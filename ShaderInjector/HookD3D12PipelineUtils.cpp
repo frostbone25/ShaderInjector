@@ -3,8 +3,10 @@
 
 #include <cstdio>
 #include <sstream>
+#include <dxgi1_6.h>
 
 #include "Hash.h"
+#include "ShaderInjectorIO.h"
 #include "ShaderInjectorGUI.h"
 
 namespace HookD3D12
@@ -511,6 +513,119 @@ namespace HookD3D12
 			}
 
 			ptr += subobjectSize;
+		}
+	}
+
+	void GatherD3D12PipelineInfo(IDXGISwapChain3* swapChain, ID3D12Device* device, ID3D12CommandQueue* commandQueue, D3D12PipelineInfo& pipelineInfo)
+	{
+		if (!swapChain || !device)
+			return;
+
+		ShaderInjectorIO::WriteToLogFile("[d3d12hook] gathering pipeline info...");
+
+		DXGI_SWAP_CHAIN_DESC desc{};
+		swapChain->GetDesc(&desc);
+
+		pipelineInfo.swapChainBuffers = desc.BufferCount;
+		pipelineInfo.swapChainFormat = desc.BufferDesc.Format;
+
+		ShaderInjectorIO::WriteToLogFile("[d3d12hook] swapChainBuffers: " + std::to_string(pipelineInfo.swapChainBuffers));
+		ShaderInjectorIO::WriteToLogFile("[d3d12hook] swapChainFormat: " + std::to_string(pipelineInfo.swapChainFormat));
+
+		IDXGIDevice* dxgiDevice = nullptr;
+
+		if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dxgiDevice))))
+		{
+			IDXGIAdapter* adapter = nullptr;
+
+			if (SUCCEEDED(dxgiDevice->GetAdapter(&adapter)))
+			{
+				DXGI_ADAPTER_DESC adapterDesc{};
+				adapter->GetDesc(&adapterDesc);
+
+				char gpuName[256]{};
+				wcstombs_s(nullptr, gpuName, adapterDesc.Description, sizeof(gpuName));
+
+				pipelineInfo.gpuName = gpuName;
+				pipelineInfo.vendorId = adapterDesc.VendorId;
+				pipelineInfo.deviceId = adapterDesc.DeviceId;
+				pipelineInfo.dedicatedVideoMemory = adapterDesc.DedicatedVideoMemory;
+				pipelineInfo.dedicatedSystemMemory = adapterDesc.DedicatedSystemMemory;
+				pipelineInfo.sharedSystemMemory = adapterDesc.SharedSystemMemory;
+
+				adapter->Release();
+			}
+
+			dxgiDevice->Release();
+		}
+		else
+		{
+			IDXGIFactory6* factory = nullptr;
+			HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
+
+			if (FAILED(hr))
+			{
+				pipelineInfo.gpuName = "CreateDXGIFactory1 failed";
+				return;
+			}
+
+			IDXGIAdapter1* adapter = nullptr;
+
+			for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i)
+			{
+				DXGI_ADAPTER_DESC1 desc;
+				adapter->GetDesc1(&desc);
+
+				if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+				{
+					adapter->Release();
+					continue;
+				}
+
+				char gpuName[256];
+				wcstombs_s(nullptr, gpuName, sizeof(gpuName), desc.Description, _TRUNCATE);
+
+				pipelineInfo.gpuName = gpuName;
+				pipelineInfo.vendorId = desc.VendorId;
+				pipelineInfo.deviceId = desc.DeviceId;
+				pipelineInfo.dedicatedVideoMemory = desc.DedicatedVideoMemory;
+				pipelineInfo.dedicatedSystemMemory = desc.DedicatedSystemMemory;
+				pipelineInfo.sharedSystemMemory = desc.SharedSystemMemory;
+
+				adapter->Release();
+				break;
+			}
+
+			factory->Release();
+		}
+
+		D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
+
+		if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options))))
+		{
+			pipelineInfo.resourceBindingTier = options.ResourceBindingTier;
+			pipelineInfo.tiledResourcesTier = options.TiledResourcesTier;
+			pipelineInfo.conservativeRasterTier = options.ConservativeRasterizationTier;
+		}
+
+		D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5{};
+
+		if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
+		{
+			pipelineInfo.raytracingTier = options5.RaytracingTier;
+		}
+
+		D3D12_FEATURE_DATA_D3D12_OPTIONS7 options7{};
+
+		if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &options7, sizeof(options7))))
+		{
+			pipelineInfo.meshShaderTier = options7.MeshShaderTier;
+		}
+
+		if (commandQueue)
+		{
+			D3D12_COMMAND_QUEUE_DESC queueDesc = commandQueue->GetDesc();
+			pipelineInfo.commandQueueType = queueDesc.Type;
 		}
 	}
 }

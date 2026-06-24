@@ -814,8 +814,8 @@ namespace ShaderInjectorGUI
 
 			ImGui::Spacing();
 
-			UI_GraphicsPipelines();
 			UI_StreamPipelines();
+			UI_GraphicsPipelines();
 
 			ImGui::Spacing();
 			ImGui::Unindent(indentSpace);

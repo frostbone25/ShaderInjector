@@ -7,6 +7,7 @@
 
 #include <d3d12.h>
 #include <dxgi.h>
+#include <dxgi1_4.h>
 
 #include "ShaderReplacement.h"
 
@@ -14,6 +15,7 @@ namespace HookD3D12
 {
 	struct GraphicsPipelineInfo;
 	struct PipelineStateInfo;
+	struct D3D12PipelineInfo;
 
 	template<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type, typename PayloadT>
 	struct alignas(void*) PSOSubobject
@@ -70,4 +72,5 @@ namespace HookD3D12
 	void ApplyPipelineStreamMetadata(const ShaderReplacement::ShaderPipelineStreamMetadataDisk& metadata, PipelineStateInfo& pipeline);
 	void RebindPipelineStateInfoPointerFields(PipelineStateInfo& info);
 	void ParsePipelineStream(const D3D12_PIPELINE_STATE_STREAM_DESC* desc, PipelineStateInfo& info);
+	void GatherD3D12PipelineInfo(IDXGISwapChain3* swapChain, ID3D12Device* device, ID3D12CommandQueue* commandQueue, D3D12PipelineInfo& pipelineInfo);
 }

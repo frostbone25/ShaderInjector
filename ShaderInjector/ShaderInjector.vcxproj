@@ -151,6 +151,7 @@
     <ClInclude Include="Hash.h" />
     <ClInclude Include="HookD3D12.h" />
     <ClInclude Include="HookD3D12PipelineUtils.h" />
+    <ClInclude Include="HookD3D12ReplacementLookup.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_dx12.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_win32.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\imconfig.h" />
@@ -177,6 +178,7 @@
     <ClCompile Include="Hash.cpp" />
     <ClCompile Include="HookD3D12.cpp" />
     <ClCompile Include="HookD3D12PipelineUtils.cpp" />
+    <ClCompile Include="HookD3D12ReplacementLookup.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_dx12.cpp" />
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_win32.cpp" />
