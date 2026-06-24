@@ -49,7 +49,7 @@ namespace ShaderReplacement
 
 	std::vector<std::string*> PathFields(ShaderReplacement::ShaderReplacementDisk& replacement)
 	{
-		return
+		std::vector<std::string*> paths =
 		{
 			&replacement.originalShaderBlobPath,
 			&replacement.modifiedShaderBlobPath,
@@ -65,6 +65,22 @@ namespace ShaderReplacement
 			&replacement.hullShaderBlobPath,
 			&replacement.domainShaderBlobPath,
 		};
+
+		for (ShaderReplacement::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
+		{
+			paths.push_back(&pipelineTemplate.pipelineCachedBlobPath);
+			paths.push_back(&pipelineTemplate.pipelineStreamBlobPath);
+			paths.push_back(&pipelineTemplate.pipelineStreamMetadataPath);
+			paths.push_back(&pipelineTemplate.rootSignatureBlobPath);
+			paths.push_back(&pipelineTemplate.vertexShaderBlobPath);
+			paths.push_back(&pipelineTemplate.pixelShaderBlobPath);
+			paths.push_back(&pipelineTemplate.computeShaderBlobPath);
+			paths.push_back(&pipelineTemplate.geometryShaderBlobPath);
+			paths.push_back(&pipelineTemplate.hullShaderBlobPath);
+			paths.push_back(&pipelineTemplate.domainShaderBlobPath);
+		}
+
+		return paths;
 	}
 
 	void MakeReplacementPortableForDisk(ShaderReplacement::ShaderReplacementDisk& replacement)
@@ -164,6 +180,7 @@ namespace ShaderReplacement
 		MakeReplacementPortableForDisk(portableReplacement);
 
 		nlohmann::ordered_json json = portableReplacement;
+		json["pipelineTemplates"] = portableReplacement.pipelineTemplates;
 		file << json.dump(4);
 
 		return !file.fail();
@@ -181,6 +198,8 @@ namespace ShaderReplacement
 			nlohmann::ordered_json json{};
 			file >> json;
 			outReplacement = json.get<ShaderReplacement::ShaderReplacementDisk>();
+			if (json.contains("pipelineTemplates") && json["pipelineTemplates"].is_array())
+				outReplacement.pipelineTemplates = json["pipelineTemplates"].get<std::vector<ShaderReplacement::ShaderPipelineTemplateDisk>>();
 
 			ResolveReplacementPathsFromJsonLocation(outReplacement, path);
 

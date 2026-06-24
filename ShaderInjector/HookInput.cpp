@@ -74,7 +74,7 @@ namespace HookInput
 		auto it = sOriginalWndProcs.find(hwnd);
 		WNDPROC original = (it != sOriginalWndProcs.end()) ? it->second : nullptr;
 
-		if (Globals::gShowShaderInjectorGUI)
+		if (Globals::gShowShaderInjectorGUI && HookD3D12::IsInitialized() && ImGui::GetCurrentContext())
 		{
 			if (ImGui_ImplWin32_WndProcHandler(hwnd, uMsg, wParam, lParam))
 				return TRUE;

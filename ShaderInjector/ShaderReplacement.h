@@ -18,6 +18,86 @@ namespace ShaderReplacement
 		Unknown        = 6,
 	};
 
+
+	struct ShaderPipelineTemplateDisk
+	{
+		std::string name;
+		std::string sourceList;
+		std::string pipelineIndex;
+		std::string psoPointer;
+		std::string pipelineCachedBlobHash;
+		std::string pipelineCachedBlobLength;
+		std::string pipelineCachedBlobPath;
+		std::string pipelineStreamBlobPath;
+		std::string pipelineStreamMetadataPath;
+		std::string rootSignatureBlobPath;
+		std::string rootSignatureHash;
+		std::string rootSignatureLength;
+		std::string vertexShaderBlobPath;
+		std::string pixelShaderBlobPath;
+		std::string computeShaderBlobPath;
+		std::string geometryShaderBlobPath;
+		std::string hullShaderBlobPath;
+		std::string domainShaderBlobPath;
+		std::string vsHash;
+		std::string psHash;
+		std::string csHash;
+		std::string gsHash;
+		std::string hsHash;
+		std::string dsHash;
+		std::string vsLength;
+		std::string psLength;
+		std::string csLength;
+		std::string gsLength;
+		std::string hsLength;
+		std::string dsLength;
+		std::string pipelineStreamLength;
+		std::string pipelineStreamSubobjectTypes;
+		std::string inputLayoutElementCount;
+		std::string inputLayoutSignature;
+		std::string streamOutputDeclarationCount;
+		std::string streamOutputSignature;
+
+		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
+			ShaderPipelineTemplateDisk,
+			name,
+			sourceList,
+			pipelineIndex,
+			psoPointer,
+			pipelineCachedBlobHash,
+			pipelineCachedBlobLength,
+			pipelineCachedBlobPath,
+			pipelineStreamBlobPath,
+			pipelineStreamMetadataPath,
+			rootSignatureBlobPath,
+			rootSignatureHash,
+			rootSignatureLength,
+			vertexShaderBlobPath,
+			pixelShaderBlobPath,
+			computeShaderBlobPath,
+			geometryShaderBlobPath,
+			hullShaderBlobPath,
+			domainShaderBlobPath,
+			vsHash,
+			psHash,
+			csHash,
+			gsHash,
+			hsHash,
+			dsHash,
+			vsLength,
+			psLength,
+			csLength,
+			gsLength,
+			hsLength,
+			dsLength,
+			pipelineStreamLength,
+			pipelineStreamSubobjectTypes,
+			inputLayoutElementCount,
+			inputLayoutSignature,
+			streamOutputDeclarationCount,
+			streamOutputSignature)
+	};
+
 	//data structure holding information about the replacement shader serialized to the disk (JSON TEXT)
 	struct ShaderReplacementDisk
 	{
@@ -98,6 +178,7 @@ namespace ShaderReplacement
 		std::string inputLayoutSignature;
 		std::string streamOutputDeclarationCount;
 		std::string streamOutputSignature;
+		std::vector<ShaderPipelineTemplateDisk> pipelineTemplates;
 
 		std::string notes;
 
@@ -205,6 +286,7 @@ namespace ShaderReplacement
 			componentCount,
 			outputSlot)
 	};
+
 
 	struct ShaderPipelineStreamMetadataDisk
 	{
