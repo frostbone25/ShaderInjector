@@ -1,6 +1,6 @@
 #pragma once
 #include <windows.h>
-//#include <stdint.h>
+#include <wrl/client.h>
 #include <vector>
 #include <cstring>
 #include <cstdio>
@@ -10,7 +10,6 @@
 #include <map>
 #include <unordered_map>
 #include <Psapi.h>
-#include <wrl/client.h>
 #include <dxgi.h>
 #include <dxgi1_4.h>
 #include <d3d9.h>
@@ -38,5 +37,6 @@ namespace HookInput
 {
 	extern void Initalize(HWND hWindow);
 	extern void Remove(HWND hWindow);
+
 	static LRESULT APIENTRY WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 }

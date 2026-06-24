@@ -11,22 +11,15 @@
 #include <dxgi.h>
 #include <d3d12.h>
 #include "ShaderInjectorIO.h"
+#include "VTableIndex.h"
 
-//ref - https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/blob/master/hooks.cpp
 namespace Hooks
 {
-	// VTable indices derived from the official DirectX interface order.
-	// These values are stable across Windows versions and SDKs.
-	constexpr size_t kPresentIndex = 8;            // IDXGISwapChain::Present
-	constexpr size_t kPresent1Index = 22;           // IDXGISwapChain1::Present1
-	constexpr size_t kResizeBuffersIndex = 13;     // IDXGISwapChain::ResizeBuffers
-	constexpr size_t kExecuteCommandListsIndex = 10; // ID3D12CommandQueue::ExecuteCommandLists
-
 	//dummy objects for v tables
-	static Microsoft::WRL::ComPtr<IDXGISwapChain3>       pSwapChain = nullptr;
-	static Microsoft::WRL::ComPtr<ID3D12Device>          pDevice = nullptr;
-	static Microsoft::WRL::ComPtr<ID3D12CommandQueue>    pCommandQueue = nullptr;
-	static Microsoft::WRL::ComPtr<ID3D12CommandAllocator> pCommandAllocator = nullptr;
+	static Microsoft::WRL::ComPtr<IDXGISwapChain3>           pSwapChain = nullptr;
+	static Microsoft::WRL::ComPtr<ID3D12Device>              pDevice = nullptr;
+	static Microsoft::WRL::ComPtr<ID3D12CommandQueue>        pCommandQueue = nullptr;
+	static Microsoft::WRL::ComPtr<ID3D12CommandAllocator>    pCommandAllocator = nullptr;
 	static Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> pCommandList = nullptr;
 	static HWND hDummyWindow = nullptr;
 	static const wchar_t* dummyClassName = L"DummyWndClass";
@@ -277,7 +270,7 @@ namespace Hooks
 		MH_STATUS minHookStatus;
 
 		//======================================== Hook_PresentD3D12 ========================================
-		pPresentTarget = reinterpret_cast<LPVOID>(swapChainVTable[kPresentIndex]);
+		pPresentTarget = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexPresent]);
 		minHookStatus = MH_CreateHook(pPresentTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_PresentD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_PresentD3D12));
 		
 		if (minHookStatus != MH_OK)
@@ -288,7 +281,7 @@ namespace Hooks
 		}
 
 		//======================================== Hook_Present1D3D12 ========================================
-		pPresent1Target = reinterpret_cast<LPVOID>(swapChainVTable[kPresent1Index]);
+		pPresent1Target = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexPresent1]);
 		minHookStatus = MH_CreateHook(pPresent1Target, reinterpret_cast<LPVOID>(HookD3D12::Hook_Present1D3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_Present1D3D12));
 
 		if (minHookStatus != MH_OK)
@@ -299,7 +292,7 @@ namespace Hooks
 		}
 
 		//======================================== Hook_ResizeBuffersD3D12 ========================================
-		pResizeBuffersTarget = reinterpret_cast<LPVOID>(swapChainVTable[kResizeBuffersIndex]);
+		pResizeBuffersTarget = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexResizeBuffers]);
 		minHookStatus = MH_CreateHook(pResizeBuffersTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_ResizeBuffersD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_ResizeBuffersD3D12));
 
 		if (minHookStatus != MH_OK)
@@ -310,7 +303,7 @@ namespace Hooks
 		}
 
 		//======================================== Hook_ExecuteCommandListsD3D12 ========================================
-		pExecuteCommandListsTarget = reinterpret_cast<LPVOID>(commandQueueVTable[kExecuteCommandListsIndex]);
+		pExecuteCommandListsTarget = reinterpret_cast<LPVOID>(commandQueueVTable[VTableIndex::indexExecuteCommandLists]);
 		minHookStatus = MH_CreateHook(pExecuteCommandListsTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_ExecuteCommandListsD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_ExecuteCommandListsD3D12));
 
 		if (minHookStatus != MH_OK)

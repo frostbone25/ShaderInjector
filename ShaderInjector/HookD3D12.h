@@ -205,6 +205,10 @@ namespace HookD3D12
 		const void* shaderBytecode,
 		PipelineStateInfo& pipeline);
 
+
+	extern void release();
+	bool IsInitialized();
+
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -462,10 +466,7 @@ namespace HookD3D12
 
 	extern PFN_GetSerializedSize Original_GetSerializedSize;
 
-	extern HRESULT __stdcall Hook_Serialize(
-		ID3D12PipelineLibrary* library,
-		void* data,
-		SIZE_T dataSize);
+	extern SIZE_T __stdcall Hook_GetSerializedSize(ID3D12PipelineLibrary* library);
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SERIALIZE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SERIALIZE |||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -478,8 +479,8 @@ namespace HookD3D12
 
 	extern PFN_Serialize Original_Serialize;
 
-	extern SIZE_T __stdcall Hook_GetSerializedSize(ID3D12PipelineLibrary* library);
-
-	extern void release();
-	bool IsInitialized();
+	extern HRESULT __stdcall Hook_Serialize(
+		ID3D12PipelineLibrary* library,
+		void* data,
+		SIZE_T dataSize);
 }
