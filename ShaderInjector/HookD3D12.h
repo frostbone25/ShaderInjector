@@ -182,6 +182,9 @@ namespace HookD3D12
 	void MarkShaderReplacementApplyDirty();
 	void ClearShaderMarkers();
 	void InvalidateShaderMarkerPSOs();
+	void CaptureGraphicsPipelineState(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* desc, ID3D12PipelineState* pipelineState);
+	void CaptureComputePipelineState(const D3D12_COMPUTE_PIPELINE_STATE_DESC* desc, ID3D12PipelineState* pipelineState, bool registerKnownPipeline);
+	void CapturePipelineStateStream(const D3D12_PIPELINE_STATE_STREAM_DESC* desc, ID3D12PipelineState* pipelineState);
 	void RefreshLoadedShaderReplacements();
 	void SyncShaderReplacementNameBuffer();
 	bool SaveShaderReplacement(int index);
@@ -206,7 +209,7 @@ namespace HookD3D12
 		PipelineStateInfo& pipeline);
 
 
-	extern void release();
+	extern void Release();
 	bool IsInitialized();
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||

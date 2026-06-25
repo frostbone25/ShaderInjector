@@ -177,6 +177,8 @@
     <ClCompile Include="FPSCounter.cpp" />
     <ClCompile Include="Hash.cpp" />
     <ClCompile Include="HookD3D12.cpp" />
+    <ClCompile Include="HookD3D12Install.cpp" />
+    <ClCompile Include="HookD3D12PipelineLibrary.cpp" />
     <ClCompile Include="HookD3D12PipelineUtils.cpp" />
     <ClCompile Include="HookD3D12ReplacementLookup.cpp" />
     <ClCompile Include="dllmain.cpp" />
