@@ -376,7 +376,7 @@ namespace HookD3D12
 
 			if (typeIdx >= ARRAYSIZE(kSubobjectSizes))
 			{
-				ShaderInjectorGUI::WriteToRuntimeLog("ParsePipelineStream: unknown subobject type " + std::to_string(typeIdx) + ", cannot continue");
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12PipelineUtils->ParsePipelineStream: unknown subobject type " + std::to_string(typeIdx) + ", cannot continue");
 				return;
 			}
 
@@ -384,7 +384,7 @@ namespace HookD3D12
 
 			if (ptr + subobjectSize > end)
 			{
-				ShaderInjectorGUI::WriteToRuntimeLog("ParsePipelineStream: subobject overruns stream buffer, aborting");
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12PipelineUtils->ParsePipelineStream: subobject overruns stream buffer, aborting");
 				return;
 			}
 
@@ -521,7 +521,7 @@ namespace HookD3D12
 		if (!swapChain || !device)
 			return;
 
-		ShaderInjectorIO::WriteToLogFile("[d3d12hook] gathering pipeline info...");
+		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineUtils->GatherD3D12PipelineInfo: gathering pipeline info...");
 
 		DXGI_SWAP_CHAIN_DESC desc{};
 		swapChain->GetDesc(&desc);
@@ -529,8 +529,8 @@ namespace HookD3D12
 		pipelineInfo.swapChainBuffers = desc.BufferCount;
 		pipelineInfo.swapChainFormat = desc.BufferDesc.Format;
 
-		ShaderInjectorIO::WriteToLogFile("[d3d12hook] swapChainBuffers: " + std::to_string(pipelineInfo.swapChainBuffers));
-		ShaderInjectorIO::WriteToLogFile("[d3d12hook] swapChainFormat: " + std::to_string(pipelineInfo.swapChainFormat));
+		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineUtils->GatherD3D12PipelineInfo: swapChainBuffers: " + std::to_string(pipelineInfo.swapChainBuffers));
+		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineUtils->GatherD3D12PipelineInfo: swapChainFormat: " + std::to_string(pipelineInfo.swapChainFormat));
 
 		IDXGIDevice* dxgiDevice = nullptr;
 

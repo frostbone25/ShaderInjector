@@ -59,7 +59,7 @@ namespace HookD3D12
 
 		if (!ShaderInjectorIO::LoadDXILBlobFromDisk(replacement.pipelineStreamBlobPath, outPipeline.streamBlob))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("LoadPersistedStreamTemplate: missing stream blob for " + replacement.name);
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12ReplacementTemplates->LoadPersistedStreamTemplateFromReplacement: missing stream blob for " + replacement.name);
 			return false;
 		}
 
@@ -70,7 +70,7 @@ namespace HookD3D12
 			!LoadPersistedShaderBlob(replacement.hullShaderBlobPath, outPipeline.hsBytecode, outPipeline.hsHash, outPipeline.hsSize) ||
 			!LoadPersistedShaderBlob(replacement.domainShaderBlobPath, outPipeline.dsBytecode, outPipeline.dsHash, outPipeline.dsSize))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("LoadPersistedStreamTemplate: missing original shader stage blob for " + replacement.name);
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12ReplacementTemplates->LoadPersistedStreamTemplateFromReplacement: missing original shader stage blob for " + replacement.name);
 			return false;
 		}
 
@@ -80,9 +80,10 @@ namespace HookD3D12
 		if (!replacement.pipelineStreamMetadataPath.empty())
 		{
 			ShaderReplacement::ShaderPipelineStreamMetadataDisk metadata{};
+
 			if (!ShaderReplacement::LoadPipelineStreamMetadataJson(replacement.pipelineStreamMetadataPath, metadata))
 			{
-				ShaderInjectorGUI::WriteToRuntimeLog("LoadPersistedStreamTemplate: missing stream metadata for " + replacement.name);
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12ReplacementTemplates->LoadPersistedStreamTemplateFromReplacement: missing stream metadata for " + replacement.name);
 				return false;
 			}
 
@@ -261,7 +262,7 @@ namespace HookD3D12
 		}
 
 		if (templateIndex > 1)
-			ShaderInjectorGUI::WriteToRuntimeLog("Captured stream pipeline template variants for " + replacement.name + ": " + std::to_string(templateIndex));
+			ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12ReplacementTemplates->WriteMatchingStreamPipelineTemplateVariants: Captured stream pipeline template variants for " + replacement.name + ": " + std::to_string(templateIndex));
 	}
 
 	bool SelectPersistedPipelineTemplateForUncaptured(

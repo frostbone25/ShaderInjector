@@ -223,29 +223,21 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	typedef HRESULT(WINAPI* D3D12CreateDeviceFn)(
-		IUnknown* pAdapter,
-		D3D_FEATURE_LEVEL MinimumFeatureLevel,
-		REFIID riid,
-		void** ppDevice);
+	typedef HRESULT(WINAPI* FunctionCreateDeviceD3D12)(IUnknown* pAdapter, D3D_FEATURE_LEVEL MinimumFeatureLevel, REFIID riid, void** ppDevice);
 
-	extern D3D12CreateDeviceFn Original_D3D12CreateDevice;
+	extern FunctionCreateDeviceD3D12 Original_CreateDeviceD3D12;
 
-	HRESULT WINAPI Hook_D3D12CreateDevice(
-		IUnknown* pAdapter,
-		D3D_FEATURE_LEVEL MinimumFeatureLevel,
-		REFIID riid,
-		void** ppDevice);
+	HRESULT WINAPI Hook_CreateDeviceD3D12(IUnknown* pAdapter, D3D_FEATURE_LEVEL MinimumFeatureLevel, REFIID riid, void** ppDevice);
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| PRESENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| PRESENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| PRESENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	typedef HRESULT(STDMETHODCALLTYPE* PresentD3D12)(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags);
-	typedef HRESULT(STDMETHODCALLTYPE* Present1Fn)(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pParams);
+	typedef HRESULT(STDMETHODCALLTYPE* FunctionPresentD3D12)(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags);
+	typedef HRESULT(STDMETHODCALLTYPE* FunctionPresent1D3D12)(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pParams);
 
-	extern PresentD3D12 Original_PresentD3D12;
-	extern Present1Fn   Original_Present1D3D12;
+	extern FunctionPresentD3D12 Original_PresentD3D12;
+	extern FunctionPresent1D3D12 Original_Present1D3D12;
 
 	extern HRESULT STDMETHODCALLTYPE Hook_PresentD3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags);
 	extern HRESULT STDMETHODCALLTYPE Hook_Present1D3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pParams);
@@ -254,64 +246,39 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| EXECUTE COMMAND LISTS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| EXECUTE COMMAND LISTS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	typedef void(STDMETHODCALLTYPE* ExecuteCommandListsFn)(ID3D12CommandQueue* _this, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists);
+	typedef void(STDMETHODCALLTYPE* FunctionExecuteCommandListsD3D12)(ID3D12CommandQueue* _this, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists);
 
-	extern ExecuteCommandListsFn Original_ExecuteCommandListsD3D12;
+	extern FunctionExecuteCommandListsD3D12 Original_ExecuteCommandListsD3D12;
 
-	extern void STDMETHODCALLTYPE Hook_ExecuteCommandListsD3D12(
-		ID3D12CommandQueue* _this,
-		UINT                          NumCommandLists,
-		ID3D12CommandList* const* ppCommandLists);
+	extern void STDMETHODCALLTYPE Hook_ExecuteCommandListsD3D12(ID3D12CommandQueue* _this, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists);
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| RESIZE BUFFERS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| RESIZE BUFFERS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| RESIZE BUFFERS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	typedef HRESULT(STDMETHODCALLTYPE* ResizeBuffersFn)(
-		IDXGISwapChain3* pSwapChain,
-		UINT BufferCount,
-		UINT Width,
-		UINT Height,
-		DXGI_FORMAT NewFormat,
-		UINT SwapChainFlags);
+	typedef HRESULT(STDMETHODCALLTYPE* FunctionResizeBuffersD3D12)(IDXGISwapChain3* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags);
 
-	extern ResizeBuffersFn Original_ResizeBuffersD3D12;
+	extern FunctionResizeBuffersD3D12 Original_ResizeBuffersD3D12;
 
-	extern HRESULT STDMETHODCALLTYPE Hook_ResizeBuffersD3D12(
-		IDXGISwapChain3* pSwapChain,
-		UINT BufferCount,
-		UINT Width,
-		UINT Height,
-		DXGI_FORMAT NewFormat,
-		UINT SwapChainFlags);
+	extern HRESULT STDMETHODCALLTYPE Hook_ResizeBuffersD3D12(IDXGISwapChain3* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags);
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE PIPELINE LIBRARY |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE PIPELINE LIBRARY |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE PIPELINE LIBRARY |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	typedef HRESULT(__stdcall* PFN_CreatePipelineLibrary)(
-		ID3D12Device1*,
-		const void*,
-		SIZE_T,
-		REFIID,
-		void**);
+	typedef HRESULT(__stdcall* FunctionCreatePipelineLibraryD3D12)(ID3D12Device1*, const void*, SIZE_T, REFIID, void**);
 
-	extern PFN_CreatePipelineLibrary Original_CreatePipelineLibrary;
+	extern FunctionCreatePipelineLibraryD3D12 Original_CreatePipelineLibrary;
 
-	extern HRESULT __stdcall Hook_CreatePipelineLibrary(
-		ID3D12Device1* device,
-		const void* pLibraryBlob,
-		SIZE_T blobLength,
-		REFIID riid,
-		void** ppPipelineLibrary);
+	extern HRESULT __stdcall Hook_CreatePipelineLibrary(ID3D12Device1* device, const void* pLibraryBlob, SIZE_T blobLength, REFIID riid, void** ppPipelineLibrary);
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE GRAPHICS PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE GRAPHICS PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE GRAPHICS PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	using CreateGraphicsPipelineStateFn = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_GRAPHICS_PIPELINE_STATE_DESC*, REFIID, void**);
+	using FunctionCreateGraphicsPipelineStateD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_GRAPHICS_PIPELINE_STATE_DESC*, REFIID, void**);
 
-	extern CreateGraphicsPipelineStateFn Original_CreateGraphicsPipelineState;
+	extern FunctionCreateGraphicsPipelineStateD3D12 Original_CreateGraphicsPipelineState;
 
 	//IMPORTANT NOTE: while this works and I will keep it around, it looks like for the most part this actually catches the imgui pixel shaders
 	//so we can actually disable some of the pixel shaders of the imgui rendering. 
@@ -322,29 +289,19 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOAD GRAPHICS PIPELINE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOAD GRAPHICS PIPELINE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	typedef HRESULT(__stdcall* PFN_LoadGraphicsPipeline)(
-		ID3D12PipelineLibrary*,
-		LPCWSTR,
-		const D3D12_GRAPHICS_PIPELINE_STATE_DESC*,
-		REFIID,
-		void**);
+	typedef HRESULT(__stdcall* FunctionLoadGraphicsPipelineD3D12)(ID3D12PipelineLibrary*, LPCWSTR, const D3D12_GRAPHICS_PIPELINE_STATE_DESC*, REFIID, void**);
 
-	extern PFN_LoadGraphicsPipeline Original_LoadGraphicsPipeline;
+	extern FunctionLoadGraphicsPipelineD3D12 Original_LoadGraphicsPipeline;
 
-	HRESULT __stdcall Hook_LoadGraphicsPipeline(
-		ID3D12PipelineLibrary* library,
-		LPCWSTR name,
-		const D3D12_GRAPHICS_PIPELINE_STATE_DESC* desc,
-		REFIID riid,
-		void** ppPipelineState);
+	HRESULT __stdcall Hook_LoadGraphicsPipeline(ID3D12PipelineLibrary* library, LPCWSTR name, const D3D12_GRAPHICS_PIPELINE_STATE_DESC* desc, REFIID riid, void** ppPipelineState);
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE COMPUTE PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE COMPUTE PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE COMPUTE PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	using CreateComputePipelineStateFn = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_COMPUTE_PIPELINE_STATE_DESC*, REFIID, void**);
+	using FunctionCreateComputePipelineStateD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_COMPUTE_PIPELINE_STATE_DESC*, REFIID, void**);
 
-	extern CreateComputePipelineStateFn Original_CreateComputePipelineState;
+	extern FunctionCreateComputePipelineStateD3D12 Original_CreateComputePipelineState;
 
 	extern HRESULT STDMETHODCALLTYPE Hook_CreateComputePipelineState(ID3D12Device* device, const D3D12_COMPUTE_PIPELINE_STATE_DESC* desc, REFIID riid, void** ppPipelineState);
 
@@ -352,9 +309,9 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	using CreateRootSignatureFn = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, UINT, const void*, SIZE_T, REFIID, void**);
+	using FunctionCreateRootSignatureD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, UINT, const void*, SIZE_T, REFIID, void**);
 
-	extern CreateRootSignatureFn Original_CreateRootSignature;
+	extern FunctionCreateRootSignatureD3D12 Original_CreateRootSignature;
 
 	extern HRESULT STDMETHODCALLTYPE Hook_CreateRootSignature(ID3D12Device* device, UINT nodeMask, const void* blobWithRootSignature, SIZE_T blobLengthInBytes, REFIID riid, void** rootSignature);
 
@@ -362,49 +319,29 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOAD COMPUTE PIPELINE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOAD COMPUTE PIPELINE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	typedef HRESULT(__stdcall* PFN_LoadComputePipeline)(
-		ID3D12PipelineLibrary*,
-		LPCWSTR,
-		const D3D12_COMPUTE_PIPELINE_STATE_DESC*,
-		REFIID,
-		void**);
+	typedef HRESULT(__stdcall* FunctionLoadComputePipelineD3D12)(ID3D12PipelineLibrary*, LPCWSTR, const D3D12_COMPUTE_PIPELINE_STATE_DESC*, REFIID, void**);
 
-	extern PFN_LoadComputePipeline Original_LoadComputePipeline;
+	extern FunctionLoadComputePipelineD3D12 Original_LoadComputePipeline;
 
-	extern HRESULT __stdcall Hook_LoadComputePipeline(
-		ID3D12PipelineLibrary* library,
-		LPCWSTR name,
-		const D3D12_COMPUTE_PIPELINE_STATE_DESC* desc,
-		REFIID riid,
-		void** ppPipelineState);
+	extern HRESULT __stdcall Hook_LoadComputePipeline(ID3D12PipelineLibrary* library, LPCWSTR name, const D3D12_COMPUTE_PIPELINE_STATE_DESC* desc, REFIID riid, void** ppPipelineState);
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOAD PIPELINE STREAM |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOAD PIPELINE STREAM |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOAD PIPELINE STREAM |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	typedef HRESULT(__stdcall* PFN_LoadPipeline)(
-		ID3D12PipelineLibrary1*,
-		LPCWSTR,
-		const D3D12_PIPELINE_STATE_STREAM_DESC*,
-		REFIID,
-		void**);
+	typedef HRESULT(__stdcall* FunctionLoadPipelineD3D12)(ID3D12PipelineLibrary1*, LPCWSTR, const D3D12_PIPELINE_STATE_STREAM_DESC*, REFIID, void**);
 
-	extern PFN_LoadPipeline Original_LoadPipeline;
+	extern FunctionLoadPipelineD3D12 Original_LoadPipeline;
 
-	extern HRESULT __stdcall Hook_LoadPipeline(
-		ID3D12PipelineLibrary1* library,
-		LPCWSTR name,
-		const D3D12_PIPELINE_STATE_STREAM_DESC* desc,
-		REFIID riid,
-		void** ppPipelineState);
+	extern HRESULT __stdcall Hook_LoadPipeline(ID3D12PipelineLibrary1* library, LPCWSTR name, const D3D12_PIPELINE_STATE_STREAM_DESC* desc, REFIID riid, void** ppPipelineState);
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	using CreatePipelineStateFn = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device2*, const D3D12_PIPELINE_STATE_STREAM_DESC*, REFIID, void**);
+	using FunctionCreatePipelineStateD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device2*, const D3D12_PIPELINE_STATE_STREAM_DESC*, REFIID, void**);
 
-	extern CreatePipelineStateFn Original_CreatePipelineState;
+	extern FunctionCreatePipelineStateD3D12 Original_CreatePipelineState;
 
 	//IMPORTANT NOTE: the majority of the game has these calls for the shader resources.
 	//checking via renderdoc it seems all shader resources are ID3D12Device2::CreatePipelineState
@@ -415,9 +352,9 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SET PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SET PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	using SetPipelineStateFn = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12PipelineState*);
+	using FunctionSetPipelineStateD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12PipelineState*);
 
-	extern SetPipelineStateFn Original_SetPipelineState;
+	extern FunctionSetPipelineStateD3D12 Original_SetPipelineState;
 
 	extern void STDMETHODCALLTYPE Hook_SetPipelineState(ID3D12GraphicsCommandList* cmdList, ID3D12PipelineState* pso);
 
@@ -425,9 +362,9 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SET COMPUTE ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SET COMPUTE ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	using SetComputeRootSignatureFn = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12RootSignature*);
+	using FunctionSetComputeRootSignatureD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12RootSignature*);
 
-	extern SetComputeRootSignatureFn Original_SetComputeRootSignature;
+	extern FunctionSetComputeRootSignatureD3D12 Original_SetComputeRootSignature;
 
 	extern void STDMETHODCALLTYPE Hook_SetComputeRootSignature(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSignature);
 
@@ -435,9 +372,9 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SET GRAPHICS ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SET GRAPHICS ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	using SetGraphicsRootSignatureFn = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12RootSignature*);
+	using FunctionSetGraphicsRootSignatureD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12RootSignature*);
 
-	extern SetGraphicsRootSignatureFn Original_SetGraphicsRootSignature;
+	extern FunctionSetGraphicsRootSignatureD3D12 Original_SetGraphicsRootSignature;
 
 	extern void STDMETHODCALLTYPE Hook_SetGraphicsRootSignature(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSignature);
 
@@ -445,9 +382,9 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SET PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SET PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	using ResetGraphicsCommandListFn = HRESULT(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12CommandAllocator*, ID3D12PipelineState*);
+	using FunctionResetGraphicsCommandListD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12CommandAllocator*, ID3D12PipelineState*);
 
-	extern ResetGraphicsCommandListFn Original_ResetGraphicsCommandList;
+	extern FunctionResetGraphicsCommandListD3D12 Original_ResetGraphicsCommandList;
 
 	extern HRESULT STDMETHODCALLTYPE Hook_ResetGraphicsCommandList(ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* allocator, ID3D12PipelineState* initialState);
 	
@@ -455,26 +392,19 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| STORE PIPELINE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| STORE PIPELINE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	typedef HRESULT(__stdcall* PFN_StorePipeline)(
-		ID3D12PipelineLibrary*,
-		LPCWSTR,
-		ID3D12PipelineState*);
+	typedef HRESULT(__stdcall* FunctionStorePipelineD3D12)(ID3D12PipelineLibrary*, LPCWSTR, ID3D12PipelineState*);
 
-	extern PFN_StorePipeline Original_StorePipeline;
+	extern FunctionStorePipelineD3D12 Original_StorePipeline;
 
-	HRESULT __stdcall Hook_StorePipeline(
-		ID3D12PipelineLibrary* library,
-		LPCWSTR name,
-		ID3D12PipelineState* pso);
+	HRESULT __stdcall Hook_StorePipeline(ID3D12PipelineLibrary* library, LPCWSTR name, ID3D12PipelineState* pso);
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| GET SERIALIZED SIZE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| GET SERIALIZED SIZE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| GET SERIALIZED SIZE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	typedef SIZE_T(__stdcall* PFN_GetSerializedSize)(
-		ID3D12PipelineLibrary*);
+	typedef SIZE_T(__stdcall* FunctionGetSerializedSizeD3D12)(ID3D12PipelineLibrary*);
 
-	extern PFN_GetSerializedSize Original_GetSerializedSize;
+	extern FunctionGetSerializedSizeD3D12 Original_GetSerializedSize;
 
 	extern SIZE_T __stdcall Hook_GetSerializedSize(ID3D12PipelineLibrary* library);
 
@@ -482,15 +412,9 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SERIALIZE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SERIALIZE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	typedef HRESULT(__stdcall* PFN_Serialize)(
-		ID3D12PipelineLibrary*,
-		void*,
-		SIZE_T);
+	typedef HRESULT(__stdcall* FunctionSerializeD3D12)(ID3D12PipelineLibrary*, void*, SIZE_T);
 
-	extern PFN_Serialize Original_Serialize;
+	extern FunctionSerializeD3D12 Original_Serialize;
 
-	extern HRESULT __stdcall Hook_Serialize(
-		ID3D12PipelineLibrary* library,
-		void* data,
-		SIZE_T dataSize);
+	extern HRESULT __stdcall Hook_Serialize(ID3D12PipelineLibrary* library, void* data, SIZE_T dataSize);
 }

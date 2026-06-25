@@ -2,24 +2,24 @@
 
 namespace HookD3D12
 {
-	PresentD3D12                  Original_PresentD3D12 = nullptr;
-	Present1Fn                    Original_Present1D3D12 = nullptr;
-	D3D12CreateDeviceFn           Original_D3D12CreateDevice = nullptr;
-	ExecuteCommandListsFn         Original_ExecuteCommandListsD3D12 = nullptr;
-	ResizeBuffersFn               Original_ResizeBuffersD3D12 = nullptr;
-	PFN_CreatePipelineLibrary     Original_CreatePipelineLibrary = nullptr;
-	PFN_LoadGraphicsPipeline      Original_LoadGraphicsPipeline = nullptr;
-	PFN_LoadComputePipeline       Original_LoadComputePipeline = nullptr;
-	PFN_LoadPipeline              Original_LoadPipeline = nullptr;
-	PFN_StorePipeline             Original_StorePipeline = nullptr;
-	PFN_GetSerializedSize         Original_GetSerializedSize = nullptr;
-	PFN_Serialize                 Original_Serialize = nullptr;
-	SetPipelineStateFn            Original_SetPipelineState = nullptr;
-	ResetGraphicsCommandListFn    Original_ResetGraphicsCommandList = nullptr;
-	SetGraphicsRootSignatureFn    Original_SetGraphicsRootSignature = nullptr;
-	SetComputeRootSignatureFn     Original_SetComputeRootSignature = nullptr;
-	CreateComputePipelineStateFn  Original_CreateComputePipelineState = nullptr;
-	CreateRootSignatureFn         Original_CreateRootSignature = nullptr;
-	CreateGraphicsPipelineStateFn Original_CreateGraphicsPipelineState = nullptr;
-	CreatePipelineStateFn         Original_CreatePipelineState = nullptr;
+	FunctionPresentD3D12                     Original_PresentD3D12 = nullptr;
+	FunctionPresent1D3D12                    Original_Present1D3D12 = nullptr;
+	FunctionCreateDeviceD3D12                Original_CreateDeviceD3D12 = nullptr;
+	FunctionExecuteCommandListsD3D12         Original_ExecuteCommandListsD3D12 = nullptr;
+	FunctionResizeBuffersD3D12               Original_ResizeBuffersD3D12 = nullptr;
+	FunctionCreatePipelineLibraryD3D12       Original_CreatePipelineLibrary = nullptr;
+	FunctionLoadGraphicsPipelineD3D12        Original_LoadGraphicsPipeline = nullptr;
+	FunctionLoadComputePipelineD3D12         Original_LoadComputePipeline = nullptr;
+	FunctionLoadPipelineD3D12                Original_LoadPipeline = nullptr;
+	FunctionStorePipelineD3D12               Original_StorePipeline = nullptr;
+	FunctionGetSerializedSizeD3D12           Original_GetSerializedSize = nullptr;
+	FunctionSerializeD3D12                   Original_Serialize = nullptr;
+	FunctionSetPipelineStateD3D12            Original_SetPipelineState = nullptr;
+	FunctionResetGraphicsCommandListD3D12    Original_ResetGraphicsCommandList = nullptr;
+	FunctionSetGraphicsRootSignatureD3D12    Original_SetGraphicsRootSignature = nullptr;
+	FunctionSetComputeRootSignatureD3D12     Original_SetComputeRootSignature = nullptr;
+	FunctionCreateComputePipelineStateD3D12  Original_CreateComputePipelineState = nullptr;
+	FunctionCreateRootSignatureD3D12         Original_CreateRootSignature = nullptr;
+	FunctionCreateGraphicsPipelineStateD3D12 Original_CreateGraphicsPipelineState = nullptr;
+	FunctionCreatePipelineStateD3D12         Original_CreatePipelineState = nullptr;
 }

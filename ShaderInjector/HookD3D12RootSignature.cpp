@@ -40,9 +40,10 @@ namespace HookD3D12
 			return existingIt->second;
 
 		std::vector<uint8_t> blob;
+
 		if (!ShaderInjectorIO::LoadDXILBlobFromDisk(replacement.rootSignatureBlobPath, blob))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("GetOrCreatePersistedRootSignature: missing blob for " + replacement.name);
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12RootSignature->GetOrCreatePersistedRootSignature: missing blob for " + replacement.name);
 			return nullptr;
 		}
 
@@ -55,7 +56,7 @@ namespace HookD3D12
 
 		if (FAILED(hr) || !rootSignature)
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("GetOrCreatePersistedRootSignature: failed hr=" + std::to_string((unsigned)hr) + " replacement=" + replacement.name);
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12RootSignature->GetOrCreatePersistedRootSignature: failed hr=" + std::to_string((unsigned)hr) + " replacement=" + replacement.name);
 			return nullptr;
 		}
 

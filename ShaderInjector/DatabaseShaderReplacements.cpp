@@ -61,7 +61,7 @@ namespace HookD3D12
 		ResetUncapturedReplacementAttempts();
 		gLoadedShaderReplacementsOnce = true;
 		MarkShaderReplacementApplyDirty();
-		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12 | RefreshLoadedShaderReplacements | Loaded shader replacements from disk: " + std::to_string(gLoadedShaderReplacements.size()));
+		ShaderInjectorGUI::WriteToRuntimeLog("DatabaseShaderReplacements->RefreshLoadedShaderReplacements: Loaded shader replacements from disk: " + std::to_string(gLoadedShaderReplacements.size()));
 
 		for (const auto& replacement : gLoadedShaderReplacements)
 		{
@@ -103,12 +103,12 @@ namespace HookD3D12
 
 		if (!ShaderReplacement::WriteShaderReplacementJson(replacement))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12 | SaveShaderReplacement | failed to save " + replacement.jsonPath);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderReplacements->SaveShaderReplacement: failed to save " + replacement.jsonPath);
 			return false;
 		}
 
 		MarkShaderReplacementApplyDirty();
-		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12 | SaveShaderReplacement | Saved shader replacement: " + replacement.jsonPath);
+		ShaderInjectorGUI::WriteToRuntimeLog("DatabaseShaderReplacements->SaveShaderReplacement: Saved shader replacement: " + replacement.jsonPath);
 		return true;
 	}
 
@@ -124,13 +124,13 @@ namespace HookD3D12
 
 		if (replacement.shaderSourcePath.empty() || !ShaderInjectorIO::FileExists(replacement.shaderSourcePath))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12 | CompileShaderReplacement | source file not found " + replacement.shaderSourcePath);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderReplacements->CompileShaderReplacement: source file not found " + replacement.shaderSourcePath);
 			return false;
 		}
 
 		if (replacement.shaderProfile.empty() || replacement.shaderEntryPoint.empty())
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12 | CompileShaderReplacement | shader profile or entry point missing for " + replacement.name);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderReplacements->CompileShaderReplacement: shader profile or entry point missing for " + replacement.name);
 			return false;
 		}
 
@@ -138,13 +138,13 @@ namespace HookD3D12
 
 		if (!ShaderInjectorIO::CompileSourceToDXILBlob(replacement.shaderSourcePath, replacement.shaderProfile, replacement.shaderEntryPoint, compiledBlobPath))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12 | CompileShaderReplacement | compile failed for " + replacement.shaderSourcePath);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderReplacements->CompileShaderReplacement: compile failed for " + replacement.shaderSourcePath);
 			return false;
 		}
 
 		replacement.modifiedShaderBlobPath = compiledBlobPath;
 		ShaderReplacement::WriteShaderReplacementJson(replacement);
-		ShaderInjectorGUI::WriteToRuntimeLogSuccess("HookD3D12 | CompileShaderReplacement | Compiled shader replacement: " + replacement.name + " -> " + replacement.modifiedShaderBlobPath);
+		ShaderInjectorGUI::WriteToRuntimeLogSuccess("DatabaseShaderReplacements->CompileShaderReplacement: Compiled shader replacement: " + replacement.name + " -> " + replacement.modifiedShaderBlobPath);
 		return true;
 	}
 
@@ -163,12 +163,12 @@ namespace HookD3D12
 		if (replacement.modifiedShaderBlobPath.empty() || !ShaderInjectorIO::LoadDXILBlobFromDisk(replacement.modifiedShaderBlobPath, loadedBlob) || loadedBlob.empty())
 		{
 			gLoadedShaderReplacementBlobs[index].clear();
-			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12 | ReloadShaderReplacement | failed to load compiled blob " + replacement.modifiedShaderBlobPath);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderReplacements->ReloadShaderReplacement: failed to load compiled blob " + replacement.modifiedShaderBlobPath);
 		}
 		else
 		{
 			gLoadedShaderReplacementBlobs[index] = loadedBlob;
-			ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12 | ReloadShaderReplacement | Reloaded shader replacement: " + replacement.name + " bytes=" + std::to_string(gLoadedShaderReplacementBlobs[index].size()));
+			ShaderInjectorGUI::WriteToRuntimeLog("DatabaseShaderReplacements->ReloadShaderReplacement: Reloaded shader replacement: " + replacement.name + " bytes=" + std::to_string(gLoadedShaderReplacementBlobs[index].size()));
 		}
 
 		{
@@ -199,7 +199,7 @@ namespace HookD3D12
 			InvalidateAllReplacementPSOs();
 		}
 
-		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12 | DeleteShaderReplacement | Deleted shader replacement: " + replacement.name);
+		ShaderInjectorGUI::WriteToRuntimeLog("DatabaseShaderReplacements->DeleteShaderReplacement: Deleted shader replacement: " + replacement.name);
 		RefreshLoadedShaderReplacements();
 		MarkShaderReplacementApplyDirty();
 		return true;

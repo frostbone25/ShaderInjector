@@ -105,7 +105,7 @@ namespace HookD3D12
 		{
 			if (!gLoggedResizeCooldown)
 			{
-				ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12] Resize cooldown active; delaying overlay recreation.");
+				ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12OverlayStartup->IsSwapChainReadyForOverlayInitialization: Resize cooldown active; delaying overlay recreation.");
 				gLoggedResizeCooldown = true;
 			}
 

@@ -30,7 +30,7 @@ namespace HookD3D12
 		{
 			if (!shaderHash || !shaderBytecode || shaderBytecodeLength == 0)
 			{
-				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12 | CreateReplacementShaderTemplate | missing shader bytecode");
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12ReplacementCreation->CreateReplacementShaderTemplate: missing shader bytecode");
 				return false;
 			}
 
@@ -44,7 +44,7 @@ namespace HookD3D12
 
 			if (!ShaderInjectorIO::DirectoryExists(replacementDirectory))
 			{
-				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12 | CreateReplacementShaderTemplate | failed to create directory " + replacementDirectory);
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12ReplacementCreation->CreateReplacementShaderTemplate: failed to create directory " + replacementDirectory);
 				return false;
 			}
 
@@ -183,11 +183,11 @@ namespace HookD3D12
 
 			if (!ok)
 			{
-				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12 | CreateReplacementShaderTemplate | failed to write one or more files for " + replacementName);
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12ReplacementCreation->CreateReplacementShaderTemplate: failed to write one or more files for " + replacementName);
 				return false;
 			}
 
-			ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12 | CreateReplacementShaderTemplate | Created replacement shader template: " + replacement.jsonPath);
+			ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12ReplacementCreation->CreateReplacementShaderTemplate: Created replacement shader template: " + replacement.jsonPath);
 			gLoadedShaderReplacementsOnce = false;
 			MarkShaderReplacementApplyDirty();
 			return true;

@@ -46,6 +46,7 @@ namespace ShaderInjectorIO
 	void WriteToLogFile(const std::string& text);
 	void WriteToLogFileError(const std::string& text);
 	void WriteToLogFileSuccess(const std::string& text);
+	void WriteToLogFileWarning(const std::string& text);
 
 	//tools
 	bool RunProcess(const std::string& commandLine);

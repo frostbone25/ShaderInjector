@@ -278,6 +278,12 @@ namespace ShaderInjectorIO
 		WriteToLogFile("[SUCCESS] " + text);
 	}
 
+	//quick wrapper, just to knock down our log strings in the code because my eyes hurt
+	void WriteToLogFileWarning(const std::string& text)
+	{
+		WriteToLogFile("[WARNING] " + text);
+	}
+
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| TOOLS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| TOOLS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| TOOLS |||||||||||||||||||||||||||||||||||||||||||||||||||||

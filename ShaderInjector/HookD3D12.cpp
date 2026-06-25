@@ -518,14 +518,14 @@ namespace HookD3D12
 		//NOTE: haven't hit any of these yet, seems to pass
 		if (FAILED(hr))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12]: Hook_CreatePipelineState() not succeded.");
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->Hook_CreatePipelineState: not succeded.");
 			return hr;
 		}
 
 		//NOTE: haven't hit any of these yet, seems to pass
 		if (!desc || !ppPipelineState || !*ppPipelineState)
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12]: Hook_CreatePipelineState() not succeded, no objects");
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->Hook_CreatePipelineState: not succeded, no objects");
 			return hr;
 		}
 
@@ -552,13 +552,13 @@ namespace HookD3D12
 
 		if (!hiddenSelection && targetType == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS && Globals::markerPixelShaderBlob.empty() && Globals::nullPixelShaderBlob.empty())
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("RebuildStreamPSOWithoutStage: marker and null pixel shader blobs are empty, aborting PS marker rebuild");
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: marker and null pixel shader blobs are empty, aborting PS marker rebuild");
 			return;
 		}
 
 		if (!hiddenSelection && targetType == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS && Globals::markerComputeShaderBlob.empty())
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("RebuildStreamPSOWithoutStage: marker compute shader blob is empty, aborting CS marker rebuild");
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: marker compute shader blob is empty, aborting CS marker rebuild");
 			return;
 		}
 
@@ -572,7 +572,7 @@ namespace HookD3D12
 
 		if (FAILED(device->QueryInterface(IID_PPV_ARGS(&device2))))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12]: RebuildStreamPSOWithoutStage() Failed QueryInterface for Device2");
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: Failed QueryInterface for Device2");
 			return;
 		}
 
@@ -589,7 +589,7 @@ namespace HookD3D12
 		{
 			if (ptr + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE) > end)
 			{
-				ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12]: RebuildStreamPSOWithoutStage() Stream walk: ptr overran end reading type");
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: Stream walk: ptr overran end reading type");
 				break;
 			}
 
@@ -599,8 +599,8 @@ namespace HookD3D12
 			if (typeIdx >= ARRAYSIZE(kSubobjectSizes))
 			{
 				char unk[256];
-				sprintf_s(unk, "[HookD3D12]: RebuildStreamPSOWithoutStage() Unknown typeIdx=%u at offset=%zu, stopping", typeIdx, (size_t)(ptr - patchedBlob.data()));
-				ShaderInjectorGUI::WriteToRuntimeLog(unk);
+				sprintf_s(unk, "HookD3D12->RebuildStreamPSOWithoutStage: Unknown typeIdx=%u at offset=%zu, stopping", typeIdx, (size_t)(ptr - patchedBlob.data()));
+				ShaderInjectorGUI::WriteToRuntimeLogError(unk);
 				break;
 			}
 
@@ -608,7 +608,7 @@ namespace HookD3D12
 
 			if (ptr + subobjectSize > end)
 			{
-				ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12]: RebuildStreamPSOWithoutStage() Stream walk: subobject overruns buffer");
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: Stream walk: subobject overruns buffer");
 				break;
 			}
 
@@ -707,7 +707,7 @@ namespace HookD3D12
 		{
 			// The target shader type wasn't found in the stream at all
 			// This PSO may not actually contain that stage
-			ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12]: RebuildStreamPSOWithoutStage() Target shader type not found in stream blob, aborting");
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: Target shader type not found in stream blob, aborting");
 			device2->Release();
 			return;
 		}
@@ -768,7 +768,7 @@ namespace HookD3D12
 
 		if (FAILED(hr))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12]: RebuildStreamPSOWithoutStage() RebuildStreamPSOWithoutStage: failed hr=" + std::to_string((unsigned)hr));
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: RebuildStreamPSOWithoutStage: failed hr=" + std::to_string((unsigned)hr));
 			outPSO = nullptr;
 		}
 		else
@@ -798,18 +798,12 @@ namespace HookD3D12
 			if (ShaderInjectorIO::FileExists(replacement.modifiedShaderBlobPath))
 			{
 				if (ShaderInjectorIO::LoadDXILBlobFromDisk(replacement.modifiedShaderBlobPath, blob) && !blob.empty())
-				{
-					ShaderInjectorGUI::WriteToRuntimeLog("GetReplacementBlobForUse: loaded modified blob for " + replacement.name + " bytes=" + std::to_string(blob.size()));
-				}
+					ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->GetReplacementBlobForUse: loaded modified blob for " + replacement.name + " bytes=" + std::to_string(blob.size()));
 				else
-				{
-					ShaderInjectorGUI::WriteToRuntimeLog("GetReplacementBlobForUse: failed to load modified blob for " + replacement.name + " path=" + replacement.modifiedShaderBlobPath);
-				}
+					ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->GetReplacementBlobForUse: failed to load modified blob for " + replacement.name + " path=" + replacement.modifiedShaderBlobPath);
 			}
 			else
-			{
-				ShaderInjectorGUI::WriteToRuntimeLog("GetReplacementBlobForUse: modified blob file missing for " + replacement.name + " path=" + replacement.modifiedShaderBlobPath);
-			}
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->GetReplacementBlobForUse: modified blob file missing for " + replacement.name + " path=" + replacement.modifiedShaderBlobPath);
 		}
 
 		if (!blob.empty())
@@ -824,7 +818,7 @@ namespace HookD3D12
 			outBytecode = Globals::nullPixelShaderBlob.data();
 			outBytecodeSize = Globals::nullPixelShaderBlob.size();
 			outUsedFallback = true;
-			ShaderInjectorGUI::WriteToRuntimeLog("GetReplacementBlobForUse: using null pixel shader fallback for " + replacement.name);
+			ShaderInjectorGUI::WriteToRuntimeLogWarning("HookD3D12->GetReplacementBlobForUse: using null pixel shader fallback for " + replacement.name);
 			return true;
 		}
 
@@ -861,7 +855,7 @@ namespace HookD3D12
 
 		if (!GetReplacementBlobForUse(replacementIndex, replacementBytecode, replacementBytecodeSize, usedFallback))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("RebuildGraphicsPSOWithReplacement: replacement blob unavailable for " + replacement.name);
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildGraphicsPSOWithReplacement: replacement blob unavailable for " + replacement.name);
 			return false;
 		}
 
@@ -893,7 +887,7 @@ namespace HookD3D12
 
 		if (FAILED(hr))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("RebuildGraphicsPSOWithReplacement: failed hr=" + std::to_string((unsigned)hr) + " replacement=" + replacement.name);
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildGraphicsPSOWithReplacement: failed hr=" + std::to_string((unsigned)hr) + " replacement=" + replacement.name);
 			pipeline.psoWithReplacement = nullptr;
 			return false;
 		}
@@ -904,7 +898,7 @@ namespace HookD3D12
 		pipeline.activeShaderReplacementUsesFallback = usedFallback;
 		RegisterKnownPipelineStateLocked(pipeline.psoWithReplacement);
 		gPipelineStateOverridesDirty = true;
-		ShaderInjectorGUI::WriteToRuntimeLog("Applied graphics shader replacement: " + replacement.name + (usedFallback ? " (null shader fallback)" : ""));
+		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->RebuildGraphicsPSOWithReplacement: Applied graphics shader replacement: " + replacement.name + (usedFallback ? " (null shader fallback)" : ""));
 		return true;
 	}
 
@@ -938,7 +932,7 @@ namespace HookD3D12
 
 		if (!GetReplacementBlobForUse(replacementIndex, replacementBytecode, replacementBytecodeSize, usedFallback))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("RebuildStreamPSOWithReplacement: replacement blob unavailable for " + replacement.name);
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithReplacement: replacement blob unavailable for " + replacement.name);
 			return false;
 		}
 
@@ -1041,7 +1035,7 @@ namespace HookD3D12
 		if (missingRootSignature)
 		{
 			device2->Release();
-			ShaderInjectorGUI::WriteToRuntimeLog("RebuildStreamPSOWithReplacement: persisted stream template needs an observed root signature for " + replacement.name);
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithReplacement: persisted stream template needs an observed root signature for " + replacement.name);
 			return false;
 		}
 
@@ -1061,7 +1055,7 @@ namespace HookD3D12
 
 		if (FAILED(hr))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("RebuildStreamPSOWithReplacement: failed hr=" + std::to_string((unsigned)hr) + " replacement=" + replacement.name + " streamBytes=" + std::to_string(patchedBlob.size()) + " root=" + PointerToString(rootSignatureOverride) + " vsBytes=" + std::to_string(pipeline.vsBytecode.size()) + " psBytes=" + std::to_string(pipeline.psBytecode.size()) + " inputElements=" + std::to_string(pipeline.inputElements.size()));
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithReplacement: failed hr=" + std::to_string((unsigned)hr) + " replacement=" + replacement.name + " streamBytes=" + std::to_string(patchedBlob.size()) + " root=" + PointerToString(rootSignatureOverride) + " vsBytes=" + std::to_string(pipeline.vsBytecode.size()) + " psBytes=" + std::to_string(pipeline.psBytecode.size()) + " inputElements=" + std::to_string(pipeline.inputElements.size()));
 			pipeline.psoWithReplacement = nullptr;
 			return false;
 		}
@@ -1072,7 +1066,7 @@ namespace HookD3D12
 		pipeline.activeShaderReplacementUsesFallback = usedFallback;
 		RegisterKnownPipelineStateLocked(pipeline.psoWithReplacement);
 		gPipelineStateOverridesDirty = true;
-		ShaderInjectorGUI::WriteToRuntimeLog("Applied stream shader replacement: " + replacement.name + (usedFallback ? " (null shader fallback)" : ""));
+		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->RebuildStreamPSOWithReplacement: Applied stream shader replacement: " + replacement.name + (usedFallback ? " (null shader fallback)" : ""));
 		return true;
 	}
 
@@ -1165,7 +1159,7 @@ namespace HookD3D12
 				return false;
 
 			attemptedAnyRootSignature = true;
-			ShaderInjectorGUI::WriteToRuntimeLog(std::string("Uncaptured persisted stream rebuild using ") + rootSignatureSource + ": " + replacement.name + templateLogSuffix);
+			ShaderInjectorGUI::WriteToRuntimeLog(std::string("HookD3D12->TryApplyPersistedStreamTemplateToUncaptured: Uncaptured persisted stream rebuild using ") + rootSignatureSource + ": " + replacement.name + templateLogSuffix);
 
 			if (!RebuildStreamPSOWithReplacement(persistedPipeline, replacementIndex, shaderHash, shaderType, rootSignatureForRebuild))
 				return false;
@@ -1175,7 +1169,7 @@ namespace HookD3D12
 			uncaptured.activeShaderReplacementType = shaderType;
 			uncaptured.activeShaderReplacementHash = shaderHash;
 			gPipelineStateOverrides[uncaptured.pipelineState] = persistedPipeline.psoWithReplacement;
-			ShaderInjectorGUI::WriteToRuntimeLog(std::string("Applied uncaptured PSO replacement from persisted stream template by ") + matchMethod + " using " + rootSignatureSource + ": " + replacement.name + templateLogSuffix);
+			ShaderInjectorGUI::WriteToRuntimeLog(std::string("HookD3D12->TryApplyPersistedStreamTemplateToUncaptured: Applied uncaptured PSO replacement from persisted stream template by ") + matchMethod + " using " + rootSignatureSource + ": " + replacement.name + templateLogSuffix);
 			return true;
 		};
 
@@ -1185,14 +1179,14 @@ namespace HookD3D12
 		if (persistedRootSignature && persistedRootSignature != observedRootSignature)
 		{
 			if (observedRootSignature)
-				ShaderInjectorGUI::WriteToRuntimeLog("Observed root signature rebuild failed; retrying persisted root signature blob: " + replacement.name + templateLogSuffix);
+				ShaderInjectorGUI::WriteToRuntimeLogWarning("HookD3D12->TryApplyPersistedStreamTemplateToUncaptured: Observed root signature rebuild failed; retrying persisted root signature blob: " + replacement.name + templateLogSuffix);
 
 			if (TryRebuildWithRootSignature(persistedRootSignature, "persisted root signature blob"))
 				return true;
 		}
 
 		if (!attemptedAnyRootSignature)
-			ShaderInjectorGUI::WriteToRuntimeLog("Uncaptured PSO matched persisted stream template, but no root signature is available: " + replacement.name + templateLogSuffix);
+			ShaderInjectorGUI::WriteToRuntimeLogWarning("HookD3D12->TryApplyPersistedStreamTemplateToUncaptured: Uncaptured PSO matched persisted stream template, but no root signature is available: " + replacement.name + templateLogSuffix);
 
 		return false;
 	}
@@ -1278,7 +1272,7 @@ namespace HookD3D12
 					uncaptured.activeShaderReplacementType = replacement.shaderType;
 					uncaptured.activeShaderReplacementHash = shaderHash;
 					gPipelineStateOverrides[uncaptured.pipelineState] = pipeline.psoWithReplacement;
-					ShaderInjectorGUI::WriteToRuntimeLog(std::string("Applied uncaptured PSO replacement by ") + matchMethod + ": " + replacement.name);
+					ShaderInjectorGUI::WriteToRuntimeLog(std::string("HookD3D12->TryApplyUncapturedReplacement: Applied uncaptured PSO replacement by ") + matchMethod + ": " + replacement.name);
 					return true;
 				}
 			}
@@ -1298,7 +1292,7 @@ namespace HookD3D12
 					uncaptured.activeShaderReplacementType = replacement.shaderType;
 					uncaptured.activeShaderReplacementHash = shaderHash;
 					gPipelineStateOverrides[uncaptured.pipelineState] = pipeline.psoWithReplacement;
-					ShaderInjectorGUI::WriteToRuntimeLog(std::string("Applied uncaptured PSO replacement by ") + matchMethod + ": " + replacement.name);
+					ShaderInjectorGUI::WriteToRuntimeLog(std::string("HookD3D12->TryApplyUncapturedReplacement: Applied uncaptured PSO replacement by ") + matchMethod + ": " + replacement.name);
 					return true;
 				}
 			}
@@ -1313,7 +1307,7 @@ namespace HookD3D12
 				uncaptured.activeShaderReplacementType = replacement.shaderType;
 				uncaptured.activeShaderReplacementHash = shaderHash;
 				gPipelineStateOverrides[uncaptured.pipelineState] = pipeline.psoWithReplacement;
-				ShaderInjectorGUI::WriteToRuntimeLog("Applied uncaptured PSO replacement by matching graphics template: " + replacement.name);
+				ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->TryApplyUncapturedReplacement: Applied uncaptured PSO replacement by matching graphics template: " + replacement.name);
 				return true;
 			}
 		}
@@ -1327,7 +1321,7 @@ namespace HookD3D12
 				uncaptured.activeShaderReplacementType = replacement.shaderType;
 				uncaptured.activeShaderReplacementHash = shaderHash;
 				gPipelineStateOverrides[uncaptured.pipelineState] = pipeline.psoWithReplacement;
-				ShaderInjectorGUI::WriteToRuntimeLog("Applied uncaptured PSO replacement by matching stream template: " + replacement.name);
+				ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->TryApplyUncapturedReplacement: Applied uncaptured PSO replacement by matching stream template: " + replacement.name);
 				return true;
 			}
 		}
@@ -1339,7 +1333,7 @@ namespace HookD3D12
 		}
 
 		uncaptured.attemptedReplacement = true;
-		ShaderInjectorGUI::WriteToRuntimeLog("Uncaptured PSO matched replacement cached blob, but no rebuild template is currently available: " + replacement.name);
+		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->TryApplyUncapturedReplacement: Uncaptured PSO matched replacement cached blob, but no rebuild template is currently available: " + replacement.name);
 		return false;
 	}
 
@@ -1521,13 +1515,13 @@ namespace HookD3D12
 		{
 			if (!gLoggedPresent1Hook)
 			{
-				ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12 | HandlePresentD3D12 | Present1 hook active");
+				ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: Present1 hook active");
 				gLoggedPresent1Hook = true;
 			}
 		}
 		else if (!gLoggedPresentHook)
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12 | HandlePresentD3D12 | Present hook active");
+			ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: Present hook active");
 			gLoggedPresentHook = true;
 		}
 
@@ -1555,9 +1549,9 @@ namespace HookD3D12
 
 		//IMPORTANT NOTE: it appears that when first starting the application gInitialized is false
 		//if (gInitialized)
-			//ShaderInjectorGUI::WriteToRuntimeLog("Hook_Present1D3D12: gInitialized = TRUE");
+			//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: gInitialized = TRUE");
 		//else
-			//ShaderInjectorGUI::WriteToRuntimeLog("Hook_Present1D3D12: gInitialized = FALSE");
+			//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: gInitialized = FALSE");
 	
 		DXGI_SWAP_CHAIN_DESC startupSwapChainDesc = {};
 
@@ -1579,7 +1573,7 @@ namespace HookD3D12
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
 			if (!gDevice && FAILED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice))) 
 			{
-				ShaderInjectorGUI::WriteToRuntimeLog("Hook_Present1D3D12: GetDevice fail");
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: GetDevice fail");
 				return CallOriginalPresent();
 			}
 
@@ -1589,7 +1583,7 @@ namespace HookD3D12
 
 				if (FAILED(hr))
 				{
-					ShaderInjectorGUI::WriteToRuntimeLog("Failed to get ID3D12Device2");
+					ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: Failed to get ID3D12Device2");
 				}
 			}
 
@@ -1609,7 +1603,7 @@ namespace HookD3D12
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
 			if (FAILED(gDevice->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&gHeapRTV)))) 
 			{
-				MessageBoxA(nullptr, "hookPresent1D3D12: CreateDescriptorHeap RTV fail", "Shader Injector", MB_OK);
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: CreateDescriptorHeap RTV fail");
 				return CallOriginalPresent();
 			}
 
@@ -1619,7 +1613,7 @@ namespace HookD3D12
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
 			if (FAILED(gDevice->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&gHeapSRV)))) 
 			{
-				MessageBoxA(nullptr, "hookPresent1D3D12: CreateDescriptorHeap SRV fail", "Shader Injector", MB_OK);
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: CreateDescriptorHeap SRV fail");
 				return CallOriginalPresent();
 			}
 
@@ -1631,11 +1625,9 @@ namespace HookD3D12
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
 			for (UINT i = 0; i < gBufferCount; ++i)
 			{
-				if (FAILED(gDevice->CreateCommandAllocator(
-					D3D12_COMMAND_LIST_TYPE_DIRECT,
-					IID_PPV_ARGS(&gFrameContexts[i].allocator)))) 
+				if (FAILED(gDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gFrameContexts[i].allocator)))) 
 				{
-					MessageBoxA(nullptr, "hookPresent1D3D12: CreateCommandAllocator fail", "Shader Injector", MB_OK);
+					ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: CreateCommandAllocator fail");
 					return CallOriginalPresent();
 				}
 			}
@@ -1708,7 +1700,7 @@ namespace HookD3D12
 				gHeapSRV->GetGPUDescriptorHandleForHeapStart()); //this also seemingly initalizes fine
 
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
-			//MessageBoxA(nullptr, "[HookD3D12] ImGui initialized.", "Shader Injector", MB_OK);
+			//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: ImGui initialized");
 
 			HookInput::Initalize(desc.OutputWindow);
 
@@ -1717,7 +1709,7 @@ namespace HookD3D12
 				//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
 				if (FAILED(gDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gOverlayFence)))) 
 				{
-					MessageBoxA(nullptr, "CreateFence fail", "Shader Injector", MB_OK);
+					ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: CreateFence fail");
 					return CallOriginalPresent();
 				}
 			}
@@ -1730,8 +1722,8 @@ namespace HookD3D12
 				if (!gFenceEvent)
 				{
 					char buffer[256];
-					sprintf_s(buffer, "[HookD3D12] Failed to create fence event: %lu", GetLastError());
-					MessageBoxA(nullptr, buffer, "MinHook", MB_OK);
+					sprintf_s(buffer, "HookD3D12->HandlePresentD3D12: Failed to create fence event: %lu", GetLastError());
+					ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
 				}
 			}
 
@@ -1742,7 +1734,7 @@ namespace HookD3D12
 			gInitialized = true;
 			if (!gLoggedOverlayInitialized)
 			{
-				ShaderInjectorIO::WriteToLogFile("[HookD3D12] Overlay initialized from present path");
+				ShaderInjectorIO::WriteToLogFile("HookD3D12->HandlePresentD3D12: Overlay initialized from present path");
 				gLoggedOverlayInitialized = true;
 			}
 		}
@@ -1752,14 +1744,14 @@ namespace HookD3D12
 		if (GetAsyncKeyState(Globals::keyOpenShaderInjectorGUI) & 1)
 		{
 			Globals::gShowShaderInjectorGUI = !Globals::gShowShaderInjectorGUI;
-			//WriteToRuntimeLog(std::string("Shader Injector GUI ") + (gShowShaderInjectorGUI ? "Enabled" : "Disabled"));
+			//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: Shader Injector GUI " + (gShowShaderInjectorGUI ? "Enabled" : "Disabled"));
 		}
 
 		if (GetAsyncKeyState(Globals::keyToggleShaderInjector) & 1)
 		{
 			Globals::gShaderInjectorEnabled = !Globals::gShaderInjectorEnabled;
 			MarkShaderReplacementApplyDirty();
-			//WriteToRuntimeLog(std::string("Shader Injector ") + (gShaderInjectorEnabled ? "Enabled" : "Disabled"));
+			//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: Shader Injector " + (gShaderInjectorEnabled ? "Enabled" : "Disabled"));
 		}
 
 		if (!Globals::gShowShaderInjectorGUI || gOverlayRenderingDisabled)
@@ -1839,12 +1831,12 @@ namespace HookD3D12
 
 					if (waitRes == WAIT_TIMEOUT)
 					{
-						//DebugLog("[HookD3D12] WaitForSingleObject timeout");
+						//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: WaitForSingleObject timeout");
 						canRender = false;
 					}
 					else if (waitRes != WAIT_OBJECT_0) 
 					{
-						//DebugLog("[HookD3D12] WaitForSingleObject failed: %lu", GetLastError());
+						//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: WaitForSingleObject failed: %lu", GetLastError());
 						canRender = false;
 					}
 				}
@@ -1857,7 +1849,7 @@ namespace HookD3D12
 
 			if (!canRender) 
 			{
-				//DebugLog("[HookD3D12] Skipping ImGui render for this frame");
+				//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: Skipping ImGui render for this frame");
 				ImGui::EndFrame();
 				return CallOriginalPresent();
 			}
@@ -1919,7 +1911,7 @@ namespace HookD3D12
 			// Execute
 			if (!gCommandQueue) 
 			{
-				//DebugLog("[HookD3D12] CommandQueue not set, skipping ExecuteCommandLists.");
+				//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: CommandQueue not set, skipping ExecuteCommandLists.");
 			}
 			else
 			{
@@ -1981,7 +1973,7 @@ namespace HookD3D12
 						gCommandQueue = _this;
 						if (!gLoggedCommandQueueCaptured)
 						{
-							ShaderInjectorIO::WriteToLogFile("[HookD3D12] Captured direct command queue");
+							//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->Hook_ExecuteCommandListsD3D12: Captured direct command queue");
 							gLoggedCommandQueueCaptured = true;
 						}
 						//DebugLog("[HookD3D12] Captured CommandQueue=%p", _this);
@@ -2020,7 +2012,7 @@ namespace HookD3D12
 
 		if (FAILED(hr))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12] Overlay fence signal failed during resize teardown.");
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->WaitForOverlayGPUIdle: Overlay fence signal failed during resize teardown.");
 			return false;
 		}
 
@@ -2031,7 +2023,7 @@ namespace HookD3D12
 
 		if (FAILED(hr))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12] Overlay fence SetEventOnCompletion failed during resize teardown.");
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->WaitForOverlayGPUIdle: Overlay fence SetEventOnCompletion failed during resize teardown.");
 			return false;
 		}
 
@@ -2039,7 +2031,7 @@ namespace HookD3D12
 
 		if (waitResult != WAIT_OBJECT_0)
 		{
-			ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12] Overlay fence wait timed out during resize teardown; releasing overlay resources anyway.");
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->WaitForOverlayGPUIdle: Overlay fence wait timed out during resize teardown; releasing overlay resources anyway.");
 			return false;
 		}
 
@@ -2117,7 +2109,7 @@ namespace HookD3D12
 		UINT SwapChainFlags)
 	{
 		char buffer[1024];
-		sprintf_s(buffer, "[HookD3D12] ResizeBuffers %ux%u Buffers=%u", Width, Height, BufferCount);
+		sprintf_s(buffer, "HookD3D12->Hook_ResizeBuffersD3D12: ResizeBuffers %ux%u Buffers=%u", Width, Height, BufferCount);
 		ShaderInjectorGUI::WriteToRuntimeLog(buffer);
 
 		// Release every overlay object that depends on swap-chain buffers or descriptor heaps before ResizeBuffers.
@@ -2134,8 +2126,8 @@ namespace HookD3D12
 
 		if (FAILED(hr))
 		{
-			sprintf_s(buffer, "[HookD3D12] ResizeBuffers FAILED hr=0x%08X", (UINT)hr);
-			ShaderInjectorGUI::WriteToRuntimeLog(buffer);
+			sprintf_s(buffer, "HookD3D12->Hook_ResizeBuffersD3D12: ResizeBuffers FAILED hr=0x%08X", (UINT)hr);
+			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
 			gOverlayRenderingDisabled = false;
 			ResetOverlayStartupGate();
 
@@ -2150,14 +2142,14 @@ namespace HookD3D12
 		gOverlayRenderingDisabled = false;
 		NotifyOverlayResizeBuffersSucceeded();
 
-		ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12] ResizeBuffers succeeded. Overlay recreation deferred until resize settles.");
+		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->Hook_ResizeBuffersD3D12: ResizeBuffers succeeded. Overlay recreation deferred until resize settles.");
 
 		return hr;
 	}
 
 	void Release()
 	{
-		//ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12] Releasing resources and hooks.");
+		//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->Release: Releasing resources and hooks.");
 
 		gShutdown = true;
 		ResetOverlayStartupGate();

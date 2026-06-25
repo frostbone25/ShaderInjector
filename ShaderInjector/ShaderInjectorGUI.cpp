@@ -797,6 +797,11 @@ namespace ShaderInjectorGUI
 		WriteToRuntimeLog("[SUCCESS] " + text);
 	}
 
+	void WriteToRuntimeLogWarning(std::string text)
+	{
+		WriteToRuntimeLog("[WARNING] " + text);
+	}
+
 	void ClearRuntimeLog()
 	{
 		runtimeLogText = "";

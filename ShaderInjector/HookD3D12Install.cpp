@@ -34,7 +34,7 @@ namespace HookD3D12
 			return false;
 		}
 
-		MH_STATUS createStatus = MH_CreateHook(createDeviceAddress, reinterpret_cast<void*>(&Hook_D3D12CreateDevice), reinterpret_cast<void**>(&Original_D3D12CreateDevice));
+		MH_STATUS createStatus = MH_CreateHook(createDeviceAddress, reinterpret_cast<void*>(&Hook_CreateDeviceD3D12), reinterpret_cast<void**>(&Original_CreateDeviceD3D12));
 
 		if (createStatus != MH_OK && createStatus != MH_ERROR_ALREADY_CREATED)
 		{
@@ -59,9 +59,9 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| HOOK D3D12 CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| HOOK D3D12 CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	HRESULT WINAPI Hook_D3D12CreateDevice(IUnknown* pAdapter, D3D_FEATURE_LEVEL MinimumFeatureLevel, REFIID riid, void** ppDevice)
+	HRESULT WINAPI Hook_CreateDeviceD3D12(IUnknown* pAdapter, D3D_FEATURE_LEVEL MinimumFeatureLevel, REFIID riid, void** ppDevice)
 	{
-		HRESULT createDeviceResult = Original_D3D12CreateDevice(pAdapter, MinimumFeatureLevel, riid, ppDevice);
+		HRESULT createDeviceResult = Original_CreateDeviceD3D12(pAdapter, MinimumFeatureLevel, riid, ppDevice);
 
 		if (SUCCEEDED(createDeviceResult) && ppDevice && *ppDevice)
 		{
@@ -71,7 +71,7 @@ namespace HookD3D12
 			if (SUCCEEDED(unknown->QueryInterface(IID_PPV_ARGS(&device))))
 			{
 				InstallPipelineHooksForDevice(device);
-				ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12Install->Hook_D3D12CreateDevice: D3D12CreateDevice captured device and installed pipeline hooks");
+				ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12Install->Hook_CreateDeviceD3D12: D3D12CreateDevice captured device and installed pipeline hooks");
 				device->Release();
 			}
 		}
