@@ -58,27 +58,6 @@ typedef uint32_t uintx_t;
 
 namespace HookD3D12
 {
-	PresentD3D12                  Original_PresentD3D12 = nullptr;
-	Present1Fn                    Original_Present1D3D12 = nullptr;
-	D3D12CreateDeviceFn           Original_D3D12CreateDevice = nullptr;
-	ExecuteCommandListsFn         Original_ExecuteCommandListsD3D12 = nullptr;
-	ResizeBuffersFn               Original_ResizeBuffersD3D12 = nullptr;
-	PFN_CreatePipelineLibrary     Original_CreatePipelineLibrary = nullptr;
-	PFN_LoadGraphicsPipeline      Original_LoadGraphicsPipeline = nullptr;
-	PFN_LoadComputePipeline       Original_LoadComputePipeline = nullptr;
-	PFN_LoadPipeline              Original_LoadPipeline = nullptr;
-	PFN_StorePipeline             Original_StorePipeline = nullptr;
-	PFN_GetSerializedSize         Original_GetSerializedSize = nullptr;
-	PFN_Serialize                 Original_Serialize = nullptr;
-	SetPipelineStateFn            Original_SetPipelineState = nullptr;
-	ResetGraphicsCommandListFn    Original_ResetGraphicsCommandList = nullptr;
-	SetGraphicsRootSignatureFn    Original_SetGraphicsRootSignature = nullptr;
-	SetComputeRootSignatureFn     Original_SetComputeRootSignature = nullptr;
-	CreateComputePipelineStateFn  Original_CreateComputePipelineState = nullptr;
-	CreateRootSignatureFn         Original_CreateRootSignature = nullptr;
-	CreateGraphicsPipelineStateFn Original_CreateGraphicsPipelineState = nullptr;
-	CreatePipelineStateFn         Original_CreatePipelineState = nullptr;
-
 	static ID3D12Device*              gDevice = nullptr;
 	static ID3D12Device*              gDevice2 = nullptr;
 	static ID3D12CommandQueue*        gCommandQueue = nullptr;
@@ -107,8 +86,6 @@ namespace HookD3D12
 	static std::vector<UncapturedPipelineStateInfo> gUncapturedPipelineStates;
 	static std::unordered_map<ID3D12GraphicsCommandList*, ID3D12RootSignature*> gCurrentGraphicsRootSignatureByCommandList;
 	static std::unordered_map<ID3D12GraphicsCommandList*, ID3D12RootSignature*> gCurrentComputeRootSignatureByCommandList;
-	static std::unordered_map<ID3D12RootSignature*, RootSignatureInfo> gRootSignatureInfoByPointer;
-	static std::unordered_map<std::string, ID3D12RootSignature*> gPersistedRootSignaturesByPath;
 
 	struct OverlayStartupGateState
 	{
@@ -590,56 +567,6 @@ namespace HookD3D12
 		gPipelineStateOverridesDirty = false;
 	}
 
-
-	bool GetRootSignatureBlob(ID3D12RootSignature* rootSignature, std::vector<uint8_t>& outBlob, uint64_t& outHash)
-	{
-		outBlob.clear();
-		outHash = 0;
-
-		if (!rootSignature)
-			return false;
-
-		auto it = gRootSignatureInfoByPointer.find(rootSignature);
-		if (it == gRootSignatureInfoByPointer.end() || it->second.blob.empty())
-			return false;
-
-		outBlob = it->second.blob;
-		outHash = it->second.hash;
-		return outHash != 0;
-	}
-
-	ID3D12RootSignature* GetOrCreatePersistedRootSignature(const ShaderReplacement::ShaderReplacementDisk& replacement)
-	{
-		if (replacement.rootSignatureBlobPath.empty() || !gDevice)
-			return nullptr;
-
-		auto existingIt = gPersistedRootSignaturesByPath.find(replacement.rootSignatureBlobPath);
-		if (existingIt != gPersistedRootSignaturesByPath.end())
-			return existingIt->second;
-
-		std::vector<uint8_t> blob;
-		if (!ShaderInjectorIO::LoadDXILBlobFromDisk(replacement.rootSignatureBlobPath, blob))
-		{
-			ShaderInjectorGUI::WriteToRuntimeLog("GetOrCreatePersistedRootSignature: missing blob for " + replacement.name);
-			return nullptr;
-		}
-
-		ID3D12RootSignature* rootSignature = nullptr;
-		HRESULT hr = E_FAIL;
-		if (Original_CreateRootSignature)
-			hr = Original_CreateRootSignature(gDevice, 0, blob.data(), blob.size(), IID_PPV_ARGS(&rootSignature));
-		else
-			hr = gDevice->CreateRootSignature(0, blob.data(), blob.size(), IID_PPV_ARGS(&rootSignature));
-
-		if (FAILED(hr) || !rootSignature)
-		{
-			ShaderInjectorGUI::WriteToRuntimeLog("GetOrCreatePersistedRootSignature: failed hr=" + std::to_string((unsigned)hr) + " replacement=" + replacement.name);
-			return nullptr;
-		}
-
-		gPersistedRootSignaturesByPath[replacement.rootSignatureBlobPath] = rootSignature;
-		return rootSignature;
-	}
 
 	bool CreateReplacementShaderTemplate(
 		const std::string& sourceList,
@@ -1200,34 +1127,6 @@ namespace HookD3D12
 		}
 
 		return Original_ResetGraphicsCommandList(cmdList, allocator, boundState);
-	}
-
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
-	HRESULT STDMETHODCALLTYPE Hook_CreateRootSignature(ID3D12Device* device, UINT nodeMask, const void* blobWithRootSignature, SIZE_T blobLengthInBytes, REFIID riid, void** rootSignature)
-	{
-		HRESULT hr = Original_CreateRootSignature(device, nodeMask, blobWithRootSignature, blobLengthInBytes, riid, rootSignature);
-
-		if (SUCCEEDED(hr) && blobWithRootSignature && blobLengthInBytes > 0 && rootSignature && *rootSignature)
-		{
-			ID3D12RootSignature* rootSignatureObject = nullptr;
-			IUnknown* unknown = reinterpret_cast<IUnknown*>(*rootSignature);
-			if (unknown && SUCCEEDED(unknown->QueryInterface(IID_PPV_ARGS(&rootSignatureObject))))
-			{
-				RootSignatureInfo info{};
-				const uint8_t* bytes = static_cast<const uint8_t*>(blobWithRootSignature);
-				info.blob.assign(bytes, bytes + blobLengthInBytes);
-				info.hash = Hash::HashMemory(blobWithRootSignature, blobLengthInBytes);
-
-				std::lock_guard<std::mutex> lock(gPipelineMutex);
-				gRootSignatureInfoByPointer[rootSignatureObject] = info;
-				rootSignatureObject->Release();
-			}
-		}
-
-		return hr;
 	}
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE COMPUTE PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -2075,7 +1974,7 @@ namespace HookD3D12
 		else
 			observedRootSignature = uncaptured.observedGraphicsRootSignature ? uncaptured.observedGraphicsRootSignature : uncaptured.observedComputeRootSignature;
 
-		ID3D12RootSignature* persistedRootSignature = GetOrCreatePersistedRootSignature(templateReplacement);
+		ID3D12RootSignature* persistedRootSignature = GetOrCreatePersistedRootSignature(templateReplacement, gDevice);
 		bool attemptedAnyRootSignature = false;
 
 		auto TryRebuildWithRootSignature = [&](ID3D12RootSignature* rootSignatureForRebuild, const char* rootSignatureSource) -> bool
@@ -2715,7 +2614,7 @@ namespace HookD3D12
 			guiContext.frameTimeMs = FPSCounter::gCurrentFrameTimeMS;
 			guiContext.runtimeLogText = &ShaderInjectorGUI::runtimeLogText;
 			guiContext.drawMenu = &ShaderInjectorGUI::UI_ShaderInjectorMenu;
-			ShaderInjectorGUI::DrawMainWindow(guiContext);
+			ShaderInjectorGUI::UI_MainWindow(guiContext);
 
 			//=========================================== IMGUI END ===========================================
 
@@ -3110,13 +3009,7 @@ namespace HookD3D12
 			gCommandQueue = nullptr;
 		}
 
-		for (auto& persistedRootSignature : gPersistedRootSignaturesByPath)
-		{
-			if (persistedRootSignature.second)
-				persistedRootSignature.second->Release();
-		}
-		gPersistedRootSignaturesByPath.clear();
-		gRootSignatureInfoByPointer.clear();
+		ReleaseRootSignatureCache();
 		gCurrentGraphicsRootSignatureByCommandList.clear();
 		gCurrentComputeRootSignatureByCommandList.clear();
 

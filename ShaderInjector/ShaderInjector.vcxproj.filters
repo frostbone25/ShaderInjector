@@ -113,6 +113,9 @@
     <ClCompile Include="HookD3D12Install.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="HookD3D12Originals.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="HookD3D12PipelineLibrary.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -123,6 +126,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12ReplacementTemplates.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12RootSignature.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\imgui.cpp">

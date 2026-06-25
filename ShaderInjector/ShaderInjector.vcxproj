@@ -180,10 +180,12 @@
     <ClCompile Include="Hash.cpp" />
     <ClCompile Include="HookD3D12.cpp" />
     <ClCompile Include="HookD3D12Install.cpp" />
+    <ClCompile Include="HookD3D12Originals.cpp" />
     <ClCompile Include="HookD3D12PipelineLibrary.cpp" />
     <ClCompile Include="HookD3D12PipelineUtils.cpp" />
     <ClCompile Include="HookD3D12ReplacementLookup.cpp" />
     <ClCompile Include="HookD3D12ReplacementTemplates.cpp" />
+    <ClCompile Include="HookD3D12RootSignature.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_dx12.cpp" />
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_win32.cpp" />

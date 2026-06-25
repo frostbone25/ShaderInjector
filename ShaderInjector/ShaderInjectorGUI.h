@@ -1,14 +1,23 @@
 #pragma once
 
 #include <string>
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <vector>
 
+#include "imgui.h"
+
+#include "HookD3D12.h"
+#include "ShaderInjectorIO.h"
+#include "Hash.h"
+#include "Globals.h"
+#include "ShaderInjectorGUIShaderSources.h"
 #include "ShaderReplacement.h"
 
 namespace ShaderInjectorGUI
 {
 	using DrawMenuFn = void(*)();
-
-	extern std::string runtimeLogText;
 
 	struct MainWindowContext
 	{
@@ -22,15 +31,58 @@ namespace ShaderInjectorGUI
 		DrawMenuFn drawMenu = nullptr;
 	};
 
-	void DrawMainWindow(const MainWindowContext& context);
-
+	void UI_MainWindow(const MainWindowContext& context);
 	void UI_ShaderInjectorMenu();
+
+	//===================== shader replacements =====================
 	void UI_ShaderReplacements();
+
+	template<typename PipelineT>
+	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderReplacement::ShaderReplacementDisk& replacement);
+
+	template<typename PipelineT>
+	void UI_DrawReplacementPSORow(const char* sourceList, int index, const PipelineT& pipeline);
+	void UI_ShaderReplacementPSOList(const ShaderReplacement::ShaderReplacementDisk& replacement);
+	int CountReplacementPSOs(const ShaderReplacement::ShaderReplacementDisk& replacement);
+
+	template<typename PipelineT>
+	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderReplacement::ShaderReplacementDisk& replacement);
+
+	//===================== developer settings =====================
+	void UI_AdapterInfo();
+	void UI_D3D12PipelineInfo();
+
+	//===================== pipelines =====================
 	void UI_StreamPipelines();
 	//void UI_GraphicsPipelines(); //<--- hidden from GUI for now
-	void UI_D3D12PipelineInfo();
-	void UI_AdapterInfo();
 
+	template<
+		typename PipelineT,
+		uint64_t PipelineT::* HashMember,
+		SIZE_T PipelineT::* SizeMember,
+		std::vector<uint8_t> PipelineT::* BytecodeMember>
+	void UI_ShaderStageList(
+		const char* stageLabel,
+		const char* idPrefix,
+		const char* sourceList,
+		std::vector<PipelineT>& pipelines,
+		ShaderReplacement::ShaderType shaderType,
+		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE subobjectType,
+		HookD3D12::PSOPendingRebuild::SourceList pendingSource,
+		bool allowMarkerToggle,
+		bool PipelineT::* disabledMember,
+		ID3D12PipelineState* PipelineT::* rebuiltPSOMember);
+
+	template<typename PipelineT, uint64_t PipelineT::* HashMember>
+	int CountShaderStage(const std::vector<PipelineT>& pipelines);
+
+	template<typename PipelineT, uint64_t PipelineT::* HashMember>
+	int FindFirstShaderStageIndex(const std::vector<PipelineT>& pipelines);
+
+	//===================== runtime logs =====================
+	extern std::string runtimeLogText;
+
+	void UI_RuntimeLogTextBox(const std::string* logText);
 	void WriteToRuntimeLog(std::string text);
 	void ClearRuntimeLog();
 }
