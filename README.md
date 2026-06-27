@@ -55,3 +55,13 @@ In addition if you would like to do pull requests to improve or contribute featu
 - [json (nlohmann)](https://github.com/nlohmann/json)
 - [inifile-cpp (Rookfighter)](https://github.com/Rookfighter/inifile-cpp)
 - [Universal-Dear-ImGui-Hook (Sh0ckFR)](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/tree/master)
+
+# Special Thanks
+
+People who have aided in the development of this project with testing or other various tasks, big or small.
+
+- Neocortex
+- Stephe
+- YIIS
+- smackedwookiee
+- sajittarius
