@@ -3,7 +3,7 @@ Shader Injector Mod for [FF7 Rebirth PC](https://store.steampowered.com/app/2909
 
 ---
 # Download
-### Nexus Mods
+### [Nexus Mods](https://www.nexusmods.com/finalfantasy7rebirth/mods/2153)
 ### [Github](https://github.com/frostbone25/ShaderInjector/releases)
 
 ---
