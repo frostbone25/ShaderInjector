@@ -94,7 +94,7 @@ Now we finally boot into the game, [deleting our shader cache](#step-1-delete-ga
 
 As the game compiles it's shaders you should see the shader injector menu pop up within a short few seconds. If that happens it's a good sign, but just sit tight and let the game compile it's shaders. **DO NOT SKIP COMPILATION**
 
-**IMPORTANT NOTE:** When the progress bar reaches the end ***the game will temporarily freeze*** due to compiling a batch of pixel/vertex shaders right at the end. ***Just let it run/chug and it will eventually unfreeze fairly pretty quickly.***
+**IMPORTANT NOTE:** When the progress bar reaches the end ***the game will temporarily freeze*** due to compiling a batch of pixel/vertex shaders right at the end. ***Just let it run/chug and it will eventually unfreeze fairly quickly.***
 
 ![step3-c1](GithubContent/Install/step3-c1.jpg)
 
