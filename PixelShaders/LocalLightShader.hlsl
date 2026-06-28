@@ -1,13 +1,42 @@
 //DeferredLocalLightPS.hlsl
 
-//|||||||||||||||||||||||||||||||||| CONFIGURATION ||||||||||||||||||||||||||||||||||
-//|||||||||||||||||||||||||||||||||| CONFIGURATION ||||||||||||||||||||||||||||||||||
-//|||||||||||||||||||||||||||||||||| CONFIGURATION ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - BRDF ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - BRDF ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - BRDF ||||||||||||||||||||||||||||||||||
 //here are parameters that are wired up for easy tweakin...
 
-//simulates micro-level shadowing on materials (using material ao)
-//NOTE: this can lead to some materials/objects looking much darker than usual, if this is not desired you can just disable to revert to original shading
-//#define ENABLE_MICRO_SHADOWS
+//#define SHADING_DEFAULT_LIT_LAMBERT //<--- original game
+//#define SHADING_DEFAULT_LIT_BURLEY
+#define SHADING_DEFAULT_LIT_OREN_NAYAR
+
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - MICRO SHADOWS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - MICRO SHADOWS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - MICRO SHADOWS ||||||||||||||||||||||||||||||||||
+//here are parameters that are wired up for easy tweakin...
+
+//simulates micro-level shadowing on materials (using material ao) super cheap and performant! (from uncharted 4)
+//but this can lead to some materials/objects looking much darker than usual.
+//if this is not desired you can just disable to revert to (mostly) original shading
+#define ENABLE_MICRO_SHADOWS
+
+//applies microshadows to skin, generally shadowing terms should be mostly unified, however this can lead to an overly dark appearance characters in certain conditions and areas
+//I would leave it off if you desire characters to stay true to their original game shading
+//#define ENABLE_MICRO_SHADOWS_SKIN
+
+//applies microshadows to hair, generally shadowing terms should be mostly unified, however this can lead to an overly dark appearance characters in certain conditions and areas
+//I would leave it off if you desire characters to stay true to their original game shading
+//#define ENABLE_MICRO_SHADOWS_HAIR
+
+//requested feature for control over strength of shadows, the uncharted 4 micro shadow application at full intensity can be quite strong
+//leaving some places a little too dark when in direct sunlight, but here you have control over how strong it is
+//RANGE: this should be between [0.0 <---> 1.0]
+//DEFAULT: 1
+#define MICRO_SHADOWS_STRENGTH 1.0
+
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SSAO ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SSAO ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SSAO ||||||||||||||||||||||||||||||||||
+//here are parameters that are wired up for easy tweakin...
 
 //apply SSAO to the direct lighting for more contrast
 //NOTE: I don't recomend this, as it's not only physically in-accurate, but can create too much "shadowing" for things that are supposed to be in direct light
@@ -15,10 +44,21 @@
 //#define APPLY_SSAO_IN_DIRECT_LIGHT
 
 //[APPLY_SSAO_IN_DIRECT_LIGHT ONLY!] This only works if APPLY_SSAO_IN_DIRECT_LIGHT is enabled!
-//this controls the intensity of the SSAO term when applied to direct light
+//this controls the "contrast" of the SSAO term when applied to direct light
 //RANGE: this should be between [0.0 <---> 8.0]
 //DEFAULT: 1.0
 #define SSAO_POWER 1.0
+
+//[APPLY_SSAO_IN_DIRECT_LIGHT ONLY!] This only works if APPLY_SSAO_IN_DIRECT_LIGHT is enabled!
+//this controls the "brightness" of the SSAO term when applied to direct light, I suggest using this in tandem with SSAO_POWER
+//RANGE: this should be between [1.0 <---> 8.0]
+//DEFAULT: 1.0
+#define SSAO_BRIGHTNESS 1.0
+
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - CONTACT SHADOWS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - CONTACT SHADOWS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - CONTACT SHADOWS ||||||||||||||||||||||||||||||||||
+//here are parameters that are wired up for easy tweakin...
 
 //this changes the noise pattern every frame, which with Temporal Anti-Aliasing (or DLSS or anything related)
 //you want to do, that way samples change every frame and results get blended together over time for a better final apperance
@@ -33,6 +73,9 @@
 //NOTE 2: game uses this by default
 //#define RANDOM_BLUE_NOISE
 
+//the main attraction, contact shadows!
+//in short it raymarches against the scene depth buffer to estimate shadows
+//significantly improves overall shadow quality
 #define ENABLE_CONTACT_SHADOWS
 
 //this directly controls the quality of the contact shadows, the more the better!
@@ -50,15 +93,19 @@
 #define CONTACT_SHADOWS_RAY_LENGTH 50.0
 
 //this controls how "thick" objects are in the depth buffer
-//RANGE: this should be between [0.1 <---> 1.0]
+//RANGE: this should be between [10 <---> 100.0]
 //DEFAULT: 0.35
 //HIGHER VALUES: larger volume of shadow, but can lead to alot of wierd false shadowing. objects up close can cast shadows onto objects far behind it which can look odd.
-//LOWER VALUES: smaller volume of shadow, 
-#define CONTACT_SHADOWS_THICKNESS 0.35
+//LOWER VALUES: smaller volume of shadow, less false shadowing, but they can appear less dense and might be too thin
+#define CONTACT_SHADOWS_THICKNESS 25.0
 
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces
 //RANGE: this should be between [0.0 <---> 0.1]
-#define CONTACT_SHADOWS_BIAS 1e-03
+#define CONTACT_SHADOWS_BIAS 0.01
+
+//this is a small bias factor to minimize contact shadow acne on sloped surfaces using surface normal
+//RANGE: this should be between [0.0 <---> 1.0]
+#define CONTACT_SHADOWS_NORMAL_BIAS 0.01
 
 //OPTIMIZATION: this avoids calculating contact shadows for sky pixels
 //has no effect visually, but can save you quite a bit of frametime especially the more you look up :P 
@@ -80,6 +127,15 @@
 
 //smoother | takes the values within the 2x2 checker block and averages them together for a slightly softer apperance
 #define CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION_TYPE_AVG
+
+//this was requested by quite a few people who wanted to control the strength of the shadows
+//physical accuracy is at 1.0 full power, and natrually global illumination (ambient, bounce, transmission light) fills in shadows
+//however the games GI term is far from perfect and can leave some areas quite dark so here you can control it
+//reduction in shadow strength can create an odd 90s style look where you can see a semblance of light leaking through to "fill in" for the shadow.
+//not a fan of it, and it's not accurate, but hey to each their own!
+//RANGE: this should be between [0.0 <---> 1.0]
+//DEFAULT: 1
+#define CONTACT_SHADOWS_STRENGTH 1.0
 
 //|||||||||||||||||||||||||||||||||| MACROS ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| MACROS ||||||||||||||||||||||||||||||||||
@@ -105,36 +161,46 @@
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
+//resources passed in to the shader
 
 //SamplerComparisonState View_SharedPointClampedSampler : register(s0); // can't disambiguate
 //SamplerComparisonState View_SharedBilinearClampedSampler : register(s1); // can't disambiguate
 //SamplerComparisonState LightAttenuationTextureSampler : register(s2); // can't disambiguate
 
-SamplerState View_SharedPointClampedSampler : register(s0); // can't disambiguate
-SamplerState View_SharedBilinearClampedSampler : register(s1); // can't disambiguate
-SamplerState LightAttenuationTextureSampler : register(s2); // can't disambiguate
+SamplerState View_SharedPointClampedSampler    : register(s0, space0);
+SamplerState View_SharedBilinearClampedSampler : register(s1, space0);
+SamplerState LightAttenuationTextureSampler    : register(s2, space0);
 
-Texture3D<float4> View_SpatiotemporalBlueNoiseVolumeTexture : register(t0);
+Texture3D<float4> View_SpatiotemporalBlueNoiseVolumeTexture : register(t0, space0);
 
-Texture2D<float4> SceneTexturesStruct_SceneDepthTexture : register(t2);
-Texture2D<float4> SceneTexturesStruct_GBufferATexture : register(t3);
-Texture2D<float4> SceneTexturesStruct_GBufferBTexture : register(t4);
-Texture2D<float4> SceneTexturesStruct_GBufferCTexture : register(t5);
-Texture2D<float4> SceneTexturesStruct_GBufferDTexture : register(t6);
-Texture2D<float4> SceneTexturesStruct_GBufferETexture : register(t7);
-Texture2D<float4> SceneTexturesStruct_ScreenSpaceAOTexture : register(t8);
-Texture2D<float4> LightAttenuationTexture : register(t9);
-Texture2D<float4> ClosestHZBTexture : register(t10);
-Texture2D<float4> View_ThinFilmTableTexture : register(t1);
+Texture2D<float4> View_ThinFilmTableTexture                  : register(t1, space0);
+Texture2D<float4> SceneTexturesStruct_SceneDepthTexture      : register(t2, space0);
+Texture2D<float4> SceneTexturesStruct_GBufferATexture        : register(t3, space0);
+Texture2D<float4> SceneTexturesStruct_GBufferBTexture        : register(t4, space0);
+Texture2D<float4> SceneTexturesStruct_GBufferCTexture        : register(t5, space0);
+Texture2D<float4> SceneTexturesStruct_GBufferDTexture        : register(t6, space0);
+Texture2D<float4> SceneTexturesStruct_GBufferETexture        : register(t7, space0);
+Texture2D<float4> SceneTexturesStruct_ScreenSpaceAOTexture   : register(t8, space0);
+Texture2D<float4> LightAttenuationTexture                    : register(t9, space0);
+Texture2D<float4> ClosestHZBTexture                          : register(t10, space0);
 
-cbuffer _Globals : register(b0) 
+//|||||||||||||||||||||||||||||||||| CONSTANT BUFFERS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONSTANT BUFFERS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONSTANT BUFFERS ||||||||||||||||||||||||||||||||||
+//game data passed in to the shader
+
+cbuffer Globals : register(b0, space0)
 {
 	float4 HZBCoordinateContext : packoffset(c0.x);
 };
 
-cbuffer View : register(b1) 
+cbuffer View : register(b1, space0)
 {
-	float4x4 View_TranslatedWorldToClip : packoffset(c0.x);
+	//NOTE: setting row_major seems to fix some issues
+    row_major float4x4 View_TranslatedWorldToClip : packoffset(c0);
+    row_major float4x4 View_ViewToClip            : packoffset(c36);
+    row_major float4x4 View_ScreenToWorld         : packoffset(c56);
+
 	float4x4 View_WorldToOrthographicClip : packoffset(c4.x);
 	float4x4 View_TranslatedWorldToOrthographicClip : packoffset(c8.x);
 	float4x4 View_WorldToClip : packoffset(c12.x);
@@ -143,12 +209,10 @@ cbuffer View : register(b1)
 	float4x4 View_ViewToTranslatedWorld : packoffset(c24.x);
 	float4x4 View_TranslatedWorldToCameraView : packoffset(c28.x);
 	float4x4 View_CameraViewToTranslatedWorld : packoffset(c32.x);
-	float4x4 View_ViewToClip : packoffset(c36.x);
 	float4x4 View_ViewToClipNoAA : packoffset(c40.x);
 	float4x4 View_ClipToView : packoffset(c44.x);
 	float4x4 View_ClipToTranslatedWorld : packoffset(c48.x);
 	float4x4 View_SVPositionToTranslatedWorld : packoffset(c52.x);
-	float4x4 View_ScreenToWorld : packoffset(c56.x);
 	float4x4 View_ScreenToTranslatedWorld : packoffset(c60.x);
 	float4x4 View_MobileMultiviewShadowTransform : packoffset(c64.x);
 	float3 View_ViewForward : packoffset(c68.x);
@@ -407,7 +471,7 @@ cbuffer View : register(b1)
 	int View_DebugTweak : packoffset(c299.x);
 };
 
-cbuffer DeferredLightUniforms : register(b2) 
+cbuffer DeferredLightUniforms : register(b2, space0)
 {
 	float2 DeferredLightUniforms_DistanceFadeMAD : packoffset(c0.x);
 	int DeferredLightUniforms_LightContextBitField : packoffset(c0.z);
@@ -472,7 +536,7 @@ struct FGBufferData
 
 struct FDeferredLightData
 {
-    float2 DistanceFadeMAD;
+	float2 DistanceFadeMAD;
     float3 Position;
     float  InvRadius;
     float3 Color;
@@ -523,8 +587,6 @@ struct FLightingTerms
 float Pow2(float v) { return v * v; }
 float Pow4(float v) { float v2 = v * v; return v2 * v2; }
 float Pow5(float v) { return Pow4(v) * v; }
-float3 Splat3(float v) { return float3(v, v, v); }
-float4 Splat4(float v) { return float4(v, v, v, v); }
 
 float3 SafeNormalize(float3 v)
 {
@@ -566,323 +628,19 @@ float LoadSpatiotemporalBlueNoise(PSInput input)
     return View_SpatiotemporalBlueNoiseVolumeTexture.Load(int4(blueNoiseXY, frameSlice, 0)).r;
 }
 
-//||||||||||||||||||||||||||||||| CONTACT SHADOWS |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| CONTACT SHADOWS |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| CONTACT SHADOWS |||||||||||||||||||||||||||||||
-
-float LinearEyeDepth(float sceneDepth)
-{
-	return View_InvDeviceZToWorldZTransform.z / (sceneDepth - View_InvDeviceZToWorldZTransform.w);
-}
-
-float2 WorldToScreenUV(float3 worldPos)
-{
-    float4 clipPos = mul(View_WorldToClip, float4(worldPos, 1.0));
-    clipPos.xyz /= clipPos.w;
-
-    float2 uv;
-    uv.x = clipPos.x * 0.5 + 0.5;
-    uv.y = 1.0 - (clipPos.y * 0.5 + 0.5);
-
-    return uv;
-}
-
-float3 ReconstructWorldPosition(float2 uv, float depth)
-{
-    float4 clipPos;
-    clipPos.x = uv.x * 2.0 - 1.0;
-    clipPos.y = (1.0 - uv.y) * 2.0 - 1.0;
-    clipPos.z = depth;
-    clipPos.w = 1.0;
-
-    float4 worldPos = mul(View_ClipToWorld, clipPos);
-    return worldPos.xyz / worldPos.w;
-}
-
-//for contact shadows, this is the best that I could come up with
-//quality and functionality wise this is the best, sampling depth twice (using point and bilinear) to avoid self occlusion issues
-//however it is the most expensive due to reconstructing world position at every step (twice in this one)
-float ContactShadowWorldSpaceDualDepth(
-    float3 vector_worldPosition,
-    float3 vector_worldNormal,
-    float3 vector_worldLightDirection,
-    float random)
-{
-    float raymarchStepSize = CONTACT_SHADOWS_RAY_LENGTH / CONTACT_SHADOWS_SAMPLES;
-
-    float3 rayOrigin = vector_worldPosition;
-	rayOrigin += vector_worldNormal * 0.05; //normal bias
-	//rayOrigin += vector_worldLightDirection * 0.05; //depth bias
-	rayOrigin += vector_worldLightDirection * (random * raymarchStepSize); //advance the ray once with jitter
-	float3 rayStep = vector_worldLightDirection * raymarchStepSize;
-
-    [loop]
-    for (int i = 0; i < CONTACT_SHADOWS_SAMPLES; i++)
-    {
-        float3 vector_samplePosition = rayOrigin + rayStep * i;
-        float2 vector_sampleUV = WorldToScreenUV(vector_samplePosition);
-
-        if (vector_sampleUV.x < 0.0 || vector_sampleUV.x > 1.0 || vector_sampleUV.y < 0.0 || vector_sampleUV.y > 1.0)
-            break;
-
-		float pointDepth = SceneTexturesStruct_SceneDepthTexture.SampleLevel(View_SharedPointClampedSampler, vector_sampleUV, 0).r;
-		float bilinearDepth = SceneTexturesStruct_SceneDepthTexture.SampleLevel(View_SharedBilinearClampedSampler, vector_sampleUV, 0).r;
-
-		float3 pointWorldPosition = ReconstructWorldPosition(vector_sampleUV, pointDepth);
-		float3 bilinearWorldPosition = ReconstructWorldPosition(vector_sampleUV, bilinearDepth);
-
-		float pointSceneDepth = distance(pointWorldPosition, View_WorldCameraOrigin);
-		float bilinearSceneDepth = distance(bilinearWorldPosition, View_WorldCameraOrigin);
-
-		float minDepth = min(pointSceneDepth, bilinearSceneDepth);
-		float maxDepth = max(pointSceneDepth, bilinearSceneDepth);
-
-		float rayDepth = distance(vector_samplePosition, View_WorldCameraOrigin);
-		float penetration = rayDepth - minDepth;
-		float depthDistance = maxDepth - rayDepth;
-
-		if (depthDistance < 0.0 && penetration < CONTACT_SHADOWS_THICKNESS * 100)
-			return 0.0;
-    }
-
-    return 1.0;
-}
-
-//I would consider this the second best, sampling and reconstructing world position at every step and testing.
-//there are some more self-occlusion issues that creep in but generally this is still pretty good
-//with that said it is still very expensive (less expensive than the dual, but still expensive)
-float ContactShadowWorldSpace(
-    float3 vector_worldPosition,
-    float3 vector_worldNormal,
-    float3 vector_worldLightDirection,
-    float random)
-{
-    float raymarchStepSize = CONTACT_SHADOWS_RAY_LENGTH / CONTACT_SHADOWS_SAMPLES;
-
-    float3 rayOrigin = vector_worldPosition;
-	rayOrigin += vector_worldNormal * 0.05; //normal bias
-	//rayOrigin += vector_worldLightDirection * 0.05; //depth bias
-	rayOrigin += vector_worldLightDirection * (random * raymarchStepSize); //advance the ray once with jitter
-	float3 rayStep = vector_worldLightDirection * raymarchStepSize;
-
-    [loop]
-    for (int i = 0; i < CONTACT_SHADOWS_SAMPLES; i++)
-    {
-        float3 vector_samplePosition = rayOrigin + rayStep * i;
-        float2 vector_sampleUV = WorldToScreenUV(vector_samplePosition);
-
-        if (vector_sampleUV.x < 0.0 || vector_sampleUV.x > 1.0 || vector_sampleUV.y < 0.0 || vector_sampleUV.y > 1.0)
-            break;
-
-		//NOTE: this samples the depth texture with bilinear filtering, this generally does a fine job however this can be more prone to self occlusion errors
-		//as with bilinear filtering you are interpolating depth values (depth values that may not exist!)
-		//float sampledDepth = SceneTexturesStruct_SceneDepthTexture.SampleLevel(View_SharedBilinearClampedSampler, vector_sampleUV, 0).r;
-
-		//NOTE: this samples the depth texture with point filtering, it's sharper but generally does a much better job and less prone to self occlusion errors
-		float sampledDepth = SceneTexturesStruct_SceneDepthTexture.SampleLevel(View_SharedPointClampedSampler, vector_sampleUV, 0).r;
-
-        float3 vector_sampleWorldPosition = ReconstructWorldPosition(vector_sampleUV, sampledDepth);
-		float rayDepth = distance(vector_samplePosition, View_WorldCameraOrigin);
-		float sceneDepth = distance(vector_sampleWorldPosition, View_WorldCameraOrigin);
-		float depthDiff = rayDepth - sceneDepth;
-
-		if (depthDiff > 0.0 && depthDiff < CONTACT_SHADOWS_THICKNESS * 100)
-            return 0.0;
-    }
-
-    return 1.0;
-}
-
-//next up on the 3rd quality ranking this is a clip-space version.
-//functionally and visually it's a little different than the world space dual depth, but importantly its MUCH faster.
-//since we are in clip space no need to reconstruct world position at every step.
-//you might get some more artifacting, and also less consistent shadow lengths but generally this is pretty good (and probably prefered for production use)
-float ContactShadowClipSpaceDualDepth(
-    float3 vector_worldPosition,
-    float3 vector_worldNormal,
-    float3 vector_worldLightDirection,
-    float random)
-{
-	float invSamples = rcp(CONTACT_SHADOWS_SAMPLES);
-
-    float3 rayOrigin = vector_worldPosition;
-    float4 clipStart = mul(View_WorldToClip, float4(rayOrigin, 1));
-    float4 clipEnd = mul(View_WorldToClip, float4(rayOrigin + vector_worldLightDirection * CONTACT_SHADOWS_RAY_LENGTH, 1));
-
-    float3 ndcStart = clipStart.xyz / clipStart.w;
-    float3 ndcEnd = clipEnd.xyz / clipEnd.w;
-
-	float rayLinearStart = LinearEyeDepth(ndcStart.z);
-	float rayLinearEnd   = LinearEyeDepth(ndcEnd.z);
-
-	float rayLinearDepth = lerp(rayLinearStart, rayLinearEnd, random * invSamples);
-	float rayLinearStep = (rayLinearEnd - rayLinearStart) * invSamples;
-
-	const float2 uvScale = float2(0.5, -0.5);
-	float2 uvStep = (ndcEnd.xy - ndcStart.xy) * (invSamples * uvScale);
-	float2 uv = mad(ndcStart.xy, uvScale, 0.5) + uvStep * random;
-
-    [loop]
-    for (int i = 0; i < CONTACT_SHADOWS_SAMPLES; i++)
-    {
-        if (any(uv < 0.0) || any(uv > 1.0))
-            break;
-
-		float pointDepth = SceneTexturesStruct_SceneDepthTexture.SampleLevel(View_SharedPointClampedSampler, uv, 0).r;
-		float bilinearDepth = SceneTexturesStruct_SceneDepthTexture.SampleLevel(View_SharedBilinearClampedSampler, uv, 0).r;
-
-		float2 depths = float2(pointDepth, bilinearDepth);
-		float2 linearDepths = View_InvDeviceZToWorldZTransform.z / (depths - View_InvDeviceZToWorldZTransform.w);
-
-		float minDepth = min(linearDepths.x, linearDepths.y);
-		float maxDepth = max(linearDepths.x, linearDepths.y);
-
-		float penetration = rayLinearDepth - minDepth;
-		float depthDistance = maxDepth - rayLinearDepth;
-
-		if (depthDistance < 0.0 && penetration < CONTACT_SHADOWS_THICKNESS)
-			return 0.0;
-
-		rayLinearDepth += rayLinearStep;
-		uv += uvStep;
-    }
-
-    return 1.0;
-}
-
-//last the 4th quality ranking this is a clip-space version single depth.
-//functionally and visually it's a almost the same as the dual-depth clip space version, but this is the fastest (only 1 depth sample per step)
-//you'll definetly get some artifacting compared to the prior versions, but for speed/quality this is certainly the best we can do
-float ContactShadowClipSpace(
-    float3 vector_worldPosition,
-    float3 vector_worldNormal,
-    float3 vector_worldLightDirection,
-    float random)
-{
-	float invSamples = rcp(CONTACT_SHADOWS_SAMPLES);
-
-    float3 rayOrigin = vector_worldPosition;
-    float4 clipStart = mul(View_WorldToClip, float4(rayOrigin, 1));
-    float4 clipEnd = mul(View_WorldToClip, float4(rayOrigin + vector_worldLightDirection * CONTACT_SHADOWS_RAY_LENGTH, 1));
-    float3 ndcStart = clipStart.xyz / clipStart.w;
-    float3 ndcEnd = clipEnd.xyz / clipEnd.w;
-
-	float rayLinearStart = LinearEyeDepth(ndcStart.z);
-	float rayLinearEnd   = LinearEyeDepth(ndcEnd.z);
-
-	float rayLinearDepth = lerp(rayLinearStart, rayLinearEnd, random * invSamples);
-	float rayLinearStep = (rayLinearEnd - rayLinearStart) * invSamples;
-
-	//IMPORTANT NOTE: make sure we use View_ScreenPositionScaleBias instead of hardcoded constants.
-	// xy = scale (0.5, -0.5 on D3D), zw = bias (0.5, 0.5 + viewport offset + TAA jitter)
-	// if we don't we can (and have) end up in a case where due to some resolution mismatching
-	// contact shadows can have a lot of artifacts and seemingly appear "offset" or behind for some user graphics configs
-	float2 uvStart = mad(ndcStart.xy, View_ScreenPositionScaleBias.xy, View_ScreenPositionScaleBias.zw);
-	float2 uvEnd   = mad(ndcEnd.xy,   View_ScreenPositionScaleBias.xy, View_ScreenPositionScaleBias.zw);
-	float2 uvStep  = (uvEnd - uvStart) * invSamples;
-	float2 uv      = mad(uvStep, random, uvStart);
-
-    [loop]
-    for (int i = 0; i < CONTACT_SHADOWS_SAMPLES; i++)
-    {
-        if (any(uv < 0.0) || any(uv > 1.0))
-            break;
-
-		//sampling with bilinear depth has some issue, thanks to interpolation we can end up with depth values that might be behind surfaces
-		//this can lead to self-occlusion artifacts
-		//float depth = SceneTexturesStruct_SceneDepthTexture.SampleLevel(View_SharedBilinearClampedSampler, uv, 0).r;
-
-		//sampling with point filtering on the other hand doesn't have that issue, and we actually get better results when doing it this way
-		//less self-occlusion = better quality... and it's basically free!
-		float depth = SceneTexturesStruct_SceneDepthTexture.SampleLevel(View_SharedPointClampedSampler, uv, 0).r;
-		float linearDepth = View_InvDeviceZToWorldZTransform.z / (depth - View_InvDeviceZToWorldZTransform.w);
-		float penetration = rayLinearDepth - linearDepth;
-
-		if (penetration > CONTACT_SHADOWS_BIAS && penetration < CONTACT_SHADOWS_THICKNESS)
-			return 0.0;
-
-		rayLinearDepth += rayLinearStep;
-		uv += uvStep;
-    }
-
-    return 1.0;
-}
-
-float CalculateContactShadows(
-    int2 vector_uvInt,
-    float3 vector_worldNormal, 
-    float3 vector_worldLightDirection, 
-    float3 vector_worldPosition,
-    float rawDepth,
-    float random)
-{
-    float sceneDepth = LinearEyeDepth(rawDepth);
-
-    //start off with visibility
-    float contactShadow = 1.0f;
-
-    //optimization: early out for sky
-    #if defined(CONTACT_SHADOW_EARLY_SKY_OUT)
-        if(sceneDepth < 1000000)
-    #endif
-    {
-        #if defined(CONTACT_SHADOW_CHECKERBOARD)
-            //bool checkerboardTest = (vector_uvInt.x + vector_uvInt.y + 0) % 2; //manaul debug test
-            bool checkerboardTest = (vector_uvInt.x + vector_uvInt.y + View_TemporalAAParams.x) % 2;
-            if(checkerboardTest)
-        #endif
-        {
-				//contactShadow = ContactShadowWorldSpaceDualDepth(
-				//contactShadow = ContactShadowWorldSpace(
-				//contactShadow = ContactShadowClipSpaceDualDepth(
-				contactShadow = ContactShadowClipSpace(
-					vector_worldPosition,
-					vector_worldNormal,
-					vector_worldLightDirection,
-					random);
-			}
-
-			#if defined(CONTACT_SHADOW_CHECKERBOARD) && defined(CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION)
-				//read other pixel lanes, there should be a shadow in one of them
-				//NOTE TO SELF: these quad lane reads can't be inside a conditional
-				float lane0 = QuadReadLaneAt(contactShadow, 0);
-				float lane1 = QuadReadLaneAt(contactShadow, 1);
-				float lane2 = QuadReadLaneAt(contactShadow, 2);
-				float lane3 = QuadReadLaneAt(contactShadow, 3);
-
-				//check the blank spots
-				if(!checkerboardTest)
-				{
-					#if defined(CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION_TYPE_MIN)
-						contactShadow = min(min(lane0, lane1), min(lane2, lane3));
-					#elif defined(CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION_TYPE_AVG) //little softer and more pleasing, but def a bit more costly
-						contactShadow = mad(lane0 + lane1 + lane2 + lane3, 0.5f, -1.0f);
-					#endif
-				}
-			#endif
-		}
-
-    return contactShadow;
-}
-
-
-
-
-
+//||||||||||||||||||||||||||||||| SPACE CONVERSIONS |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| SPACE CONVERSIONS |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| SPACE CONVERSIONS |||||||||||||||||||||||||||||||
 
 float LinearizeSceneDepth(float deviceZ)
 {
-    return View_InvDeviceZToWorldZTransform.x * deviceZ +
-           View_InvDeviceZToWorldZTransform.y +
-           rcp(View_InvDeviceZToWorldZTransform.z * deviceZ -
-               View_InvDeviceZToWorldZTransform.w);
+    return View_InvDeviceZToWorldZTransform.x * deviceZ + View_InvDeviceZToWorldZTransform.y + rcp(View_InvDeviceZToWorldZTransform.z * deviceZ - View_InvDeviceZToWorldZTransform.w);
 }
 
 float2 ResolveScreenUV(float4 screenVector)
 {
     float2 projectionUV = screenVector.xy / screenVector.w;
-    return projectionUV * View_ScreenPositionScaleBias.xy +
-           View_ScreenPositionScaleBias.wz;
+    return projectionUV * View_ScreenPositionScaleBias.xy + View_ScreenPositionScaleBias.wz;
 }
 
 int2 ResolvePixelPos(float2 screenUV)
@@ -903,11 +661,15 @@ float3 ReconstructWorldPosition(float4 screenVector, float sceneDepth)
     return position;
 }
 
+//||||||||||||||||||||||||||||||| GET LIGHT DATA |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| GET LIGHT DATA |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| GET LIGHT DATA |||||||||||||||||||||||||||||||
+
 FDeferredLightData GetDeferredLight()
 {
     FDeferredLightData light;
 
-    //float4 LightPositionAndInvRadius;
+	//float4 LightPositionAndInvRadius;
     light.Position = DeferredLightUniforms_Position;
     light.InvRadius = DeferredLightUniforms_InvRadius;
 
@@ -940,9 +702,12 @@ FDeferredLightData GetDeferredLight()
     return light;
 }
 
+//||||||||||||||||||||||||||||||| GBUFFER DECODING |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| GBUFFER DECODING  |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| GBUFFER DECODING  |||||||||||||||||||||||||||||||
+
 float DecodeSpecularScalar(float encodedSpecular)
 {
-    //UE4 packed specular remap
     float s = saturate(encodedSpecular);
     float decoded = (s < 0.666667) ? (s * 0.0600000) : (s * 0.360000 - 0.200000);
     return clamp(decoded, 0.0, 0.160000);
@@ -950,6 +715,8 @@ float DecodeSpecularScalar(float encodedSpecular)
 
 float3 WetnessAndIORAdjustSpecular(float3 specularColor, float selectiveMask)
 {
+    // Labels 0:305-342 and repeated material branches.  The mask is packed in
+    // the high nibble of GBufferE.a; exact UE-side name is not available.
     float wetnessEnabled = (View_WetnessIntensity > 0.0) ? 1.0 : 0.0;
     float fogMediumEnabled = (View_FogContextMediumIOR > 1.0) ? 1.0 : 0.0;
     float wetnessOrFog = saturate(selectiveMask * wetnessEnabled + fogMediumEnabled);
@@ -973,75 +740,65 @@ float3 MaybeThinFilmSpecular(float3 specularColor, float voH, float customX, flo
     return saturate(fresnelColor + thinFilm * specularColor * thinFilmWeight);
 }
 
+float3 ShadingColorOrScalarForSSS(FGBufferData gbufferData)
+{
+    return gbufferData.ShadingDiffuseColor;
+}
+
 FGBufferData DecodeGBuffer(int2 pixelPos)
 {
-    FGBufferData g;
-    g.GBufferA = SceneTexturesStruct_GBufferATexture.Load(int3(pixelPos, 0));
-    g.GBufferB = SceneTexturesStruct_GBufferBTexture.Load(int3(pixelPos, 0));
-    g.GBufferC = SceneTexturesStruct_GBufferCTexture.Load(int3(pixelPos, 0));
-    g.GBufferD = SceneTexturesStruct_GBufferDTexture.Load(int3(pixelPos, 0));
-    g.GBufferE = SceneTexturesStruct_GBufferETexture.Load(int3(pixelPos, 0));
-    g.DeviceDepth = SceneTexturesStruct_SceneDepthTexture.Load(int3(pixelPos, 0)).r;
-    g.ScreenAO = SceneTexturesStruct_ScreenSpaceAOTexture.Load(int3(pixelPos, 0)).r;
+    FGBufferData gbufferData;
+    gbufferData.GBufferA = SceneTexturesStruct_GBufferATexture.Load(int3(pixelPos, 0));
+    gbufferData.GBufferB = SceneTexturesStruct_GBufferBTexture.Load(int3(pixelPos, 0));
+    gbufferData.GBufferC = SceneTexturesStruct_GBufferCTexture.Load(int3(pixelPos, 0));
+    gbufferData.GBufferD = SceneTexturesStruct_GBufferDTexture.Load(int3(pixelPos, 0));
+    gbufferData.GBufferE = SceneTexturesStruct_GBufferETexture.Load(int3(pixelPos, 0));
+    gbufferData.DeviceDepth = SceneTexturesStruct_SceneDepthTexture.Load(int3(pixelPos, 0)).r;
+    gbufferData.ScreenAO = SceneTexturesStruct_ScreenSpaceAOTexture.Load(int3(pixelPos, 0)).r;
 
-    int packedModel = (int)round(g.GBufferB.a * 255.0);
-    g.ShadingModelID = packedModel & 15;
+    int packedModel = (int)round(gbufferData.GBufferB.a * 255.0);
+    gbufferData.ShadingModelID = packedModel & 15;
 
-    int packedMask = (int)round(saturate(g.GBufferE.a) * 255.0);
-    g.SelectiveOutputMaskHighNibble = (float)((packedMask >> 4) & 15) * 0.0666667;
+    int packedMask = (int)round(saturate(gbufferData.GBufferE.a) * 255.0);
+    gbufferData.SelectiveOutputMaskHighNibble = (float)((packedMask >> 4) & 15) * 0.0666667;
 
-    bool isEye = (g.ShadingModelID == SHADINGMODELID_EYE);
+    bool isEye = (gbufferData.ShadingModelID == SHADINGMODELID_EYE);
 
-    g.WorldNormal = DecodeUnitVector(g.GBufferA.rgb);
-    g.SecondaryNormalOrTangent = DecodeUnitVector(g.GBufferE.rgb);
-    g.BaseColor = g.GBufferC.rgb;
-    g.Roughness = g.GBufferB.b;
-    g.Metallic = isEye ? 0.0 : g.GBufferB.r;
-    g.MaterialAO = isEye ? 1.0 : g.GBufferC.a;
-    g.CustomData = g.GBufferD;
+    gbufferData.WorldNormal = DecodeUnitVector(gbufferData.GBufferA.rgb);
+    gbufferData.SecondaryNormalOrTangent = DecodeUnitVector(gbufferData.GBufferE.rgb);
+    gbufferData.BaseColor = gbufferData.GBufferC.rgb;
+    gbufferData.Roughness = gbufferData.GBufferB.b;
+    gbufferData.Metallic = isEye ? 0.0 : gbufferData.GBufferB.r;
+    gbufferData.MaterialAO = isEye ? 1.0 : gbufferData.GBufferC.a;
+    gbufferData.CustomData = gbufferData.GBufferD;
 
-    //eye is really convoluted, but they repurposes standard channels in here.
-    g.EyeMetallicPayload = isEye ? g.GBufferB.r : 0.0;
-    g.EyePayloadFromAO = isEye ? g.GBufferC.a : 0.0;
+    //eye repurposes standard channels
+    gbufferData.EyeMetallicPayload = isEye ? gbufferData.GBufferB.r : 0.0;
+    gbufferData.EyePayloadFromAO = isEye ? gbufferData.GBufferC.a : 0.0;
 
-    float specularScalar = DecodeSpecularScalar(g.GBufferA.a);
-    g.DiffuseColor = (1.0 - g.Metallic) * g.BaseColor;
-    g.SpecularColor = WetnessAndIORAdjustSpecular(
-        lerp(float3(specularScalar, specularScalar, specularScalar), g.BaseColor, g.Metallic),
-        g.SelectiveOutputMaskHighNibble);
+    float specularScalar = DecodeSpecularScalar(gbufferData.GBufferA.a);
+    gbufferData.DiffuseColor = (1.0 - gbufferData.Metallic) * gbufferData.BaseColor;
+    gbufferData.SpecularColor = WetnessAndIORAdjustSpecular(lerp(float3(specularScalar, specularScalar, specularScalar), gbufferData.BaseColor, gbufferData.Metallic), gbufferData.SelectiveOutputMaskHighNibble);
 
-    bool usesScalarDiffuse = isEye ||
-                             (g.ShadingModelID == SHADINGMODELID_SUBSURFACE_PROFILE) ||
-                             (g.ShadingModelID == SHADINGMODELID_PREINTEGRATED_SKIN);
-    g.ShadingDiffuseColor = usesScalarDiffuse ? Splat3(1.0 - g.Metallic) : g.DiffuseColor;
-    return g;
+    bool usesScalarDiffuse = isEye || (gbufferData.ShadingModelID == SHADINGMODELID_SUBSURFACE_PROFILE) || (gbufferData.ShadingModelID == SHADINGMODELID_PREINTEGRATED_SKIN);
+	gbufferData.ShadingDiffuseColor = usesScalarDiffuse ? float3(1.0 - gbufferData.Metallic, 1.0 - gbufferData.Metallic, 1.0 - gbufferData.Metallic) : gbufferData.DiffuseColor;
+    return gbufferData;
 }
 
-//float Uncharted4_MicroShadowing(float AO, float NdotL, float opacity)
-float Uncharted4_MicroShadowing(float AO, float NdotL)
-{
-    float aperture = 2.0 * AO * AO;
-    return saturate(NdotL + aperture - 1.0);
-}
-
-float ComputeMicroShadow(float screenAO, float materialAO)
-{
-    float product = screenAO * materialAO;
-    float lower = min(screenAO, materialAO);
-    float t = product + 1.0 - lower;
-    float q = 1.0 - Pow5(t);
-    return lower + Pow5(q) * (product - lower);
-}
+//||||||||||||||||||||||||||||||| LIGHTING |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| LIGHTING |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| LIGHTING |||||||||||||||||||||||||||||||
 
 float ApplySourceRadiusToNoL(float noL, float sourceRadius, float invDistSq)
 {
     if (sourceRadius > 0.0)
     {
         float sinTheta = sqrt(saturate(sourceRadius * sourceRadius * invDistSq));
+
         if (sinTheta > max(1.0e-5, noL))
         {
             float shifted = max(-sinTheta, noL) + sinTheta;
-            noL = shifted * shifted * (0.250000 / sinTheta);
+            noL = shifted * shifted * (0.25 / sinTheta);
         }
     }
 
@@ -1051,9 +808,9 @@ float ApplySourceRadiusToNoL(float noL, float sourceRadius, float invDistSq)
 FAreaLobe BuildAreaLobe(float3 normal, float3 viewDir, float3 lightDir, float distSq, float roughness, float sourceRadius)
 {
     FAreaLobe lobe;
-    float invDist = rsqrt(max(0.000100000, max(1.0, distSq)));
+    float invDist = rsqrt(max(0.0001, max(1.0, distSq)));
     float noLRaw = dot(normal, lightDir);
-    lobe.NoL = ApplySourceRadiusToNoL(noLRaw, sourceRadius, rcp(max(0.000100000, max(1.0, distSq))));
+    lobe.NoL = ApplySourceRadiusToNoL(noLRaw, sourceRadius, rcp(max(0.0001, max(1.0, distSq))));
 
     float a = roughness * roughness;
     lobe.SourceSin = saturate((1.0 - a) * sourceRadius * invDist);
@@ -1072,8 +829,7 @@ FAreaLobe BuildAreaLobe(float3 normal, float3 viewDir, float3 lightDir, float di
             float invClosestSin = rsqrt(max(1.0e-5, 1.0 - closest * closest));
             float tangentScale = invClosestSin * lobe.SourceSin;
             float newNoV = tangentScale * (noV - closest * noLRaw) + sourceCos * noLRaw;
-            float newVoL = tangentScale * ((2.0 * noV * noV - 1.0) - closest * voL) +
-                           sourceCos * voL;
+            float newVoL = tangentScale * ((2.0 * noV * noV - 1.0) - closest * voL) + sourceCos * voL;
             float halfDenom = rsqrt(max(1.0e-5, 2.0 * newVoL + 2.0));
             lobe.NoH = saturate((newNoV + noV) * halfDenom);
             lobe.VoH = min((newVoL + 1.0) * halfDenom, 1.0);
@@ -1093,6 +849,19 @@ FAreaLobe BuildAreaLobe(float3 normal, float3 viewDir, float3 lightDir, float di
     lobe.NoVAbs = abs(noV);
     return lobe;
 }
+
+FLightingTerms MakeTerms(float3 diffuse, float3 specular, float3 extra)
+{
+    FLightingTerms t;
+    t.Diffuse = diffuse;
+    t.Specular = specular;
+    t.Extra = extra;
+    return t;
+}
+
+//||||||||||||||||||||||||||||||| BRDF |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| BRDF |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| BRDF |||||||||||||||||||||||||||||||
 
 float GGXSpecularScalar(float roughness, FAreaLobe lobe)
 {
@@ -1118,13 +887,10 @@ float DiffuseEnergyCompensation(float roughness, float noL, float3 specularColor
 {
     float noLSafe = max(1.0e-6, noL);
     float r = max(0.04, roughness);
-    float f0 = saturate(((r * noLSafe) + 0.0266916) / (noLSafe + 0.466495) *
-                        exp2((noLSafe / r) * log2(r)));
+    float f0 = saturate(((r * noLSafe) + 0.0266916) / (noLSafe + 0.466495) * exp2((noLSafe / r) * log2(r)));
     float energy = max(1.0e-6, 1.0 - f0);
     float oneMinusNoL = 1.0 - noLSafe;
-    float retro = Pow5(oneMinusNoL) *
-                  exp2(log2(exp2(log2(noLSafe) * (r * 4.77030)) * 2.36651 + 0.0387332) * r);
-
+    float retro = Pow5(oneMinusNoL) * exp2(log2(exp2(log2(noLSafe) * (r * 4.7703)) * 2.36651 + 0.0387332) * r);
     float3 a = 1.0 + ((1.0 - energy) / energy) * specularColor;
     float3 b = retro + (energy - retro) * specularColor;
     return saturate(1.0 - dot(a * b, float3(0.333333, 0.333333, 0.333333)));
@@ -1134,40 +900,9 @@ float3 SpecularEnergyScale(float roughness, float noL, float3 specularColor)
 {
     float noLSafe = max(1.0e-6, noL);
     float r = max(0.04, roughness);
-    float f0 = saturate(((r * noLSafe) + 0.0266916) / (noLSafe + 0.466495) *
-                        exp2((noLSafe / r) * log2(r)));
+    float f0 = saturate(((r * noLSafe) + 0.0266916) / (noLSafe + 0.466495) * exp2((noLSafe / r) * log2(r)));
     float energy = max(1.0e-6, 1.0 - f0);
     return 1.0 + ((1.0 - energy) / energy) * specularColor;
-}
-
-float SpecularMicroShadow(float noL, float noVAbs, float roughness, float microAO, float attenuation)
-{
-    float aoRemainder = sqrt(max(0.0, 1.0 - microAO));
-    float roughMask = saturate(roughness * 3.5 - 0.5);
-    float roughWeight = saturate(1.0 - Pow5(1.0 - roughMask));
-    float grazing = Pow4(1.0 - noVAbs) * aoRemainder * roughWeight;
-    float visible = saturate(noL / max(0.001, grazing));
-    return min(attenuation, visible * visible);
-}
-
-float DiffuseMicroShadow(float noL, float microAO, float attenuation)
-{
-    float visible = saturate(noL / max(0.001, sqrt(max(0.0, 1.0 - microAO))));
-    return min(attenuation, visible * visible);
-}
-
-float3 ShadingColorOrScalarForSSS(FGBufferData g)
-{
-    return g.ShadingDiffuseColor;
-}
-
-FLightingTerms MakeTerms(float3 diffuse, float3 specular, float3 extra)
-{
-    FLightingTerms t;
-    t.Diffuse = diffuse;
-    t.Specular = specular;
-    t.Extra = extra;
-    return t;
 }
 
 float3 CommonLambertTerm(float3 diffuseColor, float invDistSq, float noL, float energy, float diffuseShadow)
@@ -1213,77 +948,156 @@ float3 Diffuse_OrenNayar(float3 DiffuseColor, float Roughness, float NoV, float 
 	return DiffuseColor / PI * (C1 + C2) * (1 + Roughness * 0.5);
 }
 
-//||||||||||||||||||||||||||||||| CUSTOM BRDF |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| CUSTOM BRDF |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| CUSTOM BRDF |||||||||||||||||||||||||||||||
-//these are different (or some my own) implementations of BRDF rather than using what unreal has
+//||||||||||||||||||||||||||||||| MICRO SHADOWS |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| MICRO SHADOWS |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| MICRO SHADOWS |||||||||||||||||||||||||||||||
 
-//const static float constant1_FON = 0.5f - 2.0f / (3.0f * PI);
-//const static float constant2_FON = 2.0f / 3.0f - 28.0f / (15.0f * PI);
-const static float constant1_FON = 0.287793409210806; //precomputed
-const static float constant2_FON = 0.0724882124569239; //precomputed
-
-//NOTE 1: this is the approximated variant of oren nayar EON, I went and did comparisons with the exact, and the approximation is almost identical
-//NOTE 2: this was also modified to be an isotropic variant (to save on calculating a TBN matrix and shifting vectors), which looks slightly different but good enough
-//NOTE 3: this version dropped the multi-scatter lobe as it literally had zero effect on the final results for this isotropic variant (when comparing direct light on a BRDF 5x5 grid metallic v. smoothness)
-float3 DiffuseEnergyPreservingOrenNayarSimplified(float3 diffuse, float roughness, float3 vector_lightDirection, float3 vector_viewDirection, float NdotL, float NdotV)
+//NEW: from uncharted 4
+float Uncharted4_MicroShadowing(float AO, float NdotL, float opacity)
 {
-    float s = dot(vector_lightDirection, vector_viewDirection) - NdotL * NdotV;
-    float t = max(NdotL, NdotV);
-    float invT = rcp(t);
-    float sovertF = (s > 0.0f) ? s * invT : s;
-    float invDenom = 1.0f - constant1_FON * roughness;
-    float scalar = invDenom * (1.0f + roughness * sovertF);
-    return diffuse * (scalar * NdotL * INV_PI);
+    float aperture = 2.0 * AO * AO;
+    float microshadow = saturate(NdotL + aperture - 1.0);
+	return lerp(1.0f, microshadow, opacity);
+}
+
+//apparently game seems to have some kind of microshadowing? it's much more muted than the uncharted 4 method... and more complicated
+
+float ComputeMicroShadow(float screenAO, float materialAO)
+{
+    float product = screenAO * materialAO;
+    float lower = min(screenAO, materialAO);
+    float t = product + 1.0 - lower;
+    float q = 1.0 - Pow5(t);
+    return lower + Pow5(q) * (product - lower);
+}
+
+float DiffuseMicroShadow(float noL, float microAO, float attenuation)
+{
+    float visible = saturate(noL / max(0.00100000, sqrt(max(0.0, 1.0 - microAO))));
+    return min(attenuation, visible * visible);
+}
+
+float SpecularMicroShadow(float noL, float noVAbs, float roughness, float microAO, float attenuation)
+{
+    float aoRemainder = sqrt(max(0.0, 1.0 - microAO));
+    float roughMask = saturate(roughness * 3.50000 - 0.500000);
+    float roughWeight = saturate(1.0 - Pow5(1.0 - roughMask));
+    float grazing = Pow4(1.0 - noVAbs) * aoRemainder * roughWeight;
+    float visible = saturate(noL / max(0.00100000, grazing));
+    return min(attenuation, visible * visible);
+}
+
+//|||||||||||||||||||||||||||||||||| CONTACT SHADOWS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONTACT SHADOWS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONTACT SHADOWS ||||||||||||||||||||||||||||||||||
+
+float CalculateContactShadows(FGBufferData gbufferData, FResolvedPixel resolvedPixel, PSInput input)
+{
+    const float invSamples = rcp((float)CONTACT_SHADOWS_SAMPLES);
+
+	#if defined(RANDOM_INTERLEAVED_GRADIENT_NOISE)
+		float random = InterleavedGradientNoise(input.SvPosition.xy, View_StateFrameIndex);
+	#elif defined(RANDOM_BLUE_NOISE)
+		float random = LoadSpatiotemporalBlueNoise(input);
+	#else
+		float random = 1.0f;
+	#endif
+	
+	//FIX: apparently we use "pre" translation? seems like there is an extra necessary offset to get an accurate world position vector
+    float3 worldPosition = resolvedPixel.WorldPosition + View_PreViewTranslation;
+
+	//apply normal bias to help mitigate self-shadowing issues
+	worldPosition += gbufferData.WorldNormal * CONTACT_SHADOWS_NORMAL_BIAS;
+
+    float3 rayOrigin = worldPosition;
+    float3 rayEnd    = rayOrigin + resolvedPixel.LightVector * CONTACT_SHADOWS_RAY_LENGTH;
+
+	//FIX: apparently we use translated world to clip, which supposedly is more accurate?
+    float4 clipStart = mul(float4(rayOrigin, 1.0), View_TranslatedWorldToClip);
+    float4 clipEnd   = mul(float4(rayEnd, 1.0), View_TranslatedWorldToClip);
+
+    float3 ndcStart = clipStart.xyz / clipStart.w;
+    float3 ndcEnd = clipEnd.xyz / clipEnd.w;
+
+    float rayStartDepth = LinearizeSceneDepth(ndcStart.z);
+    float rayEndDepth = LinearizeSceneDepth(ndcEnd.z);
+    float rayDepth = lerp(rayStartDepth, rayEndDepth, random * invSamples);
+    float rayDepthStep = (rayEndDepth - rayStartDepth) * invSamples;
+
+	//IMPORTANT NOTE: make sure we use View_ScreenPositionScaleBias instead of hardcoded constants.
+	// xy = scale (0.5, -0.5 on D3D), zw = bias (0.5, 0.5 + viewport offset + TAA jitter)
+	// if we don't we can (and have) end up in a case where due to some resolution mismatching
+	// contact shadows can have a lot of artifacts and seemingly appear "offset" or behind for some user graphics configs
+	float2 uvStart = mad(ndcStart.xy, View_ScreenPositionScaleBias.xy, View_ScreenPositionScaleBias.zw);
+	float2 uvEnd   = mad(ndcEnd.xy,   View_ScreenPositionScaleBias.xy, View_ScreenPositionScaleBias.zw);
+	float2 uvStep  = (uvEnd - uvStart) * invSamples;
+	float2 uv      = mad(uvStep, random, uvStart);
+
+    [unroll]
+    for (int i = 0; i < CONTACT_SHADOWS_SAMPLES; ++i)
+    {
+		//OPTIMIZATION: early out when our sample UV goes past screen edges
+        if (any(uv < 0.0) || any(uv > 1.0))
+            break;
+
+        float deviceDepth = SceneTexturesStruct_SceneDepthTexture.SampleLevel(View_SharedPointClampedSampler, uv, 0.0).r;
+        float sceneDepth = LinearizeSceneDepth(deviceDepth);
+        float penetration = rayDepth - sceneDepth;
+
+		//NOTE TO SELF: while this is simple and fast, leaves a harsh cutoff
+		//for thickness we can calculate a "weight" to do a smoother falloff out from shadow
+        if (penetration > CONTACT_SHADOWS_BIAS && penetration < CONTACT_SHADOWS_THICKNESS)
+            return 0.0;
+
+        rayDepth += rayDepthStep;
+        uv += uvStep;
+    }
+
+    return 1.0f;
 }
 
 //||||||||||||||||||||||||||||||| SHADING - DEFAULT LIT |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| SHADING - DEFAULT LIT |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| SHADING - DEFAULT LIT |||||||||||||||||||||||||||||||
 
-FLightingTerms ShadeDefaultLit(FGBufferData g, FResolvedPixel px, FDeferredLightData light)
+FLightingTerms ShadeDefaultLit(FGBufferData gbufferData, FResolvedPixel resolvedPixel, FDeferredLightData light)
 {
-    float roughness = max(0.04, g.Roughness);
-    float distSq = max(0.0001, max(1.0, px.LightDistanceSq));
+    float roughness = max(0.04, gbufferData.Roughness);
+    float distSq = max(0.0001, max(1.0, resolvedPixel.LightDistanceSq));
     float invDistSq = rcp(distSq);
-    FAreaLobe lobe = BuildAreaLobe(g.WorldNormal, px.CameraVector, px.LightVector, px.LightDistanceSq, roughness, light.SourceRadius);
+    FAreaLobe lobe = BuildAreaLobe(gbufferData.WorldNormal, resolvedPixel.CameraVector, resolvedPixel.LightVector, resolvedPixel.LightDistanceSq, roughness, light.SourceRadius);
 
     float voH = max(1.0e-5, lobe.VoH);
     float noVAbs = max(1.0e-5, lobe.NoVAbs);
     float specScalar = GGXSpecularScalar(roughness, lobe);
-    float3 specColor = MaybeThinFilmSpecular(g.SpecularColor, voH, g.CustomData.x, g.CustomData.y);
-    float energy = DiffuseEnergyCompensation(roughness, lobe.NoL, g.SpecularColor);
+    float3 specColor = MaybeThinFilmSpecular(gbufferData.SpecularColor, voH, gbufferData.CustomData.x, gbufferData.CustomData.y);
+    float energy = DiffuseEnergyCompensation(roughness, lobe.NoL, gbufferData.SpecularColor);
 
     #if defined(ENABLE_MICRO_SHADOWS)
-        float unchartedMicroShadow = Uncharted4_MicroShadowing(g.MaterialAO, lobe.NoL);
-        //float unchartedMicroShadow = Uncharted4_MicroShadowing(g.MaterialAO * g.ScreenAO, lobe.NoL); //too much contrast, and we get SSAO haloing which looks awkward
-        unchartedMicroShadow *= px.ShadowedLightAttenuation;
-
-        float specShadow = unchartedMicroShadow;
-        float diffuseShadow = unchartedMicroShadow;
-        float transmissionShadow = unchartedMicroShadow;
+        float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
+		float specShadow = unchartedMicroShadow;
+		float diffuseShadow = unchartedMicroShadow;
+		float transmissionShadow = min(resolvedPixel.ShadowedLightAttenuation, ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO));
     #else
-        float microAO = ComputeMicroShadow(g.ScreenAO, g.MaterialAO);
-        float specShadow = SpecularMicroShadow(lobe.NoL, noVAbs, roughness, microAO, px.ShadowedLightAttenuation);
-        float diffuseShadow = DiffuseMicroShadow(lobe.NoL, microAO, px.ShadowedLightAttenuation);
-        float transmissionShadow = min(px.ShadowedLightAttenuation, microAO);
+		float microAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO);
+		float specShadow = SpecularMicroShadow(lobe.NoL, noVAbs, roughness, microAO, resolvedPixel.ShadowedLightAttenuation);
+		float diffuseShadow = DiffuseMicroShadow(lobe.NoL, microAO, resolvedPixel.ShadowedLightAttenuation);
+		float transmissionShadow = min(resolvedPixel.ShadowedLightAttenuation, microAO);
     #endif
 
-    float3 specular = specScalar * invDistSq * specColor * SpecularEnergyScale(roughness, lobe.NoL, g.SpecularColor) * specShadow;
+    float3 specular = specScalar * invDistSq * specColor * SpecularEnergyScale(roughness, lobe.NoL, gbufferData.SpecularColor) * specShadow;
 
-    float diffuseScale = 1.0 - g.CustomData.z;
+    float diffuseScale = 1.0 - gbufferData.CustomData.z;
 
-    //float3 diffuse = CommonLambertTerm(g.ShadingDiffuseColor * diffuseScale, invDistSq, lobe.NoL, energy, diffuseShadow);
-    //float3 diffuse = lobe.NoL * Diffuse_Burley(g.ShadingDiffuseColor, g.Roughness, noVAbs, lobe.NoL, voH);
-    float3 diffuse = lobe.NoL * Diffuse_OrenNayar(g.ShadingDiffuseColor, g.Roughness, noVAbs, lobe.NoL, voH);
-    //float3 diffuse = DiffuseEnergyPreservingOrenNayarSimplified(g.ShadingDiffuseColor, g.Roughness, px.LightVector, px.CameraVector, noVAbs, lobe.NoL); //too drastic
-    diffuse *= diffuseShadow;
-    diffuse *= energy;
-    //diffuse *= g.ShadingDiffuseColor;
-    diffuse *= diffuseScale;
-    diffuse *= invDistSq;
+	#if defined(SHADING_DEFAULT_LIT_BURLEY)
+		float3 diffuse = Diffuse_Burley(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * invDistSq * lobe.NoL;
+	#elif defined(SHADING_DEFAULT_LIT_OREN_NAYAR)
+		float3 diffuse = Diffuse_OrenNayar(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * invDistSq * lobe.NoL;
+	#else //default game
+		float3 diffuse = CommonLambertTerm(gbufferData.ShadingDiffuseColor * diffuseScale, invDistSq, lobe.NoL, energy, diffuseShadow);
+	#endif
 
-    float3 extra = CommonTransmissionTerm(g.ShadingDiffuseColor, invDistSq, g.CustomData.z, energy, transmissionShadow);
+    float3 extra = CommonTransmissionTerm(gbufferData.ShadingDiffuseColor, invDistSq, gbufferData.CustomData.z, energy, transmissionShadow);
     return MakeTerms(diffuse, specular, extra);
 }
 
@@ -1291,34 +1105,36 @@ FLightingTerms ShadeDefaultLit(FGBufferData g, FResolvedPixel px, FDeferredLight
 //||||||||||||||||||||||||||||||| SHADING - SUBSURFACE PROFILE |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| SHADING - SUBSURFACE PROFILE |||||||||||||||||||||||||||||||
 
-FLightingTerms ShadeSubsurfaceProfile(FGBufferData g, FResolvedPixel px, FDeferredLightData light)
+FLightingTerms ShadeSubsurfaceProfile(FGBufferData gbufferData, FResolvedPixel resolvedPixel, FDeferredLightData light)
 {
-    float roughness = max(0.04, g.Roughness);
-    float distSq = max(0.0001, max(1.0, px.LightDistanceSq));
+    float roughness = max(0.04, gbufferData.Roughness);
+    float distSq = max(0.0001, max(1.0, resolvedPixel.LightDistanceSq));
     float invDistSq = rcp(distSq);
-    FAreaLobe lobe = BuildAreaLobe(g.WorldNormal, px.CameraVector, px.LightVector,
-                                   px.LightDistanceSq, roughness, light.SourceRadius);
+    FAreaLobe lobe = BuildAreaLobe(gbufferData.WorldNormal, resolvedPixel.CameraVector, resolvedPixel.LightVector, resolvedPixel.LightDistanceSq, roughness, light.SourceRadius);
 
     float voH = max(1.0e-5, lobe.VoH);
     float noVAbs = max(1.0e-5, lobe.NoVAbs);
     float specScalar = GGXSpecularScalar(roughness, lobe);
-    float3 specColor = MaybeThinFilmSpecular(g.SpecularColor, voH, g.CustomData.x, g.CustomData.y);
-    float energy = DiffuseEnergyCompensation(roughness, lobe.NoL, g.SpecularColor);
-    float microAO = ComputeMicroShadow(g.ScreenAO, g.MaterialAO);
+    float3 specColor = MaybeThinFilmSpecular(gbufferData.SpecularColor, voH, gbufferData.CustomData.x, gbufferData.CustomData.y);
+    float energy = DiffuseEnergyCompensation(roughness, lobe.NoL, gbufferData.SpecularColor);
 
-    float specShadow = SpecularMicroShadow(lobe.NoL, noVAbs, roughness, microAO,
-                                           px.ShadowedLightAttenuation);
-    float diffuseShadow = DiffuseMicroShadow(lobe.NoL, microAO, px.ShadowedLightAttenuation);
-    float transmissionShadow = min(px.ShadowedLightAttenuation, microAO);
+    #if defined(ENABLE_MICRO_SHADOWS_SKIN)
+        float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
+		float specShadow = unchartedMicroShadow;
+		float diffuseShadow = unchartedMicroShadow;
+		float transmissionShadow = min(resolvedPixel.ShadowedLightAttenuation, ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO));
+    #else
+		float microAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO);
+		float specShadow = SpecularMicroShadow(lobe.NoL, noVAbs, roughness, microAO, resolvedPixel.ShadowedLightAttenuation);
+		float diffuseShadow = DiffuseMicroShadow(lobe.NoL, microAO, resolvedPixel.ShadowedLightAttenuation);
+		float transmissionShadow = min(resolvedPixel.ShadowedLightAttenuation, microAO);
+    #endif
 
-    float3 specular = specScalar * invDistSq * specColor *
-                      SpecularEnergyScale(roughness, lobe.NoL, g.SpecularColor) *
-                      specShadow;
-    float diffuseScale = 1.0 - g.CustomData.z;
-    float3 diffuse = CommonLambertTerm(ShadingColorOrScalarForSSS(g) * diffuseScale, invDistSq,
-                                       lobe.NoL, energy, diffuseShadow);
-    float3 extra = CommonTransmissionTerm(ShadingColorOrScalarForSSS(g), invDistSq,
-                                          g.CustomData.z, energy, transmissionShadow);
+	float3 shadingColor = ShadingColorOrScalarForSSS(gbufferData);
+    float3 specular = specScalar * invDistSq * specColor * SpecularEnergyScale(roughness, lobe.NoL, gbufferData.SpecularColor) * specShadow;
+    float diffuseScale = 1.0 - gbufferData.CustomData.z;
+    float3 diffuse = CommonLambertTerm(shadingColor * diffuseScale, invDistSq, lobe.NoL, energy, diffuseShadow);
+    float3 extra = CommonTransmissionTerm(shadingColor, invDistSq, gbufferData.CustomData.z, energy, transmissionShadow);
     return MakeTerms(diffuse, specular, extra);
 }
 
@@ -1326,16 +1142,15 @@ FLightingTerms ShadeSubsurfaceProfile(FGBufferData g, FResolvedPixel px, FDeferr
 //||||||||||||||||||||||||||||||| SHADING - PREINTEGRATED SKIN |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| SHADING - PREINTEGRATED SKIN |||||||||||||||||||||||||||||||
 
-FLightingTerms ShadePreintegratedSkin(FGBufferData g, FResolvedPixel px, FDeferredLightData light)
+FLightingTerms ShadePreintegratedSkin(FGBufferData gbufferData, FResolvedPixel resolvedPixel, FDeferredLightData light)
 {
-    float roughnessNarrow = max(0.04, g.Roughness * 0.577000);
-    float roughnessWide = max(0.04, g.Roughness);
+    float roughnessNarrow = max(0.04, gbufferData.Roughness * 0.577);
+    float roughnessWide = max(0.04, gbufferData.Roughness);
     float mixedRoughness = lerp(roughnessNarrow, roughnessWide, 0.85);
-    float distSq = max(0.0001, max(1.0, px.LightDistanceSq));
+    float distSq = max(0.0001, max(1.0, resolvedPixel.LightDistanceSq));
     float invDistSq = rcp(distSq);
 
-    FAreaLobe lobe = BuildAreaLobe(g.WorldNormal, px.CameraVector, px.LightVector,
-                                   px.LightDistanceSq, mixedRoughness, light.SourceRadius);
+    FAreaLobe lobe = BuildAreaLobe(gbufferData.WorldNormal, resolvedPixel.CameraVector, resolvedPixel.LightVector, resolvedPixel.LightDistanceSq, mixedRoughness, light.SourceRadius);
 
     float noVAbs = max(1.0e-5, lobe.NoVAbs);
     float aNarrow = roughnessNarrow * roughnessNarrow;
@@ -1345,12 +1160,11 @@ FLightingTerms ShadePreintegratedSkin(FGBufferData g, FResolvedPixel px, FDeferr
 
     float areaNarrow = 1.0;
     float areaWide = 1.0;
+
     if (lobe.HasSourceAngle)
     {
-        areaNarrow = a2Narrow / (lobe.SourceSin * 0.25 *
-                                (lobe.SourceSin + aNarrow * 3.0) + a2Narrow);
-        areaWide = a2Wide / (lobe.SourceSin * 0.25 *
-                             (lobe.SourceSin + aWide * 3.0) + a2Wide);
+        areaNarrow = a2Narrow / (lobe.SourceSin * 0.25 * (lobe.SourceSin + aNarrow * 3.0) + a2Narrow);
+        areaWide = a2Wide / (lobe.SourceSin * 0.25 * (lobe.SourceSin + aWide * 3.0) + a2Wide);
     }
 
     float dNarrowDenom = lobe.NoH * lobe.NoH * (a2Narrow - 1.0) + 1.0;
@@ -1360,147 +1174,126 @@ FLightingTerms ShadePreintegratedSkin(FGBufferData g, FResolvedPixel px, FDeferr
 
     float wetnessEnabled = (View_WetnessIntensity > 0.0) ? 1.0 : 0.0;
     float fogMediumEnabled = (View_FogContextMediumIOR > 1.0) ? 1.0 : 0.0;
-    float wetnessOrFog = saturate(g.SelectiveOutputMaskHighNibble * wetnessEnabled + fogMediumEnabled);
+    float wetnessOrFog = saturate(gbufferData.SelectiveOutputMaskHighNibble * wetnessEnabled + fogMediumEnabled);
     float skinF0 = 0.0465206 - wetnessOrFog * 0.0401335;
 
-    float dSkin = lerp(dNarrow, dWide, 0.850000);
-    float visDenom = mixedRoughness * mixedRoughness *
-                     (noVAbs + lobe.NoL - 2.0 * noVAbs * lobe.NoL) +
-                     2.0 * noVAbs * lobe.NoL;
+    float dSkin = lerp(dNarrow, dWide, 0.85);
+    float visDenom = mixedRoughness * mixedRoughness * (noVAbs + lobe.NoL - 2.0 * noVAbs * lobe.NoL) + 2.0 * noVAbs * lobe.NoL;
     float vis = 0.5 / visDenom;
 
-    float roughFresnel = skinF0 + Pow5(1.0 - max(1.0e-5, lobe.VoH)) *
-                                  (min(2.32603 - wetnessOrFog * 2.00668, 1.0) - skinF0);
+    float roughFresnel = skinF0 + Pow5(1.0 - max(1.0e-5, lobe.VoH)) * (min(2.32603 - wetnessOrFog * 2.00668, 1.0) - skinF0);
     float specScalar = lobe.NoL * vis * dSkin * roughFresnel * invDistSq;
 
-    float skinEnergy = saturate(1.0 - dot(Splat3(skinF0), float3(0.333333, 0.333333, 0.333333)));
-    float microAO = ComputeMicroShadow(g.ScreenAO, g.MaterialAO);
-    float specShadow = SpecularMicroShadow(lobe.NoL, noVAbs, mixedRoughness, microAO,
-                                           px.ShadowedLightAttenuation);
-    float diffuseShadow = DiffuseMicroShadow(lobe.NoL, microAO, px.ShadowedLightAttenuation);
+	float skinEnergy = saturate(1.0 - dot(float3(skinF0, skinF0, skinF0), float3(0.333333, 0.333333, 0.333333)));
 
-    float3 specular = Splat3(specScalar) * specShadow;
-    float3 diffuse = ShadingColorOrScalarForSSS(g) * invDistSq *
-                     (lobe.NoL * INV_PI) * skinEnergy * diffuseShadow;
-    return MakeTerms(diffuse, specular, Splat3(0.0));
+    #if defined(ENABLE_MICRO_SHADOWS_SKIN)
+        float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
+		float specShadow = unchartedMicroShadow;
+		float diffuseShadow = unchartedMicroShadow;
+    #else
+		float microAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO);
+		float specShadow = SpecularMicroShadow(lobe.NoL, noVAbs, mixedRoughness, microAO, resolvedPixel.ShadowedLightAttenuation);
+		float diffuseShadow = DiffuseMicroShadow(lobe.NoL, microAO, resolvedPixel.ShadowedLightAttenuation);
+    #endif
+
+	float3 specular = specScalar * specShadow;
+    float3 diffuse = ShadingColorOrScalarForSSS(gbufferData) * invDistSq * (lobe.NoL * INV_PI) * skinEnergy * diffuseShadow;
+	return MakeTerms(diffuse, specular, float3(0, 0, 0));
 }
 
 //||||||||||||||||||||||||||||||| SHADING - EYE |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| SHADING - EYE |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| SHADING - EYE |||||||||||||||||||||||||||||||
 
-// Eye is the noisiest reconstruction: UE4 repurposes GBuffer channels for iris
-// and caustic masks.  Names below are semantic guesses, formulas are preserved.
-FLightingTerms ShadeEye(FGBufferData g, FResolvedPixel px, FDeferredLightData light)
+FLightingTerms ShadeEye(FGBufferData gbufferData, FResolvedPixel resolvedPixel, FDeferredLightData light)
 {
-    float roughness = max(0.0400000, g.Roughness);
-    float distSq = max(0.000100000, max(1.0, px.LightDistanceSq));
+    float roughness = max(0.04, gbufferData.Roughness);
+    float distSq = max(0.0001, max(1.0, resolvedPixel.LightDistanceSq));
     float invDistSq = rcp(distSq);
 
-    FAreaLobe corneaLobe = BuildAreaLobe(g.WorldNormal, px.CameraVector, px.LightVector,
-                                         px.LightDistanceSq, roughness, light.SourceRadius);
-    float noLEyeNormal = ApplySourceRadiusToNoL(dot(g.SecondaryNormalOrTangent, px.LightVector),
-                                                light.SourceRadius, invDistSq);
+    FAreaLobe corneaLobe = BuildAreaLobe(gbufferData.WorldNormal, resolvedPixel.CameraVector, resolvedPixel.LightVector, resolvedPixel.LightDistanceSq, roughness, light.SourceRadius);
+    float noLEyeNormal = ApplySourceRadiusToNoL(dot(gbufferData.SecondaryNormalOrTangent, resolvedPixel.LightVector), light.SourceRadius, invDistSq);
 
     FAreaLobe specLobe = corneaLobe;
     float specScalar = GGXSpecularScalar(roughness, specLobe);
 
     float wetnessEnabled = (View_WetnessIntensity > 0.0) ? 1.0 : 0.0;
     float fogMediumEnabled = (View_FogContextMediumIOR > 1.0) ? 1.0 : 0.0;
-    float wetnessOrFog = saturate(g.SelectiveOutputMaskHighNibble * wetnessEnabled + fogMediumEnabled);
+    float wetnessOrFog = saturate(gbufferData.SelectiveOutputMaskHighNibble * wetnessEnabled + fogMediumEnabled);
     float eyeF0 = 0.0387252 - wetnessOrFog * 0.0348016;
-    float3 eyeF0Color = Splat3(eyeF0);
+	float3 eyeF0Color = eyeF0;
 
-    float irisDepthOrMask = saturate(g.EyePayloadFromAO);
-    float3 irisTangent = DecodeUnitVector(g.CustomData.xyz);
-    float3 refractedLight = normalize(lerp(g.SecondaryNormalOrTangent, px.LightVector, 0.671141));
-    float3 irisBitangent = SafeNormalize(cross(irisTangent, g.SecondaryNormalOrTangent));
+    float irisDepthOrMask = saturate(gbufferData.EyePayloadFromAO);
+    float3 irisTangent = DecodeUnitVector(gbufferData.CustomData.xyz);
+    float3 refractedLight = normalize(lerp(gbufferData.SecondaryNormalOrTangent, resolvedPixel.LightVector, 0.671141));
+    float3 irisBitangent = SafeNormalize(cross(irisTangent, gbufferData.SecondaryNormalOrTangent));
 
     float tangentX = dot(refractedLight, irisTangent);
     float tangentY = dot(refractedLight, irisBitangent);
-    float causticWidth = max(0.0100000, 1.0 - saturate(irisDepthOrMask * 2.70000 *
-                                                       sqrt(tangentX * tangentX + tangentY * tangentY)));
-    float causticOffset = sqrt(Pow2(tangentX * 0.780000 + irisDepthOrMask * 2.0) +
-                               Pow2(tangentY * 0.780000)) * 0.550000;
-    float causticMask = min(saturate((causticWidth - causticOffset) / causticWidth), 1.0) *
-                        max(1.0, rcp(causticWidth));
+    float causticWidth = max(0.01, 1.0 - saturate(irisDepthOrMask * 2.7 * sqrt(tangentX * tangentX + tangentY * tangentY)));
+    float causticOffset = sqrt(Pow2(tangentX * 0.78 + irisDepthOrMask * 2.0) + Pow2(tangentY * 0.78)) * 0.55;
+    float causticMask = min(saturate((causticWidth - causticOffset) / causticWidth), 1.0) * max(1.0, rcp(causticWidth));
     float glancingMask = saturate(1.0 - Pow2(1.0 - noLEyeNormal));
 
-    float f0Drop = saturate(((0.0800000 * max(1.0e-5, specLobe.NoVAbs)) + 0.0266916) /
-                            (max(1.0e-5, specLobe.NoVAbs) + 0.466495) *
-                            exp2(max(1.0e-5, specLobe.NoVAbs) * -45.5482));
+    float f0Drop = saturate(((0.08 * max(1.0e-5, specLobe.NoVAbs)) + 0.0266916) / (max(1.0e-5, specLobe.NoVAbs) + 0.466495) * exp2(max(1.0e-5, specLobe.NoVAbs) * -45.5482));
     float energy = max(1.0e-6, 1.0 - f0Drop);
-    float retro = Pow5(1.0 - max(1.0e-5, specLobe.NoVAbs)) *
-                  exp2(log2(exp2(log2(max(1.0e-5, specLobe.NoVAbs)) * 0.381624) *
-                            2.36651 + 0.0387332) * 0.0800000);
-    float eyeEnergy = saturate(1.0 - ((1.0 + ((1.0 - energy) / energy) * 0.0387252) *
-                                      (retro + (energy - retro) * 0.0387252)));
+    float retro = Pow5(1.0 - max(1.0e-5, specLobe.NoVAbs)) * exp2(log2(exp2(log2(max(1.0e-5, specLobe.NoVAbs)) * 0.381624) * 2.36651 + 0.0387332) * 0.08);
+    float eyeEnergy = saturate(1.0 - ((1.0 + ((1.0 - energy) / energy) * 0.0387252) * (retro + (energy - retro) * 0.0387252)));
 
-    int packedIrisNormal = (int)(g.CustomData.w * 255.0 + 0.5);
+    int packedIrisNormal = (int)(gbufferData.CustomData.w * 255.0 + 0.5);
     int irisX = max(1, packedIrisNormal & 15);
     int irisY = max(1, (packedIrisNormal >> 4) & 15);
     float2 irisDisk = (float2(irisX, irisY) - 8.0) * 0.142857;
     float3 irisNormalLocal = SafeNormalize(float3(irisDisk, sqrt(max(0.0, 1.0 - dot(irisDisk, irisDisk)))));
-    float3 irisNormal = irisNormalLocal.x * irisTangent +
-                        irisNormalLocal.y * irisBitangent +
-                        irisNormalLocal.z * g.SecondaryNormalOrTangent;
+    float3 irisNormal = irisNormalLocal.x * irisTangent + irisNormalLocal.y * irisBitangent + irisNormalLocal.z * gbufferData.SecondaryNormalOrTangent;
 
     float irisForward = exp2(log2(max(0.0, dot(irisNormal, refractedLight) * 0.5 + 0.5)) * 3.0);
-    float irisShadowInput = sqrt(max(0.0, 1.0 - g.GBufferB.g));
-    float irisShadow = saturate(irisForward / max(0.00100000, irisShadowInput));
+    float irisShadowInput = sqrt(max(0.0, 1.0 - gbufferData.GBufferB.g));
+    float irisShadow = saturate(irisForward / max(0.001, irisShadowInput));
     irisShadow *= irisShadow;
 
-    float irisBlend = lerp(irisForward, noLEyeNormal, g.EyeMetallicPayload);
-    float causticEnergy = lerp(causticMask * causticMask * 1.20000 * glancingMask * eyeEnergy,
-                               1.0, g.EyeMetallicPayload);
-	float irisVisibility = lerp(irisShadow, 1.0f, g.EyeMetallicPayload);
-
-    float f0Fresnel = eyeF0 + Pow5(1.0 - max(1.0e-5, specLobe.VoH)) *
-                              (min(1.93626 - wetnessOrFog * 1.74008, 1.0) - eyeF0);
+    float irisBlend = lerp(irisForward, noLEyeNormal, gbufferData.EyeMetallicPayload);
+    float causticEnergy = lerp(causticMask * causticMask * 1.2 * glancingMask * eyeEnergy, 1.0, gbufferData.EyeMetallicPayload);
+    float irisVisibility = lerp(irisShadow, 1.0f, gbufferData.EyeMetallicPayload);
+    float f0Fresnel = eyeF0 + Pow5(1.0 - max(1.0e-5, specLobe.VoH)) * (min(1.93626 - wetnessOrFog * 1.74008, 1.0) - eyeF0);
     float eyeSpecular = specScalar * f0Fresnel * invDistSq;
+	float microShadow = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.ScreenAO);
+    float specShadow = SpecularMicroShadow(corneaLobe.NoL, max(1.0e-5, specLobe.NoVAbs), roughness, microShadow, min(resolvedPixel.ShadowedLightAttenuation, 1.0f));
+    float diffuseShadow = DiffuseMicroShadow(irisBlend, microShadow, min(resolvedPixel.ShadowedLightAttenuation, irisVisibility));
 
-    float specShadow = SpecularMicroShadow(corneaLobe.NoL, max(1.0e-5, specLobe.NoVAbs),
-                                           roughness, ComputeMicroShadow(g.ScreenAO, g.ScreenAO),
-											min(px.ShadowedLightAttenuation, 1.0f));
-    float diffuseAO = ComputeMicroShadow(g.ScreenAO, g.ScreenAO);
-    float diffuseShadow = DiffuseMicroShadow(irisBlend, diffuseAO,
-                                             min(px.ShadowedLightAttenuation, irisVisibility));
-
-    float3 specular = Splat3(eyeSpecular) * specShadow;
-    float3 diffuse = g.ShadingDiffuseColor * causticEnergy * (irisBlend * INV_PI) *
-                     eyeEnergy * invDistSq * diffuseShadow;
-    return MakeTerms(diffuse, specular, Splat3(0.0));
+	float3 specular = eyeSpecular * specShadow;
+    float3 diffuse = gbufferData.ShadingDiffuseColor * causticEnergy * (irisBlend * INV_PI) * eyeEnergy * invDistSq * diffuseShadow;
+	return MakeTerms(diffuse, specular, float3(0, 0, 0));
 }
 
 //||||||||||||||||||||||||||||||| SHADING - HAIR |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| SHADING - HAIR |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| SHADING - HAIR |||||||||||||||||||||||||||||||
 
-FLightingTerms ShadeHair(FGBufferData g, FResolvedPixel px, FDeferredLightData light)
+FLightingTerms ShadeHair(FGBufferData gbufferData, FResolvedPixel resolvedPixel, FDeferredLightData light)
 {
-    float roughness = max(0.0400000, g.Roughness);
-    float distSq = max(0.000100000, max(1.0, px.LightDistanceSq));
+    float roughness = max(0.04, gbufferData.Roughness);
+    float distSq = max(0.0001, max(1.0, resolvedPixel.LightDistanceSq));
     float invDistSq = rcp(distSq);
 
-    // Hair constructs a tangent frame from the view-projected normal, then
-    // evaluates the light in that frame. GBufferD.xyz is the decoded strand/
-    // anisotropy vector in this branch, not the generic custom data color.
-    float baseNoV = dot(g.WorldNormal, px.CameraVector);
-    float3 strandTangent = SafeNormalize(g.WorldNormal * baseNoV - px.CameraVector);
-    float tangentLight = dot(strandTangent, px.LightVector);
-    float3 lightPlaneNormal = SafeNormalize(px.LightVector - strandTangent * tangentLight);
-    float3 strandVector = DecodeUnitVector(g.CustomData.xyz);
+    //hair constructs a tangent frame from the view-projected normal, then evaluates the light in that frame. 
+	//NOTE: GBufferD.xyz looks to be a decoded strand anisotropy vector?
+    float baseNoV = dot(gbufferData.WorldNormal, resolvedPixel.CameraVector);
+    float3 strandTangent = SafeNormalize(gbufferData.WorldNormal * baseNoV - resolvedPixel.CameraVector);
+    float tangentLight = dot(strandTangent, resolvedPixel.LightVector);
+    float3 lightPlaneNormal = SafeNormalize(resolvedPixel.LightVector - strandTangent * tangentLight);
+    float3 strandVector = DecodeUnitVector(gbufferData.CustomData.xyz);
 
-    float strandDotLight = dot(strandVector, px.LightVector);
-    float voL = dot(px.CameraVector, px.LightVector);
-    float tangentView = dot(strandTangent, px.CameraVector);
-    float planeNoLRaw = dot(lightPlaneNormal, px.LightVector);
-    float planeNoV = dot(lightPlaneNormal, px.CameraVector);
-    float normalDotPlane = dot(g.WorldNormal, lightPlaneNormal);
+    float strandDotLight = dot(strandVector, resolvedPixel.LightVector);
+    float voL = dot(resolvedPixel.CameraVector, resolvedPixel.LightVector);
+    float tangentView = dot(strandTangent, resolvedPixel.CameraVector);
+    float planeNoLRaw = dot(lightPlaneNormal, resolvedPixel.LightVector);
+    float planeNoV = dot(lightPlaneNormal, resolvedPixel.CameraVector);
+    float normalDotPlane = dot(gbufferData.WorldNormal, lightPlaneNormal);
 
     float3 hairBitangent = SafeNormalize(cross(lightPlaneNormal, strandTangent));
-    float bitangentV = dot(hairBitangent, px.CameraVector);
-    float bitangentL = dot(hairBitangent, px.LightVector);
+    float bitangentV = dot(hairBitangent, resolvedPixel.CameraVector);
+    float bitangentL = dot(hairBitangent, resolvedPixel.LightVector);
 
     float planeNoL = ApplySourceRadiusToNoL(planeNoLRaw, light.SourceRadius, invDistSq);
 
@@ -1522,11 +1315,8 @@ FLightingTerms ShadeHair(FGBufferData g, FResolvedPixel px, FDeferredLightData l
         if (closest < sourceCos)
         {
             float tangentScale = sourceSin * rsqrt(max(1.0e-5, 1.0 - closest * closest));
-            adjustedNoLForHalf = tangentScale * (planeNoV - closest * planeNoLRaw) +
-                                 sourceCos * planeNoLRaw;
-            adjustedVoL = tangentScale * ((2.0 * planeNoV * planeNoV - 1.0) -
-                                          closest * voL) +
-                          sourceCos * voL;
+            adjustedNoLForHalf = tangentScale * (planeNoV - closest * planeNoLRaw) + sourceCos * planeNoLRaw;
+            adjustedVoL = tangentScale * ((2.0 * planeNoV * planeNoV - 1.0) - closest * voL) + sourceCos * voL;
 
             float invHalfLen = rsqrt(max(1.0e-5, 2.0 * adjustedVoL + 2.0));
             areaHalfN = (adjustedNoLForHalf + planeNoV) * invHalfLen;
@@ -1553,94 +1343,73 @@ FLightingTerms ShadeHair(FGBufferData g, FResolvedPixel px, FDeferredLightData l
     voH = max(1.0e-5, voH);
 
     float f0Mask = saturate(-strandDotLight);
-    float rim = exp2(log2(max(0.0, 1.0 - f0Mask * f0Mask)) * 24.0000);
+    float rim = exp2(log2(max(0.0, 1.0 - f0Mask * f0Mask)) * 24.0);
 
     float wetnessEnabled = (View_WetnessIntensity > 0.0) ? 1.0 : 0.0;
     float fogMediumEnabled = (View_FogContextMediumIOR > 1.0) ? 1.0 : 0.0;
-    float wetnessOrFog = saturate(g.SelectiveOutputMaskHighNibble * wetnessEnabled + fogMediumEnabled);
+    float wetnessOrFog = saturate(gbufferData.SelectiveOutputMaskHighNibble * wetnessEnabled + fogMediumEnabled);
     float hairF0 = 0.0465206 - wetnessOrFog * 0.0401335;
-    float fresnel = hairF0 + Pow5(1.0 - voH) *
-                             (min(2.32603 - wetnessOrFog * 2.00668, 1.0) - hairF0);
+    float fresnel = hairF0 + Pow5(1.0 - voH) * (min(2.32603 - wetnessOrFog * 2.00668, 1.0) - hairF0);
     float energy = saturate(1.0 - hairF0);
 
     float rough2 = roughness * roughness;
     float rough4 = rough2 * rough2;
-    float longitudinalV = sqrt(Pow2(tangentView * rough2 * 0.550000) +
-                               Pow2(bitangentV * rough2 * 1.45000) +
-                               Pow2(noVAbs));
-    float longitudinalL = sqrt(Pow2(tangentLight * rough2 * 0.550000) +
-                               Pow2(bitangentL * rough2 * 1.45000) +
-                               Pow2(planeNoL));
-    float longitudinal = 0.500000 / (longitudinalV * planeNoL + longitudinalL * noVAbs);
+    float longitudinalV = sqrt(Pow2(tangentView * rough2 * 0.55) + Pow2(bitangentV * rough2 * 1.45) + Pow2(noVAbs));
+    float longitudinalL = sqrt(Pow2(tangentLight * rough2 * 0.55) + Pow2(bitangentL * rough2 * 1.45) + Pow2(planeNoL));
+    float longitudinal = 0.5 / (longitudinalV * planeNoL + longitudinalL * noVAbs);
 
-    float primaryDenom = Pow2(areaHalfT) * 2.63636 +
-                         Pow2(areaHalfB) * 0.379310 +
-                         Pow2(areaHalfN) * rough4 * 0.797500;
+    float primaryDenom = Pow2(areaHalfT) * 2.63636 + Pow2(areaHalfB) * 0.37931 + Pow2(areaHalfN) * rough4 * 0.7975;
 
-    float secondaryDenom0 = Pow2(regularHalfT) * 2.63636 +
-                            Pow2(regularHalfB) * 0.379310 +
-                            Pow2(regularHalfN) * 0.199375;
-    float secondaryDenom1 = Pow2(regularHalfT) * 2.63636 +
-                            Pow2(regularHalfB) * 0.379310 +
-                            Pow2(regularHalfN) * 0.797500;
-    float dSecondary0 = 0.0634630 / max(1.0e-8, secondaryDenom0 * secondaryDenom0);
+    float secondaryDenom0 = Pow2(regularHalfT) * 2.63636 + Pow2(regularHalfB) * 0.37931 + Pow2(regularHalfN) * 0.199375;
+    float secondaryDenom1 = Pow2(regularHalfT) * 2.63636 + Pow2(regularHalfB) * 0.37931 + Pow2(regularHalfN) * 0.7975;
+    float dSecondary0 = 0.063463 / max(1.0e-8, secondaryDenom0 * secondaryDenom0);
     float dSecondary1 = 0.253852 / max(1.0e-8, secondaryDenom1 * secondaryDenom1);
 
-    float areaNorm = hasSourceAngle
-        ? rough4 / (sourceSin * 0.250000 * (sourceSin + rough2 * 3.00000) + rough4)
-        : 1.0;
+    float areaNorm = hasSourceAngle ? rough4 / (sourceSin * 0.25 * (sourceSin + rough2 * 3.0) + rough4) : 1.0;
 
-    float strandScatter = exp2(-12.0000 * strandDotLight * strandDotLight);
+    float strandScatter = exp2(-12.0 * strandDotLight * strandDotLight);
     float azimuth = saturate((normalDotPlane + 1.0) * 0.392699);
     float strandSinSq = 1.0 - tangentLight * tangentLight;
-    float colorExponent = rsqrt(max(0.0625000, strandSinSq));
+    float colorExponent = rsqrt(max(0.0625, strandSinSq));
 
-    float3 coloredPrimary = exp2(log2(max(g.ShadingDiffuseColor, Splat3(1.0e-4))) *
-                                  colorExponent);
-    float primaryLumaScale = dot(g.ShadingDiffuseColor, float3(0.212600, 0.715200, 0.0722000)) /
-                             max(0.000100000, dot(coloredPrimary, float3(0.212600, 0.715200, 0.0722000)));
+	float3 coloredPrimary = exp2(log2(max(gbufferData.ShadingDiffuseColor, float3(1.0e-4, 1.0e-4, 1.0e-4))) * colorExponent);
+    float primaryLumaScale = dot(gbufferData.ShadingDiffuseColor, float3(0.2126, 0.7152, 0.0722)) / max(0.0001, dot(coloredPrimary, float3(0.2126, 0.7152, 0.0722)));
 
-    float primarySpec = rough4 * 0.253852 * planeNoL * rim * longitudinal *
-                        (1.0 / max(1.0e-8, primaryDenom * primaryDenom)) *
-                        fresnel * areaNorm * azimuth;
+    float primarySpec = rough4 * 0.253852 * planeNoL * rim * longitudinal * (1.0 / max(1.0e-8, primaryDenom * primaryDenom)) * fresnel * areaNorm * azimuth;
 
-    float secondaryDWithoutScatter = dSecondary1 - 0.500000 * strandScatter * dSecondary1;
-    float secondaryBRDF = lerp(secondaryDWithoutScatter, dSecondary0, 0.150000) * azimuth;
+    float secondaryDWithoutScatter = dSecondary1 - 0.5 * strandScatter * dSecondary1;
+    float secondaryBRDF = lerp(secondaryDWithoutScatter, dSecondary0, 0.15) * azimuth;
     float coloredDiffuseScalar = rim * planeNoL * energy * secondaryBRDF;
 
     float adjustedVoLForTransmission = adjustedVoL;
-    float backscatterBase = max(0.0, adjustedVoLForTransmission * 1.80000 + 1.81000);
-    float backscatterShape = (Pow2(adjustedVoLForTransmission) + 1.0) * 0.00807103 *
-                             exp2(log2(backscatterBase) * -1.50000);
+    float backscatterBase = max(0.0, adjustedVoLForTransmission * 1.8 + 1.81);
+    float backscatterShape = (Pow2(adjustedVoLForTransmission) + 1.0) * 0.00807103 * exp2(log2(backscatterBase) * -1.5);
     float transmissionPhase = INV_4PI + Pow2(strandSinSq) * (backscatterShape - INV_4PI);
-    float transmissionScalar = rim * 0.425000 * energy * strandScatter * transmissionPhase;
+    float transmissionScalar = rim * 0.425 * energy * strandScatter * transmissionPhase;
 
-    float3 secondaryColor = exp2(log2(max(g.ShadingDiffuseColor, Splat3(1.0e-4))) *
-                                  (0.5 * colorExponent));
-    float secondaryLumaScale = dot(g.ShadingDiffuseColor, float3(0.212600, 0.715200, 0.0722000)) /
-                               max(0.000100000, dot(secondaryColor, float3(0.212600, 0.715200, 0.0722000)));
+	float3 secondaryColor = exp2(log2(max(gbufferData.ShadingDiffuseColor, float3(1.0e-4, 1.0e-4, 1.0e-4))) * (0.5 * colorExponent));
+    float secondaryLumaScale = dot(gbufferData.ShadingDiffuseColor, float3(0.2126, 0.7152, 0.0722)) / max(0.0001, dot(secondaryColor, float3(0.2126, 0.7152, 0.0722)));
 
-    float microAO = ComputeMicroShadow(g.ScreenAO, g.MaterialAO);
-    float halfWrappedNoL = planeNoL * 0.500000 + 0.500000;
-    float roughMask = saturate(roughness * 3.50000 - 0.500000);
+    #if defined(ENABLE_MICRO_SHADOWS_HAIR)
+        float microAO = Uncharted4_MicroShadowing(gbufferData.MaterialAO, planeNoL, MICRO_SHADOWS_STRENGTH);
+    #else
+		float microAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO);
+	#endif
+
+    float halfWrappedNoL = planeNoL * 0.5 + 0.5;
+    float roughMask = saturate(roughness * 3.5 - 0.5);
     float roughWeight = saturate(1.0 - Pow5(1.0 - roughMask));
-    float specOcclusionDenom = max(0.00100000,
-                                   Pow4(1.0 - saturate(baseNoV)) *
-                                   sqrt(max(0.0, 1.0 - microAO)) *
-                                   roughWeight);
+    float specOcclusionDenom = max(0.001, Pow4(1.0 - saturate(baseNoV)) * sqrt(max(0.0, 1.0 - microAO)) * roughWeight);
     float specVisibilitySq = Pow2(saturate(halfWrappedNoL / specOcclusionDenom));
-    float diffuseVisibilitySq = Pow2(saturate(halfWrappedNoL /
-                                     max(0.00100000, sqrt(max(0.0, 1.0 - microAO)))));
+    float diffuseVisibilitySq = Pow2(saturate(halfWrappedNoL / max(0.001, sqrt(max(0.0, 1.0 - microAO)))));
 
-    float specShadow = min(px.ShadowedLightAttenuation, specVisibilitySq);
-    float diffuseShadow = min(px.ShadowedLightAttenuation, diffuseVisibilitySq);
-    float transmissionShadow = min(px.ShadowedLightAttenuation, diffuseVisibilitySq * diffuseVisibilitySq);
+    float specShadow = min(resolvedPixel.ShadowedLightAttenuation, specVisibilitySq);
+    float diffuseShadow = min(resolvedPixel.ShadowedLightAttenuation, diffuseVisibilitySq);
+    float transmissionShadow = min(resolvedPixel.ShadowedLightAttenuation, diffuseVisibilitySq * diffuseVisibilitySq);
 
-    float3 specular = Splat3(primarySpec * invDistSq * specShadow);
-    float3 diffuse = coloredDiffuseScalar * invDistSq *
-                     coloredPrimary * primaryLumaScale * diffuseShadow;
-    float3 extra = transmissionScalar * invDistSq *
-                   secondaryColor * secondaryLumaScale * transmissionShadow;
+	float3 specular = primarySpec * invDistSq * specShadow;
+    float3 diffuse = coloredDiffuseScalar * invDistSq * coloredPrimary * primaryLumaScale * diffuseShadow;
+    float3 extra = transmissionScalar * invDistSq * secondaryColor * secondaryLumaScale * transmissionShadow;
     return MakeTerms(diffuse, specular, extra);
 }
 
@@ -1648,117 +1417,115 @@ FLightingTerms ShadeHair(FGBufferData g, FResolvedPixel px, FDeferredLightData l
 //||||||||||||||||||||||||||||||| SHADING - CLOTH |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| SHADING - CLOTH |||||||||||||||||||||||||||||||
 
-FLightingTerms ShadeCloth(FGBufferData g, FResolvedPixel px, FDeferredLightData light)
+FLightingTerms ShadeCloth(FGBufferData gbufferData, FResolvedPixel resolvedPixel, FDeferredLightData light)
 {
-    float roughness = max(0.500000, g.Roughness);
-    float distSq = max(0.000100000, max(1.0, px.LightDistanceSq));
+    float roughness = max(0.5, gbufferData.Roughness);
+    float distSq = max(0.0001, max(1.0, resolvedPixel.LightDistanceSq));
     float invDistSq = rcp(distSq);
-    FAreaLobe lobe = BuildAreaLobe(g.WorldNormal, px.CameraVector, px.LightVector,
-                                   px.LightDistanceSq, roughness, light.SourceRadius);
+    FAreaLobe lobe = BuildAreaLobe(gbufferData.WorldNormal, resolvedPixel.CameraVector, resolvedPixel.LightVector, resolvedPixel.LightDistanceSq, roughness, light.SourceRadius);
 
     float noVAbs = max(1.0e-5, lobe.NoVAbs);
     float voH = max(1.0e-5, lobe.VoH);
     float a = roughness * roughness;
     float a2 = a * a;
-    float areaNorm = lobe.HasSourceAngle
-        ? a2 / (lobe.SourceSin * 0.250000 * (lobe.SourceSin + a * 3.00000) + a2)
-        : 1.0;
+    float areaNorm = lobe.HasSourceAngle ? a2 / (lobe.SourceSin * 0.25 * (lobe.SourceSin + a * 3.0) + a2) : 1.0;
 
     float dDenom = lobe.NoH * lobe.NoH * (a2 - 1.0) + 1.0;
     float ggxD = a2 * INV_PI / (dDenom * dDenom);
-    float clothD = ((rcp(a2) + 1.0) * INV_PI) *
-                   exp2(log2(max(0.00781250, 1.0 - lobe.NoH * lobe.NoH)) * rcp(a2));
+    float clothD = ((rcp(a2) + 1.0) * INV_PI) * exp2(log2(max(0.0078125, 1.0 - lobe.NoH * lobe.NoH)) * rcp(a2));
     float mixedD = clothD + 0.5 * noVAbs * (ggxD - clothD);
-    float vis = 0.250000 / (noVAbs + lobe.NoL - noVAbs * lobe.NoL);
+    float vis = 0.25 / (noVAbs + lobe.NoL - noVAbs * lobe.NoL);
 
     float wetnessEnabled = (View_WetnessIntensity > 0.0) ? 1.0 : 0.0;
     float fogMediumEnabled = (View_FogContextMediumIOR > 1.0) ? 1.0 : 0.0;
-    float wetnessOrFog = saturate(g.SelectiveOutputMaskHighNibble * wetnessEnabled + fogMediumEnabled);
+    float wetnessOrFog = saturate(gbufferData.SelectiveOutputMaskHighNibble * wetnessEnabled + fogMediumEnabled);
     float clothF0 = 0.0672154 - wetnessOrFog * 0.0528935;
     float fresnel = clothF0 + Pow5(1.0 - voH) * (min(3.36077 - wetnessOrFog * 2.64467, 1.0) - clothF0);
     float clothEnergy = saturate(1.0 - clothF0);
 
     float specScalar = mixedD * areaNorm * vis * fresnel;
-    float3 sheenDiffuse = Splat3(specScalar) + g.ShadingDiffuseColor * (1.0 - g.CustomData.x) *
-                          (clothEnergy * mixedD);
+	float3 sheenDiffuse = specScalar + gbufferData.ShadingDiffuseColor * (1.0 - gbufferData.CustomData.x) * (clothEnergy * mixedD);
     float lambert = clothEnergy * INV_PI;
 
-    float microAO = ComputeMicroShadow(g.ScreenAO, g.MaterialAO);
-    float specShadow = SpecularMicroShadow(lobe.NoL, max(1.0e-5, lobe.NoVAbs),
-                                           g.Roughness, microAO, px.ShadowedLightAttenuation);
-    float diffuseShadow = DiffuseMicroShadow(lobe.NoL, microAO, px.ShadowedLightAttenuation);
+    #if defined(ENABLE_MICRO_SHADOWS)
+        float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
+		float specShadow = unchartedMicroShadow;
+		float diffuseShadow = unchartedMicroShadow;
+    #else
+		float microAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO);
+		float specShadow = SpecularMicroShadow(lobe.NoL, max(1.0e-5, lobe.NoVAbs), gbufferData.Roughness, microAO, resolvedPixel.ShadowedLightAttenuation);
+		float diffuseShadow = DiffuseMicroShadow(lobe.NoL, microAO, resolvedPixel.ShadowedLightAttenuation);
+    #endif
 
     float3 specular = lobe.NoL * invDistSq * sheenDiffuse * specShadow;
-    float3 diffuse = g.ShadingDiffuseColor * g.CustomData.x * invDistSq *
-                     lobe.NoL * lambert * diffuseShadow;
-    return MakeTerms(diffuse, specular, Splat3(0.0));
+    float3 diffuse = gbufferData.ShadingDiffuseColor * gbufferData.CustomData.x * invDistSq * lobe.NoL * lambert * diffuseShadow;
+	return MakeTerms(diffuse, specular, float3(0, 0, 0));
 }
 
 //||||||||||||||||||||||||||||||| SHADING MAIN |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| SHADING MAIN |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| SHADING MAIN |||||||||||||||||||||||||||||||
 
-FLightingTerms ShadeMaterial(FGBufferData g, FResolvedPixel px, FDeferredLightData light)
+FLightingTerms ShadeMaterial(FGBufferData gbufferData, FResolvedPixel resolvedPixel, FDeferredLightData light)
 {
-    switch (g.ShadingModelID)
+    switch (gbufferData.ShadingModelID)
     {
         case SHADINGMODELID_DEFAULT_LIT:
-            return ShadeDefaultLit(g, px, light);
+            return ShadeDefaultLit(gbufferData, resolvedPixel, light);
         case SHADINGMODELID_SUBSURFACE_PROFILE:
-            return ShadeSubsurfaceProfile(g, px, light);
+            return ShadeSubsurfaceProfile(gbufferData, resolvedPixel, light);
         case SHADINGMODELID_PREINTEGRATED_SKIN:
-            return ShadePreintegratedSkin(g, px, light);
+            return ShadePreintegratedSkin(gbufferData, resolvedPixel, light);
         case SHADINGMODELID_EYE:
-            return ShadeEye(g, px, light);
+            return ShadeEye(gbufferData, resolvedPixel, light);
         case SHADINGMODELID_HAIR:
-            return ShadeHair(g, px, light);
+            return ShadeHair(gbufferData, resolvedPixel, light);
         case SHADINGMODELID_CLOTH:
-            return ShadeCloth(g, px, light);
+            return ShadeCloth(gbufferData, resolvedPixel, light);
         default:
-            return MakeTerms(Splat3(0.0), Splat3(0.0), Splat3(0.0));
+			return MakeTerms(float3(0, 0, 0), float3(0, 0, 0), float3(0, 0, 0));
     }
 }
 
-FResolvedPixel ResolvePixel(PSInput input, FGBufferData g, FDeferredLightData light)
+FResolvedPixel ResolvePixel(PSInput input, FGBufferData gbufferData, FDeferredLightData light)
 {
-    FResolvedPixel px;
-    px.ScreenUV = ResolveScreenUV(input.ScreenVector);
-    px.PixelPos = ResolvePixelPos(px.ScreenUV);
-    //px.WorldPosition = ReconstructWorldPosition(px.ScreenUV, g.DeviceDepth); //this one for some reason does not,
-	px.WorldPosition = ReconstructWorldPosition(px.ScreenUV, g.DeviceDepth); //using my own float2 reconstruct world position version actually works here
-    //px.WorldPosition = ReconstructWorldPosition(input.ScreenVector, g.DeviceDepth);
-    px.CameraVector = SafeNormalize(View_WorldCameraOrigin - px.WorldPosition);
+    FResolvedPixel resolvedPixel;
+    resolvedPixel.ScreenUV = ResolveScreenUV(input.ScreenVector);
+    resolvedPixel.PixelPos = ResolvePixelPos(resolvedPixel.ScreenUV);
+    resolvedPixel.WorldPosition = ReconstructWorldPosition(input.ScreenVector, gbufferData.DeviceDepth);
+    resolvedPixel.CameraVector = SafeNormalize(View_WorldCameraOrigin - resolvedPixel.WorldPosition);
 
-    float3 toLight = light.Position - px.WorldPosition;
-    px.LightDistanceSq = dot(toLight, toLight);
-    px.LightVector = (px.LightDistanceSq > 0.000100000) ? toLight * rsqrt(px.LightDistanceSq) : Splat3(0.0);
+    float3 toLight = light.Position - resolvedPixel.WorldPosition;
+    resolvedPixel.LightDistanceSq = dot(toLight, toLight);
+	resolvedPixel.LightVector = (resolvedPixel.LightDistanceSq > 0.0001) ? toLight * rsqrt(resolvedPixel.LightDistanceSq) : float3(0, 0, 0);
 
-    float invRadiusSqDist = light.InvRadius * light.InvRadius * px.LightDistanceSq;
-    float attenuation = saturate(1.0 - invRadiusSqDist * invRadiusSqDist); //attenuation appears broken?
+    float invRadiusSqDist = light.InvRadius * light.InvRadius * resolvedPixel.LightDistanceSq;
+    float attenuation = saturate(1.0 - invRadiusSqDist * invRadiusSqDist);
     attenuation *= attenuation;
 
     bool hasSpotCone = (light.SpotAngles.x > -2.0);
+
     if (hasSpotCone)
     {
-        float cone = saturate((dot(px.LightVector, light.Direction) - light.SpotAngles.x) *
-                              light.SpotAngles.y);
+        float cone = saturate((dot(resolvedPixel.LightVector, light.Direction) - light.SpotAngles.x) * light.SpotAngles.y);
         attenuation *= cone * cone;
     }
 
-    float4 lightMask = LightAttenuationTexture.SampleLevel(LightAttenuationTextureSampler, px.ScreenUV, 0.0);
+    //disassembly multiplies LightAttenuationTexture.r and .b.
+    float4 lightMask = LightAttenuationTexture.SampleLevel(LightAttenuationTextureSampler, resolvedPixel.ScreenUV, 0.0);
     float textureLightAttenuation = lightMask.r * lightMask.b;
 
     bool skipLightAttenuationTexture = ((light.LightContextBitField & 131072) == 0);
-    px.ShadowedLightAttenuation = skipLightAttenuationTexture ? 1.0 : textureLightAttenuation;
-    px.DistanceAttenuation = attenuation;
+    resolvedPixel.ShadowedLightAttenuation = skipLightAttenuationTexture ? 1.0 : textureLightAttenuation;
+    resolvedPixel.DistanceAttenuation = attenuation;
 
-    //if the bit is set, labels 21-22 require the faded texture attenuation to be positive before any material branch runs.
+    //if the bit is set, we require a positive texture attenuation?
     if (!skipLightAttenuationTexture && textureLightAttenuation <= 0.0)
     {
-        px.DistanceAttenuation = 0.0;
+        resolvedPixel.DistanceAttenuation = 0.0;
     }
 
-    return px;
+    return resolvedPixel;
 }
 
 //|||||||||||||||||||||||||||||||||| MAIN PIXEL SHADER ||||||||||||||||||||||||||||||||||
@@ -1766,128 +1533,97 @@ FResolvedPixel ResolvePixel(PSInput input, FGBufferData g, FDeferredLightData li
 //|||||||||||||||||||||||||||||||||| MAIN PIXEL SHADER ||||||||||||||||||||||||||||||||||
 //NOTE: DO NOT CHANGE THE FUNCTION NAME, otherwise we lose the entry point and can't use the shader!
 
-//this is what executes for every pixel, the start of it for this pass
 PSOutput main(PSInput input)
 {
     PSOutput output;
     float2 screenUV = ResolveScreenUV(input.ScreenVector);
     int2 pixelPos = ResolvePixelPos(screenUV);
-    FGBufferData graphicsBuffer = DecodeGBuffer(pixelPos);
+    FGBufferData gbufferData = DecodeGBuffer(pixelPos);
 
-    //optimization: early out if the material is supposed to be unlit (no light)
-    if (graphicsBuffer.ShadingModelID == SHADINGMODELID_UNLIT)
+	//optimization: early out if shading model is unlit only (no lighting!)
+    if (gbufferData.ShadingModelID == SHADINGMODELID_UNLIT)
     {
-        output.Color = Splat4(0.0);
+		output.Color = 0.0;
         return output;
     }
 
     FDeferredLightData light = GetDeferredLight();
-    FResolvedPixel px = ResolvePixel(input, graphicsBuffer, light);
+    FResolvedPixel resolvedPixel = ResolvePixel(input, gbufferData, light);
 
-    //optimization: early out if we are too far from a light
-    if (px.DistanceAttenuation <= 0.0)
+	//optimization: early out if resolved light distance attenuation is 0!
+    if (resolvedPixel.DistanceAttenuation <= 0.0)
     {
-        output.Color = Splat4(0.0);
+		output.Color = 0.0;
         return output;
     }
 
-    //optimization: early out if we are already in shadow (from the shadowmap)
-    if (px.ShadowedLightAttenuation <= 0.0)
+	//optimization: early out if actual shadowmap shadows are 0!
+    if (resolvedPixel.ShadowedLightAttenuation <= 0.0)
     {
-        output.Color = Splat4(0.0);
+		output.Color = 0.0;
         return output;
     }
 
-    FLightingTerms terms = ShadeMaterial(graphicsBuffer, px, light);
+    FLightingTerms lightingTerms = ShadeMaterial(gbufferData, resolvedPixel, light);
 
-    float3 lightScale = px.DistanceAttenuation * light.Color;
-    float3 specularLit = terms.Specular * lightScale;
-    float3 diffuseLit = terms.Diffuse * lightScale;
-    float3 extraLit = terms.Extra * lightScale;
-    float3 finalColor = diffuseLit + extraLit + specularLit;
+    float3 lightScale = resolvedPixel.DistanceAttenuation * light.Color;
+    float3 specularLit = lightingTerms.Specular * lightScale;
+    float3 diffuseLit = lightingTerms.Diffuse * lightScale;
+    float3 extraLit = lightingTerms.Extra * lightScale;
 
-	#if defined(ENABLE_CONTACT_SHADOWS)
-        #if defined(RANDOM_INTERLEAVED_GRADIENT_NOISE)
-            float random = InterleavedGradientNoise(pixelPos, View_FrameNumber);
-        #elif defined(RANDOM_BLUE_NOISE)
-            float random = LoadSpatiotemporalBlueNoise(input);
-        #else
-            float random = 1.0f;
-        #endif
+	//IMPORTANT NOTE: the game stores the final luminance color in the alpha channel
+	//however IT IS NOT FINAL COLOR (diffuse + specular), it is just diffuse only????
+	//if you return final color you end up killing the specular highlights on the
+	//final rendered image making them look dead... why the hell can't we return the whole color?
+    float3 diffuseLighting = diffuseLit + extraLit;
+    float3 totalLighting = diffuseLighting + specularLit;
+    float diffuseLuminance = dot(diffuseLighting, float3(0.212600, 0.715200, 0.0722000));
 
-        //NOTE: unreal vectors do some wierd funky stuff, so I just calculate my own (ideally we don't to save on perf but I can't get their vectors to work!)
-		float4 vector_screenPosition = input.ScreenVector;
-		float2 vector_screenPositionScaledXY = vector_screenPosition.xy / vector_screenPosition.w;
-		float2 vector_uv = vector_screenPositionScaledXY * View_ScreenPositionScaleBias.xy + View_ScreenPositionScaleBias.wz;
-		float3 screenRay = float3(vector_uv.x * 2.0f - 1.0f, (1.0f - vector_uv.y) * 2.0f - 1.0f, 1.0f);
-		float3 vector_reconstructedWorldRayDirection = mul(View_ScreenToWorld, float4(screenRay, 0)).xyz;
-		float3 jankWorldPosition = ReconstructWorldPosition(vector_uv, graphicsBuffer.DeviceDepth); //this one for some reason does not,
-		float3 toLight = light.Position - jankWorldPosition;
-		float LightDistanceSq = dot(toLight, toLight);
-		float3 LightVector = (LightDistanceSq > 0.000100000) ? toLight * rsqrt(LightDistanceSq) : Splat3(0.0);
-		LightVector = normalize(LightVector);
+	//combine final color (rgb) and diffuse luma (a), apply exposure to make sure everything is in range
+    output.Color = float4(totalLighting, diffuseLuminance) * View_PreExposure;
 
-		finalColor *= CalculateContactShadows(
-            pixelPos,
-            graphicsBuffer.WorldNormal, 
-            LightVector, 
-            jankWorldPosition,
-            graphicsBuffer.DeviceDepth,
-            random);
+	//contact shadows!
+	#if defined (ENABLE_CONTACT_SHADOWS)
+		float contactShadow = 1.0;
+
+		#if defined(CONTACT_SHADOW_CHECKERBOARD)
+			bool checkerboardTest = ((pixelPos.x + pixelPos.y + (int)View_TemporalAAParams.x) & 1) != 0;
+			if (checkerboardTest)
+		#endif
+		{
+			#if defined(CONTACT_SHADOW_EARLY_SKY_OUT)
+				if (LinearizeSceneDepth(gbufferData.DeviceDepth) < 1000000.0)
+			#endif
+			{
+				contactShadow = CalculateContactShadows(gbufferData, resolvedPixel, input);
+			}
+		}
+
+		#if defined(CONTACT_SHADOW_CHECKERBOARD) && defined(CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION)
+			float lane0 = QuadReadLaneAt(contactShadow, 0);
+			float lane1 = QuadReadLaneAt(contactShadow, 1);
+			float lane2 = QuadReadLaneAt(contactShadow, 2);
+			float lane3 = QuadReadLaneAt(contactShadow, 3);
+
+			if (!checkerboardTest)
+			{
+				#if defined(CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION_TYPE_MIN)
+					contactShadow = min(min(lane0, lane1), min(lane2, lane3));
+				#elif defined(CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION_TYPE_AVG)
+					contactShadow = saturate((lane0 + lane1 + lane2 + lane3) * 0.5 - 1.0);
+				#endif
+			}
+		#endif
+
+		output.Color *= lerp(1.0f, contactShadow, CONTACT_SHADOWS_STRENGTH);
+		//output.Color = lerp(1.0f, contactShadow, CONTACT_SHADOWS_STRENGTH); //debug
 	#endif
 
     //applying screen-space ambient occlusion to the direct light term
-    //technically this is inaccurate and inplausible... but artistically some people really like it
-    //so lets just give them the power of choice!
+    //technically this is inaccurate and inplausible... but artistically some people really like it so lets just give them the power of choice!
     #if defined(APPLY_SSAO_IN_DIRECT_LIGHT)
-        finalColor.rgb *= pow(graphicsBuffer.ScreenAO, SSAO_POWER);
+        output.Color *= saturate(pow(gbufferData.ScreenAO, SSAO_POWER) * SSAO_BRIGHTNESS);
     #endif
 
-    //alpha channel stores luminance of final render target
-    float alpha = dot(finalColor.rgb, float3(0.212600, 0.715200, 0.0722000));
-
-	//DEBUG
-	//output.Color = float4(light.Color, 0);
-	//output.Color = float4(lightScale, 0);
-	//output.Color = float4(screenUV, 0, 0);
-	//output.Color = float4(pixelPos, 0, 0);
-	//output.Color = float4(graphicsBuffer.GBufferA.rgb, 0);
-	//output.Color = float4(graphicsBuffer.GBufferA.a, graphicsBuffer.GBufferA.a, graphicsBuffer.GBufferA.a, 0);
-	//output.Color = float4(graphicsBuffer.GBufferB.rgb, 0);
-	//output.Color = float4(graphicsBuffer.GBufferB.a, graphicsBuffer.GBufferB.a, graphicsBuffer.GBufferB.a, 0);
-	//output.Color = float4(graphicsBuffer.GBufferC.rgb, 0);
-	//output.Color = float4(graphicsBuffer.GBufferC.a, graphicsBuffer.GBufferC.a, graphicsBuffer.GBufferC.a, 0);
-	//output.Color = float4(graphicsBuffer.GBufferD.rgb, 0);
-	//output.Color = float4(graphicsBuffer.GBufferD.a, graphicsBuffer.GBufferD.a, graphicsBuffer.GBufferD.a, 0);
-	//output.Color = float4(graphicsBuffer.GBufferE.rgb, 0);
-	//output.Color = float4(graphicsBuffer.GBufferE.a, graphicsBuffer.GBufferE.a, graphicsBuffer.GBufferE.a, 0);
-	//output.Color = float4(graphicsBuffer.DeviceDepth, graphicsBuffer.DeviceDepth, graphicsBuffer.DeviceDepth, 0);
-	//output.Color = float4(graphicsBuffer.ScreenAO, graphicsBuffer.ScreenAO, graphicsBuffer.ScreenAO, 0);
-	//output.Color = float4(graphicsBuffer.WorldNormal, 0);
-	//output.Color = float4(graphicsBuffer.SecondaryNormalOrTangent, 0);
-	//output.Color = float4(graphicsBuffer.BaseColor, 0);
-	//output.Color = float4(graphicsBuffer.Metallic, graphicsBuffer.Metallic, graphicsBuffer.Metallic, 0);
-	//output.Color = float4(graphicsBuffer.Specular, graphicsBuffer.Specular, graphicsBuffer.Specular, 0);
-	//output.Color = float4(graphicsBuffer.Roughness, g.Roughness, graphicsBuffer.Roughness, 0);
-	//output.Color = float4(graphicsBuffer.MaterialAO, graphicsBuffer.MaterialAO, graphicsBuffer.MaterialAO, 0);
-	//output.Color = float4(graphicsBuffer.CustomData.rgb, 0);
-	//output.Color = float4(graphicsBuffer.CustomData.a, graphicsBuffer.CustomData.a, graphicsBuffer.CustomData.a, 0);
-	//output.Color = float4(graphicsBuffer.ShadingModelID, graphicsBuffer.ShadingModelID, graphicsBuffer.ShadingModelID, 0);
-	//output.Color = float4(graphicsBuffer.SelectiveOutputMaskHighNibble, graphicsBuffer.SelectiveOutputMaskHighNibble, graphicsBuffer.SelectiveOutputMaskHighNibble, 0);
-	//output.Color = float4(graphicsBuffer.DiffuseColor, 0);
-	//output.Color = float4(graphicsBuffer.SpecularColor, 0);
-	//output.Color = float4(graphicsBuffer.ShadingDiffuseColor, 0);
-	//output.Color = float4(graphicsBuffer.EyeMetallicPayload, graphicsBuffer.EyeMetallicPayload, graphicsBuffer.EyeMetallicPayload, 0);
-	//output.Color = float4(graphicsBuffer.EyePayloadFromAO, graphicsBuffer.EyePayloadFromAO, graphicsBuffer.EyePayloadFromAO, 0);
-	//output.Color = float4(px.ScreenUV, 0, 0);
-	//output.Color = float4(px.PixelPos, 0, 0);
-	//output.Color = float4(px.WorldPosition, 0);
-	//output.Color = float4(px.CameraVector, 0);
-	//output.Color = float4(px.LightVector, 0);
-	//output.Color = float4(px.LightDistanceSq, px.LightDistanceSq, px.LightDistanceSq, 0);
-	//output.Color = float4(px.DistanceAttenuation, px.DistanceAttenuation, px.DistanceAttenuation, 0);
-	//output.Color = float4(px.ShadowedLightAttenuation, px.ShadowedLightAttenuation, px.ShadowedLightAttenuation, 0);
-
-    output.Color = float4(finalColor, alpha) * View_PreExposure;
     return output;
 }
