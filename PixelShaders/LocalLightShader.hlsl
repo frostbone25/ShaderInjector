@@ -17,7 +17,7 @@
 //simulates micro-level shadowing on materials (using material ao) super cheap and performant! (from uncharted 4)
 //but this can lead to some materials/objects looking much darker than usual.
 //if this is not desired you can just disable to revert to (mostly) original shading
-#define ENABLE_MICRO_SHADOWS
+//#define ENABLE_MICRO_SHADOWS
 
 //applies microshadows to skin, generally shadowing terms should be mostly unified, however this can lead to an overly dark appearance characters in certain conditions and areas
 //I would leave it off if you desire characters to stay true to their original game shading
@@ -101,11 +101,11 @@
 
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces
 //RANGE: this should be between [0.0 <---> 0.1]
-#define CONTACT_SHADOWS_BIAS 0.01
+#define CONTACT_SHADOWS_BIAS 0.005
 
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces using surface normal
 //RANGE: this should be between [0.0 <---> 1.0]
-#define CONTACT_SHADOWS_NORMAL_BIAS 0.01
+#define CONTACT_SHADOWS_NORMAL_BIAS 0.005
 
 //OPTIMIZATION: this avoids calculating contact shadows for sky pixels
 //has no effect visually, but can save you quite a bit of frametime especially the more you look up :P 
