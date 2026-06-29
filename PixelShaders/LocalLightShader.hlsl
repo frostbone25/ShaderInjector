@@ -137,6 +137,18 @@
 //DEFAULT: 1
 #define CONTACT_SHADOWS_STRENGTH 1.0
 
+//this was requested by a couple of users who wanted to selectively disable contact shadows for specific material types
+//while this could create visual inconsistencies, I've wired them up anyway so you can use them at your own descretion
+//these both are used essentially for all materials within the game
+//#define DISABLE_CONTACT_SHADOWS_FOR_DEFAULT_LIT
+//#define DISABLE_CONTACT_SHADOWS_FOR_CLOTH //<-- this does get used on characters but it's not common, default_lit
+
+//all these 4 below generally cover a majority of the character
+//#define DISABLE_CONTACT_SHADOWS_FOR_PREINTEGRATED_SKIN
+//#define DISABLE_CONTACT_SHADOWS_FOR_SUBSURFACE_PROFILE
+//#define DISABLE_CONTACT_SHADOWS_FOR_HAIR
+//#define DISABLE_CONTACT_SHADOWS_FOR_EYE
+
 //|||||||||||||||||||||||||||||||||| MACROS ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| MACROS ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| MACROS ||||||||||||||||||||||||||||||||||
@@ -709,8 +721,8 @@ FDeferredLightData GetDeferredLight()
 float DecodeSpecularScalar(float encodedSpecular)
 {
     float s = saturate(encodedSpecular);
-    float decoded = (s < 0.666667) ? (s * 0.0600000) : (s * 0.360000 - 0.200000);
-    return clamp(decoded, 0.0, 0.160000);
+    float decoded = (s < 0.666667) ? (s * 0.06) : (s * 0.36 - 0.2);
+    return clamp(decoded, 0.0, 0.16);
 }
 
 float3 WetnessAndIORAdjustSpecular(float3 specularColor, float selectiveMask)
@@ -719,15 +731,15 @@ float3 WetnessAndIORAdjustSpecular(float3 specularColor, float selectiveMask)
     float fogMediumEnabled = (View_FogContextMediumIOR > 1.0) ? 1.0 : 0.0;
     float wetnessOrFog = saturate(selectiveMask * wetnessEnabled + fogMediumEnabled);
 
-    float3 shifted = max(0.0, specularColor - 0.0200000) * 1.02041;
-    shifted = exp2(log2(shifted) * 1.40000);
+    float3 shifted = max(0.0, specularColor - 0.02) * 1.02041;
+    shifted = exp2(log2(shifted) * 1.4);
     return lerp(specularColor, shifted, wetnessOrFog);
 }
 
 float3 MaybeThinFilmSpecular(float3 specularColor, float voH, float customX, float customY)
 {
     float3 thinFilm = View_ThinFilmTableTexture.SampleLevel(View_SharedBilinearClampedSampler, float2(voH, customX), 0.0).rgb - 0.5;
-    float thinFilmWeight = saturate(customX * 128.0) * saturate(customY) * 2.50000;
+    float thinFilmWeight = saturate(customX * 128.0) * saturate(customY) * 2.5;
     float oneMinusVoH = 1.0 - voH;
     float fresnelWeight = Pow5(oneMinusVoH);
     float whiteClamp = min(dot(specularColor, float3(16.6667, 16.6667, 16.6667)), 1.0);
@@ -1071,8 +1083,8 @@ FLightingTerms ShadeDefaultLit(FGBufferData gbufferData, FResolvedPixel resolved
 
     #if defined(ENABLE_MICRO_SHADOWS)
         float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
-		float specShadow = unchartedMicroShadow;
-		float diffuseShadow = unchartedMicroShadow;
+		float specShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
+		float diffuseShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
 		float transmissionShadow = min(resolvedPixel.ShadowedLightAttenuation, ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO));
     #else
 		float microAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO);
@@ -1116,8 +1128,8 @@ FLightingTerms ShadeSubsurfaceProfile(FGBufferData gbufferData, FResolvedPixel r
 
     #if defined(ENABLE_MICRO_SHADOWS_SKIN)
         float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
-		float specShadow = unchartedMicroShadow;
-		float diffuseShadow = unchartedMicroShadow;
+		float specShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
+		float diffuseShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
 		float transmissionShadow = min(resolvedPixel.ShadowedLightAttenuation, ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO));
     #else
 		float microAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO);
@@ -1184,8 +1196,8 @@ FLightingTerms ShadePreintegratedSkin(FGBufferData gbufferData, FResolvedPixel r
 
     #if defined(ENABLE_MICRO_SHADOWS_SKIN)
         float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
-		float specShadow = unchartedMicroShadow;
-		float diffuseShadow = unchartedMicroShadow;
+		float specShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
+		float diffuseShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
     #else
 		float microAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO);
 		float specShadow = SpecularMicroShadow(lobe.NoL, noVAbs, mixedRoughness, microAO, resolvedPixel.ShadowedLightAttenuation);
@@ -1610,6 +1622,39 @@ PSOutput main(PSInput input)
 				#endif
 			}
 		#endif
+
+        //===========================================================
+        //added controls (some users want to disable contact shadows for specific materials)
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_DEFAULT_LIT)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_DEFAULT_LIT)
+                contactShadow = 1.0f;
+        #endif
+        
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_CLOTH)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_CLOTH)
+                contactShadow = 1.0f;
+        #endif
+
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_PREINTEGRATED_SKIN)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_PREINTEGRATED_SKIN)
+                contactShadow = 1.0f;
+        #endif
+
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_SUBSURFACE_PROFILE)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE_PROFILE)
+                contactShadow = 1.0f;
+        #endif
+
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_HAIR)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_HAIR)
+                contactShadow = 1.0f;
+        #endif
+
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_EYE)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_EYE)
+                contactShadow = 1.0f;
+        #endif
+        //===========================================================
 
 		output.Color *= lerp(1.0f, contactShadow, CONTACT_SHADOWS_STRENGTH);
 		//output.Color = lerp(1.0f, contactShadow, CONTACT_SHADOWS_STRENGTH); //debug

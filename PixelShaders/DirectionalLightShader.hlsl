@@ -5,8 +5,14 @@
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - BRDF ||||||||||||||||||||||||||||||||||
 //here are parameters that are wired up for easy tweakin...
 
+//this is the default (physically inaccurate) shading model for the game
+//if you are not a fan of the other shading models just disable them and enable this to return to the original shading
 //#define SHADING_DEFAULT_LIT_LAMBERT //<--- original game
+
+//this is a physically accurate shading model, making diffuse materials more "diffuse"-like
 //#define SHADING_DEFAULT_LIT_BURLEY
+
+//this is a physically accurate shading model, making diffuse materials more "diffuse"-like
 #define SHADING_DEFAULT_LIT_OREN_NAYAR
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - MICRO SHADOWS ||||||||||||||||||||||||||||||||||
@@ -21,11 +27,11 @@
 
 //applies microshadows to skin, generally shadowing terms should be mostly unified, however this can lead to an overly dark appearance characters in certain conditions and areas
 //I would leave it off if you desire characters to stay true to their original game shading
-#define ENABLE_MICRO_SHADOWS_SKIN
+//#define ENABLE_MICRO_SHADOWS_SKIN
 
 //applies microshadows to hair, generally shadowing terms should be mostly unified, however this can lead to an overly dark appearance characters in certain conditions and areas
 //I would leave it off if you desire characters to stay true to their original game shading
-#define ENABLE_MICRO_SHADOWS_HAIR
+//#define ENABLE_MICRO_SHADOWS_HAIR
 
 //requested feature for control over strength of shadows, the uncharted 4 micro shadow application at full intensity can be quite strong
 //leaving some places a little too dark when in direct sunlight, but here you have control over how strong it is
@@ -136,6 +142,18 @@
 //RANGE: this should be between [0.0 <---> 1.0]
 //DEFAULT: 1
 #define CONTACT_SHADOWS_STRENGTH 1.0
+
+//this was requested by a couple of users who wanted to selectively disable contact shadows for specific material types
+//while this could create visual inconsistencies, I've wired them up anyway so you can use them at your own descretion
+//these both are used essentially for all materials within the game
+//#define DISABLE_CONTACT_SHADOWS_FOR_DEFAULT_LIT
+//#define DISABLE_CONTACT_SHADOWS_FOR_CLOTH //<-- this does get used on characters but it's not common, default_lit
+
+//all these 4 below generally cover a majority of the character
+//#define DISABLE_CONTACT_SHADOWS_FOR_PREINTEGRATED_SKIN
+//#define DISABLE_CONTACT_SHADOWS_FOR_SUBSURFACE_PROFILE
+//#define DISABLE_CONTACT_SHADOWS_FOR_HAIR
+//#define DISABLE_CONTACT_SHADOWS_FOR_EYE
 
 //|||||||||||||||||||||||||||||||||| MACROS ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| MACROS ||||||||||||||||||||||||||||||||||
@@ -1203,10 +1221,9 @@ FLightingTerms ShadeDefaultLit(FGBufferData gbufferData, FResolvedPixel resolved
     #if defined(ENABLE_MICRO_SHADOWS)
         float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
         //float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO * gbufferData.ScreenAO, lobe.NoL, MICRO_SHADOWS_STRENGTH); //too much contrast, and we get SSAO haloing which looks awkward
-        unchartedMicroShadow *= resolvedPixel.ShadowedLightAttenuation;
 
-        float specShadow = unchartedMicroShadow;
-        float diffuseShadow = unchartedMicroShadow;
+        float specShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
+        float diffuseShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
         float transmissionShadow = min(resolvedPixel.ShadowedLightAttenuation, ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO));
     #else
         float microAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO);
@@ -1251,11 +1268,10 @@ FLightingTerms ShadeSubsurfaceProfile(FGBufferData gbufferData, FResolvedPixel r
     #if defined(ENABLE_MICRO_SHADOWS_SKIN)
         float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
         //float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO * gbufferData.ScreenAO, lobe.NoL, MICRO_SHADOWS_STRENGTH); //too much contrast, and we get SSAO haloing which looks awkward
-        unchartedMicroShadow *= resolvedPixel.ShadowedLightAttenuation;
 
-        float specShadow = unchartedMicroShadow;
-        float diffuseShadow = unchartedMicroShadow;
-        float transmissionShadow = unchartedMicroShadow;
+        float specShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
+        float diffuseShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
+        float transmissionShadow = min(resolvedPixel.ShadowedLightAttenuation, ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO));
     #else
         float microAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO);
         float specShadow = SpecularMicroShadow(lobe.NoL, noVAbs, roughness, microAO, resolvedPixel.ShadowedLightAttenuation);
@@ -1321,10 +1337,9 @@ FLightingTerms ShadePreintegratedSkin(FGBufferData gbufferData, FResolvedPixel r
     #if defined(ENABLE_MICRO_SHADOWS_SKIN)
         float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
         //float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO * gbufferData.ScreenAO, lobe.NoL, MICRO_SHADOWS_STRENGTH); //too much contrast, and we get SSAO haloing which looks awkward
-        unchartedMicroShadow *= resolvedPixel.ShadowedLightAttenuation;
 
-        float specShadow = unchartedMicroShadow;
-        float diffuseShadow = unchartedMicroShadow;
+        float specShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
+        float diffuseShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
     #else
         float microAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO);
         float specShadow = SpecularMicroShadow(lobe.NoL, noVAbs, mixedRoughness, microAO, resolvedPixel.ShadowedLightAttenuation);
@@ -1771,7 +1786,41 @@ PSOutput main(PSInput input)
         #endif
 
 		float contactShadow = CalculateContactShadows(pixelPos, resolvedPixel.WorldPosition, graphicsBuffer.WorldNormal, resolvedPixel.LightVector, graphicsBuffer.DeviceDepth, random);
-		output.Color *= lerp(1.0f, contactShadow, CONTACT_SHADOWS_STRENGTH);
+		
+        //===========================================================
+        //added controls (some users want to disable contact shadows for specific materials)
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_DEFAULT_LIT)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_DEFAULT_LIT)
+                contactShadow = 1.0f;
+        #endif
+        
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_CLOTH)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_CLOTH)
+                contactShadow = 1.0f;
+        #endif
+
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_PREINTEGRATED_SKIN)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_PREINTEGRATED_SKIN)
+                contactShadow = 1.0f;
+        #endif
+
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_SUBSURFACE_PROFILE)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE_PROFILE)
+                contactShadow = 1.0f;
+        #endif
+
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_HAIR)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_HAIR)
+                contactShadow = 1.0f;
+        #endif
+
+        #if defined(DISABLE_CONTACT_SHADOWS_FOR_EYE)
+            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_EYE)
+                contactShadow = 1.0f;
+        #endif
+        //===========================================================
+        
+        output.Color *= lerp(1.0f, contactShadow, CONTACT_SHADOWS_STRENGTH);
 		//output.Color = lerp(1.0f, contactShadow, CONTACT_SHADOWS_STRENGTH); //debug
 	#endif
 
