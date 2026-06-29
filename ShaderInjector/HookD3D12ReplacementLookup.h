@@ -12,11 +12,13 @@
 namespace HookD3D12
 {
 	bool GetPipelineCachedBlobInfo(ID3D12PipelineState* pipelineState, uint64_t& outHash, SIZE_T& outSize, std::vector<uint8_t>* outBytes = nullptr);
-	bool ReplacementHasCachedBlobSize(const ShaderReplacement::ShaderReplacementDisk& replacement, SIZE_T cachedBlobSize);
+	void ResetCachedBlobContentLookup();
 	bool ReplacementHasCachedBlobHash(const ShaderReplacement::ShaderReplacementDisk& replacement, uint64_t cachedBlobHash);
-	int CountEnabledShaderReplacementsByCachedBlobSize(SIZE_T cachedBlobSize);
-	int FindUniqueEnabledShaderReplacementByCachedBlobSize(SIZE_T cachedBlobSize);
 	int FindEnabledShaderReplacementByCachedBlob(uint64_t cachedBlobHash);
+	int FindEnabledShaderReplacementByCachedBlobContent(
+		const std::vector<uint8_t>& cachedBlob,
+		double& outMatchingRatio,
+		size_t& outLongestMatchingRun);
 	bool ReplacementHashMatches(uint64_t pipelineHash, const std::string& replacementHash);
 	bool GraphicsPipelineMatchesReplacementTemplate(const GraphicsPipelineInfo& pipeline, const ShaderReplacement::ShaderReplacementDisk& replacement);
 	bool StreamPipelineMatchesReplacementTemplate(const PipelineStateInfo& pipeline, const ShaderReplacement::ShaderReplacementDisk& replacement);

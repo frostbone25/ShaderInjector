@@ -51,6 +51,8 @@ namespace HookD3D12
 
 			ShaderReplacement::ShaderReplacementDisk replacement{};
 			replacement.schemaVersion = 1;
+			// Replacements remain enabled unless the user explicitly disables them.
+			// Matching safety is enforced by exact hashes and verified blob content.
 			replacement.enabled = true;
 			replacement.name = replacementName;
 			replacement.shaderType = shaderType;

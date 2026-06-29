@@ -1210,19 +1210,20 @@ namespace HookD3D12
 		int replacementIndex = FindEnabledShaderReplacementByCachedBlob(uncaptured.cachedBlobHash);
 		const char* matchMethod = "cached blob hash";
 
-		if (replacementIndex < 0)
+		if (replacementIndex < 0 && !uncaptured.cachedBlob.empty())
 		{
-			replacementIndex = FindUniqueEnabledShaderReplacementByCachedBlobSize(uncaptured.cachedBlobSize);
-			matchMethod = "unique cached blob size fallback";
+			double matchingRatio = 0.0;
+			size_t longestMatchingRun = 0;
+			replacementIndex = FindEnabledShaderReplacementByCachedBlobContent(uncaptured.cachedBlob, matchingRatio, longestMatchingRun);
 
 			if (replacementIndex >= 0)
 			{
-				const ShaderReplacement::ShaderReplacementDisk& candidate = gLoadedShaderReplacements[replacementIndex];
+				matchMethod = "verified cached blob content";
 				ShaderInjectorGUI::WriteToRuntimeLog(
-					"HookD3D12->TryApplyUncapturedReplacement: Uncaptured PSO size fallback candidate: replacement=" + candidate.name +
-					" uncapturedHash=" + Hash::FormatHash(uncaptured.cachedBlobHash) +
-					" replacementCacheHash=" + candidate.pipelineCachedBlobHash +
-					" cacheBytes=" + std::to_string((size_t)uncaptured.cachedBlobSize));
+					"HookD3D12->TryApplyUncapturedReplacement: Verified persisted cached blob content: replacement=" + gLoadedShaderReplacements[replacementIndex].name +
+					" cachedHash=" + Hash::FormatHash(uncaptured.cachedBlobHash) +
+					" matchingRatio=" + std::to_string(matchingRatio) +
+					" longestMatchingRun=" + std::to_string(longestMatchingRun));
 			}
 		}
 
@@ -1235,8 +1236,6 @@ namespace HookD3D12
 			{
 				int enabledCount = 0;
 				int cachedHashCount = 0;
-				const int cachedSizeCandidateCount = CountEnabledShaderReplacementsByCachedBlobSize(uncaptured.cachedBlobSize);
-
 				for (const auto& replacement : gLoadedShaderReplacements)
 				{
 					if (!replacement.enabled)
@@ -1252,8 +1251,7 @@ namespace HookD3D12
 					"HookD3D12->TryApplyUncapturedReplacement: Uncaptured PSO has no replacement match: cachedHash=" + Hash::FormatHash(uncaptured.cachedBlobHash) +
 					" cachedBytes=" + std::to_string((size_t)uncaptured.cachedBlobSize) +
 					" enabledReplacements=" + std::to_string(enabledCount) +
-					" replacementsWithCachedHash=" + std::to_string(cachedHashCount) +
-					" replacementsWithSameCacheBytes=" + std::to_string(cachedSizeCandidateCount));
+					" replacementsWithCachedHash=" + std::to_string(cachedHashCount));
 				noMatchLogCount++;
 			}
 

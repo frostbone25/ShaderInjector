@@ -260,6 +260,11 @@ namespace ShaderInjectorIO
 		return JoinPath(GetLogsDirectory(), "ShaderInjector" + extensionLOG);
 	}
 
+	std::string GetPreviousLogFilePath()
+	{
+		return JoinPath(GetLogsDirectory(), "ShaderLogPrevious" + extensionLOG);
+	}
+
 	std::string GetDumpsDirectory()
 	{
 		return JoinPath(GetShaderInjectorDirectory(), "Dumps");
@@ -307,13 +312,39 @@ namespace ShaderInjectorIO
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//TODO: a current and a previous log file
-
-	//clears log file contents
-	void PurgeLogFile()
+	void RotateLogFiles()
 	{
 		std::lock_guard<std::mutex> lock(gLogMutex);
-		std::ofstream logFile(PathFromUtf8(GetLogFilePath()), std::ios::trunc);
+
+		// Rotation runs before the rest of IO initialization, so ensure the log
+		// directory exists even on the first launch.
+		std::error_code error;
+		FileSystem::create_directories(PathFromUtf8(GetLogsDirectory()), error);
+
+		const FileSystem::path currentLogPath = PathFromUtf8(GetLogFilePath());
+		const FileSystem::path previousLogPath = PathFromUtf8(GetPreviousLogFilePath());
+
+		error.clear();
+		FileSystem::remove(previousLogPath, error);
+
+		error.clear();
+		if (FileSystem::is_regular_file(currentLogPath, error))
+		{
+			error.clear();
+			FileSystem::rename(currentLogPath, previousLogPath, error);
+
+			// A same-directory rename should normally succeed. Retain a copy fallback
+			// for filesystems exposed through Wine/Proton that implement rename poorly.
+			if (error)
+			{
+				error.clear();
+				FileSystem::copy_file(currentLogPath, previousLogPath, FileSystem::copy_options::overwrite_existing, error);
+				if (!error)
+					FileSystem::remove(currentLogPath, error);
+			}
+		}
+
+		std::ofstream currentLog(currentLogPath, std::ios::trunc);
 	}
 
 

@@ -39,6 +39,7 @@ namespace ShaderInjectorIO
 	std::string GetUncapturedPSODirectory();
 	std::string GetLogsDirectory();
 	std::string GetLogFilePath();
+	std::string GetPreviousLogFilePath();
 	std::string GetToolsDirectory();
 	std::string GetToolPathDXC();
 	std::string GetShaderReplacementsDirectory();
@@ -47,7 +48,7 @@ namespace ShaderInjectorIO
 	std::string GetInjectorSettingsPath();
 
 	//logs
-	void PurgeLogFile();
+	void RotateLogFiles();
 	void WriteToLogFile(const std::string& text);
 	void WriteToLogFileError(const std::string& text);
 	void WriteToLogFileSuccess(const std::string& text);

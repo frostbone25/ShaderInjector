@@ -1,11 +1,102 @@
 //HookD3D12ReplacementLookup.cpp
 #include "HookD3D12ReplacementLookup.h"
 
+#include <algorithm>
+#include <unordered_map>
+
 //custom
 #include "Hash.h"
+#include "ShaderInjectorIO.h"
 
 namespace HookD3D12
 {
+	namespace
+	{
+		// Tiny driver cache records can be mostly common bookkeeping with only a few
+		// identifying bytes. Do not infer identity from those opaque records.
+		constexpr size_t minimumContentMatchSize = 4096;
+		constexpr double minimumMatchingByteRatio = 0.98;
+		constexpr double minimumStableRunRatio = 0.50;
+		constexpr double ambiguityRatioMargin = 0.002;
+
+		struct CachedBlobContentMatch
+		{
+			double matchingRatio = 0.0;
+			size_t longestMatchingRun = 0;
+		};
+
+		std::unordered_map<std::string, std::vector<uint8_t>> gCachedBlobSidecars;
+
+		const std::vector<uint8_t>& LoadCachedBlobSidecar(const std::string& path)
+		{
+			auto existing = gCachedBlobSidecars.find(path);
+			if (existing != gCachedBlobSidecars.end())
+				return existing->second;
+
+			std::vector<uint8_t> bytes;
+			if (!path.empty())
+				ShaderInjectorIO::LoadDXILBlobFromDisk(path, bytes);
+
+			return gCachedBlobSidecars.emplace(path, std::move(bytes)).first->second;
+		}
+
+		CachedBlobContentMatch CompareCachedBlobContent(
+			const std::vector<uint8_t>& persistedBlob,
+			const std::vector<uint8_t>& currentBlob)
+		{
+			CachedBlobContentMatch match{};
+			if (persistedBlob.size() != currentBlob.size() || persistedBlob.size() < minimumContentMatchSize)
+				return match;
+
+			size_t matchingBytes = 0;
+			size_t currentMatchingRun = 0;
+
+			for (size_t byteIndex = 0; byteIndex < persistedBlob.size(); ++byteIndex)
+			{
+				if (persistedBlob[byteIndex] != currentBlob[byteIndex])
+				{
+					currentMatchingRun = 0;
+					continue;
+				}
+
+				++matchingBytes;
+				++currentMatchingRun;
+				match.longestMatchingRun = (std::max)(match.longestMatchingRun, currentMatchingRun);
+			}
+
+			match.matchingRatio = static_cast<double>(matchingBytes) / static_cast<double>(persistedBlob.size());
+			return match;
+		}
+
+		CachedBlobContentMatch BestCachedBlobContentMatch(
+			const ShaderReplacement::ShaderReplacementDisk& replacement,
+			const std::vector<uint8_t>& currentBlob)
+		{
+			CachedBlobContentMatch bestMatch{};
+
+			auto considerPath = [&](const std::string& path)
+			{
+				const CachedBlobContentMatch match = CompareCachedBlobContent(LoadCachedBlobSidecar(path), currentBlob);
+				if (match.matchingRatio > bestMatch.matchingRatio ||
+					(match.matchingRatio == bestMatch.matchingRatio && match.longestMatchingRun > bestMatch.longestMatchingRun))
+				{
+					bestMatch = match;
+				}
+			};
+
+			considerPath(replacement.pipelineCachedBlobPath);
+			for (const ShaderReplacement::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
+				considerPath(pipelineTemplate.pipelineCachedBlobPath);
+
+			return bestMatch;
+		}
+	}
+
+	void ResetCachedBlobContentLookup()
+	{
+		gCachedBlobSidecars.clear();
+	}
+
 	bool GetPipelineCachedBlobInfo(ID3D12PipelineState* pipelineState, uint64_t& outHash, SIZE_T& outSize, std::vector<uint8_t>* outBytes)
 	{
 		outHash = 0;
@@ -42,31 +133,6 @@ namespace HookD3D12
 		return outHash != 0;
 	}
 
-	bool ReplacementHasCachedBlobSize(const ShaderReplacement::ShaderReplacementDisk& replacement, SIZE_T cachedBlobSize)
-	{
-		if (!cachedBlobSize)
-			return false;
-
-		if (!replacement.pipelineCachedBlobLength.empty())
-		{
-			const SIZE_T replacementSize = (SIZE_T)_strtoui64(replacement.pipelineCachedBlobLength.c_str(), nullptr, 10);
-			if (replacementSize == cachedBlobSize)
-				return true;
-		}
-
-		for (const ShaderReplacement::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
-		{
-			if (pipelineTemplate.pipelineCachedBlobLength.empty())
-				continue;
-
-			const SIZE_T templateSize = (SIZE_T)_strtoui64(pipelineTemplate.pipelineCachedBlobLength.c_str(), nullptr, 10);
-			if (templateSize == cachedBlobSize)
-				return true;
-		}
-
-		return false;
-	}
-
 	bool ReplacementHasCachedBlobHash(const ShaderReplacement::ShaderReplacementDisk& replacement, uint64_t cachedBlobHash)
 	{
 		if (!cachedBlobHash)
@@ -82,49 +148,6 @@ namespace HookD3D12
 		}
 
 		return false;
-	}
-
-	int CountEnabledShaderReplacementsByCachedBlobSize(SIZE_T cachedBlobSize)
-	{
-		if (!cachedBlobSize)
-			return 0;
-
-		int matchCount = 0;
-		for (const auto& replacement : gLoadedShaderReplacements)
-		{
-			if (!replacement.enabled)
-				continue;
-
-			if (ReplacementHasCachedBlobSize(replacement, cachedBlobSize))
-				matchCount++;
-		}
-
-		return matchCount;
-	}
-
-	int FindUniqueEnabledShaderReplacementByCachedBlobSize(SIZE_T cachedBlobSize)
-	{
-		if (!cachedBlobSize)
-			return -1;
-
-		int matchIndex = -1;
-		int matchCount = 0;
-
-		for (int i = 0; i < (int)gLoadedShaderReplacements.size(); i++)
-		{
-			const ShaderReplacement::ShaderReplacementDisk& replacement = gLoadedShaderReplacements[i];
-
-			if (!replacement.enabled)
-				continue;
-
-			if (ReplacementHasCachedBlobSize(replacement, cachedBlobSize))
-			{
-				matchIndex = i;
-				matchCount++;
-			}
-		}
-
-		return matchCount == 1 ? matchIndex : -1;
 	}
 
 	int FindEnabledShaderReplacementByCachedBlob(uint64_t cachedBlobHash)
@@ -144,6 +167,59 @@ namespace HookD3D12
 		}
 
 		return -1;
+	}
+
+	int FindEnabledShaderReplacementByCachedBlobContent(
+		const std::vector<uint8_t>& cachedBlob,
+		double& outMatchingRatio,
+		size_t& outLongestMatchingRun)
+	{
+		outMatchingRatio = 0.0;
+		outLongestMatchingRun = 0;
+
+		if (cachedBlob.size() < minimumContentMatchSize)
+			return -1;
+
+		int bestReplacementIndex = -1;
+		double secondBestRatio = 0.0;
+
+		for (int replacementIndex = 0; replacementIndex < static_cast<int>(gLoadedShaderReplacements.size()); ++replacementIndex)
+		{
+			const ShaderReplacement::ShaderReplacementDisk& replacement = gLoadedShaderReplacements[replacementIndex];
+			if (!replacement.enabled)
+				continue;
+
+			const CachedBlobContentMatch match = BestCachedBlobContentMatch(replacement, cachedBlob);
+			const size_t minimumStableRun = static_cast<size_t>(cachedBlob.size() * minimumStableRunRatio);
+			if (match.matchingRatio < minimumMatchingByteRatio || match.longestMatchingRun < minimumStableRun)
+				continue;
+
+			if (match.matchingRatio > outMatchingRatio)
+			{
+				secondBestRatio = outMatchingRatio;
+				outMatchingRatio = match.matchingRatio;
+				outLongestMatchingRun = match.longestMatchingRun;
+				bestReplacementIndex = replacementIndex;
+			}
+			else
+			{
+				secondBestRatio = (std::max)(secondBestRatio, match.matchingRatio);
+			}
+		}
+
+		if (bestReplacementIndex < 0)
+			return -1;
+
+		// Two nearly identical enabled replacements targeting the same cached PSO
+		// are ambiguous. Refuse to guess rather than binding the wrong pipeline.
+		if (secondBestRatio > 0.0 && outMatchingRatio - secondBestRatio < ambiguityRatioMargin)
+		{
+			outMatchingRatio = 0.0;
+			outLongestMatchingRun = 0;
+			return -1;
+		}
+
+		return bestReplacementIndex;
 	}
 
 	bool ReplacementHashMatches(uint64_t pipelineHash, const std::string& replacementHash)

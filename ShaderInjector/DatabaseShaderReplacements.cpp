@@ -8,6 +8,7 @@
 #include "DatabaseShaderReplacements.h"
 #include "DatabaseShaderSources.h"
 #include "HookD3D12ReplacementTemplates.h"
+#include "HookD3D12ReplacementLookup.h"
 #include "ShaderInjectorGUI.h"
 #include "ShaderInjectorIO.h"
 #include "ShaderReplacement.h"
@@ -181,6 +182,7 @@ namespace HookD3D12
 	void RefreshLoadedShaderReplacements()
 	{
 		//rebuild the runtime list from disk so external edits or deleted replacement folders are reflected in the UI.
+		ResetCachedBlobContentLookup();
 		gLoadedShaderReplacements.clear();
 		gLoadedShaderReplacementBlobs.clear();
 		gSelectedShaderReplacementIndex = -1;

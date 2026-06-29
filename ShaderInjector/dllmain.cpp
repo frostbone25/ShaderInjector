@@ -31,9 +31,8 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	//||||||||||||||||||||||||||||||| INITALIZE IO |||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||| INITALIZE IO |||||||||||||||||||||||||||||||
 
-	//clear log file on start so we start fresh
-	//TODO: make a "previous" log file to store results of last session
-	ShaderInjectorIO::PurgeLogFile();
+	// Preserve the previous run before starting a fresh current log.
+	ShaderInjectorIO::RotateLogFiles();
 
 	//initalize IO operations (folders, files, internal shader files)
 	ShaderInjectorIO::Initialize();
