@@ -867,6 +867,55 @@ FLightingTerms MakeTerms(float3 diffuse, float3 specular, float3 extra)
     return terms;
 }
 
+//|||||||||||||||||||||||||||||||||| LIGHTING - EXPERIMENTAL ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| LIGHTING - EXPERIMENTAL ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| LIGHTING - EXPERIMENTAL ||||||||||||||||||||||||||||||||||
+
+//experimental attempt at avoiding occluded local light sources
+//the idea is simple, and I expect jank but I atleast thing some solution would help those who really don't like it
+//we know the light point in world space already
+//if it's a spotlight even better since we have a defined directon
+//but check distance of light to camera
+//then check distance of light to depth, if the distance is negative then the light is behind geometry
+//using that value push the light forward towards camera, with an additional world normal offset 
+
+#define OCCLUDED_LIGHT_DEPTH_BIAS 1.0f
+#define OCCLUDED_LIGHT_NORMAL_OFFSET 15.0f
+#define OCCLUDED_LIGHT_MAX_PUSH_DISTANCE 50.0f
+#define OCCLUDED_LIGHT_OCCLUSION_EPSILON 0.25f
+
+//NOTE TO SELF: use HZB, it has mips!
+float3 CalculateOffsetedLightPosition(FGBufferData gbufferData, FDeferredLightData light)
+{
+    float3 originalLightPosition = light.Position;
+    float3 cameraForward = normalize(View_ViewForward);
+    float sceneViewDepth = LinearizeSceneDepth(gbufferData.DeviceDepth);
+    float lightViewDepth = dot(originalLightPosition - View_WorldCameraOrigin, cameraForward);
+
+    if (lightViewDepth <= 0.0f || sceneViewDepth <= 0.0f || light.InvRadius <= 0.0f)
+        return originalLightPosition;
+
+    float penetrationDepth = lightViewDepth - sceneViewDepth;
+
+    if (penetrationDepth <= OCCLUDED_LIGHT_OCCLUSION_EPSILON)
+        return originalLightPosition;
+
+    float pushDistance = penetrationDepth + max(OCCLUDED_LIGHT_DEPTH_BIAS, 0.0f);
+
+    if (OCCLUDED_LIGHT_MAX_PUSH_DISTANCE > 0.0f && pushDistance > OCCLUDED_LIGHT_MAX_PUSH_DISTANCE)
+        return originalLightPosition;
+
+    float3 worldNormal = gbufferData.WorldNormal;
+    float normalLengthSq = dot(worldNormal, worldNormal);
+
+    worldNormal = (normalLengthSq > 1.0e-8f) ? worldNormal * rsqrt(normalLengthSq) : -cameraForward;
+
+    if (dot(worldNormal, cameraForward) > 0.0f)
+        worldNormal = -worldNormal;
+
+    return originalLightPosition - cameraForward * pushDistance + worldNormal * max(OCCLUDED_LIGHT_NORMAL_OFFSET, 0.0f);
+}
+
 //||||||||||||||||||||||||||||||| BRDF |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| BRDF |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| BRDF |||||||||||||||||||||||||||||||
@@ -1098,9 +1147,9 @@ FLightingTerms ShadeDefaultLit(FGBufferData gbufferData, FResolvedPixel resolved
     float diffuseScale = 1.0 - gbufferData.CustomData.z;
 
 	#if defined(SHADING_DEFAULT_LIT_BURLEY)
-		float3 diffuse = Diffuse_Burley(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * invDistSq * lobe.NoL;
+		float3 diffuse = Diffuse_Burley(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * invDistSq * lobe.NoL * diffuseShadow;
 	#elif defined(SHADING_DEFAULT_LIT_OREN_NAYAR)
-		float3 diffuse = Diffuse_OrenNayar(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * invDistSq * lobe.NoL;
+		float3 diffuse = Diffuse_OrenNayar(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * invDistSq * lobe.NoL * diffuseShadow;
 	#else //default game
 		float3 diffuse = CommonLambertTerm(gbufferData.ShadingDiffuseColor * diffuseScale, invDistSq, lobe.NoL, energy, diffuseShadow);
 	#endif
@@ -1504,6 +1553,7 @@ FResolvedPixel ResolvePixel(PSInput input, FGBufferData gbufferData, FDeferredLi
     resolvedPixel.CameraVector = SafeNormalize(View_WorldCameraOrigin - resolvedPixel.WorldPosition);
 
     float3 toLight = light.Position - resolvedPixel.WorldPosition;
+    //float3 toLight = CalculateOffsetedLightPosition(gbufferData, light) - resolvedPixel.WorldPosition;
     resolvedPixel.LightDistanceSq = dot(toLight, toLight);
 	resolvedPixel.LightVector = (resolvedPixel.LightDistanceSq > 0.0001) ? toLight * rsqrt(resolvedPixel.LightDistanceSq) : float3(0, 0, 0);
 

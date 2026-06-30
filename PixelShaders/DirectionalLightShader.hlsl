@@ -1220,8 +1220,6 @@ FLightingTerms ShadeDefaultLit(FGBufferData gbufferData, FResolvedPixel resolved
 
     #if defined(ENABLE_MICRO_SHADOWS)
         float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
-        //float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO * gbufferData.ScreenAO, lobe.NoL, MICRO_SHADOWS_STRENGTH); //too much contrast, and we get SSAO haloing which looks awkward
-
         float specShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
         float diffuseShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
         float transmissionShadow = min(resolvedPixel.ShadowedLightAttenuation, ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO));
@@ -1267,8 +1265,6 @@ FLightingTerms ShadeSubsurfaceProfile(FGBufferData gbufferData, FResolvedPixel r
 
     #if defined(ENABLE_MICRO_SHADOWS_SKIN)
         float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
-        //float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO * gbufferData.ScreenAO, lobe.NoL, MICRO_SHADOWS_STRENGTH); //too much contrast, and we get SSAO haloing which looks awkward
-
         float specShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
         float diffuseShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
         float transmissionShadow = min(resolvedPixel.ShadowedLightAttenuation, ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.MaterialAO));
@@ -1336,8 +1332,6 @@ FLightingTerms ShadePreintegratedSkin(FGBufferData gbufferData, FResolvedPixel r
 
     #if defined(ENABLE_MICRO_SHADOWS_SKIN)
         float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO, lobe.NoL, MICRO_SHADOWS_STRENGTH);
-        //float unchartedMicroShadow = Uncharted4_MicroShadowing(gbufferData.MaterialAO * gbufferData.ScreenAO, lobe.NoL, MICRO_SHADOWS_STRENGTH); //too much contrast, and we get SSAO haloing which looks awkward
-
         float specShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
         float diffuseShadow = unchartedMicroShadow * resolvedPixel.ShadowedLightAttenuation;
     #else
@@ -1405,14 +1399,11 @@ FLightingTerms ShadeEye(FGBufferData gbufferData, FResolvedPixel resolvedPixel, 
 
     float irisBlend = lerp(irisForward, noLEyeNormal, gbufferData.EyeMetallicPayload);
     float causticEnergy = lerp(causticMask * causticMask * 1.2 * glancingMask * eyeEnergy, 1.0, gbufferData.EyeMetallicPayload);
-    //float irisVisibility = lerp(irisShadow, px.EyeOcclusion, g.EyeMetallicPayload);
 	float irisVisibility = lerp(irisShadow, 1.0f, gbufferData.EyeMetallicPayload);
-
     float f0Fresnel = eyeF0 + Pow5(1.0 - max(1.0e-5, specLobe.VoH)) * (min(1.93626 - wetnessOrFog * 1.74008, 1.0) - eyeF0);
     float eyeSpecular = specScalar * f0Fresnel * invDistSq;
-
-    float specShadow = SpecularMicroShadow(corneaLobe.NoL, max(1.0e-5, specLobe.NoVAbs), roughness, ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.ScreenAO), min(resolvedPixel.ShadowedLightAttenuation, 1.0f));
 	float diffuseAO = ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.ScreenAO);
+    float specShadow = SpecularMicroShadow(corneaLobe.NoL, max(1.0e-5, specLobe.NoVAbs), roughness, ComputeMicroShadow(gbufferData.ScreenAO, gbufferData.ScreenAO), min(resolvedPixel.ShadowedLightAttenuation, 1.0f));
     float diffuseShadow = DiffuseMicroShadow(irisBlend, diffuseAO, min(resolvedPixel.ShadowedLightAttenuation, irisVisibility));
 
     float3 specular = eyeSpecular * specShadow;
