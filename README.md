@@ -66,7 +66,7 @@ In addition if you would like to do pull requests to improve or contribute featu
 People who have aided in the development of this project with testing or other various tasks, big or small.
 
 - [Neocortex](https://www.nexusmods.com/profile/Neocoretx)
-- Stephe
+- [Stepheroth](https://www.nexusmods.com/profile/Stepheroth)
 - [YIIS](https://www.nexusmods.com/profile/YIISx/mods)
 - [smackedwookiee](url=https://www.youtube.com/@SmackedWookiee)
 - sajittarius

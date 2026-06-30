@@ -5,8 +5,19 @@
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - BRDF ||||||||||||||||||||||||||||||||||
 //here are parameters that are wired up for easy tweakin...
 
+//this is the original shading model used for the game
+//its simple, and efficent, but not accurate
+//if you want to retain the original game shading turn this on
 //#define SHADING_DEFAULT_LIT_LAMBERT //<--- original game
+
+//new shading model, little different but more accurate to diffuse shading in real life
+//visually it makes diffuse materials more "diffuse" and matte as it should caused by retro-reflection (when you look away from the light direction)
+//but for some artistically this might be undesirable
 //#define SHADING_DEFAULT_LIT_BURLEY
+
+//new shading model, little different but more accurate to diffuse shading in real life
+//similar to burley, visually it makes diffuse materials more "diffuse" and matte as it should caused by retro-reflection (when you look away from the light direction)
+//but for some artistically this might be undesirable
 #define SHADING_DEFAULT_LIT_OREN_NAYAR
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - MICRO SHADOWS ||||||||||||||||||||||||||||||||||
@@ -94,7 +105,7 @@
 
 //this controls how "thick" objects are in the depth buffer
 //RANGE: this should be between [10 <---> 100.0]
-//DEFAULT: 0.35
+//DEFAULT: 25.0
 //HIGHER VALUES: larger volume of shadow, but can lead to alot of wierd false shadowing. objects up close can cast shadows onto objects far behind it which can look odd.
 //LOWER VALUES: smaller volume of shadow, less false shadowing, but they can appear less dense and might be too thin
 #define CONTACT_SHADOWS_THICKNESS 25.0
@@ -102,6 +113,10 @@
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces
 //RANGE: this should be between [0.0 <---> 0.1]
 #define CONTACT_SHADOWS_BIAS 0.005
+
+//this is a small bias factor to minimize contact shadow acne on sloped surfaces for hair specifically
+//RANGE: this should be between [0.0 <---> 0.1]
+#define CONTACT_SHADOWS_BIAS_HAIR 0.005
 
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces using surface normal
 //RANGE: this should be between [0.0 <---> 1.0]
@@ -115,7 +130,7 @@
 //OPTIMIZATION: this calculates contact shadows for every other pixel in a checkerboard like pattern that switches every frame
 //it saves a small bit of frametime, but does have a quality degredation with more visible shimmering at distances
 //disable if you want sharper true per-pixel contact shadows (at a bit of a perf hit)
-#define CONTACT_SHADOW_CHECKERBOARD
+//#define CONTACT_SHADOW_CHECKERBOARD
 
 //[CONTACT_SHADOW_CHECKERBOARD ONLY!] This only works if checkerboarding is enabled!
 //this tries to fill in the gaps intelligently during checkerboard rendering minimize holes where no shadow is calculated 
@@ -148,6 +163,19 @@
 //#define DISABLE_CONTACT_SHADOWS_FOR_SUBSURFACE_PROFILE
 //#define DISABLE_CONTACT_SHADOWS_FOR_HAIR
 //#define DISABLE_CONTACT_SHADOWS_FOR_EYE
+
+//another requested feature...
+//this is an added effect that will gradually "fade" contact shadows as it goes further out
+//this does have a bit of a perf hit with (extra instructions per iteration in the loop now)
+//I've done my best to optimize and keep it light, but it just requires more instructions to achieve
+//still, in the grand scheme of things this should be pretty light and enabled if you really want to mitigate some of shortcomings (atleast its not another texture sample)
+#define CONTACT_SHADOWS_FALLOFF
+
+//this shapes the falloff
+//higher values = sharper/darker shadow further out
+//lower values = softer/lighter shadow further out
+//DEFAULT: 3
+#define CONTACT_SHADOWS_FALLOFF_CONTRAST 3.0
 
 //|||||||||||||||||||||||||||||||||| MACROS ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| MACROS ||||||||||||||||||||||||||||||||||
@@ -1090,6 +1118,12 @@ float CalculateContactShadows(FGBufferData gbufferData, FResolvedPixel resolvedP
 	float2 uvStep  = (uvEnd - uvStart) * invSamples;
 	float2 uv      = mad(uvStep, random, uvStart);
 
+	float occlusion = 1.0f;
+	float contactShadowBias = CONTACT_SHADOWS_BIAS;
+
+	if(gbufferData.ShadingModelID == SHADINGMODELID_HAIR)
+		contactShadowBias = CONTACT_SHADOWS_BIAS_HAIR;
+
     [unroll]
     for (int i = 0; i < CONTACT_SHADOWS_SAMPLES; ++i)
     {
@@ -1101,16 +1135,36 @@ float CalculateContactShadows(FGBufferData gbufferData, FResolvedPixel resolvedP
         float sceneDepth = LinearizeSceneDepth(deviceDepth);
         float penetration = rayDepth - sceneDepth;
 
-		//NOTE TO SELF: while this is simple and fast, leaves a harsh cutoff
-		//for thickness we can calculate a "weight" to do a smoother falloff out from shadow
-        if (penetration > CONTACT_SHADOWS_BIAS && penetration < CONTACT_SHADOWS_THICKNESS)
-            return 0.0;
+		#if defined(CONTACT_SHADOWS_FALLOFF)
+			if (penetration > contactShadowBias && penetration < CONTACT_SHADOWS_THICKNESS)
+			{
+				//how far along the ray are we? (we are going from point towards the light)
+				float rayProgress = i * invSamples;
+				float thicknessFade = 1.0 - saturate((penetration - contactShadowBias) / (CONTACT_SHADOWS_THICKNESS - contactShadowBias));
+				float distanceFade = 1.0 - saturate(rayProgress);
+				float sampleShadow = 1.0 - distanceFade;
+				sampleShadow *= sampleShadow;
+
+				occlusion = min(occlusion, sampleShadow);
+			}
+		#else
+			//NOTE TO SELF: while this is simple and fast, leaves a harsh cutoff
+			//for thickness we can calculate a "weight" to do a smoother falloff out from shadow
+			if (penetration > contactShadowBias && penetration < CONTACT_SHADOWS_THICKNESS)
+				return 0.0;
+		#endif
 
         rayDepth += rayDepthStep;
         uv += uvStep;
     }
 
-    return 1.0f;
+	//when introducing the falloff shadows can appear a little too light
+	//to compensate especially near contacts we have a contrast factor here
+	#if defined(CONTACT_SHADOWS_FALLOFF)
+		occlusion = pow(occlusion, CONTACT_SHADOWS_FALLOFF_CONTRAST);
+	#endif
+
+    return occlusion;
 }
 
 //||||||||||||||||||||||||||||||| SHADING - DEFAULT LIT |||||||||||||||||||||||||||||||
