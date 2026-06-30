@@ -10,6 +10,7 @@ This document will occasionally be updated with more information collected from 
 - [Vanishing Lights](#vanishing-lights)
 - [Flickering Shadows / Offset Shadows](#flickering-shadows--offset-shadows)
 - [Linux Support](#linux-support)
+- [Game Not Launching](#game-not-launching)
 
 ---
 
@@ -120,3 +121,9 @@ or for HGL users (not tested)
 Add the following Variable name to the game settings page:
 Variable name: WINEDLLOVERRIDES
 Value: dsound=n,b
+
+---
+
+#### Game Not Launching
+
+Some uesrs have reported that when installing the ShaderInjector that the game wouldn't start. A user has reported that Windows' Smart App Control was blocking the dll from being used, and turning it off fixed it and allowed the game to run.
