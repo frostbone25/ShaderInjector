@@ -48,6 +48,7 @@
 #include "ShaderInjectorGUI.h"
 #include "Hash.h"
 #include "FPSCounter.h"
+#include "ShaderAutomaticDiscovery.h"
 #include "HookD3D12PipelineUtils.h"
 #include "HookD3D12ReplacementLookup.h"
 #include "HookD3D12ReplacementTemplates.h"
@@ -1347,6 +1348,8 @@ namespace HookD3D12
 
 	void ApplyShaderTargetPSOs()
 	{
+		ShaderAutomaticDiscovery::ProcessQueuedWork(1);
+
 		if (!Globals::gShaderInjectorEnabled)
 			return;
 

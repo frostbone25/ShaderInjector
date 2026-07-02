@@ -25,12 +25,15 @@ namespace HookD3D12
 		capturedPipeline.streamBlob.assign(streamStart, streamStart + pipelineStreamDescription->SizeInBytes);
 
 		ParsePipelineStream(pipelineStreamDescription, capturedPipeline);
-		ShaderAutomaticDiscovery::ProcessCapturedStreamPipeline(capturedPipeline);
 
-		std::lock_guard<std::mutex> lock(gPipelineMutex);
-		RegisterKnownPipelineStateLocked(pipelineState);
-		gPipelineStates.push_back(capturedPipeline);
-		RebindPipelineStateInfoPointerFields(gPipelineStates.back());
-		MarkShaderTargetApplyDirty();
+		{
+			std::lock_guard<std::mutex> lock(gPipelineMutex);
+			RegisterKnownPipelineStateLocked(pipelineState);
+			gPipelineStates.push_back(capturedPipeline);
+			RebindPipelineStateInfoPointerFields(gPipelineStates.back());
+			MarkShaderTargetApplyDirty();
+		}
+
+		ShaderAutomaticDiscovery::ProcessCapturedStreamPipeline(capturedPipeline);
 	}
 }

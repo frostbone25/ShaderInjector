@@ -6,6 +6,7 @@
 
 #include "ShaderInjectorIO.h"
 #include "ShaderDiscovery.h"
+#include "ShaderAutomaticDiscovery.h"
 
 namespace DatabaseModifiedShaders
 {
@@ -69,6 +70,8 @@ namespace DatabaseModifiedShaders
 			const std::string rightName = right.name.empty() ? right.id : right.name;
 			return leftName < rightName;
 		});
+
+		ShaderAutomaticDiscovery::RefreshModifiedShaderIndex(gModifiedShaders);
 
 		ShaderInjectorIO::WriteToLogFile(
 			"DatabaseModifiedShaders->RefreshModifiedShaders: loaded packages=" + std::to_string(gModifiedShaders.size()));
