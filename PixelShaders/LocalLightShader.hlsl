@@ -1,4 +1,122 @@
-//DeferredLocalLightPS.hlsl
+//DeferredLocalLightPS.hlsl - PATCHED (community review build)
+
+//|||||||||||||||||||||||||||||||||| PATCHES (community review) ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| PATCHES (community review) ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| PATCHES (community review) ||||||||||||||||||||||||||||||||||
+//Each patch is independently toggleable. Comment a #define out to get the original behavior back.
+//None of these change the author's tunables above/below; they only fix or gate specific code paths.
+
+//BUGFIX (lamps-in-fixtures going dark): the contact shadow ray had a FIXED length of
+//CONTACT_SHADOWS_RAY_LENGTH and could march PAST a point light. Geometry behind the light
+//(physically incapable of occluding it) still registered as shadow, and the housing a light
+//sits inside of was hit at low rayProgress -> falloff treated it as a near-surface contact
+//-> pitch black. This clamps the ray to the light distance (correct per the reference UE
+//implementation) and additionally stops short of the light by an absolute per-light dead
+//zone (sized from the game's own SourceRadius) so fixtures the light is embedded in don't
+//occlude their own light. Those lights ship with shadow casting disabled in vanilla ON
+//PURPOSE - grazing their housing should not kill them.
+//TRADE-OFF: legit occluders very close to a light lose their contact shadow. Vanilla never had
+//that shadow either, so this converges to vanilla near sources while keeping contact shadows
+//where they matter: near the receiving surface.
+#define PATCH_LIGHT_DISTANCE_CLAMP
+
+//[PATCH_LIGHT_DISTANCE_CLAMP ONLY] dead zone around each light, in world units (~cm).
+//Occluders inside this radius of the light position cannot cast contact shadows.
+//Driven PER LIGHT by the game's own SourceRadius (DeferredLightUniforms_SourceRadius):
+//    deadZone = max(MIN, SourceRadius * SCALE)
+//so wall fixtures with large/offset sources get a large zone while candles and desk
+//lamps keep a small one - small props near small lights keep their shadows.
+//
+//MIN: floor for lights that report a ~0 source radius (else they'd self-occlude again).
+//RANGE: [4.0 <---> 12.0] | DEFAULT: 6.0
+#define CONTACT_SHADOWS_FIXTURE_RADIUS_MIN 6.0
+//SCALE: SourceRadius measures the emitter, not the housing around it; this factor
+//bridges that gap. Calibrate on a wall fixture: raise until its dark halo dies, stop.
+//RANGE: [1.0 <---> 4.0] | DEFAULT: 2.0
+#define CONTACT_SHADOWS_FIXTURE_RADIUS_SCALE 4.0 //user-calibrated on tunnel wall fixtures
+
+//RAMP MODE (default ON): instead of a hard dead zone (occluders inside the radius cast
+//NOTHING), weight each hit by its distance to the light: hits at the bulb weigh ~0,
+//hits at the radius edge weigh full, cage bars land in between -> partial bar shadows
+//come back while the lamp keeps emitting. The weight is squared so hits very close to
+//the light (the housing/bracket) stay near zero and the wall-fixture halo stays dead.
+//If a faint halo reappears on wall fixtures, raise SCALE a notch or comment this out
+//to return to the hard dead zone.
+//NOTE: requires CONTACT_SHADOWS_FALLOFF (the ramp lives in the falloff loop).
+#define CONTACT_SHADOWS_FIXTURE_RAMP
+
+//PATCH v4: emissive/unlit surfaces must not occlude the light they represent.
+//The visible bulb/glass mesh of a fixture is typically SHADINGMODELID_UNLIT; when the
+//game places the actual light source offset from that mesh (common on wall fixtures),
+//the bulb lands mid-ramp and casts a bulb-shaped shadow. This checks the shading model
+//of each hit (one extra GBufferB fetch per hit candidate) and discards UNLIT hits.
+//Side effect (usually desirable): neon signs, fire and other emissive props stop
+//casting contact shadows too.
+//CAVEAT: if the bulb mesh is NOT unlit (default-lit with emissive, or translucent
+//with an opaque core), this can't identify it and the shadow will remain.
+//#define PATCH_UNLIT_HITS_DONT_OCCLUDE
+
+//PATCH v5: hard dead CORE inside the ramp. The pure ramp failed on wall fixtures whose
+//bulb mesh sits at ~0.7-0.9 of the fixture radius from the (offset) light position -
+//squared weight there is still visible. Inside CORE fraction of the radius: zero
+//occlusion (v2 behavior, known to kill the bulb shadow). The ramp only lives in the
+//outer shell [CORE..1.0]. Radii are per-light, so the wall fixture's bulb lands in its
+//own (large) core while a desk lamp's cage bars stay in their own (small) shell and
+//keep their partial shadows.
+//RANGE: [0.0 <---> 0.95] | 0.0 = pure ramp (v3) | ~1.0 = hard dead zone (v2)
+//If the bulb shadow persists, raise; if desk-lamp bar shadows vanish, lower.
+#define CONTACT_SHADOWS_FIXTURE_CORE 0.80
+
+//DEBUG: paint each visible pixel's shading model. UNLIT = RED (emissive: bulbs, signs),
+//everything else = grey by ID. Point the camera at the bulb: red means the unlit
+//rejection should have caught it (report a bug); grey/dark means the caster is lit
+//housing or the glass is translucent - only the CORE can handle it.
+//#define DEBUG_VISUALIZE_SHADING_MODEL
+//DEBUG: uncomment to visualize SourceRadius per light (grey = radius/50). If the wall
+//fixture does NOT read brighter than a desk lamp, the field isn't usable - revert to a
+//constant dead zone and report back.
+//#define DEBUG_VISUALIZE_SOURCE_RADIUS
+
+//BUGFIX: thicknessFade was computed inside the falloff loop but never applied (dead code).
+//Fades out hits whose penetration approaches CONTACT_SHADOWS_THICKNESS. With the local pass
+//shipping THICKNESS=25.0 this matters a lot: thin fixtures/props stop occluding like walls.
+#define PATCH_THICKNESS_FADE
+
+//BUGFIX: guard rays whose clip-space w goes <= 0. Indoors this is COMMON for local lights
+//(light near the camera, ray crossing the near plane) - without the guard the NDC flips and
+//the march reads garbage UVs -> random flicker.
+#define PATCH_CLIP_W_GUARD
+
+//BUGFIX: perspective-correct ray depth interpolation (see directional shader for rationale).
+//Local light rays almost always have a strong depth component, so it matters MORE here.
+//Requires PATCH_CLIP_W_GUARD.
+#define PATCH_PERSPECTIVE_DEPTH
+
+//BUGFIX: wrap the IGN frame counter (unbounded -> mantissa loss on long sessions).
+#define PATCH_NOISE_FRAME_WRAP
+
+//BUGFIX: jittered falloff progress (see directional shader for rationale).
+#define PATCH_FALLOFF_JITTER
+
+//OPTIMIZATION: reversed-Z sky test without linearizing (see directional shader).
+#define PATCH_FAST_SKY_OUT
+
+//OPTIMIZATION (bit-exact ONLY while PATCH_THICKNESS_FADE is OFF): break after first hit.
+//#define PATCH_EARLY_BREAK_FIRST_HIT
+
+//LOOK CHANGE (off by default): re-apply the dropped 'energy' term to Burley/Oren-Nayar
+//(see directional shader for rationale).
+//#define PATCH_DIFFUSE_ENERGY_TERM
+#if defined(PATCH_DIFFUSE_ENERGY_TERM)
+    #define PATCH_DIFFUSE_ENERGY_MULT energy
+#else
+    #define PATCH_DIFFUSE_ENERGY_MULT 1.0
+#endif
+
+//COMPILE FIX (always on, not toggleable): the DISABLE_CONTACT_SHADOWS_FOR_* blocks in main()
+//referenced 'graphicsBuffer' (the directional shader's variable name) but this file names it
+//'gbufferData' - enabling any of those toggles failed to compile. Renamed.
+
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - BRDF ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - BRDF ||||||||||||||||||||||||||||||||||
@@ -108,7 +226,7 @@
 //DEFAULT: 25.0
 //HIGHER VALUES: larger volume of shadow, but can lead to alot of wierd false shadowing. objects up close can cast shadows onto objects far behind it which can look odd.
 //LOWER VALUES: smaller volume of shadow, less false shadowing, but they can appear less dense and might be too thin
-#define CONTACT_SHADOWS_THICKNESS 25.0
+#define CONTACT_SHADOWS_THICKNESS 12.0 //user-calibrated: frames shadow, lanterns don't self-dim
 
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces
 //high values = reduced acne but can introduce visual issues where shadows appear less grounded
@@ -134,7 +252,7 @@
 #define CONTACT_SHADOWS_NORMAL_BIAS 0.5
 
 //OPTIMIZATION: this avoids calculating contact shadows for sky pixels
-//has no effect visually, but can save you quite a bit of frametime especially the more you look up :P 
+//has no effect visually, but can save you quite a bit of frametime especially the more you look up :P
 //honestly no reason you should turn this off unless you want to suffer in vain...
 #define CONTACT_SHADOW_EARLY_SKY_OUT
 
@@ -144,7 +262,7 @@
 //#define CONTACT_SHADOW_CHECKERBOARD
 
 //[CONTACT_SHADOW_CHECKERBOARD ONLY!] This only works if checkerboarding is enabled!
-//this tries to fill in the gaps intelligently during checkerboard rendering minimize holes where no shadow is calculated 
+//this tries to fill in the gaps intelligently during checkerboard rendering minimize holes where no shadow is calculated
 #define CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION
 
 //[CONTACT_SHADOW_CHECKERBOARD and CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION ONLY!] This only works if checkerboarding and quad reconstruction is enabled!
@@ -207,7 +325,7 @@
 //#define SHADINGMODELID_CLEAR_COAT			4
 //#define SHADINGMODELID_TWOSIDED_FOLIAGE	6
 //#define SHADINGMODELID_NUM				10
-//#define SHADINGMODELID_MASK					0xF	
+//#define SHADINGMODELID_MASK					0xF
 
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -608,6 +726,7 @@ struct FResolvedPixel
     float  LightDistanceSq;
     float  DistanceAttenuation;
     float  ShadowedLightAttenuation;
+    float  LightSourceRadius; //PATCH: carried so CalculateContactShadows can size the dead zone per light
 };
 
 struct FAreaLobe
@@ -917,7 +1036,7 @@ FLightingTerms MakeTerms(float3 diffuse, float3 specular, float3 extra)
 //if it's a spotlight even better since we have a defined directon
 //but check distance of light to camera
 //then check distance of light to depth, if the distance is negative then the light is behind geometry
-//using that value push the light forward towards camera, with an additional world normal offset 
+//using that value push the light forward towards camera, with an additional world normal offset
 
 #define OCCLUDED_LIGHT_DEPTH_BIAS 1.0f
 #define OCCLUDED_LIGHT_NORMAL_OFFSET 15.0f
@@ -1093,13 +1212,17 @@ float CalculateContactShadows(FGBufferData gbufferData, FResolvedPixel resolvedP
     const float invSamples = rcp((float)CONTACT_SHADOWS_SAMPLES);
 
 	#if defined(RANDOM_INTERLEAVED_GRADIENT_NOISE)
+		#if defined(PATCH_NOISE_FRAME_WRAP)
+		float random = InterleavedGradientNoise(input.SvPosition.xy, View_StateFrameIndex & 63);
+		#else
 		float random = InterleavedGradientNoise(input.SvPosition.xy, View_StateFrameIndex);
+		#endif
 	#elif defined(RANDOM_BLUE_NOISE)
 		float random = LoadSpatiotemporalBlueNoise(input);
 	#else
 		float random = 1.0f;
 	#endif
-	
+
     //approximation of how big a pixel is
     //this is because at low resolutions biasing / noise issues get really bad
     //but intrestingly at higher and higher resolutions the biasing/noise issues go away
@@ -1121,19 +1244,61 @@ float CalculateContactShadows(FGBufferData gbufferData, FResolvedPixel resolvedP
     worldPosition += gbufferData.WorldNormal * (pixelSize * CONTACT_SHADOWS_NORMAL_BIAS);
 
     float3 rayOrigin = worldPosition + resolvedPixel.LightVector * contactShadowBias;
+#if defined(PATCH_LIGHT_DISTANCE_CLAMP)
+    //PATCH: never march past the light source - occluders behind a point light
+    //cannot physically block it, yet the fixed-length ray sampled them as shadow.
+    //Also stop short of the light (absolute dead zone below) so the fixture a light
+    //sits inside of doesn't occlude its own light: those lights ship with shadow
+    //casting disabled in vanilla on purpose. This is the main fix for dark indoor lamps.
+    //Side effect: rayProgress now ends AT the light, so the existing distance
+    //falloff finally does its job for near-light hits.
+    //PATCH v2: absolute per-light dead zone instead of proportional REACH.
+    //Proportional was mis-shaped: zone grew with receiver distance (too small for the
+    //wall right behind a fixture, too large for far receivers). Fixture size is an
+    //absolute property of the light, so subtract, don't multiply - and size it from
+    //the game's own per-light SourceRadius.
+    float fixtureRadius    = max(CONTACT_SHADOWS_FIXTURE_RADIUS_MIN, resolvedPixel.LightSourceRadius * CONTACT_SHADOWS_FIXTURE_RADIUS_SCALE);
+    float distanceToLight  = sqrt(resolvedPixel.LightDistanceSq);
+#if defined(CONTACT_SHADOWS_FIXTURE_RAMP) && defined(CONTACT_SHADOWS_FALLOFF)
+    //ramp mode: march the full distance; per-hit weighting inside the loop handles
+    //the fixture instead of a hard exclusion zone
+    float clampedRayLength = min(CONTACT_SHADOWS_RAY_LENGTH, distanceToLight);
+#else
+    float clampedRayLength = min(CONTACT_SHADOWS_RAY_LENGTH, max(distanceToLight - fixtureRadius, 0.0));
+#endif
+    float3 rayEnd    = rayOrigin + resolvedPixel.LightVector * clampedRayLength;
+#else
     float3 rayEnd    = rayOrigin + resolvedPixel.LightVector * CONTACT_SHADOWS_RAY_LENGTH;
+#endif
 
 	//FIX: apparently we use translated world to clip, which supposedly is more accurate?
     float4 clipStart = mul(float4(rayOrigin, 1.0), View_TranslatedWorldToClip);
     float4 clipEnd   = mul(float4(rayEnd, 1.0), View_TranslatedWorldToClip);
+
+#if defined(PATCH_CLIP_W_GUARD)
+    //PATCH: indoors, local-light rays cross the camera near plane all the time.
+    //If either ray end has w <= 0 the perspective divide flips the NDC and the
+    //march walks garbage UVs -> random flicker. Bail to 'no shadow'.
+    if (clipStart.w <= 0.0 || clipEnd.w <= 0.0)
+        return 1.0;
+#endif
 
     float3 ndcStart = clipStart.xyz / clipStart.w;
     float3 ndcEnd = clipEnd.xyz / clipEnd.w;
 
     float rayStartDepth = LinearizeSceneDepth(ndcStart.z);
     float rayEndDepth = LinearizeSceneDepth(ndcEnd.z);
+#if defined(PATCH_PERSPECTIVE_DEPTH)
+    //PATCH: perspective-correct ray depth (see directional shader for rationale).
+    //Local light rays almost always have a strong depth component -> matters more here.
+    float invDepthStart = rcp(rayStartDepth);
+    float invDepthEnd   = rcp(rayEndDepth);
+    float invDepthStep  = (invDepthEnd - invDepthStart) * invSamples;
+    float invRayDepth   = mad(invDepthStep, random, invDepthStart);
+#else
     float rayDepth = lerp(rayStartDepth, rayEndDepth, random * invSamples);
     float rayDepthStep = (rayEndDepth - rayStartDepth) * invSamples;
+#endif
 
 	//IMPORTANT NOTE: make sure we use View_ScreenPositionScaleBias instead of hardcoded constants.
 	// xy = scale (0.5, -0.5 on D3D), zw = bias (0.5, 0.5 + viewport offset + TAA jitter)
@@ -1156,28 +1321,89 @@ float CalculateContactShadows(FGBufferData gbufferData, FResolvedPixel resolvedP
 
         float deviceDepth = SceneTexturesStruct_SceneDepthTexture.SampleLevel(View_SharedPointClampedSampler, uv, 0.0).r;
         float sceneDepth = LinearizeSceneDepth(deviceDepth);
+        #if defined(PATCH_PERSPECTIVE_DEPTH)
+        float rayDepth = rcp(invRayDepth);
+        #endif
         float penetration = rayDepth - sceneDepth;
 
 		#if defined(CONTACT_SHADOWS_FALLOFF)
 			if (penetration > contactShadowBias && penetration < CONTACT_SHADOWS_THICKNESS)
 			{
+				#if defined(PATCH_UNLIT_HITS_DONT_OCCLUDE)
+					//PATCH v4: the hit surface's shading model lives in GBufferB.a (packed & 15).
+					//Unlit = emissive geometry (bulb glass, signs, fire) - it cannot occlude.
+					int hitPackedModel = (int)round(SceneTexturesStruct_GBufferBTexture.SampleLevel(View_SharedPointClampedSampler, uv, 0.0).a * 255.0);
+					if ((hitPackedModel & 15) == SHADINGMODELID_UNLIT)
+					{
+						#if defined(PATCH_PERSPECTIVE_DEPTH)
+						invRayDepth += invDepthStep;
+						#else
+						rayDepth += rayDepthStep;
+						#endif
+						uv += uvStep;
+						continue;
+					}
+				#endif
 				//how far along the ray are we? (we are going from point towards the light)
-				float rayProgress = i * invSamples;
+				#if defined(PATCH_FALLOFF_JITTER)
+					//PATCH: use the jittered sample position, not the quantized index,
+					//so the falloff doesn't band temporally under animated noise
+					float rayProgress = (i + random) * invSamples;
+				#else
+					float rayProgress = i * invSamples;
+				#endif
 				float thicknessFade = 1.0 - saturate((penetration - contactShadowBias) / (CONTACT_SHADOWS_THICKNESS - contactShadowBias));
 				float distanceFade = 1.0 - saturate(rayProgress);
 				float sampleShadow = 1.0 - distanceFade;
 				sampleShadow *= sampleShadow;
 
+				#if defined(PATCH_THICKNESS_FADE)
+					//PATCH: thicknessFade was computed but never used (dead code in the original).
+					//Deep penetrations - hits far behind the depth surface, i.e. a thin occluder
+					//or a disocclusion - fade out instead of shadowing at full strength.
+					sampleShadow = lerp(1.0, sampleShadow, thicknessFade);
+				#endif
+
+				#if defined(PATCH_LIGHT_DISTANCE_CLAMP) && defined(CONTACT_SHADOWS_FIXTURE_RAMP)
+					//PATCH v3: weight the hit by its world distance to the light. Housing/bracket
+					//hits (at the bulb) weigh ~0 -> lamp keeps emitting, no wall halo. Cage bars
+					//farther out weigh partially -> soft bar shadows return. Squared to keep the
+					//weight near zero close to the light.
+					float hitDistToLight = distanceToLight - rayProgress * clampedRayLength;
+					//PATCH v5: zero weight inside the core, linear ramp across the outer shell
+					float coreRadius  = fixtureRadius * CONTACT_SHADOWS_FIXTURE_CORE;
+					float fixtureFade = saturate((hitDistToLight - coreRadius) / max(fixtureRadius - coreRadius, 0.01));
+					sampleShadow = lerp(1.0, sampleShadow, fixtureFade);
+				#endif
+
 				occlusion = min(occlusion, sampleShadow);
+
+				#if defined(PATCH_EARLY_BREAK_FIRST_HIT) && !defined(PATCH_THICKNESS_FADE)
+					//PATCH: with pure distance falloff, sampleShadow grows monotonically with i,
+					//so the first hit is provably the darkest - later hits can never win the min()
+					break;
+				#endif
 			}
 		#else
 			//NOTE TO SELF: while this is simple and fast, leaves a harsh cutoff
 			//for thickness we can calculate a "weight" to do a smoother falloff out from shadow
 			if (penetration > contactShadowBias && penetration < CONTACT_SHADOWS_THICKNESS)
-				return 0.0;
+			{
+				#if defined(PATCH_UNLIT_HITS_DONT_OCCLUDE)
+					int hitPackedModel = (int)round(SceneTexturesStruct_GBufferBTexture.SampleLevel(View_SharedPointClampedSampler, uv, 0.0).a * 255.0);
+					if ((hitPackedModel & 15) != SHADINGMODELID_UNLIT)
+						return 0.0;
+				#else
+					return 0.0;
+				#endif
+			}
 		#endif
 
+        #if defined(PATCH_PERSPECTIVE_DEPTH)
+        invRayDepth += invDepthStep;
+        #else
         rayDepth += rayDepthStep;
+        #endif
         uv += uvStep;
     }
 
@@ -1224,9 +1450,9 @@ FLightingTerms ShadeDefaultLit(FGBufferData gbufferData, FResolvedPixel resolved
     float diffuseScale = 1.0 - gbufferData.CustomData.z;
 
 	#if defined(SHADING_DEFAULT_LIT_BURLEY)
-		float3 diffuse = Diffuse_Burley(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * invDistSq * lobe.NoL * diffuseShadow;
+		float3 diffuse = Diffuse_Burley(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * invDistSq * lobe.NoL * diffuseShadow * PATCH_DIFFUSE_ENERGY_MULT; //PATCH: optional dropped-energy-term fix
 	#elif defined(SHADING_DEFAULT_LIT_OREN_NAYAR)
-		float3 diffuse = Diffuse_OrenNayar(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * invDistSq * lobe.NoL * diffuseShadow;
+		float3 diffuse = Diffuse_OrenNayar(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * invDistSq * lobe.NoL * diffuseShadow * PATCH_DIFFUSE_ENERGY_MULT; //PATCH: optional dropped-energy-term fix
 	#else //default game
 		float3 diffuse = CommonLambertTerm(gbufferData.ShadingDiffuseColor * diffuseScale, invDistSq, lobe.NoL, energy, diffuseShadow);
 	#endif
@@ -1410,7 +1636,7 @@ FLightingTerms ShadeHair(FGBufferData gbufferData, FResolvedPixel resolvedPixel,
     float distSq = max(0.0001, max(1.0, resolvedPixel.LightDistanceSq));
     float invDistSq = rcp(distSq);
 
-    //hair constructs a tangent frame from the view-projected normal, then evaluates the light in that frame. 
+    //hair constructs a tangent frame from the view-projected normal, then evaluates the light in that frame.
 	//NOTE: GBufferD.xyz looks to be a decoded strand anisotropy vector?
     float baseNoV = dot(gbufferData.WorldNormal, resolvedPixel.CameraVector);
     float3 strandTangent = SafeNormalize(gbufferData.WorldNormal * baseNoV - resolvedPixel.CameraVector);
@@ -1633,6 +1859,7 @@ FResolvedPixel ResolvePixel(PSInput input, FGBufferData gbufferData, FDeferredLi
     //float3 toLight = CalculateOffsetedLightPosition(gbufferData, light) - resolvedPixel.WorldPosition;
     resolvedPixel.LightDistanceSq = dot(toLight, toLight);
 	resolvedPixel.LightVector = (resolvedPixel.LightDistanceSq > 0.0001) ? toLight * rsqrt(resolvedPixel.LightDistanceSq) : float3(0, 0, 0);
+    resolvedPixel.LightSourceRadius = light.SourceRadius; //PATCH
 
     float invRadiusSqDist = light.InvRadius * light.InvRadius * resolvedPixel.LightDistanceSq;
     float attenuation = saturate(1.0 - invRadiusSqDist * invRadiusSqDist);
@@ -1675,6 +1902,17 @@ PSOutput main(PSInput input)
     int2 pixelPos = ResolvePixelPos(screenUV);
     FGBufferData gbufferData = DecodeGBuffer(pixelPos);
 
+	#if defined(DEBUG_VISUALIZE_SHADING_MODEL)
+		//PATCH DEBUG: UNLIT (emissive) = red, others = grey by ID. Placed before the
+		//unlit early-out on purpose so emissive pixels actually paint.
+		PSOutput dbg;
+		float3 dbgColor = (gbufferData.ShadingModelID == SHADINGMODELID_UNLIT)
+			? float3(1.0, 0.0, 0.0)
+			: ((float)gbufferData.ShadingModelID / 9.0).xxx;
+		dbg.Color = float4(dbgColor, 0.0) * View_PreExposure;
+		return dbg;
+	#endif
+
 	//optimization: early out if shading model is unlit only (no lighting!)
     if (gbufferData.ShadingModelID == SHADINGMODELID_UNLIT)
     {
@@ -1684,6 +1922,12 @@ PSOutput main(PSInput input)
 
     FDeferredLightData light = GetDeferredLight();
     FResolvedPixel resolvedPixel = ResolvePixel(input, gbufferData, light);
+
+	#if defined(DEBUG_VISUALIZE_SOURCE_RADIUS)
+		//PATCH DEBUG: paint each light's footprint grey by its SourceRadius (white = 50+).
+		output.Color = float4(saturate(light.SourceRadius / 50.0).xxx * resolvedPixel.DistanceAttenuation, 0.0) * View_PreExposure;
+		return output;
+	#endif
 
 	//optimization: early out if resolved light distance attenuation is 0!
     if (resolvedPixel.DistanceAttenuation <= 0.0)
@@ -1727,7 +1971,12 @@ PSOutput main(PSInput input)
 		#endif
 		{
 			#if defined(CONTACT_SHADOW_EARLY_SKY_OUT)
+				#if defined(PATCH_FAST_SKY_OUT)
+				//PATCH: reversed-Z - sky/far plane is device depth 0, test directly
+				if (gbufferData.DeviceDepth > 1.0e-7)
+				#else
 				if (LinearizeSceneDepth(gbufferData.DeviceDepth) < 1000000.0)
+				#endif
 			#endif
 			{
 				contactShadow = CalculateContactShadows(gbufferData, resolvedPixel, input);
@@ -1753,32 +2002,32 @@ PSOutput main(PSInput input)
         //===========================================================
         //added controls (some users want to disable contact shadows for specific materials)
         #if defined(DISABLE_CONTACT_SHADOWS_FOR_DEFAULT_LIT)
-            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_DEFAULT_LIT)
+            if (gbufferData.ShadingModelID /*PATCH: compile fix, was 'graphicsBuffer'*/ == SHADINGMODELID_DEFAULT_LIT)
                 contactShadow = 1.0f;
         #endif
-        
+
         #if defined(DISABLE_CONTACT_SHADOWS_FOR_CLOTH)
-            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_CLOTH)
+            if (gbufferData.ShadingModelID /*PATCH: compile fix, was 'graphicsBuffer'*/ == SHADINGMODELID_CLOTH)
                 contactShadow = 1.0f;
         #endif
 
         #if defined(DISABLE_CONTACT_SHADOWS_FOR_PREINTEGRATED_SKIN)
-            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_PREINTEGRATED_SKIN)
+            if (gbufferData.ShadingModelID /*PATCH: compile fix, was 'graphicsBuffer'*/ == SHADINGMODELID_PREINTEGRATED_SKIN)
                 contactShadow = 1.0f;
         #endif
 
         #if defined(DISABLE_CONTACT_SHADOWS_FOR_SUBSURFACE_PROFILE)
-            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE_PROFILE)
+            if (gbufferData.ShadingModelID /*PATCH: compile fix, was 'graphicsBuffer'*/ == SHADINGMODELID_SUBSURFACE_PROFILE)
                 contactShadow = 1.0f;
         #endif
 
         #if defined(DISABLE_CONTACT_SHADOWS_FOR_HAIR)
-            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_HAIR)
+            if (gbufferData.ShadingModelID /*PATCH: compile fix, was 'graphicsBuffer'*/ == SHADINGMODELID_HAIR)
                 contactShadow = 1.0f;
         #endif
 
         #if defined(DISABLE_CONTACT_SHADOWS_FOR_EYE)
-            if (graphicsBuffer.ShadingModelID == SHADINGMODELID_EYE)
+            if (gbufferData.ShadingModelID /*PATCH: compile fix, was 'graphicsBuffer'*/ == SHADINGMODELID_EYE)
                 contactShadow = 1.0f;
         #endif
         //===========================================================

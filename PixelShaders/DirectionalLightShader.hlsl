@@ -1,4 +1,63 @@
-//DeferredDirectionalLightPS.hlsl
+//DeferredDirectionalLightPS.hlsl - PATCHED (community review build)
+
+//|||||||||||||||||||||||||||||||||| PATCHES (community review) ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| PATCHES (community review) ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| PATCHES (community review) ||||||||||||||||||||||||||||||||||
+//Each patch is independently toggleable. Comment a #define out to get the original behavior back.
+//None of these change the author's tunables above/below; they only fix or gate specific code paths.
+
+//BUGFIX: thicknessFade was computed inside the falloff loop but never applied (dead code).
+//Enabling it fades out hits whose penetration approaches CONTACT_SHADOWS_THICKNESS instead of
+//shadowing at full strength -> softer treatment of thin occluders, less foliage shimmer.
+//NOTE: turns the min() accumulation into a real scan (non-monotonic), see PATCH_EARLY_BREAK_FIRST_HIT.
+#define PATCH_THICKNESS_FADE
+
+//BUGFIX: guard against rays whose clip-space w goes <= 0 (surface near the camera plane with the
+//light pointing towards the camera). Without it the NDC flips sign and the march walks garbage UVs.
+//The author's earlier (commented-out) implementation had this guard; the active one lost it.
+#define PATCH_CLIP_W_GUARD
+
+//BUGFIX: uv advances linearly in screen space, but along a screen-space line it is 1/z that
+//interpolates linearly - not z. Interpolate reciprocal depth so the ray depth and the sampled
+//scene depth stay in correspondence. Reduces acne/offset when the light has a strong depth
+//component (sun towards/away from camera). Requires PATCH_CLIP_W_GUARD (rcp near w=0 blows up).
+#define PATCH_PERSPECTIVE_DEPTH
+
+//BUGFIX: View_FrameNumber grows unbounded; after long sessions the IGN math loses mantissa and
+//the noise pattern degrades. Wrap it (the blue-noise path already wraps its frame index).
+#define PATCH_NOISE_FRAME_WRAP
+
+//BUGFIX: the falloff used the quantized sample index while the actual sample position is jittered
+//-> temporal banding under animated noise. Use the jittered position.
+#define PATCH_FALLOFF_JITTER
+
+//OPTIMIZATION (bit-exact): if the shadowmap already fully shadows the pixel, every lighting term
+//is 0 and the contact shadow multiply cannot change the output - skip the whole raymarch.
+//Auto-disabled under CONTACT_SHADOW_CHECKERBOARD (QuadReadLaneAt needs all lanes running).
+#define PATCH_SKIP_FULLY_SHADOWED
+
+//OPTIMIZATION: with reversed-Z the sky/far plane is device depth 0 - test that directly instead
+//of linearizing. NOTE: original also skipped *extremely* distant geometry (>1e6 units), this only
+//skips the true far plane; visually equivalent, marginally more honest.
+#define PATCH_FAST_SKY_OUT
+
+//OPTIMIZATION (bit-exact ONLY while PATCH_THICKNESS_FADE is OFF): with pure distance falloff,
+//sampleShadow grows monotonically with i, so the first hit is provably the darkest and later
+//hits can never win the min(). Break after the first hit. Ignored if PATCH_THICKNESS_FADE is on.
+//#define PATCH_EARLY_BREAK_FIRST_HIT
+
+//LOOK CHANGE (off by default): the Burley/Oren-Nayar paths drop the 'energy' term
+//(DiffuseEnergyCompensation) that the Lambert path keeps, while specular keeps its companion
+//SpecularEnergyScale -> diffuse/specular balance differs from the Lambert reference. This
+//re-applies 'energy' to the alternative diffuse models. May be related to the specularity
+//difference noted in the mod docs. Test it - it noticeably re-balances rough surfaces.
+//#define PATCH_DIFFUSE_ENERGY_TERM
+#if defined(PATCH_DIFFUSE_ENERGY_TERM)
+    #define PATCH_DIFFUSE_ENERGY_MULT energy
+#else
+    #define PATCH_DIFFUSE_ENERGY_MULT 1.0
+#endif
+
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - BRDF ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - BRDF ||||||||||||||||||||||||||||||||||
@@ -1163,13 +1222,31 @@ float FastContactShadowClipSpace(
     float4 clipStart = mul(View_WorldToClip, float4(rayOrigin, 1.0));
     float4 clipEnd   = mul(View_WorldToClip, float4(rayEnd, 1.0));
 
+    #if defined(PATCH_CLIP_W_GUARD)
+    //PATCH: if either ray end crosses the camera plane (w <= 0) the perspective
+    //divide flips the NDC and the march walks garbage UVs. Bail to 'no shadow'.
+    //(the earlier commented-out implementation above had this guard - the active one lost it)
+    if (clipStart.w <= 0.0 || clipEnd.w <= 0.0)
+        return 1.0;
+#endif
+
     float3 ndcStart = clipStart.xyz / clipStart.w;
     float3 ndcEnd = clipEnd.xyz / clipEnd.w;
 
     float rayStartDepth = LinearEyeDepth(ndcStart.z);
     float rayEndDepth = LinearEyeDepth(ndcEnd.z);
+#if defined(PATCH_PERSPECTIVE_DEPTH)
+    //PATCH: uv advances linearly in screen space; along a screen-space line it is
+    //1/z that interpolates linearly, not z. Interpolate reciprocal depth so ray
+    //depth and sampled scene depth stay in correspondence.
+    float invDepthStart = rcp(rayStartDepth);
+    float invDepthEnd   = rcp(rayEndDepth);
+    float invDepthStep  = (invDepthEnd - invDepthStart) * invSamples;
+    float invRayDepth   = mad(invDepthStep, random, invDepthStart);
+#else
     float rayDepth = lerp(rayStartDepth, rayEndDepth, random * invSamples);
     float rayDepthStep = (rayEndDepth - rayStartDepth) * invSamples;
+#endif
 
 	//IMPORTANT NOTE: make sure we use View_ScreenPositionScaleBias instead of hardcoded constants.
 	// xy = scale (0.5, -0.5 on D3D), zw = bias (0.5, 0.5 + viewport offset + TAA jitter)
@@ -1193,19 +1270,41 @@ float FastContactShadowClipSpace(
 
         float deviceDepth = SceneTexturesStruct_SceneDepthTexture.SampleLevel(View_SharedPointClampedSampler, uv, 0.0).r;
         float sceneDepth = LinearEyeDepth(deviceDepth);
+        #if defined(PATCH_PERSPECTIVE_DEPTH)
+        float rayDepth = rcp(invRayDepth);
+        #endif
         float penetration = rayDepth - sceneDepth;
 
 		#if defined(CONTACT_SHADOWS_FALLOFF)
 			if (penetration > contactShadowBias && penetration < CONTACT_SHADOWS_THICKNESS)
 			{
 				//how far along the ray are we? (we are going from point towards the light)
-				float rayProgress = i * invSamples;
+				#if defined(PATCH_FALLOFF_JITTER)
+					//PATCH: use the jittered sample position, not the quantized index,
+					//so the falloff doesn't band temporally under animated noise
+					float rayProgress = (i + random) * invSamples;
+				#else
+					float rayProgress = i * invSamples;
+				#endif
 				float thicknessFade = 1.0 - saturate((penetration - contactShadowBias) / (CONTACT_SHADOWS_THICKNESS - contactShadowBias));
 				float distanceFade = 1.0 - saturate(rayProgress);
 				float sampleShadow = 1.0 - distanceFade;
 				sampleShadow *= sampleShadow;
 
+				#if defined(PATCH_THICKNESS_FADE)
+					//PATCH: thicknessFade was computed but never used (dead code in the original).
+					//Deep penetrations - hits far behind the depth surface, i.e. a thin occluder
+					//or a disocclusion - fade out instead of shadowing at full strength.
+					sampleShadow = lerp(1.0, sampleShadow, thicknessFade);
+				#endif
+
 				occlusion = min(occlusion, sampleShadow);
+
+				#if defined(PATCH_EARLY_BREAK_FIRST_HIT) && !defined(PATCH_THICKNESS_FADE)
+					//PATCH: with pure distance falloff, sampleShadow grows monotonically with i,
+					//so the first hit is provably the darkest - later hits can never win the min()
+					break;
+				#endif
 			}
 		#else
 			//NOTE TO SELF: while this is simple and fast, leaves a harsh cutoff
@@ -1214,7 +1313,11 @@ float FastContactShadowClipSpace(
 				return 0.0;
 		#endif
 
+        #if defined(PATCH_PERSPECTIVE_DEPTH)
+        invRayDepth += invDepthStep;
+        #else
         rayDepth += rayDepthStep;
+        #endif
         uv += uvStep;
     }
 
@@ -1230,10 +1333,18 @@ float FastContactShadowClipSpace(
 float CalculateContactShadows(int2 pixelPos, float3 worldPosition, float3 worldNormal, float3 lightDirection, float rawDepth, float random, int shadingModelID)
 {
     #if defined(CONTACT_SHADOW_EARLY_SKY_OUT)
-        if (LinearizeSceneDepth(rawDepth) >= 1000000.0)
-        {
-            return 1.0;
-        }
+        #if defined(PATCH_FAST_SKY_OUT)
+            //PATCH: reversed-Z - the sky/far plane is device depth 0, test directly
+            if (rawDepth <= 1.0e-7)
+            {
+                return 1.0;
+            }
+        #else
+            if (LinearizeSceneDepth(rawDepth) >= 1000000.0)
+            {
+                return 1.0;
+            }
+        #endif
     #endif
 
     float contactShadow = 1.0;
@@ -1299,9 +1410,9 @@ FLightingTerms ShadeDefaultLit(FGBufferData gbufferData, FResolvedPixel resolved
     float diffuseScale = 1.0 - gbufferData.CustomData.z;
 
 	#if defined(SHADING_DEFAULT_LIT_BURLEY)
-		float3 diffuse = Diffuse_Burley(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * lobe.NoL * diffuseShadow;
+		float3 diffuse = Diffuse_Burley(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * lobe.NoL * diffuseShadow * PATCH_DIFFUSE_ENERGY_MULT; //PATCH: optional dropped-energy-term fix
 	#elif defined(SHADING_DEFAULT_LIT_OREN_NAYAR)
-		float3 diffuse = Diffuse_OrenNayar(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * lobe.NoL * diffuseShadow;
+		float3 diffuse = Diffuse_OrenNayar(gbufferData.ShadingDiffuseColor * diffuseScale, roughness, noVAbs, lobe.NoL, voH) * lobe.NoL * diffuseShadow * PATCH_DIFFUSE_ENERGY_MULT; //PATCH: optional dropped-energy-term fix
 	#else //default game
 		float3 diffuse = CommonLambertTerm(gbufferData.ShadingDiffuseColor * diffuseScale, invDistSq, lobe.NoL, energy, diffuseShadow);
 	#endif
@@ -1833,14 +1944,27 @@ PSOutput main(PSInput input)
 	//contact shadows!
 	#if defined(ENABLE_CONTACT_SHADOWS)
         #if defined(RANDOM_INTERLEAVED_GRADIENT_NOISE)
+            #if defined(PATCH_NOISE_FRAME_WRAP)
+            float random = InterleavedGradientNoise(pixelPos, View_FrameNumber & 63);
+            #else
             float random = InterleavedGradientNoise(pixelPos, View_FrameNumber);
+            #endif
         #elif defined(RANDOM_BLUE_NOISE)
             float random = LoadSpatiotemporalBlueNoise(input);
         #else
             float random = 1.0f;
         #endif
 
-		float contactShadow = CalculateContactShadows(pixelPos, resolvedPixel.WorldPosition, graphicsBuffer.WorldNormal, resolvedPixel.LightVector, graphicsBuffer.DeviceDepth, random, graphicsBuffer.ShadingModelID);
+		float contactShadow = 1.0;
+		#if defined(PATCH_SKIP_FULLY_SHADOWED) && !defined(CONTACT_SHADOW_CHECKERBOARD)
+		//PATCH (bit-exact): if the shadowmap already fully shadows this pixel every
+		//lighting term is 0 - multiplying by contactShadow cannot change the output.
+		//(auto-disabled under checkerboard: QuadReadLaneAt needs all lanes to run)
+		if (resolvedPixel.ShadowedLightAttenuation > 0.0)
+		#endif
+		{
+			contactShadow = CalculateContactShadows(pixelPos, resolvedPixel.WorldPosition, graphicsBuffer.WorldNormal, resolvedPixel.LightVector, graphicsBuffer.DeviceDepth, random, graphicsBuffer.ShadingModelID);
+		}
 		
         //===========================================================
         //added controls (some users want to disable contact shadows for specific materials)
