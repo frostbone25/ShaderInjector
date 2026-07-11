@@ -90,11 +90,26 @@ namespace ShaderAutomaticDiscovery
 		bool gSessionStartTimeInitialized = false;
 		bool gNeverSeenShaderTypeDiagnosticLogged = false;
 		constexpr std::chrono::seconds neverSeenShaderTypeDiagnosticDelay{60};
+		constexpr std::chrono::seconds progressLogInterval{5};
+		constexpr uint64_t progressLogCompletedStep = 25;
+		constexpr uint64_t progressLogQueuedStep = 100;
 		std::condition_variable gAnalysisCondition;
 		std::thread* gAnalysisWorker = nullptr;
 		bool gAnalysisWorkerRunning = false;
 		bool gAnalysisStopRequested = false;
 		bool gAcceptingWork = true;
+		size_t gActiveAnalysisJobs = 0;
+		uint64_t gQueuedShaderTotal = 0;
+		uint64_t gAnalysisSubmittedTotal = 0;
+		uint64_t gAnalysisCompletedTotal = 0;
+		uint64_t gAnalysisMatchedTotal = 0;
+		uint64_t gAnalysisFailedTotal = 0;
+		uint64_t gDirectMatchProcessedTotal = 0;
+		uint64_t gShaderTargetsCreatedTotal = 0;
+		uint64_t gLastLoggedProcessedTotal = 0;
+		uint64_t gLastLoggedQueuedTotal = 0;
+		std::chrono::steady_clock::time_point gLastProgressLogTime{};
+		bool gProgressWasActive = false;
 		// Newer game patches tend to compile shaders slightly smaller than the version a mod
 		// package was originally built against, so the lower bound gets more slack than the
 		// upper bound.
@@ -182,6 +197,95 @@ namespace ShaderAutomaticDiscovery
 					return true;
 			}
 			return false;
+		}
+
+		uint64_t ProcessedShaderTotalLocked()
+		{
+			return gAnalysisCompletedTotal + gDirectMatchProcessedTotal;
+		}
+
+		bool HasPendingDiscoveryWorkLocked()
+		{
+			return !gQueuedShaders.empty() ||
+				!gAnalysisJobs.empty() ||
+				!gAnalysisResults.empty() ||
+				gActiveAnalysisJobs > 0;
+		}
+
+		std::string BuildDiscoveryProgressMessageLocked(const char* reason)
+		{
+			const uint64_t processedTotal = ProcessedShaderTotalLocked();
+			const uint64_t rejectedTotal = gAnalysisCompletedTotal >= gAnalysisMatchedTotal ?
+				gAnalysisCompletedTotal - gAnalysisMatchedTotal : 0;
+			const double processedPercent = gQueuedShaderTotal > 0 ?
+				(static_cast<double>(processedTotal) * 100.0) / static_cast<double>(gQueuedShaderTotal) : 100.0;
+			const double analysisPercent = gAnalysisSubmittedTotal > 0 ?
+				(static_cast<double>(gAnalysisCompletedTotal) * 100.0) / static_cast<double>(gAnalysisSubmittedTotal) : 100.0;
+
+			char processedPercentText[32]{};
+			char analysisPercentText[32]{};
+			sprintf_s(processedPercentText, "%.1f", processedPercent);
+			sprintf_s(analysisPercentText, "%.1f", analysisPercent);
+
+			return "ShaderAutomaticDiscovery->Progress: " + std::string(reason) +
+				" processed=" + std::to_string(processedTotal) + "/" + std::to_string(gQueuedShaderTotal) +
+				" (" + processedPercentText + "%)" +
+				" analyzed=" + std::to_string(gAnalysisCompletedTotal) + "/" + std::to_string(gAnalysisSubmittedTotal) +
+				" (" + analysisPercentText + "%)" +
+				" directMatches=" + std::to_string(gDirectMatchProcessedTotal) +
+				" analysisMatches=" + std::to_string(gAnalysisMatchedTotal) +
+				" analysisRejected=" + std::to_string(rejectedTotal) +
+				" analysisFailed=" + std::to_string(gAnalysisFailedTotal) +
+				" targetsCreated=" + std::to_string(gShaderTargetsCreatedTotal) +
+				" queued=" + std::to_string(gQueuedShaders.size()) +
+				" pendingAnalysis=" + std::to_string(gAnalysisJobs.size()) +
+				" activeAnalysis=" + std::to_string(gActiveAnalysisJobs) +
+				" pendingResults=" + std::to_string(gAnalysisResults.size());
+		}
+
+		void MaybeLogDiscoveryProgress(const char* reason, bool force = false)
+		{
+			std::string progressMessage;
+			{
+				std::lock_guard<std::mutex> lock(gQueueMutex);
+				const auto now = std::chrono::steady_clock::now();
+				const bool active = HasPendingDiscoveryWorkLocked();
+				const uint64_t processedTotal = ProcessedShaderTotalLocked();
+				const bool completedEnoughWork = processedTotal >= gLastLoggedProcessedTotal + progressLogCompletedStep;
+				const bool queuedEnoughWork = gQueuedShaderTotal >= gLastLoggedQueuedTotal + progressLogQueuedStep;
+				const bool waitedLongEnough = gLastProgressLogTime.time_since_epoch().count() == 0 ||
+					now - gLastProgressLogTime >= progressLogInterval;
+				const bool justFinished = gProgressWasActive && !active;
+
+				if (!force && !justFinished && (!active || (!completedEnoughWork && !queuedEnoughWork && !waitedLongEnough)))
+					return;
+
+				progressMessage = BuildDiscoveryProgressMessageLocked(justFinished ? "complete" : reason);
+				gLastLoggedProcessedTotal = processedTotal;
+				gLastLoggedQueuedTotal = gQueuedShaderTotal;
+				gLastProgressLogTime = now;
+				gProgressWasActive = active;
+			}
+
+			ShaderInjectorGUI::WriteToRuntimeLog(progressMessage);
+		}
+
+		void MarkAnalysisCompleted(bool matched, bool failed)
+		{
+			std::lock_guard<std::mutex> lock(gQueueMutex);
+			if (gActiveAnalysisJobs > 0)
+				--gActiveAnalysisJobs;
+			++gAnalysisCompletedTotal;
+			if (matched)
+				++gAnalysisMatchedTotal;
+			if (failed)
+				++gAnalysisFailedTotal;
+		}
+
+		void MarkShaderTargetCreated()
+		{
+			std::lock_guard<std::mutex> lock(gQueueMutex);
+			++gShaderTargetsCreatedTotal;
 		}
 
 		void RebindGraphicsPipelinePointers(HookD3D12::GraphicsPipelineInfo& pipeline)
@@ -283,6 +387,7 @@ namespace ShaderAutomaticDiscovery
 				gQueuedShaders.push_front(std::move(queued));
 			else
 				gQueuedShaders.push_back(std::move(queued));
+			++gQueuedShaderTotal;
 			return true;
 		}
 
@@ -344,6 +449,7 @@ namespace ShaderAutomaticDiscovery
 			}
 
 			HookD3D12::MarkShaderTargetApplyDirty();
+			MarkShaderTargetCreated();
 			ShaderInjectorGUI::WriteToRuntimeLogSuccess(
 				"ShaderAutomaticDiscovery: created ShaderTarget for " + Hash::FormatHash(queued.key.hash) +
 				" using " + modifiedShaderId);
@@ -438,6 +544,7 @@ namespace ShaderAutomaticDiscovery
 
 					job = std::move(gAnalysisJobs.front());
 					gAnalysisJobs.pop_front();
+					++gActiveAnalysisJobs;
 				}
 
 				try
@@ -450,7 +557,10 @@ namespace ShaderAutomaticDiscovery
 						*job.modifiedShaders,
 						&candidateAnalysis);
 					if (modifiedShaderIndex < 0 || modifiedShaderIndex >= static_cast<int>(job.modifiedShaders->size()))
+					{
+						MarkAnalysisCompleted(false, false);
 						continue;
+					}
 
 					AnalysisResult result{};
 					result.queuedShader = std::move(job.queuedShader);
@@ -460,9 +570,11 @@ namespace ShaderAutomaticDiscovery
 						std::lock_guard<std::mutex> lock(gQueueMutex);
 						gAnalysisResults.push_back(std::move(result));
 					}
+					MarkAnalysisCompleted(true, false);
 				}
 				catch (...)
 				{
+					MarkAnalysisCompleted(false, true);
 					ShaderInjectorGUI::WriteToRuntimeLogError(
 						"ShaderAutomaticDiscovery: background shader analysis failed unexpectedly");
 				}
@@ -496,6 +608,7 @@ namespace ShaderAutomaticDiscovery
 			job.queuedShader = std::move(queued);
 			job.modifiedShaders = gModifiedShaderAnalysisSnapshot;
 			gAnalysisJobs.push_back(std::move(job));
+			++gAnalysisSubmittedTotal;
 			gAnalysisCondition.notify_one();
 			return true;
 		}
@@ -662,6 +775,10 @@ namespace ShaderAutomaticDiscovery
 			if (!directModifiedShaderId.empty())
 			{
 				ProcessMatchedShader(queued, directModifiedShaderId);
+				{
+					std::lock_guard<std::mutex> lock(gQueueMutex);
+					++gDirectMatchProcessedTotal;
+				}
 				continue;
 			}
 
@@ -672,6 +789,8 @@ namespace ShaderAutomaticDiscovery
 				break;
 			}
 		}
+
+		MaybeLogDiscoveryProgress("active");
 	}
 
 	void Shutdown()
