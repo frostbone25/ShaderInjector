@@ -11,6 +11,7 @@
 #include "ShaderAnalyzer.h"
 #include "ShaderInjectorGUI.h"
 #include "ShaderInjectorIO.h"
+#include "StringHelper.h"
 
 namespace ShaderDiscovery
 {
@@ -191,6 +192,36 @@ namespace ShaderDiscovery
 
 		if (!HasStrictCrossVersionIdentity(candidateAnalysis))
 		{
+			std::string failureReason;
+			if (!candidateAnalysis.succeeded)
+			{
+				failureReason = candidateAnalysis.error.empty() ?
+					"analysis did not succeed" : candidateAnalysis.error;
+			}
+			else
+			{
+				auto appendMissingField = [&](const char* fieldName)
+				{
+					if (!failureReason.empty())
+						failureReason += ", ";
+					failureReason += fieldName;
+				};
+				if (candidateAnalysis.portableReflectionIdentityHash.empty())
+					appendMissingField("portableReflectionIdentityHash");
+				if (candidateAnalysis.semanticInstructionSetHash.empty())
+					appendMissingField("semanticInstructionSetHash");
+				if (candidateAnalysis.crossVersionIdentityHash.empty())
+					appendMissingField("crossVersionIdentityHash");
+				if (failureReason.empty())
+					failureReason = "unknown";
+			}
+
+			ShaderInjectorGUI::WriteToRuntimeLogError(
+				"ShaderDiscovery->DiscoverEnabledReplacement: " +
+				std::string(candidateAnalysis.succeeded ? "incomplete cross-version identity for " : "analysis failed for ") +
+				Hash::FormatHash(shaderHash) +
+				" type=" + StringHelper::ShaderTypeToString(shaderType) +
+				": " + failureReason);
 			gAttemptedCandidates.insert(candidateKey);
 			return -1;
 		}
@@ -478,6 +509,73 @@ namespace ShaderDiscovery
 					" score=" + std::to_string(bestScore));
 				return bestPackageIndex;
 			}
+
+			if (bestPackageIndex >= 0)
+			{
+				const ModifiedShader::PackageDisk& bestPackage = modifiedShaders[bestPackageIndex];
+				const ShaderAnalysis::ShaderAnalysisDisk* bestTargetAnalysis = nullptr;
+				double bestTargetScore = 0.0;
+				for (const ModifiedShader::TargetDisk& storedTarget : bestPackage.targets)
+				{
+					ModifiedShader::TargetDisk referenceTarget = storedTarget;
+					referenceTarget.knownShaderBytecodeHashes.clear();
+					ModifiedShader::TargetDisk candidateTarget{};
+					candidateTarget.targetApplication = referenceTarget.targetApplication;
+					candidateTarget.gameVersion = referenceTarget.gameVersion;
+					candidateTarget.originalShaderBytecodeLength = std::to_string(shaderBytecode.size());
+					candidateTarget.shaderAnalysis = candidateAnalysis;
+					const double targetScore = referenceTarget.CalculateSimilarityScore(candidateTarget);
+					if (targetScore > bestTargetScore)
+					{
+						bestTargetScore = targetScore;
+						bestTargetAnalysis = &storedTarget.shaderAnalysis;
+					}
+				}
+
+				std::string identityDiff;
+				if (bestTargetAnalysis)
+				{
+					auto appendDiff = [&](const char* label, const std::string& left, const std::string& right)
+					{
+						if (left != right)
+						{
+							if (!identityDiff.empty())
+								identityDiff += ", ";
+							identityDiff += std::string(label) + "=" + left + "!=" + right;
+						}
+					};
+					appendDiff("portableReflection",
+						candidateAnalysis.portableReflectionIdentityHash,
+						bestTargetAnalysis->portableReflectionIdentityHash);
+					appendDiff("semanticInstructionSet",
+						candidateAnalysis.semanticInstructionSetHash,
+						bestTargetAnalysis->semanticInstructionSetHash);
+					appendDiff("crossVersionIdentity",
+						candidateAnalysis.crossVersionIdentityHash,
+						bestTargetAnalysis->crossVersionIdentityHash);
+					appendDiff("entryFunction",
+						candidateAnalysis.entryFunctionName,
+						bestTargetAnalysis->entryFunctionName);
+				}
+
+				ShaderInjectorGUI::WriteToRuntimeLogError(
+					"ShaderDiscovery->DiscoverEnabledModifiedShader: analysis match rejected for " +
+					Hash::FormatHash(shaderHash) +
+					" bestScore=" + std::to_string(bestScore) +
+					" secondBestScore=" + std::to_string(secondBestScore) +
+					(identityDiff.empty() ? "" : " identityDiff={" + identityDiff + "}") +
+					" bestCandidate=" + bestPackage.id);
+			}
+		}
+		else
+		{
+			const std::string failureReason = candidateAnalysis.error.empty() ?
+				"analysis did not succeed" : candidateAnalysis.error;
+			ShaderInjectorGUI::WriteToRuntimeLogError(
+				"ShaderDiscovery->DiscoverEnabledModifiedShader: analysis failed for " +
+				Hash::FormatHash(shaderHash) +
+				" type=" + StringHelper::ShaderTypeToString(shaderType) +
+				": " + failureReason);
 		}
 #endif
 

@@ -2,6 +2,7 @@
 
 #include <deque>
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <memory>
@@ -19,6 +20,7 @@
 #include "ShaderAnalysis.h"
 #include "ShaderDiscovery.h"
 #include "ShaderInjectorGUI.h"
+#include "StringHelper.h"
 
 namespace ShaderAutomaticDiscovery
 {
@@ -82,7 +84,12 @@ namespace ShaderAutomaticDiscovery
 		std::unordered_map<ShaderKey, std::string, ShaderKeyHasher> gDirectMatchShaders;
 		std::shared_ptr<const std::vector<ModifiedShader::PackageDisk>> gModifiedShaderAnalysisSnapshot;
 		bool gCompatibleShaderTypes[static_cast<size_t>(ShaderTarget::Unknown) + 1]{};
+		bool gSeenShaderTypes[static_cast<size_t>(ShaderTarget::Unknown) + 1]{};
 		std::vector<std::pair<size_t, size_t>> gPlausibleByteLengthRanges[static_cast<size_t>(ShaderTarget::Unknown) + 1];
+		std::chrono::steady_clock::time_point gSessionStartTime{};
+		bool gSessionStartTimeInitialized = false;
+		bool gNeverSeenShaderTypeDiagnosticLogged = false;
+		constexpr std::chrono::seconds neverSeenShaderTypeDiagnosticDelay{60};
 		std::condition_variable gAnalysisCondition;
 		std::thread* gAnalysisWorker = nullptr;
 		bool gAnalysisWorkerRunning = false;
@@ -185,11 +192,29 @@ namespace ShaderAutomaticDiscovery
 			{
 				return true;
 			}
+			gSeenShaderTypes[shaderTypeIndex] = true;
 			const auto directMatchIterator = gDirectMatchShaders.find(key);
 			const bool directMatch = directMatchIterator != gDirectMatchShaders.end() &&
 				!directMatchIterator->second.empty();
 			if (!force && !directMatch && !HasPlausibleByteLength(shaderType, shaderBytecode.size()))
+			{
+				std::string expectedRanges;
+				const std::vector<std::pair<size_t, size_t>>& ranges = gPlausibleByteLengthRanges[shaderTypeIndex];
+				for (size_t rangeIndex = 0; rangeIndex < ranges.size(); ++rangeIndex)
+				{
+					if (rangeIndex > 0)
+						expectedRanges += ", ";
+					expectedRanges += std::to_string(ranges[rangeIndex].first) + "-" + std::to_string(ranges[rangeIndex].second);
+				}
+
+				ShaderInjectorGUI::WriteToRuntimeLogError(
+					"ShaderAutomaticDiscovery->Enqueue: byte length rejected for " +
+					StringHelper::ShaderTypeToString(shaderType) +
+					" hash=" + Hash::FormatHash(shaderHash) +
+					" byteLength=" + std::to_string(shaderBytecode.size()) +
+					(expectedRanges.empty() ? "" : " expectedRanges=[" + expectedRanges + "]"));
 				return true;
+			}
 
 			if (!force && !gSubmittedShaders.insert(key).second)
 				return true;
@@ -208,7 +233,13 @@ namespace ShaderAutomaticDiscovery
 			if (gQueuedShaders.size() >= maximumQueuedShaders)
 			{
 				if (!force)
+				{
+					ShaderInjectorGUI::WriteToRuntimeLogError(
+						"ShaderAutomaticDiscovery->Enqueue: queue full, dropping shader hash=" +
+						Hash::FormatHash(shaderHash) +
+						" queueSize=" + std::to_string(gQueuedShaders.size()));
 					return false;
+				}
 				gQueuedShaders.pop_back();
 			}
 
@@ -438,6 +469,73 @@ namespace ShaderAutomaticDiscovery
 			gAnalysisCondition.notify_one();
 			return true;
 		}
+
+		void CollectNeverSeenCompatibleShaderTypesForDiagnostic(std::vector<ShaderTarget::ShaderType>& outNeverSeenShaderTypes)
+		{
+			if (gNeverSeenShaderTypeDiagnosticLogged)
+				return;
+
+			if (!gSessionStartTimeInitialized)
+			{
+				gSessionStartTime = std::chrono::steady_clock::now();
+				gSessionStartTimeInitialized = true;
+				return;
+			}
+
+			if (std::chrono::steady_clock::now() - gSessionStartTime < neverSeenShaderTypeDiagnosticDelay)
+				return;
+
+			gNeverSeenShaderTypeDiagnosticLogged = true;
+
+			for (size_t shaderTypeIndex = 0; shaderTypeIndex < static_cast<size_t>(ShaderTarget::Unknown); ++shaderTypeIndex)
+			{
+				if (!gCompatibleShaderTypes[shaderTypeIndex] || gSeenShaderTypes[shaderTypeIndex])
+					continue;
+
+				outNeverSeenShaderTypes.push_back(static_cast<ShaderTarget::ShaderType>(shaderTypeIndex));
+			}
+		}
+
+		void LogNeverSeenCompatibleShaderTypes(const std::vector<ShaderTarget::ShaderType>& neverSeenShaderTypes)
+		{
+			if (neverSeenShaderTypes.empty())
+				return;
+
+			size_t enabledPackageCounts[static_cast<size_t>(ShaderTarget::Unknown) + 1]{};
+			size_t enabledReplacementCounts[static_cast<size_t>(ShaderTarget::Unknown) + 1]{};
+			for (const ModifiedShader::PackageDisk& modifiedShader : DatabaseModifiedShaders::GetModifiedShaders())
+			{
+				if (!modifiedShader.enabled || modifiedShader.shaderType == ShaderTarget::Unknown)
+					continue;
+
+				const size_t shaderTypeIndex = static_cast<size_t>(modifiedShader.shaderType);
+				if (shaderTypeIndex < static_cast<size_t>(ShaderTarget::Unknown))
+					++enabledPackageCounts[shaderTypeIndex];
+			}
+
+			if (HookD3D12::gLoadedShaderTargetsOnce)
+			{
+				for (const ShaderTarget::ShaderTargetDisk& replacement : HookD3D12::gLoadedShaderTargets)
+				{
+					if (!replacement.enabled || replacement.shaderType == ShaderTarget::Unknown)
+						continue;
+
+					const size_t shaderTypeIndex = static_cast<size_t>(replacement.shaderType);
+					if (shaderTypeIndex < static_cast<size_t>(ShaderTarget::Unknown))
+						++enabledReplacementCounts[shaderTypeIndex];
+				}
+			}
+
+			for (ShaderTarget::ShaderType shaderType : neverSeenShaderTypes)
+			{
+				const size_t shaderTypeIndex = static_cast<size_t>(shaderType);
+				ShaderInjectorGUI::WriteToRuntimeLogError(
+					"ShaderAutomaticDiscovery->MaybeLogNeverSeenCompatibleShaderTypes: no capture attempt for " +
+					StringHelper::ShaderTypeToString(shaderType) +
+					" enabledPackages=" + std::to_string(enabledPackageCounts[shaderTypeIndex]) +
+					" enabledReplacements=" + std::to_string(enabledReplacementCounts[shaderTypeIndex]));
+			}
+		}
 	}
 
 	void RefreshModifiedShaderIndex(const std::vector<ModifiedShader::PackageDisk>& modifiedShaders)
@@ -451,6 +549,8 @@ namespace ShaderAutomaticDiscovery
 		gDirectMatchShaders.clear();
 		for (bool& compatibleShaderType : gCompatibleShaderTypes)
 			compatibleShaderType = false;
+		for (bool& seenShaderType : gSeenShaderTypes)
+			seenShaderType = false;
 		for (auto& ranges : gPlausibleByteLengthRanges)
 			ranges.clear();
 
@@ -487,11 +587,14 @@ namespace ShaderAutomaticDiscovery
 
 	void ProcessQueuedWork(size_t maximumJobs)
 	{
+		std::vector<ShaderTarget::ShaderType> neverSeenShaderTypes;
 		{
 			std::lock_guard<std::mutex> lock(gQueueMutex);
 			if (!gAcceptingWork)
 				return;
+			CollectNeverSeenCompatibleShaderTypesForDiagnostic(neverSeenShaderTypes);
 		}
+		LogNeverSeenCompatibleShaderTypes(neverSeenShaderTypes);
 
 		// D3D12-facing completion work remains on the render thread.
 		for (size_t processedJobs = 0; processedJobs < maximumJobs; ++processedJobs)
