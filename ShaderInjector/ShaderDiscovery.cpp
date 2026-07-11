@@ -222,6 +222,97 @@ namespace ShaderDiscovery
 
 		if (matchingReplacementIndex < 0)
 		{
+			double bestFuzzyScore = 0.0;
+			double secondBestFuzzyScore = 0.0;
+			int bestFuzzyReplacementIndex = -1;
+			bool hasReflectionGateCandidate = false;
+
+			for (int replacementIndex = 0; replacementIndex < static_cast<int>(replacements.size()); ++replacementIndex)
+			{
+				const ShaderTarget::ShaderTargetDisk& replacement = replacements[replacementIndex];
+				if (!replacement.enabled || replacement.shaderType != shaderType ||
+					!HasPlausibleByteLength(shaderBytecode.size(), replacement) ||
+					!HasStrictCrossVersionIdentity(replacement.originalShaderAnalysis))
+				{
+					continue;
+				}
+
+				if (replacement.originalShaderAnalysis.portableReflectionIdentityHash !=
+					candidateAnalysis.portableReflectionIdentityHash)
+				{
+					continue;
+				}
+
+				hasReflectionGateCandidate = true;
+				const double replacementScore =
+					replacement.originalShaderAnalysis.CalculateSimilarityScore(candidateAnalysis);
+
+				if (replacementScore > bestFuzzyScore)
+				{
+					secondBestFuzzyScore = bestFuzzyScore;
+					bestFuzzyScore = replacementScore;
+					bestFuzzyReplacementIndex = replacementIndex;
+				}
+				else if (replacementScore > secondBestFuzzyScore)
+				{
+					secondBestFuzzyScore = replacementScore;
+				}
+			}
+
+			if (bestFuzzyReplacementIndex >= 0 &&
+				bestFuzzyScore >= SHADER_INJECTOR_DISCOVERY_MINIMUM_SIMILARITY_SCORE &&
+				bestFuzzyScore - secondBestFuzzyScore >= SHADER_INJECTOR_DISCOVERY_SIMILARITY_AMBIGUITY_MARGIN)
+			{
+				gDiscoveredReplacementAliases.emplace(candidateKey, bestFuzzyReplacementIndex);
+				ShaderInjectorGUI::WriteToRuntimeLogSuccess(
+					"ShaderDiscovery->DiscoverEnabledReplacement: fuzzy cross-version shader identity matched " +
+					Hash::FormatHash(shaderHash) + " -> " + replacements[bestFuzzyReplacementIndex].name +
+					" score=" + std::to_string(bestFuzzyScore) +
+					" portableReflection=" + candidateAnalysis.portableReflectionIdentityHash);
+				return bestFuzzyReplacementIndex;
+			}
+
+			if (hasReflectionGateCandidate)
+			{
+				std::string identityDiff;
+				if (bestFuzzyReplacementIndex >= 0)
+				{
+					const ShaderAnalysis::ShaderAnalysisDisk& bestAnalysis =
+						replacements[bestFuzzyReplacementIndex].originalShaderAnalysis;
+
+					auto appendDiff = [&](const char* label, const std::string& left, const std::string& right)
+					{
+						if (left != right)
+						{
+							if (!identityDiff.empty())
+								identityDiff += ", ";
+							identityDiff += std::string(label) + "=" + left + "!=" + right;
+						}
+					};
+					appendDiff("portableReflection",
+						candidateAnalysis.portableReflectionIdentityHash,
+						bestAnalysis.portableReflectionIdentityHash);
+					appendDiff("semanticInstructionSet",
+						candidateAnalysis.semanticInstructionSetHash,
+						bestAnalysis.semanticInstructionSetHash);
+					appendDiff("crossVersionIdentity",
+						candidateAnalysis.crossVersionIdentityHash,
+						bestAnalysis.crossVersionIdentityHash);
+					appendDiff("entryFunction",
+						candidateAnalysis.entryFunctionName,
+						bestAnalysis.entryFunctionName);
+				}
+
+				ShaderInjectorGUI::WriteToRuntimeLogError(
+					"ShaderDiscovery->DiscoverEnabledReplacement: fuzzy match rejected for " +
+					Hash::FormatHash(shaderHash) +
+					" bestScore=" + std::to_string(bestFuzzyScore) +
+					" secondBestScore=" + std::to_string(secondBestFuzzyScore) +
+					(identityDiff.empty() ? "" : " identityDiff={" + identityDiff + "}") +
+					(bestFuzzyReplacementIndex >= 0 ?
+						" bestCandidate=" + replacements[bestFuzzyReplacementIndex].name : ""));
+			}
+
 			gAttemptedCandidates.insert(candidateKey);
 			return -1;
 		}

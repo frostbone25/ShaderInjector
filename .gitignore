@@ -430,3 +430,6 @@ FodyWeavers.xsd
 
 Releases/
 PDFs/
+
+# Cross-version discovery test suite (CMake out-of-tree build)
+Tests/CrossVersionDiscovery/build/
