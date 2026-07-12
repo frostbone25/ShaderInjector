@@ -30,9 +30,10 @@ namespace ShaderAutomaticDiscovery
 {
 	namespace
 	{
-		constexpr size_t maximumQueuedShaders = 8192;
 		constexpr size_t defaultMaximumPendingAnalyses = 64;
-		constexpr size_t maximumPendingAnalysesLimit = 1024;
+		constexpr size_t defaultQueuedShaderLimit = 8192;
+		constexpr size_t maximumPendingAnalysesLimit = 8192;
+		constexpr size_t maximumQueuedShadersLimit = 65536;
 
 		size_t AutomaticAnalysisWorkerThreadCount()
 		{
@@ -43,7 +44,7 @@ namespace ShaderAutomaticDiscovery
 		size_t ConfiguredAnalysisWorkerThreadCount()
 		{
 			if (Globals::gShaderDiscoveryWorkerThreads > 0)
-				return (std::clamp<size_t>)(static_cast<size_t>(Globals::gShaderDiscoveryWorkerThreads), 1, 32);
+				return (std::clamp<size_t>)(static_cast<size_t>(Globals::gShaderDiscoveryWorkerThreads), 1, 64);
 
 			return AutomaticAnalysisWorkerThreadCount();
 		}
@@ -57,6 +58,17 @@ namespace ShaderAutomaticDiscovery
 				static_cast<size_t>(Globals::gShaderDiscoveryPendingAnalysisLimit),
 				1,
 				maximumPendingAnalysesLimit);
+		}
+
+		size_t ConfiguredQueuedShaderLimit()
+		{
+			if (Globals::gShaderDiscoveryQueuedShaderLimit <= 0)
+				return defaultQueuedShaderLimit;
+
+			return (std::clamp<size_t>)(
+				static_cast<size_t>(Globals::gShaderDiscoveryQueuedShaderLimit),
+				1024,
+				maximumQueuedShadersLimit);
 		}
 
 		struct ShaderKey
@@ -374,8 +386,10 @@ namespace ShaderAutomaticDiscovery
 				" activeAnalysis=" + std::to_string(gActiveAnalysisJobs) +
 				" pendingResults=" + std::to_string(gAnalysisResults.size()) +
 				" workerThreads=" + std::to_string(ConfiguredAnalysisWorkerThreadCount()) +
-				" frameJobBudget=" + std::to_string((std::clamp)(Globals::gShaderDiscoveryFrameJobBudget, 1, 8192)) +
+				" workerThreadPriority=" + std::to_string(Globals::gShaderDiscoveryWorkerThreadPriority) +
+				" frameJobBudget=" + std::to_string((std::clamp)(Globals::gShaderDiscoveryFrameJobBudget, 1, 65536)) +
 				" pendingAnalysisLimit=" + std::to_string(ConfiguredPendingAnalysisLimit()) +
+				" queuedShaderLimit=" + std::to_string(ConfiguredQueuedShaderLimit()) +
 				" minimumSimilarityScore=" + std::to_string(Globals::gShaderDiscoveryMinimumSimilarityScore) +
 				" similarityAmbiguityMargin=" + std::to_string(Globals::gShaderDiscoverySimilarityAmbiguityMargin);
 		}
@@ -540,7 +554,8 @@ namespace ShaderAutomaticDiscovery
 			}
 
 			const double queuePriority = CalculateQueuePriorityLocked(shaderType, shaderBytecode.size(), force, directMatch);
-			if (gQueuedShaders.size() >= maximumQueuedShaders)
+			const size_t queuedShaderLimit = ConfiguredQueuedShaderLimit();
+			if (gQueuedShaders.size() >= queuedShaderLimit)
 			{
 				auto lowestPriorityIterator = FindLowestPriorityQueuedShaderLocked();
 				if (lowestPriorityIterator == gQueuedShaders.end())
@@ -712,7 +727,7 @@ namespace ShaderAutomaticDiscovery
 
 		void AnalysisWorkerMain()
 		{
-			SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+			SetThreadPriority(GetCurrentThread(), Globals::gShaderDiscoveryWorkerThreadPriority);
 			const HRESULT comInitializationResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
 			for (;;)

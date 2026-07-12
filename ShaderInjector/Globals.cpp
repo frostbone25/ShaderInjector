@@ -29,8 +29,10 @@ namespace Globals
 	bool gShaderInjectorEnabled = true;
 
 	int gShaderDiscoveryWorkerThreads = 0;
+	int gShaderDiscoveryWorkerThreadPriority = THREAD_PRIORITY_BELOW_NORMAL;
 	int gShaderDiscoveryFrameJobBudget = 8192;
 	int gShaderDiscoveryPendingAnalysisLimit = 64;
+	int gShaderDiscoveryQueuedShaderLimit = 8192;
 	double gShaderDiscoveryMinimumSimilarityScore = 0.90;
 	double gShaderDiscoverySimilarityAmbiguityMargin = 0.02;
 

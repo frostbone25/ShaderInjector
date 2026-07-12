@@ -24,8 +24,10 @@ namespace Globals
 
 	// Shader discovery tuning. WorkerThreads = 0 means automatic half-core scaling.
 	extern int gShaderDiscoveryWorkerThreads;
+	extern int gShaderDiscoveryWorkerThreadPriority;
 	extern int gShaderDiscoveryFrameJobBudget;
 	extern int gShaderDiscoveryPendingAnalysisLimit;
+	extern int gShaderDiscoveryQueuedShaderLimit;
 	extern double gShaderDiscoveryMinimumSimilarityScore;
 	extern double gShaderDiscoverySimilarityAmbiguityMargin;
 

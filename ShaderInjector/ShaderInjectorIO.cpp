@@ -688,8 +688,10 @@ namespace ShaderInjectorIO
 			bool gShaderInjectorEnabled = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "InjectorEnabled", Globals::gShaderInjectorEnabled);
 			bool gShowShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "MenuOpen", Globals::gShowShaderInjectorGUI);
 			int shaderDiscoveryWorkerThreads = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "WorkerThreads", Globals::gShaderDiscoveryWorkerThreads);
+			int shaderDiscoveryWorkerThreadPriority = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "WorkerThreadPriority", Globals::gShaderDiscoveryWorkerThreadPriority);
 			int shaderDiscoveryFrameJobBudget = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "FrameJobBudget", Globals::gShaderDiscoveryFrameJobBudget);
 			int shaderDiscoveryPendingAnalysisLimit = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "PendingAnalysisLimit", Globals::gShaderDiscoveryPendingAnalysisLimit);
+			int shaderDiscoveryQueuedShaderLimit = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "QueuedShaderLimit", Globals::gShaderDiscoveryQueuedShaderLimit);
 			double shaderDiscoveryMinimumSimilarityScore = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "MinimumSimilarityScore", Globals::gShaderDiscoveryMinimumSimilarityScore);
 			double shaderDiscoverySimilarityAmbiguityMargin = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "SimilarityAmbiguityMargin", Globals::gShaderDiscoverySimilarityAmbiguityMargin);
 
@@ -697,17 +699,21 @@ namespace ShaderInjectorIO
 			Globals::keyToggleShaderInjector = keyToggleShaderInjector;
 			Globals::gShaderInjectorEnabled = gShaderInjectorEnabled;
 			Globals::gShowShaderInjectorGUI = gShowShaderInjectorGUI;
-			Globals::gShaderDiscoveryWorkerThreads = (std::clamp)(shaderDiscoveryWorkerThreads, 0, 32);
-			Globals::gShaderDiscoveryFrameJobBudget = (std::clamp)(shaderDiscoveryFrameJobBudget, 1, 8192);
-			Globals::gShaderDiscoveryPendingAnalysisLimit = (std::clamp)(shaderDiscoveryPendingAnalysisLimit, 1, 1024);
+			Globals::gShaderDiscoveryWorkerThreads = (std::clamp)(shaderDiscoveryWorkerThreads, 0, 64);
+			Globals::gShaderDiscoveryWorkerThreadPriority = (std::clamp)(shaderDiscoveryWorkerThreadPriority, THREAD_PRIORITY_LOWEST, THREAD_PRIORITY_HIGHEST);
+			Globals::gShaderDiscoveryFrameJobBudget = (std::clamp)(shaderDiscoveryFrameJobBudget, 1, 65536);
+			Globals::gShaderDiscoveryPendingAnalysisLimit = (std::clamp)(shaderDiscoveryPendingAnalysisLimit, 1, 8192);
+			Globals::gShaderDiscoveryQueuedShaderLimit = (std::clamp)(shaderDiscoveryQueuedShaderLimit, 1024, 65536);
 			Globals::gShaderDiscoveryMinimumSimilarityScore = (std::clamp)(shaderDiscoveryMinimumSimilarityScore, 0.0, 1.0);
 			Globals::gShaderDiscoverySimilarityAmbiguityMargin = (std::clamp)(shaderDiscoverySimilarityAmbiguityMargin, 0.0, 1.0);
 
 			WriteToLogFile(
 				"ShaderInjectorIO->ReadInjectorSettings: parsed injector settings"
 				" discoveryWorkerThreads=" + std::to_string(Globals::gShaderDiscoveryWorkerThreads) +
+				" discoveryWorkerThreadPriority=" + std::to_string(Globals::gShaderDiscoveryWorkerThreadPriority) +
 				" discoveryFrameJobBudget=" + std::to_string(Globals::gShaderDiscoveryFrameJobBudget) +
 				" discoveryPendingAnalysisLimit=" + std::to_string(Globals::gShaderDiscoveryPendingAnalysisLimit) +
+				" discoveryQueuedShaderLimit=" + std::to_string(Globals::gShaderDiscoveryQueuedShaderLimit) +
 				" discoveryMinimumSimilarityScore=" + std::to_string(Globals::gShaderDiscoveryMinimumSimilarityScore) +
 				" discoverySimilarityAmbiguityMargin=" + std::to_string(Globals::gShaderDiscoverySimilarityAmbiguityMargin));
 		}
@@ -736,8 +742,10 @@ namespace ShaderInjectorIO
 		injectorSettingsINI["InjectorSettings"]["InjectorEnabled"] = Globals::gShaderInjectorEnabled;
 		injectorSettingsINI["InjectorSettings"]["MenuOpen"] = Globals::gShowShaderInjectorGUI;
 		injectorSettingsINI["ShaderDiscovery"]["WorkerThreads"] = Globals::gShaderDiscoveryWorkerThreads;
+		injectorSettingsINI["ShaderDiscovery"]["WorkerThreadPriority"] = Globals::gShaderDiscoveryWorkerThreadPriority;
 		injectorSettingsINI["ShaderDiscovery"]["FrameJobBudget"] = Globals::gShaderDiscoveryFrameJobBudget;
 		injectorSettingsINI["ShaderDiscovery"]["PendingAnalysisLimit"] = Globals::gShaderDiscoveryPendingAnalysisLimit;
+		injectorSettingsINI["ShaderDiscovery"]["QueuedShaderLimit"] = Globals::gShaderDiscoveryQueuedShaderLimit;
 		injectorSettingsINI["ShaderDiscovery"]["MinimumSimilarityScore"] = Globals::gShaderDiscoveryMinimumSimilarityScore;
 		injectorSettingsINI["ShaderDiscovery"]["SimilarityAmbiguityMargin"] = Globals::gShaderDiscoverySimilarityAmbiguityMargin;
 
