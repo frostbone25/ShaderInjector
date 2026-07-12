@@ -7,6 +7,7 @@
 //custom
 #include "DatabaseShaderTargets.h"
 #include "DatabaseModifiedShaders.h"
+#include "Globals.h"
 #include "HookD3D12ReplacementTemplates.h"
 #include "HookD3D12ReplacementLookup.h"
 #include "ShaderDiscovery.h"
@@ -251,7 +252,8 @@ namespace HookD3D12
 			if (ShaderTarget::LoadShaderTargetJson(replacementJsonPath, replacement))
 			{
 				BackfillReplacementPortableMetadataFromSidecars(replacement);
-				ShaderDiscovery::EnsureReplacementAnalysis(replacement);
+				if (Globals::gShaderDiscoveryMode == Globals::ShaderDiscoveryMode::ShaderAnalysis)
+					ShaderDiscovery::EnsureReplacementAnalysis(replacement);
 				std::vector<uint8_t> compiledReplacementBlob;
 
 				const ModifiedShader::PackageDisk* modifiedShader =

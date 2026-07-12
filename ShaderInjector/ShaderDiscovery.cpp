@@ -161,6 +161,12 @@ namespace ShaderDiscovery
 		if (gAttemptedCandidates.find(candidateKey) != gAttemptedCandidates.end())
 			return -1;
 
+		if (Globals::gShaderDiscoveryMode != Globals::ShaderDiscoveryMode::ShaderAnalysis)
+		{
+			gAttemptedCandidates.insert(candidateKey);
+			return -1;
+		}
+
 		bool hasPlausibleReplacement = false;
 		std::unordered_set<std::string> acceptablePortableReflectionHashes;
 		for (const ShaderTarget::ShaderTargetDisk& replacement : replacements)
@@ -413,7 +419,6 @@ namespace ShaderDiscovery
 			return -1;
 		}
 
-#if SHADER_INJECTOR_DISCOVERY_MATCH_MODIFIED_SHADER_BY_HASH
 		int hashMatchIndex = -1;
 		for (int packageIndex = 0; packageIndex < static_cast<int>(modifiedShaders.size()); ++packageIndex)
 		{
@@ -461,9 +466,14 @@ namespace ShaderDiscovery
 				Hash::FormatHash(shaderHash) + " -> " + modifiedShaders[hashMatchIndex].id);
 			return hashMatchIndex;
 		}
-#endif
 
-#if SHADER_INJECTOR_DISCOVERY_MATCH_MODIFIED_SHADER_BY_ANALYSIS
+		if (Globals::gShaderDiscoveryMode != Globals::ShaderDiscoveryMode::ShaderAnalysis)
+		{
+			std::lock_guard<std::mutex> lock(gModifiedDiscoveryMutex);
+			gAttemptedModifiedShaders.insert(candidateKey);
+			return -1;
+		}
+
 		ShaderAnalysis::ShaderAnalysisDisk candidateAnalysis{};
 		bool haveCachedAnalysis = false;
 		{
@@ -621,7 +631,6 @@ namespace ShaderDiscovery
 				" type=" + StringHelper::ShaderTypeToString(shaderType) +
 				": " + failureReason);
 		}
-#endif
 
 		std::lock_guard<std::mutex> lock(gModifiedDiscoveryMutex);
 		gAttemptedModifiedShaders.insert(candidateKey);

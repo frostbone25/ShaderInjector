@@ -5,6 +5,12 @@
 
 namespace Globals
 {
+	enum class ShaderDiscoveryMode
+	{
+		HashLookup = 0,
+		ShaderAnalysis = 1,
+	};
+
 	// Handle to our DLL module
 	extern HMODULE mainModule;
 
@@ -23,6 +29,7 @@ namespace Globals
 	extern bool gShaderInjectorEnabled;
 
 	// Shader discovery tuning. WorkerThreads = 0 means automatic half-core scaling.
+	extern ShaderDiscoveryMode gShaderDiscoveryMode;
 	extern int gShaderDiscoveryWorkerThreads;
 	extern int gShaderDiscoveryWorkerThreadPriority;
 	extern int gShaderDiscoveryFrameJobBudget;

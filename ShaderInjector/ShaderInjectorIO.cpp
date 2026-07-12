@@ -760,6 +760,7 @@ namespace ShaderInjectorIO
 			int keyToggleShaderInjector = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "ToggleInjectorKey", Globals::keyToggleShaderInjector);
 			bool gShaderInjectorEnabled = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "InjectorEnabled", Globals::gShaderInjectorEnabled);
 			bool gShowShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "MenuOpen", Globals::gShowShaderInjectorGUI);
+			int shaderDiscoveryMode = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "Mode", static_cast<int>(Globals::gShaderDiscoveryMode));
 			int shaderDiscoveryWorkerThreads = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "WorkerThreads", Globals::gShaderDiscoveryWorkerThreads);
 			int shaderDiscoveryWorkerThreadPriority = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "WorkerThreadPriority", Globals::gShaderDiscoveryWorkerThreadPriority);
 			int shaderDiscoveryFrameJobBudget = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "FrameJobBudget", Globals::gShaderDiscoveryFrameJobBudget);
@@ -772,6 +773,7 @@ namespace ShaderInjectorIO
 			Globals::keyToggleShaderInjector = keyToggleShaderInjector;
 			Globals::gShaderInjectorEnabled = gShaderInjectorEnabled;
 			Globals::gShowShaderInjectorGUI = gShowShaderInjectorGUI;
+			Globals::gShaderDiscoveryMode = static_cast<Globals::ShaderDiscoveryMode>((std::clamp)(shaderDiscoveryMode, 0, 1));
 			Globals::gShaderDiscoveryWorkerThreads = (std::clamp)(shaderDiscoveryWorkerThreads, 0, 64);
 			Globals::gShaderDiscoveryWorkerThreadPriority = (std::clamp)(shaderDiscoveryWorkerThreadPriority, THREAD_PRIORITY_LOWEST, THREAD_PRIORITY_HIGHEST);
 			Globals::gShaderDiscoveryFrameJobBudget = (std::clamp)(shaderDiscoveryFrameJobBudget, 1, 65536);
@@ -782,6 +784,7 @@ namespace ShaderInjectorIO
 
 			WriteToLogFile(
 				"ShaderInjectorIO->ReadInjectorSettings: parsed injector settings"
+				" discoveryMode=" + std::to_string(static_cast<int>(Globals::gShaderDiscoveryMode)) +
 				" discoveryWorkerThreads=" + std::to_string(Globals::gShaderDiscoveryWorkerThreads) +
 				" discoveryWorkerThreadPriority=" + std::to_string(Globals::gShaderDiscoveryWorkerThreadPriority) +
 				" discoveryFrameJobBudget=" + std::to_string(Globals::gShaderDiscoveryFrameJobBudget) +
@@ -814,6 +817,7 @@ namespace ShaderInjectorIO
 		injectorSettingsINI["InjectorSettings"]["ToggleInjectorKey"] = Globals::keyToggleShaderInjector;
 		injectorSettingsINI["InjectorSettings"]["InjectorEnabled"] = Globals::gShaderInjectorEnabled;
 		injectorSettingsINI["InjectorSettings"]["MenuOpen"] = Globals::gShowShaderInjectorGUI;
+		injectorSettingsINI["ShaderDiscovery"]["Mode"] = static_cast<int>(Globals::gShaderDiscoveryMode);
 		injectorSettingsINI["ShaderDiscovery"]["WorkerThreads"] = Globals::gShaderDiscoveryWorkerThreads;
 		injectorSettingsINI["ShaderDiscovery"]["WorkerThreadPriority"] = Globals::gShaderDiscoveryWorkerThreadPriority;
 		injectorSettingsINI["ShaderDiscovery"]["FrameJobBudget"] = Globals::gShaderDiscoveryFrameJobBudget;

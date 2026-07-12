@@ -166,6 +166,16 @@ namespace ShaderAutomaticDiscovery
 		constexpr size_t byteLengthLowerTolerancePercent = 35;
 		constexpr size_t byteLengthUpperTolerancePercent = 15;
 
+		const char* ShaderDiscoveryModeName()
+		{
+			switch (Globals::gShaderDiscoveryMode)
+			{
+				case Globals::ShaderDiscoveryMode::ShaderAnalysis: return "ShaderAnalysis";
+				case Globals::ShaderDiscoveryMode::HashLookup:
+				default: return "HashLookup";
+			}
+		}
+
 		bool ParseByteLength(const std::string& byteLengthText, size_t& outByteLength)
 		{
 			if (byteLengthText.empty())
@@ -489,6 +499,7 @@ namespace ShaderAutomaticDiscovery
 				" (" + processedPercentText + "%)" +
 				" resolved=" + std::to_string(resolvedTotal) + "/" + std::to_string(gQueuedShaderTotal) +
 				" (" + resolvedPercentText + "%)" +
+				" mode=" + ShaderDiscoveryModeName() +
 				" analyzed=" + std::to_string(gAnalysisCompletedTotal) + "/" + std::to_string(gAnalysisSubmittedTotal) +
 				" (" + analysisPercentText + "%)" +
 				" directMatches=" + std::to_string(gDirectMatchProcessedTotal) +
@@ -663,6 +674,10 @@ namespace ShaderAutomaticDiscovery
 			const auto directMatchIterator = gDirectMatchShaders.find(key);
 			const bool directMatch = directMatchIterator != gDirectMatchShaders.end() &&
 				!directMatchIterator->second.empty();
+
+			if (!directMatch && Globals::gShaderDiscoveryMode == Globals::ShaderDiscoveryMode::HashLookup)
+				return true;
+
 			// PSOs are only ever created once by the game and never recreated, so this is the
 			// only chance a shader ever gets to be queued - anything rejected here is gone for
 			// the rest of the session. PixelShaders are rare enough (unlike ComputeShaders, which
@@ -1187,6 +1202,13 @@ namespace ShaderAutomaticDiscovery
 					std::lock_guard<std::mutex> lock(gQueueMutex);
 					++gDirectMatchProcessedTotal;
 				}
+				continue;
+			}
+
+			if (Globals::gShaderDiscoveryMode == Globals::ShaderDiscoveryMode::HashLookup)
+			{
+				std::lock_guard<std::mutex> lock(gQueueMutex);
+				++gDirectMatchProcessedTotal;
 				continue;
 			}
 

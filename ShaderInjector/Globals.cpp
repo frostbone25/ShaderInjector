@@ -28,6 +28,7 @@ namespace Globals
 	bool gShowShaderInjectorGUI = true;
 	bool gShaderInjectorEnabled = true;
 
+	ShaderDiscoveryMode gShaderDiscoveryMode = ShaderDiscoveryMode::HashLookup;
 	int gShaderDiscoveryWorkerThreads = 0;
 	int gShaderDiscoveryWorkerThreadPriority = THREAD_PRIORITY_BELOW_NORMAL;
 	int gShaderDiscoveryFrameJobBudget = 8192;
