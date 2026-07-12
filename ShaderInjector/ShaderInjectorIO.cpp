@@ -59,6 +59,23 @@ namespace ShaderInjectorIO
 		}
 
 		std::mutex gLogMutex;
+
+		template<typename ValueType>
+		ValueType ReadIniValueOrDefault(
+			ini::IniFile& iniFile,
+			const char* sectionName,
+			const char* keyName,
+			const ValueType& defaultValue)
+		{
+			try
+			{
+				return iniFile[sectionName][keyName].as<ValueType>();
+			}
+			catch (...)
+			{
+				return defaultValue;
+			}
+		}
 	}
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| IO HELPERS |||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -666,17 +683,33 @@ namespace ShaderInjectorIO
 			ini::IniFile injectorSettingsINI;
 			injectorSettingsINI.load(injectorSettingsPath);
 
-			int keyOpenShaderInjectorGUI = injectorSettingsINI["InjectorSettings"]["OpenMenuKey"].as<int>();
-			int keyToggleShaderInjector = injectorSettingsINI["InjectorSettings"]["ToggleInjectorKey"].as<int>();
-			bool gShaderInjectorEnabled = injectorSettingsINI["InjectorSettings"]["InjectorEnabled"].as<bool>();
-			bool gShowShaderInjectorGUI = injectorSettingsINI["InjectorSettings"]["MenuOpen"].as<bool>();
+			int keyOpenShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "OpenMenuKey", Globals::keyOpenShaderInjectorGUI);
+			int keyToggleShaderInjector = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "ToggleInjectorKey", Globals::keyToggleShaderInjector);
+			bool gShaderInjectorEnabled = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "InjectorEnabled", Globals::gShaderInjectorEnabled);
+			bool gShowShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "MenuOpen", Globals::gShowShaderInjectorGUI);
+			int shaderDiscoveryWorkerThreads = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "WorkerThreads", Globals::gShaderDiscoveryWorkerThreads);
+			int shaderDiscoveryFrameJobBudget = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "FrameJobBudget", Globals::gShaderDiscoveryFrameJobBudget);
+			int shaderDiscoveryPendingAnalysisLimit = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "PendingAnalysisLimit", Globals::gShaderDiscoveryPendingAnalysisLimit);
+			double shaderDiscoveryMinimumSimilarityScore = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "MinimumSimilarityScore", Globals::gShaderDiscoveryMinimumSimilarityScore);
+			double shaderDiscoverySimilarityAmbiguityMargin = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "SimilarityAmbiguityMargin", Globals::gShaderDiscoverySimilarityAmbiguityMargin);
 
 			Globals::keyOpenShaderInjectorGUI = keyOpenShaderInjectorGUI;
 			Globals::keyToggleShaderInjector = keyToggleShaderInjector;
 			Globals::gShaderInjectorEnabled = gShaderInjectorEnabled;
 			Globals::gShowShaderInjectorGUI = gShowShaderInjectorGUI;
+			Globals::gShaderDiscoveryWorkerThreads = (std::clamp)(shaderDiscoveryWorkerThreads, 0, 32);
+			Globals::gShaderDiscoveryFrameJobBudget = (std::clamp)(shaderDiscoveryFrameJobBudget, 1, 8192);
+			Globals::gShaderDiscoveryPendingAnalysisLimit = (std::clamp)(shaderDiscoveryPendingAnalysisLimit, 1, 1024);
+			Globals::gShaderDiscoveryMinimumSimilarityScore = (std::clamp)(shaderDiscoveryMinimumSimilarityScore, 0.0, 1.0);
+			Globals::gShaderDiscoverySimilarityAmbiguityMargin = (std::clamp)(shaderDiscoverySimilarityAmbiguityMargin, 0.0, 1.0);
 
-			WriteToLogFile("ShaderInjectorIO->ReadInjectorSettings: parsed injector settings");
+			WriteToLogFile(
+				"ShaderInjectorIO->ReadInjectorSettings: parsed injector settings"
+				" discoveryWorkerThreads=" + std::to_string(Globals::gShaderDiscoveryWorkerThreads) +
+				" discoveryFrameJobBudget=" + std::to_string(Globals::gShaderDiscoveryFrameJobBudget) +
+				" discoveryPendingAnalysisLimit=" + std::to_string(Globals::gShaderDiscoveryPendingAnalysisLimit) +
+				" discoveryMinimumSimilarityScore=" + std::to_string(Globals::gShaderDiscoveryMinimumSimilarityScore) +
+				" discoverySimilarityAmbiguityMargin=" + std::to_string(Globals::gShaderDiscoverySimilarityAmbiguityMargin));
 		}
 		catch (...)
 		{
@@ -702,6 +735,11 @@ namespace ShaderInjectorIO
 		injectorSettingsINI["InjectorSettings"]["ToggleInjectorKey"] = Globals::keyToggleShaderInjector;
 		injectorSettingsINI["InjectorSettings"]["InjectorEnabled"] = Globals::gShaderInjectorEnabled;
 		injectorSettingsINI["InjectorSettings"]["MenuOpen"] = Globals::gShowShaderInjectorGUI;
+		injectorSettingsINI["ShaderDiscovery"]["WorkerThreads"] = Globals::gShaderDiscoveryWorkerThreads;
+		injectorSettingsINI["ShaderDiscovery"]["FrameJobBudget"] = Globals::gShaderDiscoveryFrameJobBudget;
+		injectorSettingsINI["ShaderDiscovery"]["PendingAnalysisLimit"] = Globals::gShaderDiscoveryPendingAnalysisLimit;
+		injectorSettingsINI["ShaderDiscovery"]["MinimumSimilarityScore"] = Globals::gShaderDiscoveryMinimumSimilarityScore;
+		injectorSettingsINI["ShaderDiscovery"]["SimilarityAmbiguityMargin"] = Globals::gShaderDiscoverySimilarityAmbiguityMargin;
 
 		std::ofstream file(PathFromUtf8(injectorSettingsPath), std::ios::out | std::ios::trunc);
 

@@ -1411,7 +1411,8 @@ namespace HookD3D12
 		if (!IsPipelineActivityQuiet())
 			return;
 
-		ShaderAutomaticDiscovery::ProcessQueuedWork(8192);
+		const size_t shaderDiscoveryFrameJobBudget = (std::clamp)(Globals::gShaderDiscoveryFrameJobBudget, 1, 8192);
+		ShaderAutomaticDiscovery::ProcessQueuedWork(shaderDiscoveryFrameJobBudget);
 
 		if (!Globals::gShaderInjectorEnabled)
 			return;

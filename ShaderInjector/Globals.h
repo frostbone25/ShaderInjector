@@ -1,5 +1,6 @@
 #pragma once
 
+#include <windows.h>
 #include <vector>
 
 namespace Globals
@@ -20,6 +21,13 @@ namespace Globals
 	// observes the settings loaded from ShaderInjector.ini instead of keeping its own copy.
 	extern bool gShowShaderInjectorGUI;
 	extern bool gShaderInjectorEnabled;
+
+	// Shader discovery tuning. WorkerThreads = 0 means automatic half-core scaling.
+	extern int gShaderDiscoveryWorkerThreads;
+	extern int gShaderDiscoveryFrameJobBudget;
+	extern int gShaderDiscoveryPendingAnalysisLimit;
+	extern double gShaderDiscoveryMinimumSimilarityScore;
+	extern double gShaderDiscoverySimilarityAmbiguityMargin;
 
 	extern std::vector<uint8_t> nullPixelShaderBlob;
 	extern std::vector<uint8_t> markerPixelShaderBlob;

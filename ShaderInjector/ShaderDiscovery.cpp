@@ -8,6 +8,7 @@
 #include <unordered_set>
 
 #include "Hash.h"
+#include "Globals.h"
 #include "ShaderAnalyzer.h"
 #include "ShaderInjectorGUI.h"
 #include "ShaderInjectorIO.h"
@@ -296,8 +297,8 @@ namespace ShaderDiscovery
 			}
 
 			if (bestFuzzyReplacementIndex >= 0 &&
-				bestFuzzyScore >= SHADER_INJECTOR_DISCOVERY_MINIMUM_SIMILARITY_SCORE &&
-				bestFuzzyScore - secondBestFuzzyScore >= SHADER_INJECTOR_DISCOVERY_SIMILARITY_AMBIGUITY_MARGIN)
+				bestFuzzyScore >= Globals::gShaderDiscoveryMinimumSimilarityScore &&
+				bestFuzzyScore - secondBestFuzzyScore >= Globals::gShaderDiscoverySimilarityAmbiguityMargin)
 			{
 				gDiscoveredReplacementAliases.emplace(candidateKey, bestFuzzyReplacementIndex);
 				ShaderInjectorGUI::WriteToRuntimeLogSuccess(
@@ -541,8 +542,8 @@ namespace ShaderDiscovery
 				}
 			}
 
-			if (bestPackageIndex >= 0 && bestScore >= SHADER_INJECTOR_DISCOVERY_MINIMUM_SIMILARITY_SCORE &&
-				bestScore - secondBestScore >= SHADER_INJECTOR_DISCOVERY_SIMILARITY_AMBIGUITY_MARGIN)
+			if (bestPackageIndex >= 0 && bestScore >= Globals::gShaderDiscoveryMinimumSimilarityScore &&
+				bestScore - secondBestScore >= Globals::gShaderDiscoverySimilarityAmbiguityMargin)
 			{
 				std::lock_guard<std::mutex> lock(gModifiedDiscoveryMutex);
 				gDiscoveredModifiedShaders[candidateKey] = modifiedShaders[bestPackageIndex].id;

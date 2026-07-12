@@ -17,6 +17,7 @@
 
 #include "DatabaseModifiedShaders.h"
 #include "DatabaseShaderTargets.h"
+#include "Globals.h"
 #include "Hash.h"
 #include "HookD3D12.h"
 #include "HookD3D12PipelineUtils.h"
@@ -30,19 +31,33 @@ namespace ShaderAutomaticDiscovery
 	namespace
 	{
 		constexpr size_t maximumQueuedShaders = 8192;
-		constexpr size_t maximumPendingAnalyses = 64;
-		// Multiple threads let the background pool analyze several candidate shaders at the same
-		// time instead of one every ~2 seconds, which matters a lot on game patches where the
-		// real target shaders are buried behind many false candidates that all need analyzing
-		// before a match is found. This scales with the machine's core count instead of a fixed
-		// number so faster CPUs get faster discovery, but only uses half the detected threads
-		// (clamped to a sane [2, 8] range) so the mod stays a "good citizen" and doesn't compete
-		// with the game itself - which is still doing the real work of rendering - for every core.
-		const size_t analysisWorkerThreadCount = []()
+		constexpr size_t defaultMaximumPendingAnalyses = 64;
+		constexpr size_t maximumPendingAnalysesLimit = 1024;
+
+		size_t AutomaticAnalysisWorkerThreadCount()
 		{
 			const unsigned int detectedThreads = std::thread::hardware_concurrency();
 			return (std::clamp<size_t>)(detectedThreads > 0 ? detectedThreads / 2 : 4, 2, 16);
-		}();
+		}
+
+		size_t ConfiguredAnalysisWorkerThreadCount()
+		{
+			if (Globals::gShaderDiscoveryWorkerThreads > 0)
+				return (std::clamp<size_t>)(static_cast<size_t>(Globals::gShaderDiscoveryWorkerThreads), 1, 32);
+
+			return AutomaticAnalysisWorkerThreadCount();
+		}
+
+		size_t ConfiguredPendingAnalysisLimit()
+		{
+			if (Globals::gShaderDiscoveryPendingAnalysisLimit <= 0)
+				return defaultMaximumPendingAnalyses;
+
+			return (std::clamp<size_t>)(
+				static_cast<size_t>(Globals::gShaderDiscoveryPendingAnalysisLimit),
+				1,
+				maximumPendingAnalysesLimit);
+		}
 
 		struct ShaderKey
 		{
@@ -98,6 +113,7 @@ namespace ShaderAutomaticDiscovery
 		std::deque<AnalysisResult> gAnalysisResults;
 		std::unordered_set<ShaderKey, ShaderKeyHasher> gSubmittedShaders;
 		std::unordered_map<ShaderKey, std::string, ShaderKeyHasher> gDirectMatchShaders;
+		std::unordered_set<std::string> gModifiedShadersWithGeneratedTargets;
 		std::shared_ptr<const std::vector<ModifiedShader::PackageDisk>> gModifiedShaderAnalysisSnapshot;
 		bool gCompatibleShaderTypes[static_cast<size_t>(ShaderTarget::Unknown) + 1]{};
 		bool gSeenShaderTypes[static_cast<size_t>(ShaderTarget::Unknown) + 1]{};
@@ -356,12 +372,20 @@ namespace ShaderAutomaticDiscovery
 				" queued=" + std::to_string(gQueuedShaders.size()) +
 				" pendingAnalysis=" + std::to_string(gAnalysisJobs.size()) +
 				" activeAnalysis=" + std::to_string(gActiveAnalysisJobs) +
-				" pendingResults=" + std::to_string(gAnalysisResults.size());
+				" pendingResults=" + std::to_string(gAnalysisResults.size()) +
+				" workerThreads=" + std::to_string(ConfiguredAnalysisWorkerThreadCount()) +
+				" frameJobBudget=" + std::to_string((std::clamp)(Globals::gShaderDiscoveryFrameJobBudget, 1, 8192)) +
+				" pendingAnalysisLimit=" + std::to_string(ConfiguredPendingAnalysisLimit()) +
+				" minimumSimilarityScore=" + std::to_string(Globals::gShaderDiscoveryMinimumSimilarityScore) +
+				" similarityAmbiguityMargin=" + std::to_string(Globals::gShaderDiscoverySimilarityAmbiguityMargin);
 		}
+
+		void LogMissingModifiedShaderTargets();
 
 		void MaybeLogDiscoveryProgress(const char* reason, bool force = false)
 		{
 			std::string progressMessage;
+			bool logMissingTargets = false;
 			{
 				std::lock_guard<std::mutex> lock(gQueueMutex);
 				const auto now = std::chrono::steady_clock::now();
@@ -381,9 +405,12 @@ namespace ShaderAutomaticDiscovery
 				gLastLoggedQueuedTotal = gQueuedShaderTotal;
 				gLastProgressLogTime = now;
 				gProgressWasActive = active;
+				logMissingTargets = justFinished;
 			}
 
 			ShaderInjectorGUI::WriteToRuntimeLog(progressMessage);
+			if (logMissingTargets)
+				LogMissingModifiedShaderTargets();
 		}
 
 		void MarkAnalysisCompleted(bool matched, bool failed)
@@ -398,10 +425,56 @@ namespace ShaderAutomaticDiscovery
 				++gAnalysisFailedTotal;
 		}
 
-		void MarkShaderTargetCreated()
+		void MarkShaderTargetCreated(const std::string& modifiedShaderId)
 		{
 			std::lock_guard<std::mutex> lock(gQueueMutex);
 			++gShaderTargetsCreatedTotal;
+			if (!modifiedShaderId.empty())
+				gModifiedShadersWithGeneratedTargets.insert(modifiedShaderId);
+		}
+
+		void LogMissingModifiedShaderTargets()
+		{
+			std::unordered_set<std::string> modifiedShaderIdsWithTargets;
+			{
+				std::lock_guard<std::mutex> lock(gQueueMutex);
+				modifiedShaderIdsWithTargets = gModifiedShadersWithGeneratedTargets;
+			}
+
+			if (HookD3D12::gLoadedShaderTargetsOnce)
+			{
+				for (const ShaderTarget::ShaderTargetDisk& shaderTarget : HookD3D12::gLoadedShaderTargets)
+				{
+					if (!shaderTarget.modifiedShaderId.empty())
+						modifiedShaderIdsWithTargets.insert(shaderTarget.modifiedShaderId);
+				}
+			}
+
+			size_t enabledModifiedShaderCount = 0;
+			size_t modifiedShadersWithTargets = 0;
+			for (const ModifiedShader::PackageDisk& modifiedShader : DatabaseModifiedShaders::GetModifiedShaders())
+			{
+				if (!modifiedShader.enabled || modifiedShader.shaderType == ShaderTarget::Unknown)
+					continue;
+
+				++enabledModifiedShaderCount;
+				if (modifiedShaderIdsWithTargets.find(modifiedShader.id) != modifiedShaderIdsWithTargets.end())
+				{
+					++modifiedShadersWithTargets;
+					continue;
+				}
+
+				ShaderInjectorGUI::WriteToRuntimeLogWarning(
+					"ShaderAutomaticDiscovery->Summary: no ShaderTarget generated for ModifiedShader id=" +
+					modifiedShader.id +
+					" name=\"" + modifiedShader.name + "\"" +
+					" shaderType=" + StringHelper::ShaderTypeToString(modifiedShader.shaderType) +
+					" knownTargets=" + std::to_string(modifiedShader.targets.size()));
+			}
+
+			ShaderInjectorGUI::WriteToRuntimeLog(
+				"ShaderAutomaticDiscovery->Summary: ModifiedShaders with ShaderTargets=" +
+				std::to_string(modifiedShadersWithTargets) + "/" + std::to_string(enabledModifiedShaderCount));
 		}
 
 		void RebindGraphicsPipelinePointers(HookD3D12::GraphicsPipelineInfo& pipeline)
@@ -562,7 +635,7 @@ namespace ShaderAutomaticDiscovery
 			}
 
 			HookD3D12::MarkShaderTargetApplyDirty();
-			MarkShaderTargetCreated();
+			MarkShaderTargetCreated(modifiedShaderId);
 			ShaderInjectorGUI::WriteToRuntimeLogSuccess(
 				"ShaderAutomaticDiscovery: created ShaderTarget for " + Hash::FormatHash(queued.key.hash) +
 				" using " + modifiedShaderId);
@@ -709,6 +782,7 @@ namespace ShaderAutomaticDiscovery
 				return;
 
 			gAnalysisStopRequested = false;
+			const size_t analysisWorkerThreadCount = ConfiguredAnalysisWorkerThreadCount();
 			gAnalysisWorkers.reserve(analysisWorkerThreadCount);
 			for (size_t workerIndex = 0; workerIndex < analysisWorkerThreadCount; ++workerIndex)
 			{
@@ -721,7 +795,7 @@ namespace ShaderAutomaticDiscovery
 		bool TrySubmitAnalysis(QueuedShader& queued)
 		{
 			std::lock_guard<std::mutex> lock(gQueueMutex);
-			if (gAnalysisJobs.size() >= maximumPendingAnalyses || !gModifiedShaderAnalysisSnapshot)
+			if (gAnalysisJobs.size() >= ConfiguredPendingAnalysisLimit() || !gModifiedShaderAnalysisSnapshot)
 				return false;
 
 			EnsureAnalysisWorkerStartedLocked();
@@ -811,6 +885,7 @@ namespace ShaderAutomaticDiscovery
 		std::lock_guard<std::mutex> lock(gQueueMutex);
 		gModifiedShaderAnalysisSnapshot = std::move(analysisSnapshot);
 		gDirectMatchShaders.clear();
+		gModifiedShadersWithGeneratedTargets.clear();
 		for (bool& compatibleShaderType : gCompatibleShaderTypes)
 			compatibleShaderType = false;
 		for (bool& seenShaderType : gSeenShaderTypes)
@@ -922,6 +997,7 @@ namespace ShaderAutomaticDiscovery
 			gAnalysisResults.clear();
 			gSubmittedShaders.clear();
 			gDirectMatchShaders.clear();
+			gModifiedShadersWithGeneratedTargets.clear();
 			gModifiedShaderAnalysisSnapshot.reset();
 
 			if (gAnalysisWorkers.empty())
