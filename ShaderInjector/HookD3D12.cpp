@@ -1285,28 +1285,17 @@ namespace HookD3D12
 			ShaderInjectorGUI::WriteToRuntimeLog(std::string("HookD3D12->TryApplyPersistedStreamTemplateToUncaptured: Applied uncaptured PSO replacement from persisted stream template by ") + matchMethod + " using " + rootSignatureSource + ": " + replacement.name + templateLogSuffix);
 			return true;
 		};
-		const bool preferObservedRootSignature = matchMethod && strcmp(matchMethod, "verified cached blob content") == 0;
-
-		if (preferObservedRootSignature && observedRootSignature)
-		{
-			if (TryRebuildWithRootSignature(observedRootSignature, "observed command-list root signature"))
-				return true;
-
-			if (persistedRootSignature && persistedRootSignature != observedRootSignature)
-				ShaderInjectorGUI::WriteToRuntimeLogWarning("HookD3D12->TryApplyPersistedStreamTemplateToUncaptured: Observed root signature rebuild failed; retrying persisted root signature blob: " + replacement.name + templateLogSuffix);
-		}
-
-		if (persistedRootSignature && (!preferObservedRootSignature || persistedRootSignature != observedRootSignature))
+		if (persistedRootSignature)
 		{
 			if (TryRebuildWithRootSignature(persistedRootSignature, "persisted root signature blob"))
 				return true;
+
+			if (observedRootSignature && observedRootSignature != persistedRootSignature)
+				ShaderInjectorGUI::WriteToRuntimeLogWarning("HookD3D12->TryApplyPersistedStreamTemplateToUncaptured: Persisted root signature rebuild failed; retrying observed command-list root signature: " + replacement.name + templateLogSuffix);
 		}
 
-		if (!preferObservedRootSignature && observedRootSignature && observedRootSignature != persistedRootSignature)
+		if (observedRootSignature && observedRootSignature != persistedRootSignature)
 		{
-			if (persistedRootSignature)
-				ShaderInjectorGUI::WriteToRuntimeLogWarning("HookD3D12->TryApplyPersistedStreamTemplateToUncaptured: Persisted root signature rebuild failed; retrying observed command-list root signature: " + replacement.name + templateLogSuffix);
-
 			if (TryRebuildWithRootSignature(observedRootSignature, "observed command-list root signature"))
 				return true;
 		}
