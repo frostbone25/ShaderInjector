@@ -1,7 +1,6 @@
 #include "DatabaseModifiedShaders.h"
 
 #include <algorithm>
-#include <cctype>
 #include <mutex>
 #include <string>
 #include <unordered_set>
@@ -9,6 +8,7 @@
 #include "ShaderInjectorIO.h"
 #include "ShaderDiscovery.h"
 #include "ShaderAutomaticDiscovery.h"
+#include "StringHelper.h"
 
 namespace DatabaseModifiedShaders
 {
@@ -17,68 +17,6 @@ namespace DatabaseModifiedShaders
 
 	namespace
 	{
-		std::string TrimWhitespace(const std::string& text)
-		{
-			const size_t first = text.find_first_not_of(" \t\r\n");
-			if (first == std::string::npos)
-				return {};
-
-			const size_t last = text.find_last_not_of(" \t\r\n");
-			return text.substr(first, last - first + 1);
-		}
-
-		std::string LowercaseAscii(std::string text)
-		{
-			std::transform(text.begin(), text.end(), text.begin(), [](unsigned char character)
-			{
-				return static_cast<char>(std::tolower(character));
-			});
-			return text;
-		}
-
-		bool IsReservedWindowsFileName(const std::string& fileStem)
-		{
-			const std::string upper = LowercaseAscii(fileStem);
-			if (upper == "con" || upper == "prn" || upper == "aux" || upper == "nul")
-				return true;
-
-			if (upper.size() == 4 && (upper.rfind("com", 0) == 0 || upper.rfind("lpt", 0) == 0))
-				return upper[3] >= '1' && upper[3] <= '9';
-
-			return false;
-		}
-
-		std::string SanitizeFileStem(const std::string& name)
-		{
-			std::string fileStem = TrimWhitespace(name);
-
-			for (char& character : fileStem)
-			{
-				const unsigned char unsignedCharacter = static_cast<unsigned char>(character);
-				const bool invalidCharacter =
-					unsignedCharacter < 32 ||
-					character == '<' || character == '>' || character == ':' ||
-					character == '"' || character == '/' || character == '\\' ||
-					character == '|' || character == '?' || character == '*';
-
-				if (invalidCharacter)
-					character = '_';
-			}
-
-			while (!fileStem.empty() && (fileStem.back() == ' ' || fileStem.back() == '.'))
-				fileStem.pop_back();
-
-			if (IsReservedWindowsFileName(fileStem))
-				fileStem = "_" + fileStem;
-
-			return fileStem;
-		}
-
-		bool PathTextMatches(const std::string& left, const std::string& right)
-		{
-			return LowercaseAscii(left) == LowercaseAscii(right);
-		}
-
 		std::string JsonFileNameForStem(const std::string& fileStem)
 		{
 			return fileStem + "_Fingerprint" + ShaderInjectorIO::extensionJSON;
@@ -96,7 +34,7 @@ namespace DatabaseModifiedShaders
 
 		bool MoveExistingFileIfNeeded(const std::string& currentPath, const std::string& desiredPath, bool required)
 		{
-			if (PathTextMatches(currentPath, desiredPath))
+			if (ShaderInjectorIO::PathsEqual(currentPath, desiredPath))
 				return true;
 
 			if (!ShaderInjectorIO::FileExists(currentPath))
@@ -110,7 +48,7 @@ namespace DatabaseModifiedShaders
 
 		bool MoveModifiedShaderPackageToName(ModifiedShader::PackageDisk& modifiedShader, const std::string& displayName)
 		{
-			const std::string fileStem = SanitizeFileStem(displayName);
+			const std::string fileStem = ShaderInjectorIO::SanitizeFileStem(displayName);
 			if (fileStem.empty())
 				return false;
 
@@ -123,7 +61,7 @@ namespace DatabaseModifiedShaders
 			const std::string oldCompiledBlobPath = modifiedShader.compiledBlobPath;
 
 			const std::string desiredDirectory = ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetModifiedShadersDirectory(), fileStem);
-			const bool directoryAlreadyMatches = PathTextMatches(oldDirectory, desiredDirectory);
+			const bool directoryAlreadyMatches = ShaderInjectorIO::PathsEqual(oldDirectory, desiredDirectory);
 			if (!directoryAlreadyMatches)
 			{
 				if (ShaderInjectorIO::PathExists(desiredDirectory))
@@ -155,13 +93,13 @@ namespace DatabaseModifiedShaders
 			modifiedShader.compiledBlobPath = desiredCompiledBlobPath;
 			modifiedShader.jsonPath = desiredJsonPath;
 
-			if (!PathTextMatches(currentJsonPath, desiredJsonPath) && ShaderInjectorIO::PathExists(desiredJsonPath))
+			if (!ShaderInjectorIO::PathsEqual(currentJsonPath, desiredJsonPath) && ShaderInjectorIO::PathExists(desiredJsonPath))
 				return false;
 
 			if (!ModifiedShader::WriteJson(modifiedShader))
 				return false;
 
-			if (!PathTextMatches(currentJsonPath, desiredJsonPath))
+			if (!ShaderInjectorIO::PathsEqual(currentJsonPath, desiredJsonPath))
 				ShaderInjectorIO::DeleteFileIfExists(currentJsonPath);
 
 			return true;
@@ -282,7 +220,7 @@ namespace DatabaseModifiedShaders
 
 	bool SetModifiedShaderName(const std::string& modifiedShaderId, const std::string& name)
 	{
-		const std::string displayName = TrimWhitespace(name);
+		const std::string displayName = StringHelper::TrimWhitespace(name);
 		if (displayName.empty())
 			return false;
 

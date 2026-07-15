@@ -6,6 +6,12 @@
 
 namespace ShaderInjectorIO
 {
+	enum class RegistryHive
+	{
+		CurrentUser,
+		LocalMachine,
+	};
+
 	//string helpers
 	static const std::string extensionBIN = ".bin"; //binary shader bytecode dumps
 	static const std::string extensionHLSL = ".hlsl"; //shader source code
@@ -23,6 +29,8 @@ namespace ShaderInjectorIO
 	void DeleteFileIfExists(const std::string& path);
 	bool CopyFileIfMissing(const std::string& sourcePath, const std::string& destinationPath);
 	bool WriteBinaryFile(const std::string& path, const void* data, size_t size);
+	bool ReadTextFile(const std::string& path, std::string& outText);
+	bool WriteTextFile(const std::string& path, const std::string& text);
 	bool WriteTextFileIfMissing(const std::string& path, const std::string& text);
 	bool DirectoryExists(const std::string& path);
 	void DirectoryCreate(const std::string& path);
@@ -33,6 +41,9 @@ namespace ShaderInjectorIO
 	std::string DirectoryFromPath(const std::string& path);
 	std::string FileNameFromPath(const std::string& path);
 	bool IsAbsolutePath(const std::string& path);
+	bool PathsEqual(const std::string& left, const std::string& right);
+	std::string SanitizeFileStem(const std::string& name);
+	std::string ReadRegistryString(RegistryHive hive, const std::string& subKey, const std::string& valueName = "");
 	void CollectFilesByExtension(const std::string& directory, const std::string& extension, std::vector<std::string>& outFiles, bool recursive = false, bool includeFullPath = true);
 
 	//directories/paths

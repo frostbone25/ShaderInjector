@@ -1,7 +1,6 @@
 //Hooks.cpp
 #include "wrl/client.h"
 #include <windows.h>
-#include <cstdio>
 #include <dxgi1_4.h>
 #include <dxgi.h>
 #include <d3d12.h>
@@ -16,6 +15,7 @@
 #include "HookD3D12.h"
 #include "ShaderInjectorIO.h"
 #include "ShaderInjectorGUI.h"
+#include "StringHelper.h"
 #include "VTableIndex.h"
 
 namespace Hooks
@@ -57,9 +57,7 @@ namespace Hooks
 		if (!RegisterClassExW(&windowClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
 		{
 			//NOTE: keep this comment around for sanity check please!
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->CreateDeviceAndSwapChain: RegisterClassExW failed: %u\n", GetLastError());
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
+			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->CreateDeviceAndSwapChain: RegisterClassExW failed: %lu", static_cast<unsigned long>(GetLastError())));
 			return E_FAIL;
 		}
 
@@ -76,9 +74,7 @@ namespace Hooks
 
 		if (!gDummyWindow) 
 		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->CreateDeviceAndSwapChain: CreateWindowExW failed: %u\n", GetLastError());
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
+			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->CreateDeviceAndSwapChain: CreateWindowExW failed: %lu", static_cast<unsigned long>(GetLastError())));
 			return E_FAIL;
 		}
 
@@ -91,9 +87,7 @@ namespace Hooks
 
 		if (FAILED(dxgiFactory4Result))
 		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->CreateDeviceAndSwapChain: CreateDXGIFactory1 failed: 0x%08X\n", dxgiFactory4Result);
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
+			ShaderInjectorGUI::WriteToRuntimeLogError("Hooks->CreateDeviceAndSwapChain: CreateDXGIFactory1 failed: " + StringHelper::FormatHRESULT(dxgiFactory4Result));
 			return dxgiFactory4Result;
 		}
 
@@ -105,9 +99,7 @@ namespace Hooks
 
 		if (FAILED(createdD3D12DeviceResult))
 		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->CreateDeviceAndSwapChain: D3D12CreateDevice failed: 0x%08X\n", createdD3D12DeviceResult);
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
+			ShaderInjectorGUI::WriteToRuntimeLogError("Hooks->CreateDeviceAndSwapChain: D3D12CreateDevice failed: " + StringHelper::FormatHRESULT(createdD3D12DeviceResult));
 			return createdD3D12DeviceResult;
 		}
 
@@ -122,9 +114,7 @@ namespace Hooks
 
 		if (FAILED(createCommandQueueResult))
 		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->CreateDeviceAndSwapChain: CreateCommandQueue failed: 0x%08X\n", createCommandQueueResult);
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
+			ShaderInjectorGUI::WriteToRuntimeLogError("Hooks->CreateDeviceAndSwapChain: CreateCommandQueue failed: " + StringHelper::FormatHRESULT(createCommandQueueResult));
 			return createCommandQueueResult;
 		}
 
@@ -138,9 +128,7 @@ namespace Hooks
 
 		if (FAILED(createCommandAllocatorResult))
 		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->CreateDeviceAndSwapChain: CreateCommandAllocator failed: 0x%08X\n", createCommandAllocatorResult);
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
+			ShaderInjectorGUI::WriteToRuntimeLogError("Hooks->CreateDeviceAndSwapChain: CreateCommandAllocator failed: " + StringHelper::FormatHRESULT(createCommandAllocatorResult));
 			return createCommandAllocatorResult;
 		}
 
@@ -157,9 +145,7 @@ namespace Hooks
 
 		if (FAILED(createCommandListResult))
 		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->CreateDeviceAndSwapChain: CreateCommandList failed: 0x%08X\n", createCommandListResult);
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
+			ShaderInjectorGUI::WriteToRuntimeLogError("Hooks->CreateDeviceAndSwapChain: CreateCommandList failed: " + StringHelper::FormatHRESULT(createCommandListResult));
 			return createCommandListResult;
 		}
 
@@ -188,9 +174,7 @@ namespace Hooks
 
 		if (FAILED(createSwapChain1Result))
 		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->CreateDeviceAndSwapChain: CreateSwapChainForHwnd failed: 0x%08X\n", createSwapChain1Result);
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
+			ShaderInjectorGUI::WriteToRuntimeLogError("Hooks->CreateDeviceAndSwapChain: CreateSwapChainForHwnd failed: " + StringHelper::FormatHRESULT(createSwapChain1Result));
 			return createSwapChain1Result;
 		}
 
@@ -202,9 +186,7 @@ namespace Hooks
 
 		if (FAILED(swapChainQueryResult))
 		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->CreateDeviceAndSwapChain: QueryInterface IDXGISwapChain3 failed: 0x%08X\n", swapChainQueryResult);
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
+			ShaderInjectorGUI::WriteToRuntimeLogError("Hooks->CreateDeviceAndSwapChain: QueryInterface IDXGISwapChain3 failed: " + StringHelper::FormatHRESULT(swapChainQueryResult));
 			return swapChainQueryResult;
 		}
 
@@ -262,69 +244,37 @@ namespace Hooks
 		minHookStatus = MH_CreateHook(gPresentTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_PresentD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_PresentD3D12));
 		
 		if (minHookStatus != MH_OK)
-		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->Initialize: MH_CreateHook Present failed: %s\n", MH_StatusToString(minHookStatus));
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
-		}
+			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook Present failed: %s", MH_StatusToString(minHookStatus)));
 
 		//======================================== Hook_Present1D3D12 ========================================
 		gPresent1Target = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexPresent1]);
 		minHookStatus = MH_CreateHook(gPresent1Target, reinterpret_cast<LPVOID>(HookD3D12::Hook_Present1D3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_Present1D3D12));
 
 		if (minHookStatus != MH_OK)
-		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->Initialize: MH_CreateHook Present1 failed: %s\n", MH_StatusToString(minHookStatus));
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
-		}
+			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook Present1 failed: %s", MH_StatusToString(minHookStatus)));
 
 		//======================================== Hook_ResizeBuffersD3D12 ========================================
 		gResizeBuffersTarget = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexResizeBuffers]);
 		minHookStatus = MH_CreateHook(gResizeBuffersTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_ResizeBuffersD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_ResizeBuffersD3D12));
 
 		if (minHookStatus != MH_OK)
-		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->Initialize: MH_CreateHook ResizeBuffers failed: %s\n", MH_StatusToString(minHookStatus));
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
-		}
+			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook ResizeBuffers failed: %s", MH_StatusToString(minHookStatus)));
 
 		//======================================== Hook_ExecuteCommandListsD3D12 ========================================
 		gExecuteCommandListsTarget = reinterpret_cast<LPVOID>(commandQueueVTable[VTableIndex::indexExecuteCommandLists]);
 		minHookStatus = MH_CreateHook(gExecuteCommandListsTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_ExecuteCommandListsD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_ExecuteCommandListsD3D12));
 
 		if (minHookStatus != MH_OK)
-		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->Initialize: MH_CreateHook ExecuteCommandLists failed: %s\n", MH_StatusToString(minHookStatus));
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
-		}
+			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook ExecuteCommandLists failed: %s", MH_StatusToString(minHookStatus)));
 
 		//======================================== Enable Hooks ========================================
-		//enable all hooks ---
+		//enable all hooks
 		minHookStatus = MH_EnableHook(MH_ALL_HOOKS);
 
 		if (minHookStatus != MH_OK)
-		{
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->Initialize: MH_EnableHook failed: %s\n", MH_StatusToString(minHookStatus));
-			ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
-		}
+			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_EnableHook failed: %s", MH_StatusToString(minHookStatus)));
 		else
-		{
 			ShaderInjectorGUI::WriteToRuntimeLog("Hooks->Initialize: Hooks enabled.");
-
-			/*
-			char buffer[256];
-			sprintf_s(buffer, "Hooks->Initialize: Hooks enabled. Present@%p (idx=%zu), Present1@%p (idx=%zu), Resize@%p (idx=%zu), Exec@%p (idx=%zu)\n",
-				reinterpret_cast<LPVOID>(scVTable[kPresentIndex]), kPresentIndex,
-				reinterpret_cast<LPVOID>(scVTable[kPresent1Index]), kPresent1Index,
-				reinterpret_cast<LPVOID>(scVTable[kResizeBuffersIndex]), kResizeBuffersIndex,
-				reinterpret_cast<LPVOID>(cqVTable[kExecuteCommandListsIndex]), kExecuteCommandListsIndex);
-			ShaderInjectorGUI::WriteToRuntimeLog(buffer);
-			*/
-		}
 	}
 
 	void CleanupDummyObjects()

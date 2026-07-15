@@ -63,45 +63,35 @@ namespace HookD3D12
 			return false;
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
-		const ModifiedShader::PackageDisk* modifiedShader =
-			DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
+		const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
 		replacement.modifiedShaderBlobPath = modifiedShader ? modifiedShader->compiledBlobPath : "";
 
 		if (!modifiedShader)
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError(
-				"DatabaseShaderTargets->CompileShaderTarget: ModifiedShader package not found: " +
-				replacement.modifiedShaderId);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->CompileShaderTarget: ModifiedShader package not found: " + replacement.modifiedShaderId);
 			return false;
 		}
 
 		if (!modifiedShader->enabled || modifiedShader->shaderType != replacement.shaderType)
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError(
-				"DatabaseShaderTargets->CompileShaderTarget: package is disabled or has the wrong shader type: " +
-				modifiedShader->id);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->CompileShaderTarget: package is disabled or has the wrong shader type: " + modifiedShader->id);
 			return false;
 		}
 
 		if (modifiedShader->sourcePath.empty() || !ShaderInjectorIO::FileExists(modifiedShader->sourcePath))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError(
-				"DatabaseShaderTargets->CompileShaderTarget: package source file not found: " +
-				modifiedShader->sourcePath);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->CompileShaderTarget: package source file not found: " + modifiedShader->sourcePath);
 			return false;
 		}
 
 		if (!DatabaseModifiedShaders::CompileModifiedShader(modifiedShader->id))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError(
-				"DatabaseShaderTargets->CompileShaderTarget: compile failed for " + modifiedShader->sourcePath);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->CompileShaderTarget: compile failed for " + modifiedShader->sourcePath);
 			return false;
 		}
 
 		replacement.modifiedShaderBlobPath = modifiedShader->compiledBlobPath;
-		ShaderInjectorGUI::WriteToRuntimeLogSuccess(
-			"DatabaseShaderTargets->CompileShaderTarget: Compiled ModifiedShader: " +
-			modifiedShader->id + " -> " + modifiedShader->compiledBlobPath);
+		ShaderInjectorGUI::WriteToRuntimeLogSuccess("DatabaseShaderTargets->CompileShaderTarget: Compiled ModifiedShader: " + modifiedShader->id + " -> " + modifiedShader->compiledBlobPath);
 		return true;
 	}
 
@@ -117,8 +107,7 @@ namespace HookD3D12
 			return false;
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
-		const ModifiedShader::PackageDisk* modifiedShader =
-			DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
+		const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
 		replacement.modifiedShaderBlobPath = modifiedShader ? modifiedShader->compiledBlobPath : "";
 
 		if (replacementIndex >= (int)gLoadedShaderTargetBlobs.size())
@@ -132,9 +121,7 @@ namespace HookD3D12
 		if (!modifiedShader || compiledReplacementBlob.empty())
 		{
 			gLoadedShaderTargetBlobs[replacementIndex].clear();
-			ShaderInjectorGUI::WriteToRuntimeLogError(
-				"DatabaseShaderTargets->ReloadShaderTarget: failed to load compiled blob for ModifiedShader " +
-				replacement.modifiedShaderId);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->ReloadShaderTarget: failed to load compiled blob for ModifiedShader " + replacement.modifiedShaderId);
 		}
 		else
 		{
@@ -252,13 +239,15 @@ namespace HookD3D12
 			if (ShaderTarget::LoadShaderTargetJson(replacementJsonPath, replacement))
 			{
 				BackfillReplacementPortableMetadataFromSidecars(replacement);
+
 				if (Globals::gShaderDiscoveryMode == Globals::ShaderDiscoveryMode::ShaderAnalysis)
 					ShaderDiscovery::EnsureReplacementAnalysis(replacement);
+
 				std::vector<uint8_t> compiledReplacementBlob;
 
-				const ModifiedShader::PackageDisk* modifiedShader =
-					DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
+				const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
 				replacement.modifiedShaderBlobPath = modifiedShader ? modifiedShader->compiledBlobPath : "";
+
 				if (modifiedShader && IsShaderTargetEffectivelyEnabled(replacement))
 					compiledReplacementBlob = modifiedShader->compiledBlob;
 

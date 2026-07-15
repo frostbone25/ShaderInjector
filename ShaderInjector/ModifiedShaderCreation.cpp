@@ -26,8 +26,7 @@ namespace ModifiedShaderCreation
 		const std::string shaderTypeName = StringHelper::ShaderTypeToString(shaderType);
 		const std::string hashText = Hash::FormatHash(shaderHash);
 		const std::string packageName = "Modified" + shaderTypeName + "_" + hashText;
-		const std::string packageDirectory = ShaderInjectorIO::JoinPath(
-			ShaderInjectorIO::GetModifiedShadersDirectory(), packageName);
+		const std::string packageDirectory = ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetModifiedShadersDirectory(), packageName);
 		const std::string jsonPath = ShaderInjectorIO::JoinPath(packageDirectory, packageName + ".json");
 		const std::string sourceFile = packageName + ".hlsl";
 		const std::string sourcePath = ShaderInjectorIO::JoinPath(packageDirectory, sourceFile);
@@ -65,6 +64,7 @@ namespace ModifiedShaderCreation
 		package.targets.push_back(std::move(target));
 
 		const char* sourceTemplate = ShaderTemplates::GetModifiedShaderSourceTemplate(shaderType);
+
 		if (!sourceTemplate || package.shaderProfile.empty())
 		{
 			outMessage = "No Modified Shader source template is available for " + shaderTypeName + ".";
@@ -72,6 +72,7 @@ namespace ModifiedShaderCreation
 		}
 
 		ShaderInjectorIO::DirectoryCreate(packageDirectory);
+
 		if (!ShaderInjectorIO::WriteTextFileIfMissing(sourcePath, sourceTemplate))
 		{
 			outMessage = "Failed to write Modified Shader source: " + sourcePath;

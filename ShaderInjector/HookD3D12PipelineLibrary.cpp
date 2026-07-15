@@ -9,6 +9,7 @@
 
 //custom
 #include "ShaderInjectorGUI.h"
+#include "StringHelper.h"
 #include "VTableIndex.h"
 
 namespace HookD3D12
@@ -106,6 +107,35 @@ namespace HookD3D12
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineLibrary->Hook_CreatePipelineLibrary: CreatePipelineLibrary Blob Size: " + std::to_string(blobLength));
 
 		HRESULT hr = Original_CreatePipelineLibrary(device, pLibraryBlob, blobLength, riid, ppPipelineLibrary);
+
+		// Pipeline-library blobs are specific to the adapter and driver environment that serialized
+		// them. RenderDoc's D3D12 capture layer can make an otherwise current game cache incompatible.
+		// An empty library is the documented starting point for rebuilding cached pipeline entries.
+		const bool incompatibleSerializedLibrary =
+			hr == D3D12_ERROR_DRIVER_VERSION_MISMATCH ||
+			hr == D3D12_ERROR_ADAPTER_NOT_FOUND;
+
+		if (incompatibleSerializedLibrary && pLibraryBlob && blobLength > 0 && ppPipelineLibrary)
+		{
+			ShaderInjectorGUI::WriteToRuntimeLogWarning(
+				"HookD3D12PipelineLibrary->Hook_CreatePipelineLibrary: serialized pipeline library rejected hr=" +
+				StringHelper::FormatHRESULT(hr) + "; retrying with an empty library");
+
+			*ppPipelineLibrary = nullptr;
+			hr = Original_CreatePipelineLibrary(device, nullptr, 0, riid, ppPipelineLibrary);
+
+			if (SUCCEEDED(hr))
+			{
+				ShaderInjectorGUI::WriteToRuntimeLogSuccess(
+					"HookD3D12PipelineLibrary->Hook_CreatePipelineLibrary: empty pipeline library created; cached PSOs will rebuild");
+			}
+			else
+			{
+				ShaderInjectorGUI::WriteToRuntimeLogError(
+					"HookD3D12PipelineLibrary->Hook_CreatePipelineLibrary: empty pipeline library retry failed hr=" +
+					StringHelper::FormatHRESULT(hr));
+			}
+		}
 
 		if (SUCCEEDED(hr) && ppPipelineLibrary && *ppPipelineLibrary)
 		{

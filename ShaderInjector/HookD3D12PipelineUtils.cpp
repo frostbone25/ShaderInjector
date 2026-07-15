@@ -194,64 +194,64 @@ namespace HookD3D12
 			if (ptr + subobjectSize > end)
 				break;
 
-			const uint8_t* payloadPtr = ptr + sizeof(void*);
 			switch (type)
 			{
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND:
 				{
-					auto* desc = reinterpret_cast<const D3D12_BLEND_DESC*>(payloadPtr);
-					replacement.blendStateHash = HashStructText(desc, sizeof(*desc));
+					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND, D3D12_BLEND_DESC>*>(ptr);
+					replacement.blendStateHash = HashStructText(&subobject->payload, sizeof(subobject->payload));
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK:
 				{
-					auto* sampleMask = reinterpret_cast<const UINT*>(payloadPtr);
-					replacement.sampleMask = std::to_string(*sampleMask);
+					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK, UINT>*>(ptr);
+					replacement.sampleMask = std::to_string(subobject->payload);
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER:
 				{
-					auto* desc = reinterpret_cast<const D3D12_RASTERIZER_DESC*>(payloadPtr);
-					replacement.rasterizerStateHash = HashStructText(desc, sizeof(*desc));
+					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER, D3D12_RASTERIZER_DESC>*>(ptr);
+					replacement.rasterizerStateHash = HashStructText(&subobject->payload, sizeof(subobject->payload));
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL:
 				{
-					auto* desc = reinterpret_cast<const D3D12_DEPTH_STENCIL_DESC*>(payloadPtr);
-					replacement.depthStencilStateHash = HashStructText(desc, sizeof(*desc));
+					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL, D3D12_DEPTH_STENCIL_DESC>*>(ptr);
+					replacement.depthStencilStateHash = HashStructText(&subobject->payload, sizeof(subobject->payload));
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY:
 				{
-					auto* topology = reinterpret_cast<const D3D12_PRIMITIVE_TOPOLOGY_TYPE*>(payloadPtr);
-					replacement.primitiveTopologyType = std::to_string((UINT)*topology);
+					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY, D3D12_PRIMITIVE_TOPOLOGY_TYPE>*>(ptr);
+					replacement.primitiveTopologyType = std::to_string((UINT)subobject->payload);
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS:
 				{
-					auto* formats = reinterpret_cast<const D3D12_RT_FORMAT_ARRAY*>(payloadPtr);
-					replacement.numRenderTargets = std::to_string(formats->NumRenderTargets);
-					replacement.renderTargetFormat0 = formats->NumRenderTargets > 0 ? std::to_string((UINT)formats->RTFormats[0]) : "";
-					replacement.renderTargetFormats = RenderTargetFormatsSignature(formats->RTFormats, formats->NumRenderTargets);
+					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS, D3D12_RT_FORMAT_ARRAY>*>(ptr);
+					const D3D12_RT_FORMAT_ARRAY& formats = subobject->payload;
+					replacement.numRenderTargets = std::to_string(formats.NumRenderTargets);
+					replacement.renderTargetFormat0 = formats.NumRenderTargets > 0 ? std::to_string((UINT)formats.RTFormats[0]) : "";
+					replacement.renderTargetFormats = RenderTargetFormatsSignature(formats.RTFormats, formats.NumRenderTargets);
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT:
 				{
-					auto* format = reinterpret_cast<const DXGI_FORMAT*>(payloadPtr);
-					replacement.depthStencilFormat = std::to_string((UINT)*format);
+					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT, DXGI_FORMAT>*>(ptr);
+					replacement.depthStencilFormat = std::to_string((UINT)subobject->payload);
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC:
 				{
-					auto* sampleDesc = reinterpret_cast<const DXGI_SAMPLE_DESC*>(payloadPtr);
-					replacement.sampleCount = std::to_string(sampleDesc->Count);
-					replacement.sampleQuality = std::to_string(sampleDesc->Quality);
+					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC, DXGI_SAMPLE_DESC>*>(ptr);
+					replacement.sampleCount = std::to_string(subobject->payload.Count);
+					replacement.sampleQuality = std::to_string(subobject->payload.Quality);
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL1:
 				{
-					auto* desc = reinterpret_cast<const D3D12_DEPTH_STENCIL_DESC1*>(payloadPtr);
-					replacement.depthStencilStateHash = HashStructText(desc, sizeof(*desc));
+					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL1, D3D12_DEPTH_STENCIL_DESC1>*>(ptr);
+					replacement.depthStencilStateHash = HashStructText(&subobject->payload, sizeof(subobject->payload));
 					break;
 				}
 				default:

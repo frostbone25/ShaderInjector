@@ -15,6 +15,7 @@
 
 #include "Hash.h"
 #include "ShaderInjectorIO.h"
+#include "StringHelper.h"
 
 namespace ShaderAnalyzer
 {
@@ -25,33 +26,6 @@ namespace ShaderAnalyzer
 		std::mutex gAnalyzerMutex;
 		std::mutex gDXCompilerModuleMutex;
 		HMODULE gDXCompilerModule = nullptr;
-
-		std::string SafeString(const char* text)
-		{
-			return text ? text : "";
-		}
-
-		std::wstring Utf8ToWide(const std::string& text)
-		{
-			if (text.empty())
-				return {};
-
-			const int characterCount = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-			if (characterCount <= 0)
-				return {};
-
-			std::wstring wideText(static_cast<size_t>(characterCount), L'\0');
-			MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wideText.data(), characterCount);
-			wideText.resize(static_cast<size_t>(characterCount - 1));
-			return wideText;
-		}
-
-		std::string HResultText(HRESULT result)
-		{
-			char text[16]{};
-			sprintf_s(text, "0x%08X", static_cast<unsigned int>(result));
-			return text;
-		}
 
 		bool Fail(ShaderAnalysis::ShaderAnalysisDisk& analysis, const std::string& error)
 		{
@@ -94,6 +68,7 @@ namespace ShaderAnalyzer
 		HMODULE LoadDXCompiler()
 		{
 			std::lock_guard<std::mutex> lock(gDXCompilerModuleMutex);
+
 			if (gDXCompilerModule)
 				return gDXCompilerModule;
 
@@ -107,7 +82,8 @@ namespace ShaderAnalyzer
 				return gDXCompilerModule;
 			}
 
-			const std::wstring configuredPath = Utf8ToWide(ShaderInjectorIO::GetToolPathDXCompiler());
+			const std::wstring configuredPath = StringHelper::Utf8ToWide(ShaderInjectorIO::GetToolPathDXCompiler());
+
 			if (!configuredPath.empty())
 			{
 				gDXCompilerModule = LoadLibraryExW(
@@ -126,7 +102,7 @@ namespace ShaderAnalyzer
 		ShaderAnalysis::SignatureParameterDisk ReadSignatureParameter(const D3D12_SIGNATURE_PARAMETER_DESC& description)
 		{
 			ShaderAnalysis::SignatureParameterDisk parameter{};
-			parameter.semanticName = SafeString(description.SemanticName);
+			parameter.semanticName = StringHelper::SafeString(description.SemanticName);
 			parameter.semanticIndex = description.SemanticIndex;
 			parameter.registerIndex = description.Register;
 			parameter.systemValueType = static_cast<uint32_t>(description.SystemValueType);
@@ -141,14 +117,16 @@ namespace ShaderAnalyzer
 		ShaderAnalysis::TypeLayoutDisk ReadTypeLayout(ID3D12ShaderReflectionType* reflectedType, uint32_t depth)
 		{
 			ShaderAnalysis::TypeLayoutDisk layout{};
+
 			if (!reflectedType || depth >= 16)
 				return layout;
 
 			D3D12_SHADER_TYPE_DESC description{};
+
 			if (FAILED(reflectedType->GetDesc(&description)))
 				return layout;
 
-			layout.name = SafeString(description.Name);
+			layout.name = StringHelper::SafeString(description.Name);
 			layout.variableClass = static_cast<uint32_t>(description.Class);
 			layout.variableType = static_cast<uint32_t>(description.Type);
 			layout.rows = description.Rows;
@@ -157,12 +135,15 @@ namespace ShaderAnalyzer
 			layout.offset = description.Offset;
 
 			layout.members.reserve(description.Members);
+
 			for (uint32_t memberIndex = 0; memberIndex < description.Members; ++memberIndex)
 			{
 				ShaderAnalysis::TypeLayoutDisk member = ReadTypeLayout(reflectedType->GetMemberTypeByIndex(memberIndex), depth + 1);
 				const char* memberName = reflectedType->GetMemberTypeName(memberIndex);
+
 				if (memberName)
 					member.name = memberName;
+
 				layout.members.push_back(std::move(member));
 			}
 
@@ -171,10 +152,11 @@ namespace ShaderAnalyzer
 
 		void AppendTypeLayoutSignature(std::ostringstream& signature, const ShaderAnalysis::TypeLayoutDisk& layout)
 		{
-			signature << layout.variableClass << ':' << layout.variableType << ':' << layout.rows << ':'
-				<< layout.columns << ':' << layout.elements << ':' << layout.offset << '[';
+			signature << layout.variableClass << ':' << layout.variableType << ':' << layout.rows << ':' << layout.columns << ':' << layout.elements << ':' << layout.offset << '[';
+
 			for (const ShaderAnalysis::TypeLayoutDisk& member : layout.members)
 				AppendTypeLayoutSignature(signature, member);
+
 			signature << ']';
 		}
 
@@ -211,11 +193,11 @@ namespace ShaderAnalyzer
 		{
 			std::sort(resources.begin(), resources.end(), [](const auto& left, const auto& right)
 			{
-				return std::tie(left.registerSpace, left.bindPoint, left.type, left.bindCount) <
-					std::tie(right.registerSpace, right.bindPoint, right.type, right.bindCount);
+				return std::tie(left.registerSpace, left.bindPoint, left.type, left.bindCount) < std::tie(right.registerSpace, right.bindPoint, right.type, right.bindCount);
 			});
 
 			std::ostringstream signature;
+
 			for (const auto& resource : resources)
 			{
 				// Names and range IDs are intentionally excluded because compilers may rewrite them.
@@ -223,6 +205,7 @@ namespace ShaderAnalyzer
 					<< resource.flags << ':' << resource.returnType << ':' << resource.dimension << ':'
 					<< resource.sampleCountOrStride << ':' << resource.registerSpace << ';';
 			}
+
 			return Fingerprint(signature.str());
 		}
 
@@ -235,6 +218,7 @@ namespace ShaderAnalyzer
 			});
 
 			std::ostringstream signature;
+
 			for (auto& buffer : buffers)
 			{
 				std::sort(buffer.variables.begin(), buffer.variables.end(), [](const auto& left, const auto& right)
@@ -243,6 +227,7 @@ namespace ShaderAnalyzer
 				});
 
 				signature << buffer.type << ':' << buffer.size << ':' << buffer.flags << '{';
+
 				for (const auto& variable : buffer.variables)
 				{
 					signature << variable.startOffset << ':' << variable.size << ':' << variable.flags << ':'
@@ -251,8 +236,10 @@ namespace ShaderAnalyzer
 					AppendTypeLayoutSignature(signature, variable.typeLayout);
 					signature << ';';
 				}
+
 				signature << '}';
 			}
+
 			return Fingerprint(signature.str());
 		}
 
@@ -268,44 +255,24 @@ namespace ShaderAnalyzer
 			return Fingerprint(json.dump());
 		}
 
-		std::string TrimAndCollapseWhitespace(const std::string& text)
-		{
-			std::string normalized;
-			normalized.reserve(text.size());
-			bool pendingSpace = false;
-
-			for (unsigned char character : text)
-			{
-				if (std::isspace(character))
-				{
-					pendingSpace = !normalized.empty();
-					continue;
-				}
-
-				if (pendingSpace)
-					normalized.push_back(' ');
-				normalized.push_back(static_cast<char>(character));
-				pendingSpace = false;
-			}
-
-			return normalized;
-		}
-
 		void AnalyzeSemanticInstructions(
 			DxcCreateInstanceProc createInstance,
 			IDxcBlob* shaderBlob,
 			ShaderAnalysis::ShaderAnalysisDisk& analysis)
 		{
 			ComPtr<IDxcCompiler> compiler;
+
 			if (FAILED(createInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler))))
 				return;
 
 			ComPtr<IDxcBlobEncoding> disassemblyBlob;
+
 			if (FAILED(compiler->Disassemble(shaderBlob, &disassemblyBlob)) || !disassemblyBlob)
 				return;
 
 			const char* disassemblyBytes = static_cast<const char*>(disassemblyBlob->GetBufferPointer());
 			const size_t disassemblySize = disassemblyBlob->GetBufferSize();
+
 			if (!disassemblyBytes || disassemblySize == 0)
 				return;
 
@@ -323,13 +290,15 @@ namespace ShaderAnalyzer
 
 			while (std::getline(lines, line))
 			{
-				const std::string trimmedLine = TrimAndCollapseWhitespace(line);
+				const std::string trimmedLine = StringHelper::CollapseWhitespace(line);
+
 				if (!insideFunction)
 				{
 					if (trimmedLine.rfind("define ", 0) != 0)
 						continue;
 
 					insideFunction = true;
+
 					if (analysis.entryFunctionName.empty())
 					{
 						const size_t nameStart = trimmedLine.find('@');
@@ -337,6 +306,7 @@ namespace ShaderAnalyzer
 						if (nameStart != std::string::npos && nameEnd != std::string::npos)
 							analysis.entryFunctionName = trimmedLine.substr(nameStart + 1, nameEnd - nameStart - 1);
 					}
+
 					continue;
 				}
 
@@ -351,10 +321,11 @@ namespace ShaderAnalyzer
 				instruction = std::regex_replace(instruction, assignmentPattern, "");
 				instruction = std::regex_replace(instruction, ssaIdentifierPattern, "%v");
 				instruction = std::regex_replace(instruction, metadataIdentifierPattern, "!m");
-				instruction = TrimAndCollapseWhitespace(instruction);
+				instruction = StringHelper::CollapseWhitespace(instruction);
 
 				if (instruction.empty())
 					continue;
+
 				if (std::regex_match(instruction, numericLabelPattern))
 					instruction = "label:";
 
@@ -391,56 +362,69 @@ namespace ShaderAnalyzer
 		std::lock_guard<std::mutex> analyzerLock(gAnalyzerMutex);
 
 		outAnalysis = {};
+
 		if (!bytecode || bytecodeLength == 0)
 			return Fail(outAnalysis, "Shader bytecode is empty.");
+
 		if (bytecodeLength > (std::numeric_limits<uint32_t>::max)())
 			return Fail(outAnalysis, "Shader bytecode exceeds the DXC blob size limit.");
 
 		const HMODULE dxCompilerModule = LoadDXCompiler();
+
 		if (!dxCompilerModule)
 			return Fail(outAnalysis, "dxcompiler.dll could not be loaded from ShaderInjector/Tools or the process DLL search path.");
 
 		const auto createInstance = reinterpret_cast<DxcCreateInstanceProc>(GetProcAddress(dxCompilerModule, "DxcCreateInstance"));
+
 		if (!createInstance)
 			return Fail(outAnalysis, "dxcompiler.dll does not export DxcCreateInstance.");
 
 		ComPtr<IDxcUtils> utilities;
 		HRESULT result = createInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utilities));
+
 		if (FAILED(result))
-			return Fail(outAnalysis, "Failed to create IDxcUtils: " + HResultText(result));
+			return Fail(outAnalysis, "Failed to create IDxcUtils: " + StringHelper::FormatHRESULT(result));
 
 		ComPtr<IDxcBlobEncoding> shaderBlob;
 		result = utilities->CreateBlobFromPinned(bytecode, static_cast<uint32_t>(bytecodeLength), DXC_CP_ACP, &shaderBlob);
+
 		if (FAILED(result))
-			return Fail(outAnalysis, "Failed to create the DXC shader blob: " + HResultText(result));
+			return Fail(outAnalysis, "Failed to create the DXC shader blob: " + StringHelper::FormatHRESULT(result));
 
 		ComPtr<IDxcContainerReflection> containerReflection;
 		result = createInstance(CLSID_DxcContainerReflection, IID_PPV_ARGS(&containerReflection));
+
 		if (FAILED(result))
-			return Fail(outAnalysis, "Failed to create IDxcContainerReflection: " + HResultText(result));
+			return Fail(outAnalysis, "Failed to create IDxcContainerReflection: " + StringHelper::FormatHRESULT(result));
 
 		result = containerReflection->Load(shaderBlob.Get());
+
 		if (FAILED(result))
-			return Fail(outAnalysis, "The captured shader is not a readable DXIL container: " + HResultText(result));
+			return Fail(outAnalysis, "The captured shader is not a readable DXIL container: " + StringHelper::FormatHRESULT(result));
 
 		uint32_t partCount = 0;
 		result = containerReflection->GetPartCount(&partCount);
+
 		if (FAILED(result))
-			return Fail(outAnalysis, "Failed to enumerate DXIL container parts: " + HResultText(result));
+			return Fail(outAnalysis, "Failed to enumerate DXIL container parts: " + StringHelper::FormatHRESULT(result));
 
 		std::ostringstream containerSignature;
 		outAnalysis.containerParts.reserve(partCount);
+
 		for (uint32_t partIndex = 0; partIndex < partCount; ++partIndex)
 		{
 			ShaderAnalysis::ContainerPartDisk part{};
+
 			if (FAILED(containerReflection->GetPartKind(partIndex, &part.kind)))
 				continue;
 
 			part.fourCC = FourCCText(part.kind);
 			ComPtr<IDxcBlob> partContent;
+
 			if (SUCCEEDED(containerReflection->GetPartContent(partIndex, &partContent)) && partContent)
 			{
 				part.size = partContent->GetBufferSize();
+
 				if (part.size > 0)
 					part.contentHash = Hash::FormatHash(Hash::HashMemory(partContent->GetBufferPointer(), static_cast<size_t>(part.size)));
 			}
@@ -448,40 +432,45 @@ namespace ShaderAnalyzer
 			containerSignature << part.fourCC << ':' << part.size << ';';
 			outAnalysis.containerParts.push_back(std::move(part));
 		}
+
 		outAnalysis.containerSignatureHash = Fingerprint(containerSignature.str());
 
 		uint32_t dxilPartIndex = 0;
 		result = containerReflection->FindFirstPartKind(DXC_PART_DXIL, &dxilPartIndex);
+
 		if (FAILED(result))
-			return Fail(outAnalysis, "The shader container does not contain a DXIL program part: " + HResultText(result));
+			return Fail(outAnalysis, "The shader container does not contain a DXIL program part: " + StringHelper::FormatHRESULT(result));
 
 		ComPtr<ID3D12ShaderReflection> shaderReflection;
 		result = containerReflection->GetPartReflection(dxilPartIndex, IID_PPV_ARGS(&shaderReflection));
+
 		if (FAILED(result))
-			return Fail(outAnalysis, "DXIL shader reflection failed: " + HResultText(result));
+			return Fail(outAnalysis, "DXIL shader reflection failed: " + StringHelper::FormatHRESULT(result));
 
 		D3D12_SHADER_DESC shaderDescription{};
 		result = shaderReflection->GetDesc(&shaderDescription);
-		if (FAILED(result))
-			return Fail(outAnalysis, "Failed to read the DXIL shader description: " + HResultText(result));
 
-		outAnalysis.creator = SafeString(shaderDescription.Creator);
+		if (FAILED(result))
+			return Fail(outAnalysis, "Failed to read the DXIL shader description: " + StringHelper::FormatHRESULT(result));
+
+		outAnalysis.creator = StringHelper::SafeString(shaderDescription.Creator);
 		outAnalysis.shaderVersionToken = shaderDescription.Version;
 		outAnalysis.shaderStage = D3D12_SHVER_GET_TYPE(shaderDescription.Version);
 		outAnalysis.shaderModelMajor = D3D12_SHVER_GET_MAJOR(shaderDescription.Version);
 		outAnalysis.shaderModelMinor = D3D12_SHVER_GET_MINOR(shaderDescription.Version);
 		const auto shaderStageText = ShaderStageText(outAnalysis.shaderStage);
 		outAnalysis.shaderStageName = shaderStageText.first;
-		outAnalysis.shaderModelProfile = std::string(shaderStageText.second) + "_" +
-			std::to_string(outAnalysis.shaderModelMajor) + "_" + std::to_string(outAnalysis.shaderModelMinor);
+		outAnalysis.shaderModelProfile = std::string(shaderStageText.second) + "_" + std::to_string(outAnalysis.shaderModelMajor) + "_" + std::to_string(outAnalysis.shaderModelMinor);
 		outAnalysis.compilationFlags = shaderDescription.Flags;
 
 		auto readSignature = [&](uint32_t count, auto getter, std::vector<ShaderAnalysis::SignatureParameterDisk>& destination)
 		{
 			destination.reserve(count);
+
 			for (uint32_t index = 0; index < count; ++index)
 			{
 				D3D12_SIGNATURE_PARAMETER_DESC description{};
+
 				if (SUCCEEDED((shaderReflection.Get()->*getter)(index, &description)))
 					destination.push_back(ReadSignatureParameter(description));
 			}
@@ -492,14 +481,16 @@ namespace ShaderAnalyzer
 		readSignature(shaderDescription.PatchConstantParameters, &ID3D12ShaderReflection::GetPatchConstantParameterDesc, outAnalysis.patchConstantParameters);
 
 		outAnalysis.resourceBindings.reserve(shaderDescription.BoundResources);
+
 		for (uint32_t resourceIndex = 0; resourceIndex < shaderDescription.BoundResources; ++resourceIndex)
 		{
 			D3D12_SHADER_INPUT_BIND_DESC description{};
+
 			if (FAILED(shaderReflection->GetResourceBindingDesc(resourceIndex, &description)))
 				continue;
 
 			ShaderAnalysis::ResourceBindingDisk resource{};
-			resource.name = SafeString(description.Name);
+			resource.name = StringHelper::SafeString(description.Name);
 			resource.type = static_cast<uint32_t>(description.Type);
 			resource.bindPoint = description.BindPoint;
 			resource.bindCount = description.BindCount;
@@ -513,18 +504,21 @@ namespace ShaderAnalyzer
 		}
 
 		outAnalysis.constantBuffers.reserve(shaderDescription.ConstantBuffers);
+
 		for (uint32_t bufferIndex = 0; bufferIndex < shaderDescription.ConstantBuffers; ++bufferIndex)
 		{
 			ID3D12ShaderReflectionConstantBuffer* reflectedBuffer = shaderReflection->GetConstantBufferByIndex(bufferIndex);
+
 			if (!reflectedBuffer)
 				continue;
 
 			D3D12_SHADER_BUFFER_DESC bufferDescription{};
+
 			if (FAILED(reflectedBuffer->GetDesc(&bufferDescription)))
 				continue;
 
 			ShaderAnalysis::ConstantBufferDisk buffer{};
-			buffer.name = SafeString(bufferDescription.Name);
+			buffer.name = StringHelper::SafeString(bufferDescription.Name);
 			buffer.type = static_cast<uint32_t>(bufferDescription.Type);
 			buffer.size = bufferDescription.Size;
 			buffer.flags = bufferDescription.uFlags;
@@ -533,6 +527,7 @@ namespace ShaderAnalyzer
 			for (uint32_t variableIndex = 0; variableIndex < bufferDescription.Variables; ++variableIndex)
 			{
 				ID3D12ShaderReflectionVariable* reflectedVariable = reflectedBuffer->GetVariableByIndex(variableIndex);
+
 				if (!reflectedVariable)
 					continue;
 
@@ -541,7 +536,7 @@ namespace ShaderAnalyzer
 					continue;
 
 				ShaderAnalysis::ConstantBufferVariableDisk variable{};
-				variable.name = SafeString(variableDescription.Name);
+				variable.name = StringHelper::SafeString(variableDescription.Name);
 				variable.startOffset = variableDescription.StartOffset;
 				variable.size = variableDescription.Size;
 				variable.flags = variableDescription.uFlags;
@@ -589,20 +584,16 @@ namespace ShaderAnalyzer
 		execution.hullOutputPrimitive = static_cast<uint32_t>(shaderDescription.HSOutputPrimitive);
 		execution.hullPartitioning = static_cast<uint32_t>(shaderDescription.HSPartitioning);
 		execution.tessellatorDomain = static_cast<uint32_t>(shaderDescription.TessellatorDomain);
-		execution.threadGroupTotalSize = shaderReflection->GetThreadGroupSize(
-			&execution.threadGroupSizeX,
-			&execution.threadGroupSizeY,
-			&execution.threadGroupSizeZ);
+		execution.threadGroupTotalSize = shaderReflection->GetThreadGroupSize(&execution.threadGroupSizeX, &execution.threadGroupSizeY, &execution.threadGroupSizeZ);
 		execution.requiresFlags = shaderReflection->GetRequiresFlags();
 		execution.sampleFrequencyShader = shaderReflection->IsSampleFrequencyShader() != FALSE;
+
 		D3D_FEATURE_LEVEL minimumFeatureLevel{};
+
 		if (SUCCEEDED(shaderReflection->GetMinFeatureLevel(&minimumFeatureLevel)))
 			execution.minimumFeatureLevel = static_cast<uint32_t>(minimumFeatureLevel);
 
-		outAnalysis.interfaceSignatureHash = BuildSignatureParameterFingerprint(
-			outAnalysis.inputParameters,
-			outAnalysis.outputParameters,
-			outAnalysis.patchConstantParameters);
+		outAnalysis.interfaceSignatureHash = BuildSignatureParameterFingerprint(outAnalysis.inputParameters, outAnalysis.outputParameters, outAnalysis.patchConstantParameters);
 		outAnalysis.resourceSignatureHash = BuildResourceFingerprint(outAnalysis.resourceBindings);
 		outAnalysis.constantBufferSignatureHash = BuildConstantBufferFingerprint(outAnalysis.constantBuffers);
 		outAnalysis.instructionStatisticsHash = BuildInstructionFingerprint(outAnalysis.instructionStatistics);
@@ -621,18 +612,15 @@ namespace ShaderAnalyzer
 		// already how the fuzzy replacement fallback gates its candidates). If nothing in the
 		// caller's candidate set shares this shader's reflection identity, it can never match, so
 		// skip the expensive disassembly and semantic hashing below entirely.
-		const bool skipDisassembly = acceptablePortableReflectionHashes &&
-			acceptablePortableReflectionHashes->find(outAnalysis.portableReflectionIdentityHash) ==
-				acceptablePortableReflectionHashes->end();
+		const bool skipDisassembly = acceptablePortableReflectionHashes && acceptablePortableReflectionHashes->find(outAnalysis.portableReflectionIdentityHash) == acceptablePortableReflectionHashes->end();
 
 		if (!skipDisassembly)
 		{
 			AnalyzeSemanticInstructions(createInstance, shaderBlob.Get(), outAnalysis);
+
 			if (!outAnalysis.semanticInstructionSetHash.empty())
 			{
-				outAnalysis.crossVersionIdentityHash = Fingerprint(
-					outAnalysis.portableReflectionIdentityHash + ":" +
-					outAnalysis.entryFunctionName + ":" + outAnalysis.semanticInstructionSetHash);
+				outAnalysis.crossVersionIdentityHash = Fingerprint(outAnalysis.portableReflectionIdentityHash + ":" + outAnalysis.entryFunctionName + ":" + outAnalysis.semanticInstructionSetHash);
 			}
 		}
 

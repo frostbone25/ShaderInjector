@@ -1,7 +1,6 @@
 #include "ModifiedShader.h"
 
 #include <algorithm>
-#include <fstream>
 #include <unordered_set>
 
 #include "Hash.h"
@@ -22,20 +21,17 @@ namespace ModifiedShader
 			std::unordered_set<std::string> combinedHashes = leftHashes;
 			combinedHashes.insert(rightHashes.begin(), rightHashes.end());
 			size_t sharedHashCount = 0;
+
 			for (const std::string& hash : rightHashes)
 			{
 				if (leftHashes.find(hash) != leftHashes.end())
 					++sharedHashCount;
 			}
 
-			return combinedHashes.empty()
-				? 1.0
-				: static_cast<double>(sharedHashCount) / static_cast<double>(combinedHashes.size());
+			return combinedHashes.empty() ? 1.0 : static_cast<double>(sharedHashCount) / static_cast<double>(combinedHashes.size());
 		}
 
-		bool AnalysesHaveSameStrictIdentity(
-			const ShaderAnalysis::ShaderAnalysisDisk& left,
-			const ShaderAnalysis::ShaderAnalysisDisk& right)
+		bool AnalysesHaveSameStrictIdentity(const ShaderAnalysis::ShaderAnalysisDisk& left, const ShaderAnalysis::ShaderAnalysisDisk& right)
 		{
 			return left.succeeded && right.succeeded &&
 				!left.crossVersionIdentityHash.empty() &&
@@ -62,8 +58,10 @@ namespace ModifiedShader
 		SimilarityScore::WeightedAverage score;
 		score.Add(HashCollectionSimilarity(knownShaderBytecodeHashes, other.knownShaderBytecodeHashes), 4.0);
 		score.Add(SimilarityScore::NumericString(originalShaderBytecodeLength, other.originalShaderBytecodeLength), 2.0);
+
 		if (shaderAnalysis.succeeded || other.shaderAnalysis.succeeded)
 			score.Add(shaderAnalysis.CalculateSimilarityScore(other.shaderAnalysis), 10.0);
+
 		score.Add(SimilarityScore::Exact(targetApplication, other.targetApplication), 1.0);
 		score.Add(SimilarityScore::Exact(gameVersion, other.gameVersion), 0.5);
 		return score.Result();
@@ -84,6 +82,7 @@ namespace ModifiedShader
 			if (target.MatchesShader(shaderHash, analysis))
 				return true;
 		}
+
 		return false;
 	}
 
@@ -109,55 +108,46 @@ namespace ModifiedShader
 			return false;
 
 		PackageDisk portablePackage = package;
-		portablePackage.sourceFile = ShaderInjectorIO::FileNameFromPath(
-			portablePackage.sourceFile.empty() ? portablePackage.sourcePath : portablePackage.sourceFile);
-		portablePackage.compiledBlobFile = ShaderInjectorIO::FileNameFromPath(
-			portablePackage.compiledBlobFile.empty() ? portablePackage.compiledBlobPath : portablePackage.compiledBlobFile);
+		portablePackage.sourceFile = ShaderInjectorIO::FileNameFromPath(portablePackage.sourceFile.empty() ? portablePackage.sourcePath : portablePackage.sourceFile);
+		portablePackage.compiledBlobFile = ShaderInjectorIO::FileNameFromPath(portablePackage.compiledBlobFile.empty() ? portablePackage.compiledBlobPath : portablePackage.compiledBlobFile);
 		portablePackage.packageDirectory = ".";
 		portablePackage.jsonPath = ShaderInjectorIO::FileNameFromPath(package.jsonPath);
 		portablePackage.sourcePath = portablePackage.sourceFile;
 		portablePackage.compiledBlobPath = portablePackage.compiledBlobFile;
-
-		std::ofstream jsonFile(package.jsonPath, std::ios::out | std::ios::trunc);
-		if (!jsonFile.is_open())
-			return false;
 
 		nlohmann::ordered_json json = portablePackage;
 		json.erase("packageDirectory");
 		json.erase("jsonPath");
 		json.erase("sourcePath");
 		json.erase("compiledBlobPath");
-		jsonFile << json.dump(4);
-		return !jsonFile.fail();
+		return ShaderInjectorIO::WriteTextFile(package.jsonPath, json.dump(4));
 	}
 
 	bool LoadJson(const std::string& jsonPath, PackageDisk& outPackage)
 	{
 		try
 		{
-			std::ifstream jsonFile(jsonPath);
-			if (!jsonFile.is_open())
+			std::string jsonText;
+
+			if (!ShaderInjectorIO::ReadTextFile(jsonPath, jsonText))
 				return false;
 
-			nlohmann::ordered_json json{};
-			jsonFile >> json;
+			const nlohmann::ordered_json json = nlohmann::ordered_json::parse(jsonText);
 			PackageDisk package = json.get<PackageDisk>();
+
 			if (package.format != formatName)
 				return false;
 
 			package.jsonPath = jsonPath;
 			package.packageDirectory = ShaderInjectorIO::DirectoryFromPath(jsonPath);
 			package.sourceFile = ShaderInjectorIO::FileNameFromPath(package.sourceFile);
-			package.sourcePath = package.sourceFile.empty()
-				? ""
-				: ShaderInjectorIO::JoinPath(package.packageDirectory, package.sourceFile);
+			package.sourcePath = package.sourceFile.empty() ? "" : ShaderInjectorIO::JoinPath(package.packageDirectory, package.sourceFile);
 			package.compiledBlobFile = ShaderInjectorIO::FileNameFromPath(package.compiledBlobFile);
-			package.compiledBlobPath = package.compiledBlobFile.empty()
-				? ""
-				: ShaderInjectorIO::JoinPath(package.packageDirectory, package.compiledBlobFile);
+			package.compiledBlobPath = package.compiledBlobFile.empty() ? "" : ShaderInjectorIO::JoinPath(package.packageDirectory, package.compiledBlobFile);
 
 			if (package.id.empty())
 				package.id = ShaderInjectorIO::FileNameFromPath(package.packageDirectory);
+
 			if (package.name.empty())
 				package.name = package.id;
 
@@ -186,12 +176,15 @@ namespace ModifiedShader
 		{
 			if (hash.empty() || std::find(target.knownShaderBytecodeHashes.begin(), target.knownShaderBytecodeHashes.end(), hash) != target.knownShaderBytecodeHashes.end())
 				return;
+
 			target.knownShaderBytecodeHashes.push_back(hash);
 		};
 
 		addHash(shaderTarget.originalShaderBytecodeHash);
+
 		for (const std::string& aliasHash : shaderTarget.shaderBytecodeHashAliases)
 			addHash(aliasHash);
+
 		return target;
 	}
 }

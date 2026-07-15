@@ -1,6 +1,5 @@
 //dllmain.cpp
 #include <windows.h>
-#include <cstdio>
 
 //3RD PARTY
 #include "MinHook.h"
@@ -11,7 +10,9 @@
 #include "Hooks.h"
 #include "dsound_proxy.h"
 #include "ShaderInjectorIO.h"
+#include "StringHelper.h"
 #include "DatabaseModifiedShaders.h"
+#include "RenderDocIntegration.h"
 #include "SystemInfoLogger.h"
 
 //||||||||||||||||||||||||||||||| ON ATTACH |||||||||||||||||||||||||||||||
@@ -25,6 +26,12 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 
 	LoadRealDsoundDll();
 
+	//Read settings before initializing the optional RenderDoc bridge. Unless AutoAttach is
+	//explicitly enabled, initialization only detects an already injected RenderDoc module.
+	ShaderInjectorIO::RotateLogFiles();
+	ShaderInjectorIO::ReadInjectorSettings();
+	RenderDocIntegration::Initialize();
+
 	//NOTE TO SELF: not a fan of this, even though it helps...
 	//this is just to ensure we don't get crazy crashes or timing issues with d3d12 because im sick and tired of crashing
 	Sleep(5000);
@@ -32,9 +39,6 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	//||||||||||||||||||||||||||||||| INITALIZE IO |||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||| INITALIZE IO |||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||| INITALIZE IO |||||||||||||||||||||||||||||||
-
-	//preserve the previous run before starting a fresh current log
-	ShaderInjectorIO::RotateLogFiles();
 
 	//initalize IO operations (folders, files, internal shader files)
 	ShaderInjectorIO::Initialize();
@@ -132,9 +136,7 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 
 	if (minhookStatus != MH_OK)
 	{
-		char stringBuffer[256];
-		sprintf_s(stringBuffer, "dllmain->OnAttachDLL: MH_Initialize failed: %s", MH_StatusToString(minhookStatus));
-		ShaderInjectorIO::WriteToLogFileError(stringBuffer);
+		ShaderInjectorIO::WriteToLogFileError(StringHelper::Format("dllmain->OnAttachDLL: MH_Initialize failed: %s", MH_StatusToString(minhookStatus)));
 		return 0;
 	}
 
@@ -157,9 +159,7 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 
 	//IMPORTANT NOTE 4: We can infact find the d3d12.dll and get a handle on it!
 	//NOTE: keep this comment around for sanity check please!
-	char stringBuffer[256];
-	sprintf_s(stringBuffer, "dllmain->OnAttachDLL: d3d12.dll = %p", d3d12);
-	ShaderInjectorIO::WriteToLogFile(stringBuffer);
+	ShaderInjectorIO::WriteToLogFile(StringHelper::Format("dllmain->OnAttachDLL: d3d12.dll = %p", d3d12));
 
 	//this is where the real madness begins...
 	//hook into d3d12 device creation and start hooking into many of it's calls

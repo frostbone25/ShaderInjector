@@ -27,6 +27,8 @@ namespace Globals
 	// observes the settings loaded from ShaderInjector.ini instead of keeping its own copy.
 	extern bool gShowShaderInjectorGUI;
 	extern bool gShaderInjectorEnabled;
+	extern bool gRenderDocIntegrationEnabled;
+	extern bool gRenderDocAutoAttachEnabled;
 
 	// Shader discovery tuning. WorkerThreads = 0 means automatic half-core scaling.
 	extern ShaderDiscoveryMode gShaderDiscoveryMode;

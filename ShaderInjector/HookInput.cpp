@@ -78,6 +78,7 @@ namespace HookInput
 		WNDPROC originalWindowProcedure = (originalWindowProcedureIterator != sOriginalWindowProcedures.end()) ? originalWindowProcedureIterator->second : nullptr;
 
 		const bool isFreshKeyDown = (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) && (longParameter & 0x40000000) == 0;
+
 		if (isFreshKeyDown)
 		{
 			const int key = static_cast<int>(wordParameter);
@@ -110,6 +111,7 @@ namespace HookInput
 
 		if (originalWindowProcedure)
 			return CallWindowProc(originalWindowProcedure, windowHandle, message, wordParameter, longParameter);
+
 		return DefWindowProc(windowHandle, message, wordParameter, longParameter);
 	}
 }

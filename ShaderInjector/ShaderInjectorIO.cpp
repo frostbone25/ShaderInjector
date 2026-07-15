@@ -4,19 +4,16 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
-#include <cstdio>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <vector>
 
 #if defined(_WIN32)
 	#include <Windows.h>
 	#include <shellapi.h>
-#else
-	#include <limits.h>
-	#include <unistd.h>
 #endif
 
 //3RD Party
@@ -26,6 +23,7 @@
 #include "ShaderTemplates.h"
 #include "Globals.h"
 #include "ProcessRunner.h"
+#include "StringHelper.h"
 
 namespace ShaderInjectorIO
 {
@@ -47,15 +45,6 @@ namespace ShaderInjectorIO
 		std::string PathToUtf8(const FileSystem::path& path)
 		{
 			return path.u8string();
-		}
-
-		std::string Lowercase(std::string text)
-		{
-			std::transform(text.begin(), text.end(), text.begin(), [](unsigned char character)
-			{
-				return static_cast<char>(std::tolower(character));
-			});
-			return text;
 		}
 
 		std::mutex gLogMutex;
@@ -130,18 +119,33 @@ namespace ShaderInjectorIO
 		return !file.fail();
 	}
 
+	bool ReadTextFile(const std::string& filePath, std::string& outText)
+	{
+		outText.clear();
+		std::ifstream file(PathFromUtf8(filePath), std::ios::in | std::ios::binary);
+		if (!file.is_open())
+			return false;
+
+		outText.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+		return !file.bad();
+	}
+
+	bool WriteTextFile(const std::string& filePath, const std::string& text)
+	{
+		std::ofstream file(PathFromUtf8(filePath), std::ios::out | std::ios::trunc | std::ios::binary);
+		if (!file.is_open())
+			return false;
+
+		file.write(text.data(), static_cast<std::streamsize>(text.size()));
+		return !file.fail();
+	}
+
 	bool WriteTextFileIfMissing(const std::string& filePath, const std::string& text)
 	{
 		if (FileExists(filePath))
 			return true;
 
-		std::ofstream file(PathFromUtf8(filePath), std::ios::out | std::ios::trunc);
-
-		if (!file.is_open())
-			return false;
-
-		file << text;
-		return !file.fail();
+		return WriteTextFile(filePath, text);
 	}
 
 	bool DirectoryExists(const std::string& directoryPath)
@@ -278,18 +282,90 @@ namespace ShaderInjectorIO
 		return !path.empty() && PathFromUtf8(path).is_absolute();
 	}
 
+	bool PathsEqual(const std::string& left, const std::string& right)
+	{
+		const std::string normalizedLeft = PathToUtf8(PathFromUtf8(left).lexically_normal());
+		const std::string normalizedRight = PathToUtf8(PathFromUtf8(right).lexically_normal());
+#if defined(_WIN32)
+		return StringHelper::EqualsIgnoreCase(normalizedLeft, normalizedRight);
+#else
+		return normalizedLeft == normalizedRight;
+#endif
+	}
+
+	std::string SanitizeFileStem(const std::string& name)
+	{
+		std::string fileStem = StringHelper::TrimWhitespace(name);
+		for (char& character : fileStem)
+		{
+			const unsigned char unsignedCharacter = static_cast<unsigned char>(character);
+			const bool invalidCharacter =
+				unsignedCharacter < 32 ||
+				character == '<' || character == '>' || character == ':' ||
+				character == '"' || character == '/' || character == '\\' ||
+				character == '|' || character == '?' || character == '*';
+
+			if (invalidCharacter)
+				character = '_';
+		}
+
+		while (!fileStem.empty() && (fileStem.back() == ' ' || fileStem.back() == '.'))
+			fileStem.pop_back();
+
+		const std::string lowercaseStem = StringHelper::LowercaseAscii(fileStem);
+		const bool reservedName =
+			lowercaseStem == "con" || lowercaseStem == "prn" ||
+			lowercaseStem == "aux" || lowercaseStem == "nul" ||
+			(lowercaseStem.size() == 4 &&
+				(lowercaseStem.rfind("com", 0) == 0 || lowercaseStem.rfind("lpt", 0) == 0) &&
+				lowercaseStem[3] >= '1' && lowercaseStem[3] <= '9');
+
+		if (reservedName)
+			fileStem.insert(fileStem.begin(), '_');
+		return fileStem;
+	}
+
+	std::string ReadRegistryString(RegistryHive hive, const std::string& subKey, const std::string& valueName)
+	{
+#if defined(_WIN32)
+		const HKEY rootKey = hive == RegistryHive::LocalMachine ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+		const std::wstring wideSubKey = StringHelper::Utf8ToWide(subKey, false);
+		const std::wstring wideValueName = StringHelper::Utf8ToWide(valueName, false);
+		if (wideSubKey.empty())
+			return {};
+
+		DWORD requiredBytes = 0;
+		const wchar_t* valueNamePointer = wideValueName.empty() ? nullptr : wideValueName.c_str();
+		const DWORD acceptedTypes = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ;
+		const LSTATUS sizeResult = RegGetValueW(
+			rootKey, wideSubKey.c_str(), valueNamePointer, acceptedTypes, nullptr, nullptr, &requiredBytes);
+		if (sizeResult != ERROR_SUCCESS || requiredBytes < sizeof(wchar_t))
+			return {};
+
+		std::vector<wchar_t> value(requiredBytes / sizeof(wchar_t), L'\0');
+		const LSTATUS readResult = RegGetValueW(
+			rootKey, wideSubKey.c_str(), valueNamePointer, acceptedTypes, nullptr, value.data(), &requiredBytes);
+		return readResult == ERROR_SUCCESS ? StringHelper::WideToUtf8(value.data()) : std::string();
+#else
+		(void)hive;
+		(void)subKey;
+		(void)valueName;
+		return {};
+#endif
+	}
+
 	void CollectFilesByExtension(const std::string& directory, const std::string& extension, std::vector<std::string>& outFiles, bool recursive, bool includeFullPath)
 	{
 		if (directory.empty() || extension.empty() || !DirectoryExists(directory))
 			return;
 
-		const std::string expectedExtension = Lowercase(extension.front() == '.' ? extension : "." + extension);
+		const std::string expectedExtension = StringHelper::LowercaseAscii(extension.front() == '.' ? extension : "." + extension);
 		const FileSystem::directory_options options = FileSystem::directory_options::skip_permission_denied;
 		std::error_code error;
 
 		auto collectEntry = [&](const FileSystem::directory_entry& entry)
 		{
-			if (!entry.is_regular_file(error) || Lowercase(PathToUtf8(entry.path().extension())) != expectedExtension)
+			if (!entry.is_regular_file(error) || StringHelper::LowercaseAscii(PathToUtf8(entry.path().extension())) != expectedExtension)
 				return;
 
 			outFiles.push_back(PathToUtf8(includeFullPath ? entry.path() : entry.path().filename()));
@@ -329,27 +405,7 @@ namespace ShaderInjectorIO
 
 	std::string GetGameDirectory()
 	{
-#if defined(_WIN32)
-		std::vector<wchar_t> pathBuffer(1024);
-		for (;;)
-		{
-			const DWORD length = GetModuleFileNameW(nullptr, pathBuffer.data(), static_cast<DWORD>(pathBuffer.size()));
-			if (length == 0)
-				return {};
-
-			if (length < pathBuffer.size() - 1)
-				return PathToUtf8(FileSystem::path(std::wstring(pathBuffer.data(), length)).parent_path());
-
-			pathBuffer.resize(pathBuffer.size() * 2);
-		}
-#else
-		std::vector<char> pathBuffer(PATH_MAX + 1, '\0');
-		const ssize_t length = readlink("/proc/self/exe", pathBuffer.data(), PATH_MAX);
-		if (length <= 0)
-			return {};
-
-		return PathToUtf8(FileSystem::path(std::string(pathBuffer.data(), static_cast<size_t>(length))).parent_path());
-#endif
+		return DirectoryFromPath(ProcessRunner::GetCurrentExecutablePath());
 	}
 
 	std::string GetShaderInjectorDirectory()
@@ -551,8 +607,9 @@ namespace ShaderInjectorIO
 			return false;
 		}
 
-		char filename[256];
-		sprintf_s(filename, "%016llX.bin", (unsigned long long)hash);
+		const std::string filename = StringHelper::Format(
+			"%016llX.bin",
+			static_cast<unsigned long long>(hash));
 		const std::string path = JoinPath(directory, namePrefix + "_" + filename);
 
 		if (!WriteBinaryFile(path, bytecode, size))
@@ -760,6 +817,8 @@ namespace ShaderInjectorIO
 			int keyToggleShaderInjector = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "ToggleInjectorKey", Globals::keyToggleShaderInjector);
 			bool gShaderInjectorEnabled = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "InjectorEnabled", Globals::gShaderInjectorEnabled);
 			bool gShowShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "MenuOpen", Globals::gShowShaderInjectorGUI);
+			bool renderDocIntegrationEnabled = ReadIniValueOrDefault(injectorSettingsINI, "RenderDoc", "Enabled", Globals::gRenderDocIntegrationEnabled);
+			bool renderDocAutoAttachEnabled = ReadIniValueOrDefault(injectorSettingsINI, "RenderDoc", "AutoAttach", Globals::gRenderDocAutoAttachEnabled);
 			int shaderDiscoveryMode = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "Mode", static_cast<int>(Globals::gShaderDiscoveryMode));
 			int shaderDiscoveryWorkerThreads = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "WorkerThreads", Globals::gShaderDiscoveryWorkerThreads);
 			int shaderDiscoveryWorkerThreadPriority = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "WorkerThreadPriority", Globals::gShaderDiscoveryWorkerThreadPriority);
@@ -773,6 +832,8 @@ namespace ShaderInjectorIO
 			Globals::keyToggleShaderInjector = keyToggleShaderInjector;
 			Globals::gShaderInjectorEnabled = gShaderInjectorEnabled;
 			Globals::gShowShaderInjectorGUI = gShowShaderInjectorGUI;
+			Globals::gRenderDocIntegrationEnabled = renderDocIntegrationEnabled;
+			Globals::gRenderDocAutoAttachEnabled = renderDocAutoAttachEnabled;
 			Globals::gShaderDiscoveryMode = static_cast<Globals::ShaderDiscoveryMode>((std::clamp)(shaderDiscoveryMode, 0, 1));
 			Globals::gShaderDiscoveryWorkerThreads = (std::clamp)(shaderDiscoveryWorkerThreads, 0, 64);
 			Globals::gShaderDiscoveryWorkerThreadPriority = (std::clamp)(shaderDiscoveryWorkerThreadPriority, THREAD_PRIORITY_LOWEST, THREAD_PRIORITY_HIGHEST);
@@ -784,6 +845,8 @@ namespace ShaderInjectorIO
 
 			WriteToLogFile(
 				"ShaderInjectorIO->ReadInjectorSettings: parsed injector settings"
+				" renderDocEnabled=" + std::to_string(Globals::gRenderDocIntegrationEnabled) +
+				" renderDocAutoAttach=" + std::to_string(Globals::gRenderDocAutoAttachEnabled) +
 				" discoveryMode=" + std::to_string(static_cast<int>(Globals::gShaderDiscoveryMode)) +
 				" discoveryWorkerThreads=" + std::to_string(Globals::gShaderDiscoveryWorkerThreads) +
 				" discoveryWorkerThreadPriority=" + std::to_string(Globals::gShaderDiscoveryWorkerThreadPriority) +
@@ -817,6 +880,8 @@ namespace ShaderInjectorIO
 		injectorSettingsINI["InjectorSettings"]["ToggleInjectorKey"] = Globals::keyToggleShaderInjector;
 		injectorSettingsINI["InjectorSettings"]["InjectorEnabled"] = Globals::gShaderInjectorEnabled;
 		injectorSettingsINI["InjectorSettings"]["MenuOpen"] = Globals::gShowShaderInjectorGUI;
+		injectorSettingsINI["RenderDoc"]["Enabled"] = Globals::gRenderDocIntegrationEnabled;
+		injectorSettingsINI["RenderDoc"]["AutoAttach"] = Globals::gRenderDocAutoAttachEnabled;
 		injectorSettingsINI["ShaderDiscovery"]["Mode"] = static_cast<int>(Globals::gShaderDiscoveryMode);
 		injectorSettingsINI["ShaderDiscovery"]["WorkerThreads"] = Globals::gShaderDiscoveryWorkerThreads;
 		injectorSettingsINI["ShaderDiscovery"]["WorkerThreadPriority"] = Globals::gShaderDiscoveryWorkerThreadPriority;

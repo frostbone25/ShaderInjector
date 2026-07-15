@@ -19,6 +19,7 @@
 #include "Globals.h"
 #include "DatabaseModifiedShaders.h"
 #include "ModifiedShaderCreation.h"
+#include "RenderDocIntegration.h"
 #include "ShaderAutomaticDiscovery.h"
 #include "StringHelper.h"
 #include "ShaderInjectorGUITooltips.h"
@@ -68,10 +69,12 @@ namespace ShaderInjectorGUI
 	{
 		ModifiedShaderRecompileResult result{};
 		result.compiled = DatabaseModifiedShaders::CompileModifiedShader(modifiedShaderId);
+
 		if (!result.compiled)
 			return result;
 
 		const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
+
 		if (!modifiedShader)
 			return result;
 
@@ -81,10 +84,12 @@ namespace ShaderInjectorGUI
 		for (int shaderTargetIndex = 0; shaderTargetIndex < static_cast<int>(HookD3D12::gLoadedShaderTargets.size()); ++shaderTargetIndex)
 		{
 			const ShaderTarget::ShaderTargetDisk& shaderTarget = HookD3D12::gLoadedShaderTargets[shaderTargetIndex];
+
 			if (shaderTarget.modifiedShaderId != modifiedShaderId)
 				continue;
 
 			++result.linkedShaderTargetCount;
+
 			if (!shaderTarget.enabled || !modifiedShader->enabled || shaderTarget.shaderType != modifiedShader->shaderType)
 			{
 				++result.skippedInactiveShaderTargetCount;
@@ -116,6 +121,7 @@ namespace ShaderInjectorGUI
 		for (int shaderTargetIndex = 0; shaderTargetIndex < static_cast<int>(HookD3D12::gLoadedShaderTargets.size()); ++shaderTargetIndex)
 		{
 			const ShaderTarget::ShaderTargetDisk& shaderTarget = HookD3D12::gLoadedShaderTargets[shaderTargetIndex];
+
 			if (!HookD3D12::IsShaderTargetEffectivelyEnabled(shaderTarget))
 			{
 				++result.skippedInactiveShaderTargetCount;
@@ -123,6 +129,7 @@ namespace ShaderInjectorGUI
 			}
 
 			++result.activeShaderTargetCount;
+
 			if (HookD3D12::ReloadShaderTarget(shaderTargetIndex))
 				++result.reloadedShaderTargetCount;
 		}
@@ -133,6 +140,7 @@ namespace ShaderInjectorGUI
 	bool EnsureModifiedShaderCompiledForShaderTarget(const std::string& modifiedShaderId)
 	{
 		const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
+
 		if (!modifiedShader)
 		{
 			WriteToRuntimeLogError("Modified Shader package not found: " + modifiedShaderId);
@@ -146,6 +154,7 @@ namespace ShaderInjectorGUI
 		{
 			DatabaseModifiedShaders::RefreshModifiedShaders();
 			modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
+
 			if (modifiedShader && !modifiedShader->compiledBlob.empty())
 				return true;
 		}
@@ -171,6 +180,7 @@ namespace ShaderInjectorGUI
 			return false;
 
 		const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(shaderTarget.modifiedShaderId);
+
 		if (!modifiedShader)
 			return false;
 
@@ -198,6 +208,7 @@ namespace ShaderInjectorGUI
 		}
 
 		const bool reloaded = HookD3D12::ReloadShaderTarget(shaderTargetIndex);
+
 		if (reloaded)
 			WriteToRuntimeLogSuccess("Shader Target now uses Modified Shader package: " + DatabaseModifiedShaders::DisplayName(*modifiedShader));
 		else
@@ -291,8 +302,10 @@ namespace ShaderInjectorGUI
 			);
 
 			DatabaseModifiedShaders::EnsureModifiedShadersLoaded();
+
 			if (!HookD3D12::gLoadedShaderTargetsOnce)
 				HookD3D12::RefreshLoadedShaderTargets();
+
 			const std::vector<ModifiedShader::PackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
 
 			ImGui::Text("Loaded: %zu", modifiedShaders.size());
@@ -301,11 +314,9 @@ namespace ShaderInjectorGUI
 			if (ImGui::Button("Refresh##ModifiedShaders"))
 			{
 				DatabaseModifiedShaders::RefreshModifiedShaders();
-				if (!gSelectedModifiedShaderId.empty() &&
-					!DatabaseModifiedShaders::FindModifiedShaderById(gSelectedModifiedShaderId))
-				{
+
+				if (!gSelectedModifiedShaderId.empty() && !DatabaseModifiedShaders::FindModifiedShaderById(gSelectedModifiedShaderId))
 					gSelectedModifiedShaderId.clear();
-				}
 			}
 
 			ImGui::SameLine();
@@ -320,6 +331,7 @@ namespace ShaderInjectorGUI
 			{
 				std::vector<std::string> modifiedShaderIds;
 				modifiedShaderIds.reserve(modifiedShaders.size());
+
 				for (const ModifiedShader::PackageDisk& modifiedShader : modifiedShaders)
 					modifiedShaderIds.push_back(modifiedShader.id);
 
@@ -332,6 +344,7 @@ namespace ShaderInjectorGUI
 				for (const std::string& modifiedShaderId : modifiedShaderIds)
 				{
 					const ModifiedShaderRecompileResult result = RecompileModifiedShaderAndReloadLinkedTargets(modifiedShaderId);
+
 					if (!result.compiled)
 					{
 						++failedCompileCount;
@@ -360,6 +373,7 @@ namespace ShaderInjectorGUI
 			ImGui::EndDisabled();
 
 			const std::vector<ModifiedShader::PackageDisk>& refreshedModifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
+
 			if (refreshedModifiedShaders.empty())
 			{
 				ImGui::Text("No Modified Shader packages found.");
@@ -367,11 +381,8 @@ namespace ShaderInjectorGUI
 				return;
 			}
 
-			if (gSelectedModifiedShaderId.empty() ||
-				!DatabaseModifiedShaders::FindModifiedShaderById(gSelectedModifiedShaderId))
-			{
+			if (gSelectedModifiedShaderId.empty() || !DatabaseModifiedShaders::FindModifiedShaderById(gSelectedModifiedShaderId))
 				gSelectedModifiedShaderId = refreshedModifiedShaders.front().id;
-			}
 
 			if (ImGui::BeginChild("ModifiedShaders##ModifiedShadersList", ImVec2(0, 180), ImGuiChildFlags_Borders))
 			{
@@ -381,10 +392,13 @@ namespace ShaderInjectorGUI
 					const bool isUsedByShaderTarget = ModifiedShaderIsUsedByEnabledShaderTarget(modifiedShader.id);
 					const bool isActiveUsedPackage = modifiedShader.enabled && isUsedByShaderTarget;
 					std::string label = DatabaseModifiedShaders::DisplayName(modifiedShader);
+
 					if (!modifiedShader.enabled)
 						label += " (disabled)";
+
 					if (!isUsedByShaderTarget)
 						label += " (not used)";
+
 					label += "##ModifiedShader" + std::to_string(index);
 					const bool isSelected = modifiedShader.id == gSelectedModifiedShaderId;
 
@@ -407,8 +421,8 @@ namespace ShaderInjectorGUI
 			}
 			ImGui::EndChild();
 
-			const ModifiedShader::PackageDisk* selectedModifiedShader =
-				DatabaseModifiedShaders::FindModifiedShaderById(gSelectedModifiedShaderId);
+			const ModifiedShader::PackageDisk* selectedModifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(gSelectedModifiedShaderId);
+
 			if (!selectedModifiedShader)
 			{
 				ImGui::Unindent(indentSpace);
@@ -417,6 +431,7 @@ namespace ShaderInjectorGUI
 
 			ImGui::SeparatorText(DatabaseModifiedShaders::DisplayName(*selectedModifiedShader).c_str());
 			ImGui::Indent(indentSpace);
+
 			if (gModifiedShaderNameBufferId != selectedModifiedShader->id)
 			{
 				gModifiedShaderNameBufferId = selectedModifiedShader->id;
@@ -440,36 +455,43 @@ namespace ShaderInjectorGUI
 				ImGuiInputTextFlags_EnterReturnsTrue);
 			ImGui::SameLine();
 			const bool saveNameFromButton = ImGui::Button("Save Name");
+
 			if (saveNameFromEnter || saveNameFromButton)
 			{
 				if (DatabaseModifiedShaders::SetModifiedShaderName(gSelectedModifiedShaderId, gModifiedShaderNameBuffer))
 					WriteToRuntimeLogSuccess("Saved Modified Shader name: " + std::string(gModifiedShaderNameBuffer));
 				else
 					WriteToRuntimeLogError("Failed to save Modified Shader name. The name cannot be empty.");
+
 				selectedModifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(gSelectedModifiedShaderId);
 			}
 
 			ImGui::Text("Enabled");
 			ImGui::SameLine();
 			bool enabled = selectedModifiedShader->enabled;
+
 			if (ImGui::Checkbox("##ModifiedShaderEnable", &enabled))
 			{
 				if (!DatabaseModifiedShaders::SetModifiedShaderEnabled(gSelectedModifiedShaderId, enabled))
 					WriteToRuntimeLogError("Failed to save Modified Shader enabled state.");
 				else
 					HookD3D12::RefreshShaderTargetsForModifiedShaderStateChange();
+
 				selectedModifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(gSelectedModifiedShaderId);
 			}
+
 			if (!selectedModifiedShader)
 			{
 				ImGui::Unindent(indentSpace);
 				ImGui::Unindent(indentSpace);
 				return;
 			}
+
 			ImGui::SameLine();
 			if (ImGui::Button("Recompile##ModifiedShaders"))
 			{
 				const ModifiedShaderRecompileResult result = RecompileModifiedShaderAndReloadLinkedTargets(gSelectedModifiedShaderId);
+
 				if (!result.compiled)
 				{
 					WriteToRuntimeLogError("Failed to compile Modified Shader: " + gSelectedModifiedShaderId);
@@ -477,6 +499,7 @@ namespace ShaderInjectorGUI
 				else
 				{
 					const int activeLinkedShaderTargetCount = result.linkedShaderTargetCount - result.skippedInactiveShaderTargetCount;
+
 					if (result.linkedShaderTargetCount == 0)
 						WriteToRuntimeLogSuccess("Compiled Modified Shader: " + gSelectedModifiedShaderId);
 					else if (activeLinkedShaderTargetCount == 0)
@@ -487,20 +510,26 @@ namespace ShaderInjectorGUI
 						WriteToRuntimeLogError("Reloaded " + std::to_string(result.reloadedShaderTargetCount) + " of " + std::to_string(activeLinkedShaderTargetCount) + " active linked replacements.");
 				}
 			}
+
 			ImGui::SameLine();
+
 			if (ImGui::Button("Open Folder##ModifiedShaderSelected") && !ShaderInjectorIO::OpenDirectory(selectedModifiedShader->packageDirectory))
 			{
 				WriteToRuntimeLogError("Could not open Modified Shader package folder: " + selectedModifiedShader->packageDirectory);
 			}
+
 			ImGui::SameLine();
+
 			if (ImGui::Button("Delete##ModifiedShader"))
 				ImGui::OpenPopup("Delete Modified Shader?");
 
 
 			bool deletedModifiedShader = false;
+
 			if (ImGui::BeginPopupModal("Delete Modified Shader?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 			{
 				int linkedReplacementCount = 0;
+
 				for (const ShaderTarget::ShaderTargetDisk& replacement : HookD3D12::gLoadedShaderTargets)
 				{
 					if (replacement.modifiedShaderId == gSelectedModifiedShaderId)
@@ -509,13 +538,16 @@ namespace ShaderInjectorGUI
 
 				ImGui::Text("Delete '%s'?", selectedModifiedShader->name.c_str());
 				ImGui::Text("This permanently removes the package folder and all files inside it.");
+
 				if (linkedReplacementCount > 0)
 					ImGui::Text("%d Shader Replacement(s) will retain an unresolved reference.", linkedReplacementCount);
+
 				ImGui::Spacing();
 
 				if (ImGui::Button("Delete Package"))
 				{
 					const std::string deletedName = selectedModifiedShader->name;
+
 					if (DatabaseModifiedShaders::DeleteModifiedShader(gSelectedModifiedShaderId))
 					{
 						WriteToRuntimeLogSuccess("Deleted Modified Shader: " + deletedName);
@@ -529,9 +561,12 @@ namespace ShaderInjectorGUI
 						WriteToRuntimeLogError("Failed to delete Modified Shader package: " + deletedName);
 					}
 				}
+
 				ImGui::SameLine();
+
 				if (ImGui::Button("Cancel"))
 					ImGui::CloseCurrentPopup();
+
 				ImGui::EndPopup();
 			}
 
@@ -871,6 +906,96 @@ namespace ShaderInjectorGUI
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| DEVELOPER SETTINGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| DEVELOPER SETTINGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
+	void UI_RenderDoc()
+	{
+		const bool renderDocAvailable = RenderDocIntegration::IsAvailable();
+		const bool frameCaptureActive = RenderDocIntegration::IsFrameCapturing();
+		const bool targetControlConnected = RenderDocIntegration::IsTargetControlConnected();
+
+		ImGui::SeparatorText("RenderDoc");
+		ImGui::Text("Status: %s", RenderDocIntegration::GetStatusText().c_str());
+		ImGui::Text("API Version: %s", RenderDocIntegration::GetApiVersionText().c_str());
+		if (renderDocAvailable)
+			ImGui::Text("Library Load: %s", RenderDocIntegration::WasLoadedByInjector() ? "Shader Injector" : "External");
+		ImGui::Text("Target Control: %s", targetControlConnected ? "Connected" : "Disconnected");
+		ImGui::Text("Frame Capture: %s", frameCaptureActive ? "Active" : "Idle");
+		ImGui::Text("Captures: %u", RenderDocIntegration::GetCaptureCount());
+
+		const std::string renderDocLibraryPath = RenderDocIntegration::GetLibraryPath();
+		if (!renderDocLibraryPath.empty())
+			ImGui::TextWrapped("Library: %s", renderDocLibraryPath.c_str());
+
+		const uint32_t replayUiProcessId = RenderDocIntegration::GetReplayUiProcessId();
+		if (replayUiProcessId != 0)
+			ImGui::Text("Replay UI Process: %u", replayUiProcessId);
+
+		const std::string latestCapturePath = RenderDocIntegration::GetLatestCapturePath();
+		if (!latestCapturePath.empty())
+			ImGui::TextWrapped("Latest: %s", latestCapturePath.c_str());
+
+		ImGui::Spacing();
+		if (!targetControlConnected)
+		{
+			if (ImGui::Button(renderDocAvailable ? "Connect RenderDoc UI" : "Attach RenderDoc"))
+			{
+				const RenderDocIntegration::ReplayUiRequestResult result = RenderDocIntegration::ConnectReplayUi();
+				switch (result)
+				{
+					case RenderDocIntegration::ReplayUiRequestResult::Launched:
+						WriteToRuntimeLogSuccess("RenderDoc Replay UI launched and requested target control connection.");
+						break;
+					case RenderDocIntegration::ReplayUiRequestResult::AlreadyConnected:
+						WriteToRuntimeLogSuccess("RenderDoc target control is already connected.");
+						break;
+					case RenderDocIntegration::ReplayUiRequestResult::Disabled:
+						WriteToRuntimeLogWarning("RenderDoc integration is disabled in ShaderInjector.ini.");
+						break;
+					case RenderDocIntegration::ReplayUiRequestResult::Unavailable:
+						WriteToRuntimeLogError("RenderDoc installation could not be found or loaded.");
+						break;
+					case RenderDocIntegration::ReplayUiRequestResult::LaunchFailed:
+					default:
+						WriteToRuntimeLogError("RenderDoc Replay UI failed to launch.");
+						break;
+				}
+			}
+
+			ImGui::SameLine();
+		}
+
+		ImGui::BeginDisabled(!renderDocAvailable || frameCaptureActive);
+		if (ImGui::Button("RenderDoc Frame Capture"))
+		{
+			const RenderDocIntegration::CaptureRequestResult result =
+				RenderDocIntegration::RequestFrameCapture(nullptr, Globals::mainWindow);
+
+			switch (result)
+			{
+				case RenderDocIntegration::CaptureRequestResult::Queued:
+					WriteToRuntimeLogSuccess("RenderDoc frame capture queued for the next Present.");
+					break;
+				case RenderDocIntegration::CaptureRequestResult::AlreadyCapturing:
+					WriteToRuntimeLogWarning("RenderDoc is already capturing a frame.");
+					break;
+				case RenderDocIntegration::CaptureRequestResult::Disabled:
+					WriteToRuntimeLogWarning("RenderDoc integration is disabled in ShaderInjector.ini.");
+					break;
+				case RenderDocIntegration::CaptureRequestResult::Unavailable:
+				default:
+					WriteToRuntimeLogError("RenderDoc is not attached to this process.");
+					break;
+			}
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		if (ImGui::Button("Refresh##RenderDoc"))
+		{
+			RenderDocIntegration::Refresh();
+			WriteToRuntimeLog("RenderDoc status refreshed: " + RenderDocIntegration::GetStatusText());
+		}
+	}
+
 	void UI_DeveloperSettings()
 	{
 		if (ImGui::CollapsingHeader("Developer Settings"))
@@ -878,53 +1003,69 @@ namespace ShaderInjectorGUI
 			ImGui::Indent(indentSpace);
 			ImGui::Spacing();
 
-			ImGui::InputTextMultiline("##DeveloperSettingsNote",
-				const_cast<char*>(noteDeveloperSettingsText),
-				strlen(noteDeveloperSettingsText) + 1,
-				ImVec2(-FLT_MIN, 0), // -FLT_MIN width = stretch to window edge, 0 height = auto
-				ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap
-			);
-
-			ImGui::Spacing();
-			UI_AdapterInfo();
-			UI_D3D12PipelineInfo();
-			ImGui::Spacing();
-
-			ImGui::Text("Selection Style: ");
-			ImGui::SameLine();
-
-			const char* selectionStyles[] =
+			if (ImGui::BeginTabBar("##DeveloperSettingsTabs"))
 			{
-				"Blue Pixel Shader",
-				"Hidden",
-				"None",
-			};
+				if (ImGui::BeginTabItem("Shader Inspector"))
+				{
+					ImGui::InputTextMultiline("##DeveloperSettingsNote",
+						const_cast<char*>(noteDeveloperSettingsText),
+						strlen(noteDeveloperSettingsText) + 1,
+						ImVec2(-FLT_MIN, 0), // -FLT_MIN width = stretch to window edge, 0 height = auto
+						ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap
+					);
 
-			const char* btnLabel = "Clear Selections";
-			float buttonWidth = ImGui::CalcTextSize(btnLabel).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-			float spacing = ImGui::GetStyle().ItemSpacing.x;
-			float comboWidth = ImGui::GetContentRegionAvail().x - buttonWidth - spacing;
-			ImGui::SetNextItemWidth(comboWidth);
+					ImGui::Spacing();
+					UI_AdapterInfo();
+					UI_D3D12PipelineInfo();
+					ImGui::Spacing();
 
-			if (ImGui::Combo("##SelectionStyle", &gSelectionStyleIndex, selectionStyles, IM_ARRAYSIZE(selectionStyles)))
-			{
-				HookD3D12::gShaderSelectionStyle = (HookD3D12::PixelShaderSelectionStyle)gSelectionStyleIndex;
-				HookD3D12::ClearShaderMarkers();
-				HookD3D12::InvalidateShaderMarkerPSOs();
+					ImGui::Text("Selection Style: ");
+					ImGui::SameLine();
+
+					const char* selectionStyles[] =
+					{
+						"Blue Pixel Shader",
+						"Hidden",
+						"None",
+					};
+
+					const char* btnLabel = "Clear Selections";
+					float buttonWidth = ImGui::CalcTextSize(btnLabel).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+					float spacing = ImGui::GetStyle().ItemSpacing.x;
+					float comboWidth = ImGui::GetContentRegionAvail().x - buttonWidth - spacing;
+					ImGui::SetNextItemWidth(comboWidth);
+
+					if (ImGui::Combo("##SelectionStyle", &gSelectionStyleIndex, selectionStyles, IM_ARRAYSIZE(selectionStyles)))
+					{
+						HookD3D12::gShaderSelectionStyle = (HookD3D12::PixelShaderSelectionStyle)gSelectionStyleIndex;
+						HookD3D12::ClearShaderMarkers();
+						HookD3D12::InvalidateShaderMarkerPSOs();
+					}
+
+					ImGui::SameLine();
+					if (ImGui::Button(btnLabel))
+						HookD3D12::ClearShaderMarkers();
+
+					ImGui::Spacing();
+
+					UI_StreamPipelines();
+
+					//NOTE: hidden from GUI for now, even though the app can largly support operations
+					//with the graphics pipeline, for the most part with the game, FF7 rebirth we are primarily
+					//going to be messing with the stream pipeline, and this also will help avoid confusion for users
+					//UI_GraphicsPipelines();
+					ImGui::EndTabItem();
+				}
+
+				if (Globals::gRenderDocIntegrationEnabled && ImGui::BeginTabItem("RenderDoc"))
+				{
+					HookD3D12::ClearShaderMarkers();
+					UI_RenderDoc();
+					ImGui::EndTabItem();
+				}
+
+				ImGui::EndTabBar();
 			}
-
-			ImGui::SameLine();
-			if (ImGui::Button(btnLabel))
-				HookD3D12::ClearShaderMarkers();
-
-			ImGui::Spacing();
-
-			UI_StreamPipelines();
-
-			//NOTE: hidden from GUI for now, even though the app can largly support operations
-			//with the graphics pipeline, for the most part with the game, FF7 rebirth we are primarily
-			//going to be messing with the stream pipeline, and this also will help avoid confusion for users
-			//UI_GraphicsPipelines();
 
 			ImGui::Spacing();
 			ImGui::Unindent(indentSpace);

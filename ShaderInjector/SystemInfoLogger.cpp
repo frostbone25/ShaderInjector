@@ -16,7 +16,9 @@
 #include <vector>
 
 //custom
+#include "ProcessRunner.h"
 #include "ShaderInjectorIO.h"
+#include "StringHelper.h"
 
 #pragma comment(lib, "Version.lib")
 
@@ -30,39 +32,6 @@ namespace SystemInfoLogger
 		void LogLine(const std::string& text)
 		{
 			ShaderInjectorIO::WriteToLogFile(text);
-		}
-
-		std::string WideToUtf8(const wchar_t* wideText)
-		{
-			if (!wideText || !wideText[0])
-				return "";
-
-			const int requiredBytes = WideCharToMultiByte(CP_UTF8, 0, wideText, -1, nullptr, 0, nullptr, nullptr);
-			if (requiredBytes <= 0)
-				return "";
-
-			std::string result((size_t)requiredBytes - 1, '\0');
-			WideCharToMultiByte(CP_UTF8, 0, wideText, -1, result.data(), requiredBytes, nullptr, nullptr);
-			return result;
-		}
-
-		std::string BoolText(BOOL value)
-		{
-			return value ? "true" : "false";
-		}
-
-		std::string BytesToGiBString(ULONGLONG bytes)
-		{
-			std::ostringstream stream;
-			stream << std::fixed << std::setprecision(2) << (double)bytes / (1024.0 * 1024.0 * 1024.0) << " GiB";
-			return stream.str();
-		}
-
-		std::string HexString(uint64_t value, int width)
-		{
-			std::ostringstream stream;
-			stream << "0x" << std::uppercase << std::hex << std::setw(width) << std::setfill('0') << value;
-			return stream.str();
 		}
 
 		std::string VersionDwordToString(DWORD mostSignificant, DWORD leastSignificant)
@@ -79,30 +48,14 @@ namespace SystemInfoLogger
 		std::string LuidToString(LUID luid)
 		{
 			std::ostringstream stream;
-			stream << HexString((uint32_t)luid.HighPart, 8) << ":" << HexString(luid.LowPart, 8);
+			stream << StringHelper::FormatUnsignedHex((uint32_t)luid.HighPart, 8) << ":"
+				<< StringHelper::FormatUnsignedHex(luid.LowPart, 8);
 			return stream.str();
 		}
 
 		bool SameLuid(LUID left, LUID right)
 		{
 			return left.HighPart == right.HighPart && left.LowPart == right.LowPart;
-		}
-
-		std::wstring GetCurrentExecutablePath()
-		{
-			std::vector<wchar_t> buffer(MAX_PATH);
-
-			while (true)
-			{
-				const DWORD copiedCharacters = GetModuleFileNameW(nullptr, buffer.data(), (DWORD)buffer.size());
-				if (copiedCharacters == 0)
-					return L"";
-
-				if (copiedCharacters < buffer.size() - 1)
-					return std::wstring(buffer.data(), copiedCharacters);
-
-				buffer.resize(buffer.size() * 2);
-			}
 		}
 
 		std::string GetProcessorArchitectureName(WORD architecture)
@@ -158,7 +111,7 @@ namespace SystemInfoLogger
 				std::ostringstream stream;
 				stream << versionInfo.dwMajorVersion << "." << versionInfo.dwMinorVersion << "." << versionInfo.dwBuildNumber;
 				if (versionInfo.szCSDVersion[0])
-					stream << " " << WideToUtf8(versionInfo.szCSDVersion);
+					stream << " " << StringHelper::WideToUtf8(versionInfo.szCSDVersion);
 				return stream.str();
 			}
 
@@ -183,19 +136,19 @@ namespace SystemInfoLogger
 			if (!VerQueryValueW(versionData.data(), subBlock.str().c_str(), &value, &valueBytes) || !value || valueBytes == 0)
 				return "";
 
-			return WideToUtf8(static_cast<const wchar_t*>(value));
+			return StringHelper::WideToUtf8(static_cast<const wchar_t*>(value));
 		}
 
 		void LogExecutableMetadata()
 		{
-			const std::wstring executablePath = GetCurrentExecutablePath();
+			const std::wstring executablePath = StringHelper::Utf8ToWide(ProcessRunner::GetCurrentExecutablePath());
 			if (executablePath.empty())
 			{
 				LogLine("SystemInfoLogger->Executable: path unavailable");
 				return;
 			}
 
-			LogLine("SystemInfoLogger->Executable: Path=" + WideToUtf8(executablePath.c_str()));
+			LogLine("SystemInfoLogger->Executable: Path=" + StringHelper::WideToUtf8(executablePath));
 
 			DWORD ignoredHandle = 0;
 			const DWORD versionDataBytes = GetFileVersionInfoSizeW(executablePath.c_str(), &ignoredHandle);
@@ -266,7 +219,7 @@ namespace SystemInfoLogger
 				}
 
 				if (!value.empty())
-					LogLine("SystemInfoLogger->Executable: " + WideToUtf8(key) + "=" + value);
+					LogLine("SystemInfoLogger->Executable: " + StringHelper::WideToUtf8(key) + "=" + value);
 			}
 		}
 
@@ -319,12 +272,12 @@ namespace SystemInfoLogger
 			if (GlobalMemoryStatusEx(&memoryStatus))
 			{
 				LogLine("SystemInfoLogger->SystemMemory: LoadPercent=" + std::to_string(memoryStatus.dwMemoryLoad));
-				LogLine("SystemInfoLogger->SystemMemory: TotalPhysical=" + BytesToGiBString(memoryStatus.ullTotalPhys));
-				LogLine("SystemInfoLogger->SystemMemory: AvailablePhysical=" + BytesToGiBString(memoryStatus.ullAvailPhys));
-				LogLine("SystemInfoLogger->SystemMemory: TotalPageFile=" + BytesToGiBString(memoryStatus.ullTotalPageFile));
-				LogLine("SystemInfoLogger->SystemMemory: AvailablePageFile=" + BytesToGiBString(memoryStatus.ullAvailPageFile));
-				LogLine("SystemInfoLogger->SystemMemory: TotalVirtual=" + BytesToGiBString(memoryStatus.ullTotalVirtual));
-				LogLine("SystemInfoLogger->SystemMemory: AvailableVirtual=" + BytesToGiBString(memoryStatus.ullAvailVirtual));
+				LogLine("SystemInfoLogger->SystemMemory: TotalPhysical=" + StringHelper::FormatBytesAsGiB(memoryStatus.ullTotalPhys));
+				LogLine("SystemInfoLogger->SystemMemory: AvailablePhysical=" + StringHelper::FormatBytesAsGiB(memoryStatus.ullAvailPhys));
+				LogLine("SystemInfoLogger->SystemMemory: TotalPageFile=" + StringHelper::FormatBytesAsGiB(memoryStatus.ullTotalPageFile));
+				LogLine("SystemInfoLogger->SystemMemory: AvailablePageFile=" + StringHelper::FormatBytesAsGiB(memoryStatus.ullAvailPageFile));
+				LogLine("SystemInfoLogger->SystemMemory: TotalVirtual=" + StringHelper::FormatBytesAsGiB(memoryStatus.ullTotalVirtual));
+				LogLine("SystemInfoLogger->SystemMemory: AvailableVirtual=" + StringHelper::FormatBytesAsGiB(memoryStatus.ullAvailVirtual));
 			}
 
 			const int primaryWidth = GetSystemMetrics(SM_CXSCREEN);
@@ -370,15 +323,15 @@ namespace SystemInfoLogger
 				{
 					matchingAdapter = adapter;
 					LogLine("SystemInfoLogger->GPU: AdapterIndex=" + std::to_string(adapterIndex));
-					LogLine("SystemInfoLogger->GPU: Description=" + WideToUtf8(adapterDescription.Description));
-					LogLine("SystemInfoLogger->GPU: VendorId=" + HexString(adapterDescription.VendorId, 4));
-					LogLine("SystemInfoLogger->GPU: DeviceId=" + HexString(adapterDescription.DeviceId, 4));
-					LogLine("SystemInfoLogger->GPU: SubSysId=" + HexString(adapterDescription.SubSysId, 8));
+					LogLine("SystemInfoLogger->GPU: Description=" + StringHelper::WideToUtf8(adapterDescription.Description));
+					LogLine("SystemInfoLogger->GPU: VendorId=" + StringHelper::FormatUnsignedHex(adapterDescription.VendorId, 4));
+					LogLine("SystemInfoLogger->GPU: DeviceId=" + StringHelper::FormatUnsignedHex(adapterDescription.DeviceId, 4));
+					LogLine("SystemInfoLogger->GPU: SubSysId=" + StringHelper::FormatUnsignedHex(adapterDescription.SubSysId, 8));
 					LogLine("SystemInfoLogger->GPU: Revision=" + std::to_string(adapterDescription.Revision));
-					LogLine("SystemInfoLogger->GPU: DedicatedVideoMemory=" + BytesToGiBString(adapterDescription.DedicatedVideoMemory));
-					LogLine("SystemInfoLogger->GPU: DedicatedSystemMemory=" + BytesToGiBString(adapterDescription.DedicatedSystemMemory));
-					LogLine("SystemInfoLogger->GPU: SharedSystemMemory=" + BytesToGiBString(adapterDescription.SharedSystemMemory));
-					LogLine("SystemInfoLogger->GPU: Flags=" + HexString(adapterDescription.Flags, 8));
+					LogLine("SystemInfoLogger->GPU: DedicatedVideoMemory=" + StringHelper::FormatBytesAsGiB(adapterDescription.DedicatedVideoMemory));
+					LogLine("SystemInfoLogger->GPU: DedicatedSystemMemory=" + StringHelper::FormatBytesAsGiB(adapterDescription.DedicatedSystemMemory));
+					LogLine("SystemInfoLogger->GPU: SharedSystemMemory=" + StringHelper::FormatBytesAsGiB(adapterDescription.SharedSystemMemory));
+					LogLine("SystemInfoLogger->GPU: Flags=" + StringHelper::FormatUnsignedHex(adapterDescription.Flags, 8));
 					break;
 				}
 			}
@@ -395,19 +348,19 @@ namespace SystemInfoLogger
 				DXGI_QUERY_VIDEO_MEMORY_INFO localMemoryInfo{};
 				if (SUCCEEDED(adapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &localMemoryInfo)))
 				{
-					LogLine("SystemInfoLogger->GPUMemory: LocalBudget=" + BytesToGiBString(localMemoryInfo.Budget));
-					LogLine("SystemInfoLogger->GPUMemory: LocalCurrentUsage=" + BytesToGiBString(localMemoryInfo.CurrentUsage));
-					LogLine("SystemInfoLogger->GPUMemory: LocalAvailableForReservation=" + BytesToGiBString(localMemoryInfo.AvailableForReservation));
-					LogLine("SystemInfoLogger->GPUMemory: LocalCurrentReservation=" + BytesToGiBString(localMemoryInfo.CurrentReservation));
+					LogLine("SystemInfoLogger->GPUMemory: LocalBudget=" + StringHelper::FormatBytesAsGiB(localMemoryInfo.Budget));
+					LogLine("SystemInfoLogger->GPUMemory: LocalCurrentUsage=" + StringHelper::FormatBytesAsGiB(localMemoryInfo.CurrentUsage));
+					LogLine("SystemInfoLogger->GPUMemory: LocalAvailableForReservation=" + StringHelper::FormatBytesAsGiB(localMemoryInfo.AvailableForReservation));
+					LogLine("SystemInfoLogger->GPUMemory: LocalCurrentReservation=" + StringHelper::FormatBytesAsGiB(localMemoryInfo.CurrentReservation));
 				}
 
 				DXGI_QUERY_VIDEO_MEMORY_INFO nonLocalMemoryInfo{};
 				if (SUCCEEDED(adapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &nonLocalMemoryInfo)))
 				{
-					LogLine("SystemInfoLogger->GPUMemory: NonLocalBudget=" + BytesToGiBString(nonLocalMemoryInfo.Budget));
-					LogLine("SystemInfoLogger->GPUMemory: NonLocalCurrentUsage=" + BytesToGiBString(nonLocalMemoryInfo.CurrentUsage));
-					LogLine("SystemInfoLogger->GPUMemory: NonLocalAvailableForReservation=" + BytesToGiBString(nonLocalMemoryInfo.AvailableForReservation));
-					LogLine("SystemInfoLogger->GPUMemory: NonLocalCurrentReservation=" + BytesToGiBString(nonLocalMemoryInfo.CurrentReservation));
+					LogLine("SystemInfoLogger->GPUMemory: NonLocalBudget=" + StringHelper::FormatBytesAsGiB(nonLocalMemoryInfo.Budget));
+					LogLine("SystemInfoLogger->GPUMemory: NonLocalCurrentUsage=" + StringHelper::FormatBytesAsGiB(nonLocalMemoryInfo.CurrentUsage));
+					LogLine("SystemInfoLogger->GPUMemory: NonLocalAvailableForReservation=" + StringHelper::FormatBytesAsGiB(nonLocalMemoryInfo.AvailableForReservation));
+					LogLine("SystemInfoLogger->GPUMemory: NonLocalCurrentReservation=" + StringHelper::FormatBytesAsGiB(nonLocalMemoryInfo.CurrentReservation));
 				}
 			}
 		}
@@ -432,33 +385,33 @@ namespace SystemInfoLogger
 			D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
 			if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options))))
 			{
-				LogLine("SystemInfoLogger->D3D12Features: DoublePrecisionFloatShaderOps=" + BoolText(options.DoublePrecisionFloatShaderOps));
-				LogLine("SystemInfoLogger->D3D12Features: OutputMergerLogicOp=" + BoolText(options.OutputMergerLogicOp));
+				LogLine("SystemInfoLogger->D3D12Features: DoublePrecisionFloatShaderOps=" + StringHelper::BoolText(options.DoublePrecisionFloatShaderOps != FALSE));
+				LogLine("SystemInfoLogger->D3D12Features: OutputMergerLogicOp=" + StringHelper::BoolText(options.OutputMergerLogicOp != FALSE));
 				LogLine("SystemInfoLogger->D3D12Features: ResourceBindingTier=" + std::to_string((UINT)options.ResourceBindingTier));
 				LogLine("SystemInfoLogger->D3D12Features: ResourceHeapTier=" + std::to_string((UINT)options.ResourceHeapTier));
 				LogLine("SystemInfoLogger->D3D12Features: TiledResourcesTier=" + std::to_string((UINT)options.TiledResourcesTier));
 				LogLine("SystemInfoLogger->D3D12Features: ConservativeRasterizationTier=" + std::to_string((UINT)options.ConservativeRasterizationTier));
 				LogLine("SystemInfoLogger->D3D12Features: CrossNodeSharingTier=" + std::to_string((UINT)options.CrossNodeSharingTier));
-				LogLine("SystemInfoLogger->D3D12Features: VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation=" + BoolText(options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation));
-				LogLine("SystemInfoLogger->D3D12Features: TypedUAVLoadAdditionalFormats=" + BoolText(options.TypedUAVLoadAdditionalFormats));
-				LogLine("SystemInfoLogger->D3D12Features: StandardSwizzle64KBSupported=" + BoolText(options.StandardSwizzle64KBSupported));
+				LogLine("SystemInfoLogger->D3D12Features: VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation=" + StringHelper::BoolText(options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation != FALSE));
+				LogLine("SystemInfoLogger->D3D12Features: TypedUAVLoadAdditionalFormats=" + StringHelper::BoolText(options.TypedUAVLoadAdditionalFormats != FALSE));
+				LogLine("SystemInfoLogger->D3D12Features: StandardSwizzle64KBSupported=" + StringHelper::BoolText(options.StandardSwizzle64KBSupported != FALSE));
 			}
 
 			D3D12_FEATURE_DATA_D3D12_OPTIONS1 options1{};
 			if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &options1, sizeof(options1))))
 			{
-				LogLine("SystemInfoLogger->D3D12Features: WaveOps=" + BoolText(options1.WaveOps));
+				LogLine("SystemInfoLogger->D3D12Features: WaveOps=" + StringHelper::BoolText(options1.WaveOps != FALSE));
 				LogLine("SystemInfoLogger->D3D12Features: WaveLaneCountMin=" + std::to_string(options1.WaveLaneCountMin));
 				LogLine("SystemInfoLogger->D3D12Features: WaveLaneCountMax=" + std::to_string(options1.WaveLaneCountMax));
 				LogLine("SystemInfoLogger->D3D12Features: TotalLaneCount=" + std::to_string(options1.TotalLaneCount));
-				LogLine("SystemInfoLogger->D3D12Features: ExpandedComputeResourceStates=" + BoolText(options1.ExpandedComputeResourceStates));
-				LogLine("SystemInfoLogger->D3D12Features: Int64ShaderOps=" + BoolText(options1.Int64ShaderOps));
+				LogLine("SystemInfoLogger->D3D12Features: ExpandedComputeResourceStates=" + StringHelper::BoolText(options1.ExpandedComputeResourceStates != FALSE));
+				LogLine("SystemInfoLogger->D3D12Features: Int64ShaderOps=" + StringHelper::BoolText(options1.Int64ShaderOps != FALSE));
 			}
 
 			D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5{};
 			if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
 			{
-				LogLine("SystemInfoLogger->D3D12Features: SRVOnlyTiledResourceTier3=" + BoolText(options5.SRVOnlyTiledResourceTier3));
+				LogLine("SystemInfoLogger->D3D12Features: SRVOnlyTiledResourceTier3=" + StringHelper::BoolText(options5.SRVOnlyTiledResourceTier3 != FALSE));
 				LogLine("SystemInfoLogger->D3D12Features: RenderPassesTier=" + std::to_string((UINT)options5.RenderPassesTier));
 				LogLine("SystemInfoLogger->D3D12Features: RaytracingTier=" + std::to_string((UINT)options5.RaytracingTier));
 			}
@@ -474,10 +427,10 @@ namespace SystemInfoLogger
 			architecture.NodeIndex = 0;
 			if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &architecture, sizeof(architecture))))
 			{
-				LogLine("SystemInfoLogger->D3D12Features: UMA=" + BoolText(architecture.UMA));
-				LogLine("SystemInfoLogger->D3D12Features: CacheCoherentUMA=" + BoolText(architecture.CacheCoherentUMA));
-				LogLine("SystemInfoLogger->D3D12Features: IsolatedMMU=" + BoolText(architecture.IsolatedMMU));
-				LogLine("SystemInfoLogger->D3D12Features: TileBasedRenderer=" + BoolText(architecture.TileBasedRenderer));
+				LogLine("SystemInfoLogger->D3D12Features: UMA=" + StringHelper::BoolText(architecture.UMA != FALSE));
+				LogLine("SystemInfoLogger->D3D12Features: CacheCoherentUMA=" + StringHelper::BoolText(architecture.CacheCoherentUMA != FALSE));
+				LogLine("SystemInfoLogger->D3D12Features: IsolatedMMU=" + StringHelper::BoolText(architecture.IsolatedMMU != FALSE));
+				LogLine("SystemInfoLogger->D3D12Features: TileBasedRenderer=" + StringHelper::BoolText(architecture.TileBasedRenderer != FALSE));
 			}
 
 			D3D12_FEATURE_DATA_GPU_VIRTUAL_ADDRESS_SUPPORT gpuVirtualAddressSupport{};

@@ -137,7 +137,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>PreCompiledHeader.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(ProjectDir)Resources;$(ProjectDir)ExternalDependencies\json\nlohmann;$(ProjectDir)ExternalDependencies\imgui-1.92.8;$(ProjectDir)ExternalDependencies\imgui-1.92.8\backends;$(ProjectDir)ExternalDependencies\MinHook_134\include;$(ProjectDir)ExternalDependencies\inifile-cpp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Resources;$(ProjectDir)ExternalDependencies\json\nlohmann;$(ProjectDir)ExternalDependencies\imgui-1.92.8;$(ProjectDir)ExternalDependencies\imgui-1.92.8\backends;$(ProjectDir)ExternalDependencies\MinHook_134\include;$(ProjectDir)ExternalDependencies\inifile-cpp\include;$(ProjectDir)ExternalDependencies\renderdoc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PrecompiledHeaderOutputFile>$(IntDir)$(TargetName).PreCompiledHeader</PrecompiledHeaderOutputFile>
     </ClCompile>
     <Link>
@@ -181,6 +181,8 @@
     <ClInclude Include="dsound_proxy.h" />
     <ClInclude Include="Keycodes.h" />
     <ClInclude Include="ProcessRunner.h" />
+    <ClInclude Include="RenderDocIntegration.h" />
+    <ClInclude Include="ExternalDependencies\renderdoc\include\renderdoc_app.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="ShaderAnalysis.h" />
     <ClInclude Include="ShaderAnalyzer.h" />
@@ -231,6 +233,7 @@
     <ClCompile Include="dsound_proxy.cpp" />
     <ClCompile Include="Keycodes.cpp" />
     <ClCompile Include="ProcessRunner.cpp" />
+    <ClCompile Include="RenderDocIntegration.cpp" />
     <ClCompile Include="ShaderAnalyzer.cpp" />
     <ClCompile Include="ShaderAnalysis.cpp" />
     <ClCompile Include="ShaderDiscovery.cpp" />

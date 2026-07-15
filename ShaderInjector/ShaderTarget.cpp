@@ -1,7 +1,6 @@
 //ShaderTarget.cpp
 #include "ShaderTarget.h"
 
-#include <fstream>
 #include <vector>
 
 //custom
@@ -255,11 +254,6 @@ namespace ShaderTarget
 
 	bool WriteShaderTargetJson(const ShaderTarget::ShaderTargetDisk& replacement)
 	{
-		std::ofstream jsonFile(replacement.jsonPath, std::ios::out | std::ios::trunc);
-
-		if (!jsonFile.is_open())
-			return false;
-
 		ShaderTarget::ShaderTargetDisk portableReplacement = replacement;
 		MakeReplacementPortableForDisk(portableReplacement);
 
@@ -267,22 +261,18 @@ namespace ShaderTarget
 		json["shaderBytecodeHashAliases"] = portableReplacement.shaderBytecodeHashAliases;
 		json["originalShaderAnalysis"] = portableReplacement.originalShaderAnalysis;
 		json["pipelineTemplates"] = portableReplacement.pipelineTemplates;
-		jsonFile << json.dump(4);
-
-		return !jsonFile.fail();
+		return ShaderInjectorIO::WriteTextFile(replacement.jsonPath, json.dump(4));
 	}
 
 	bool LoadShaderTargetJson(const std::string& path, ShaderTarget::ShaderTargetDisk& outReplacement)
 	{
 		try
 		{
-			std::ifstream jsonFile(path);
-
-			if (!jsonFile.is_open())
+			std::string jsonText;
+			if (!ShaderInjectorIO::ReadTextFile(path, jsonText))
 				return false;
 
-			nlohmann::ordered_json json{};
-			jsonFile >> json;
+			const nlohmann::ordered_json json = nlohmann::ordered_json::parse(jsonText);
 			outReplacement = json.get<ShaderTarget::ShaderTargetDisk>();
 			if (json.contains("shaderBytecodeHashAliases") && json["shaderBytecodeHashAliases"].is_array())
 				outReplacement.shaderBytecodeHashAliases = json["shaderBytecodeHashAliases"].get<std::vector<std::string>>();
@@ -303,28 +293,19 @@ namespace ShaderTarget
 
 	bool WritePipelineStreamMetadataJson(const std::string& path, const ShaderTarget::ShaderPipelineStreamMetadataDisk& metadata)
 	{
-		std::ofstream jsonFile(path, std::ios::out | std::ios::trunc);
-
-		if (!jsonFile.is_open())
-			return false;
-
 		nlohmann::ordered_json json = metadata;
-		jsonFile << json.dump(4);
-
-		return !jsonFile.fail();
+		return ShaderInjectorIO::WriteTextFile(path, json.dump(4));
 	}
 
 	bool LoadPipelineStreamMetadataJson(const std::string& path, ShaderTarget::ShaderPipelineStreamMetadataDisk& outMetadata)
 	{
 		try
 		{
-			std::ifstream jsonFile(path);
-
-			if (!jsonFile.is_open())
+			std::string jsonText;
+			if (!ShaderInjectorIO::ReadTextFile(path, jsonText))
 				return false;
 
-			nlohmann::ordered_json json{};
-			jsonFile >> json;
+			const nlohmann::ordered_json json = nlohmann::ordered_json::parse(jsonText);
 			outMetadata = json.get<ShaderTarget::ShaderPipelineStreamMetadataDisk>();
 			return true;
 		}

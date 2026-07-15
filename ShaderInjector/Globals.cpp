@@ -27,6 +27,8 @@ namespace Globals
 
 	bool gShowShaderInjectorGUI = true;
 	bool gShaderInjectorEnabled = true;
+	bool gRenderDocIntegrationEnabled = false;
+	bool gRenderDocAutoAttachEnabled = false;
 
 	ShaderDiscoveryMode gShaderDiscoveryMode = ShaderDiscoveryMode::HashLookup;
 	int gShaderDiscoveryWorkerThreads = 0;
