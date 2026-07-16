@@ -12,7 +12,7 @@ First important thing to cover is that Shader Injector writes to it's own log fi
     <img src="GithubContent/IssueReport/dir-3.png" width="32%" />
 </p>
 
-**Now a current limitation of the injector that I will resolve soon is that on new game launches or reboots, the log file gets cleared.** This is to avoid having a giant log file that gets written to over and over *(this will be resolved soon by keeping a copy of the previous log, and renaming the other log to current)*. But if you crash, likely important details are written into the log file but upon a fresh new boot that you do those details will get lost. Oversight I know, but keep that in mind *(again will be resolved soon)*.
+Be sure to also provide the ShaderInjectorPrevious.log if it is there as well.
 
 ## Issue Report
 
@@ -20,8 +20,10 @@ First important thing to cover is that Shader Injector writes to it's own log fi
 
 ```Help, when I put shader injector into game it doesn't turn on.```
 
-This is not helpful, first off how did you install the shader injector? Did you follow the installation guide closely? What do you mean by the injector doesn't turn on, is there no menu being drawn? There is also no log file given so I can't discern at all what happened.
+**This is not helpful...**
 
-Good issue reports provide very descriptive details about the actions you took, screenshots, and even better if you provide the log file generated in ```ShaderInjector/Logs/ShaderInjector.log```. Details also about your system specs, and game version are welcome as well.
+First off how did you install the shader injector? Did you follow the installation guide closely? What do you mean by the injector doesn't turn on, is there no menu being drawn? What game version are you on? What is your OS? Do you have other mods installed? There is also no log file given so I can't discern at all what happened.
 
-**The more information I have to work with about your issue, the better chances the issue can get resolved.**
+There are too many unknowns with that inital statement which is a problem. Good issue reports provide very descriptive details about the actions you took, screenshots, and even better if you provide the log files generated in ```ShaderInjector/Logs/ShaderInjector.log```. Details also about your system specs, and game version, operating system, and any mods that are installed are important.
+
+**The more information I have to work with about your issue, the better chances the issue can get resolved.** If you don't provide enough information, then you will be ignored.

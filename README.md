@@ -1,7 +1,7 @@
 # Shader Injector
 Shader Injector Mod for [FF7 Rebirth PC](https://store.steampowered.com/app/2909400/FINAL_FANTASY_VII_REBIRTH/). This is a DX12 *(D3D12)* based mod that intercepts the rendering API calls, and allows you to inject/replace the original shaders within the title with modified ones during runtime. This mod was built for [FF7 Rebirth](https://store.steampowered.com/app/2909400/FINAL_FANTASY_VII_REBIRTH/), however because it's primarly just a DX12 interceptor, theroetically this can be adapted to work with other D3D12 based titles.
 
-[Contact Shadows details here.](https://frostbone25.github.io/p/ff7-rebirth-contact-shadows/#timings-on-1920x1080-and-3840x2160)
+[Contact Shadows details here](https://frostbone25.github.io/p/ff7-rebirth-contact-shadows/#timings-on-1920x1080-and-3840x2160)
 
 ---
 # Download

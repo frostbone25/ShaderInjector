@@ -9,11 +9,11 @@ The raw .hlsl shader source code files are located in ```(game directory)/Shader
 <p float="left">
     <img src="GithubContent/LiveShaderEditing/directory-game.png" width="24%" />
     <img src="GithubContent/LiveShaderEditing/directory-shader-injector.png" width="24%" />
-    <img src="GithubContent/LiveShaderEditing/directory-shader-sources.png" width="24%" />
-    <img src="GithubContent/LiveShaderEditing/directory-pixel-shaders.png" width="24%" />
+    <img src="GithubContent/LiveShaderEditing/directory-modified-shaders.png" width="24%" />
+    <img src="GithubContent/LiveShaderEditing/directory-includes.png" width="24%" />
 </p>
 
-Now there is multiple sets of folders and potential different shader types for the future, but currently the mod provides 2 modified pixel shaders. These are located inside ```(game directory)/ShaderInjector/ShaderSources/PixelShaders```.
+Now there is a lot of modified shaders, but the real meat is inside the ```Includes``` folder, this stores the real meat of the shaders. It's a centralized spot that all of the other shaders outside of includes effectively point to.
 
 ### Editing
 You can open the raw .hlsl source code shaders in a text editor *(or code editor)* of your choice and edit them to your liking. The modified pixel shaders provided by the mod are written with pre-processor macros that are wired up, where you can easily toggle or adjust certain shader features.
@@ -49,12 +49,13 @@ Make sure to save changes before you [recompile](#reloading-changes) in Shader I
 
 Once you've made a change, tab or go back into the game and under ```Modified Shaders``` menu. Then select the modified shader that is pointing to the shader that you are editing, in my case ```LocalLightShader.hlsl```, and click simply ```Recompile```. Your changes should be reflected immedieatly.
 
-<p float="left">
-    <img src="GithubContent/LiveShaderEditing/reload-shader-a.png" width="32%" />
-    <img src="GithubContent/LiveShaderEditing/reload-shader-b.png" width="32%" />
-</p>
+![recompile-shader](GithubContent/LiveShaderEditing/recompile-shader.png)
 
-If your changes are not being reflected or updated, there is a good chance you might be hitting a compilation error *(or something similar)*. Check under the ```Logs``` section within the shader injector menu, and correct the issues. 
+*NOTE:* if you are a bit lazier you could also click up above the ```Recompile All``` which will recompile all of the modified shaders.
+
+![recompile-all](GithubContent/LiveShaderEditing/recompile-all.png)
+
+If your changes are not being reflected or updated, there is a good chance you might be hitting a compilation error *(or something similar)*. Check under the ```Logs``` section within the shader injector menu, and correct the compilation errors. 
 
 ![compile-error](GithubContent/LiveShaderEditing/compile-error.png)
 
