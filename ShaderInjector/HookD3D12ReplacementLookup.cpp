@@ -216,14 +216,30 @@ namespace HookD3D12
 			return match;
 		}
 
+		bool CachedBlobLengthMatches(const std::string& serializedLength, size_t currentBlobSize)
+		{
+			if (serializedLength.empty())
+				return false;
+
+			char* parseEnd = nullptr;
+			const unsigned long long parsedLength = _strtoui64(serializedLength.c_str(), &parseEnd, 10);
+			return parseEnd != serializedLength.c_str() && *parseEnd == '\0' && parsedLength == currentBlobSize;
+		}
+
 		CachedBlobContentMatch BestCachedBlobContentMatch(
 			const ShaderTarget::ShaderTargetDisk& replacement,
 			const std::vector<uint8_t>& currentBlob)
 		{
 			CachedBlobContentMatch bestMatch{};
 
-			auto considerPath = [&](const std::string& path)
+			auto considerPath = [&](const std::string& path, const std::string& serializedLength)
 			{
+				// Driver cache sidecars can be large and a target may contain many templates.
+				// Length metadata lets us reject almost every candidate without loading it
+				// from disk or comparing it byte-by-byte on the render thread.
+				if (!CachedBlobLengthMatches(serializedLength, currentBlob.size()))
+					return;
+
 				const CachedBlobContentMatch match = CompareCachedBlobContent(LoadCachedBlobSidecar(path), currentBlob);
 				if (match.matchingRatio > bestMatch.matchingRatio ||
 					(match.matchingRatio == bestMatch.matchingRatio && match.longestMatchingRun > bestMatch.longestMatchingRun))
@@ -232,9 +248,9 @@ namespace HookD3D12
 				}
 			};
 
-			considerPath(replacement.pipelineCachedBlobPath);
+			considerPath(replacement.pipelineCachedBlobPath, replacement.pipelineCachedBlobLength);
 			for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
-				considerPath(pipelineTemplate.pipelineCachedBlobPath);
+				considerPath(pipelineTemplate.pipelineCachedBlobPath, pipelineTemplate.pipelineCachedBlobLength);
 
 			return bestMatch;
 		}

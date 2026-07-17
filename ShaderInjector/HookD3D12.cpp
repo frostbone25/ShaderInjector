@@ -104,6 +104,10 @@ namespace HookD3D12
 
 	static bool gShaderTargetApplyDirty = true;
 	static bool gPipelineStateOverridesDirty = true;
+	static size_t gGraphicsShaderTargetApplyCursor = 0;
+	static size_t gStreamShaderTargetApplyCursor = 0;
+	static size_t gUncapturedShaderTargetApplyCursor = 0;
+	static constexpr size_t gMaximumCapturedReplacementAttemptsPerListPerFrame = 32;
 	static constexpr int gMaximumUncapturedReplacementAttemptsPerFrame = 1;
 	static constexpr ULONGLONG gPipelineActivityQuietPeriodMs = 2500;
 	static std::atomic<ULONGLONG> gLastPipelineActivityTick = 0;
@@ -134,6 +138,12 @@ namespace HookD3D12
 	{
 		for (auto& uncaptured : gUncapturedPipelineStates)
 			uncaptured.attemptedReplacement = false;
+
+		// Shader-target refreshes can change every match. Restart all cursors so existing
+		// captured and uncaptured pipelines are reconsidered incrementally.
+		gGraphicsShaderTargetApplyCursor = 0;
+		gStreamShaderTargetApplyCursor = 0;
+		gUncapturedShaderTargetApplyCursor = 0;
 	}
 
 	void BackfillReplacementCachedBlobInfo(ShaderTarget::ShaderTargetDisk& replacement, ID3D12PipelineState* pipelineState)
@@ -280,6 +290,9 @@ namespace HookD3D12
 
 		gPipelineStateOverrides.clear();
 		gPipelineStateOverridesDirty = true;
+		gGraphicsShaderTargetApplyCursor = 0;
+		gStreamShaderTargetApplyCursor = 0;
+		gUncapturedShaderTargetApplyCursor = 0;
 	}
 
 	void RebuildPipelineStateOverrideMap()
@@ -375,8 +388,10 @@ namespace HookD3D12
 		auto computeRootIt = gCurrentComputeRootSignatureByCommandList.find(cmdList);
 		ID3D12RootSignature* observedComputeRootSignature = computeRootIt != gCurrentComputeRootSignatureByCommandList.end() ? computeRootIt->second : nullptr;
 
-		for (auto& info : gUncapturedPipelineStates)
+		for (size_t uncapturedIndex = 0; uncapturedIndex < gUncapturedPipelineStates.size(); ++uncapturedIndex)
 		{
+			auto& info = gUncapturedPipelineStates[uncapturedIndex];
+
 			if (info.pipelineState == pipelineState)
 			{
 				bool updated = false;
@@ -396,6 +411,7 @@ namespace HookD3D12
 				if (updated)
 				{
 					info.attemptedReplacement = false;
+					gUncapturedShaderTargetApplyCursor = (std::min)(gUncapturedShaderTargetApplyCursor, uncapturedIndex);
 					NotifyPipelineActivity();
 					MarkShaderTargetApplyDirty();
 				}
@@ -709,7 +725,7 @@ namespace HookD3D12
 					patchedTarget = true;
 			}
 
-			// Always zero out CachedPSO regardless of target —
+			// Always zero out CachedPSO regardless of target -
 			// the cached blob pointer is session-specific and will crash on reuse
 			if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CACHED_PSO)
 			{
@@ -727,7 +743,7 @@ namespace HookD3D12
 
 				// The pInputElementDescs pointer in the blob points to game memory.
 				// We can't fix it up easily here without copying the elements,
-				// so null it out — most PSOs don't need it for non-VS stages anyway,
+				// so null it out - most PSOs don't need it for non-VS stages anyway,
 				// but if this is a graphics PSO with VS intact, this will cause issues.
 				// For now zero it to stop the crash.
 				layout->pInputElementDescs = nullptr;
@@ -1337,31 +1353,6 @@ namespace HookD3D12
 		if (replacementIndex < 0)
 		{
 			uncaptured.attemptedReplacement = true;
-
-			static int noMatchLogCount = 0;
-			if (noMatchLogCount < 40)
-			{
-				int enabledCount = 0;
-				int cachedHashCount = 0;
-				for (const auto& replacement : gLoadedShaderTargets)
-				{
-					if (!IsShaderTargetEffectivelyEnabled(replacement))
-						continue;
-
-					enabledCount++;
-
-					if (!replacement.pipelineCachedBlobHash.empty())
-						cachedHashCount++;
-				}
-
-				ShaderInjectorGUI::WriteToRuntimeLog(
-					"HookD3D12->TryApplyUncapturedReplacement: Uncaptured PSO has no replacement match: cachedHash=" + Hash::FormatHash(uncaptured.cachedBlobHash) +
-					" cachedBytes=" + std::to_string((size_t)uncaptured.cachedBlobSize) +
-					" enabledReplacements=" + std::to_string(enabledCount) +
-					" replacementsWithCachedHash=" + std::to_string(cachedHashCount));
-				noMatchLogCount++;
-			}
-
 			return false;
 		}
 
@@ -1471,31 +1462,45 @@ namespace HookD3D12
 
 		std::lock_guard<std::mutex> lock(gPipelineMutex);
 
-		for (auto& pipeline : gGraphicsPipelines)
-			TryApplyGraphicsReplacement(pipeline);
+		size_t graphicsAttemptsThisFrame = 0;
+		while (gGraphicsShaderTargetApplyCursor < gGraphicsPipelines.size() &&
+			graphicsAttemptsThisFrame < gMaximumCapturedReplacementAttemptsPerListPerFrame)
+		{
+			TryApplyGraphicsReplacement(gGraphicsPipelines[gGraphicsShaderTargetApplyCursor]);
+			++gGraphicsShaderTargetApplyCursor;
+			++graphicsAttemptsThisFrame;
+		}
 
-		for (auto& pipeline : gPipelineStates)
-			TryApplyStreamReplacement(pipeline);
+		size_t streamAttemptsThisFrame = 0;
+		while (gStreamShaderTargetApplyCursor < gPipelineStates.size() &&
+			streamAttemptsThisFrame < gMaximumCapturedReplacementAttemptsPerListPerFrame)
+		{
+			TryApplyStreamReplacement(gPipelineStates[gStreamShaderTargetApplyCursor]);
+			++gStreamShaderTargetApplyCursor;
+			++streamAttemptsThisFrame;
+		}
 
 		int uncapturedAttemptsThisFrame = 0;
-		bool hasDeferredUncapturedWork = false;
-		for (auto& uncaptured : gUncapturedPipelineStates)
+		while (gUncapturedShaderTargetApplyCursor < gUncapturedPipelineStates.size() &&
+			uncapturedAttemptsThisFrame < gMaximumUncapturedReplacementAttemptsPerFrame)
 		{
+			auto& uncaptured = gUncapturedPipelineStates[gUncapturedShaderTargetApplyCursor];
+			++gUncapturedShaderTargetApplyCursor;
+
 			if (uncaptured.replacementPipelineState || uncaptured.attemptedReplacement)
 				continue;
 
-			if (uncapturedAttemptsThisFrame >= gMaximumUncapturedReplacementAttemptsPerFrame)
-			{
-				hasDeferredUncapturedWork = true;
-				continue;
-			}
-
 			TryApplyUncapturedReplacement(uncaptured);
-			uncapturedAttemptsThisFrame++;
+			++uncapturedAttemptsThisFrame;
 		}
 
-		RebuildPipelineStateOverrideMap();
-		gShaderTargetApplyDirty = hasDeferredUncapturedWork;
+		if (gPipelineStateOverridesDirty)
+			RebuildPipelineStateOverrideMap();
+
+		gShaderTargetApplyDirty =
+			gGraphicsShaderTargetApplyCursor < gGraphicsPipelines.size() ||
+			gStreamShaderTargetApplyCursor < gPipelineStates.size() ||
+			gUncapturedShaderTargetApplyCursor < gUncapturedPipelineStates.size();
 	}
 
 	void ProcessPendingRebuilds()
