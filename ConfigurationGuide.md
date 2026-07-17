@@ -29,7 +29,7 @@ Find the following file....
 ~FINAL FANTASY VII REBIRTH\End\Binaries\Win64\ShaderInjector\ModifiedShaders\Includes\ComputeShaderPass_ReflectionEnvironment.hlsl
 ```
 
-Open this file in a text/code editor and you'll want to find the following fields...
+Open this file in a text/code editor and you'll find the following fields...
 
 ```GLSL
 //#define SSGI_AMBIENT_OCCLUSION
@@ -59,7 +59,7 @@ Find the following file....
 ~FINAL FANTASY VII REBIRTH\End\Binaries\Win64\ShaderInjector\ModifiedShaders\Includes\PixelShaderPass_PostProcessFinal.hlsl
 ```
 
-Open this file in a text/code editor and you'll want to find the following fields...
+Open this file in a text/code editor and you'll find the following fields...
 
 ```GLSL
 //#define AUTO_EXPOSURE
@@ -76,3 +76,65 @@ Save changes to the file and tab or open the game back up, and click ```Recompil
 ![recompile-all](GithubContent/LiveShaderEditing/recompile-all.png)
 
 You should see immediate visual changes after compilation completes, with more visible ambient occlusion and local bounce light!
+
+### Tonemapping
+
+Find the following file....
+
+```
+~FINAL FANTASY VII REBIRTH\End\Binaries\Win64\ShaderInjector\ModifiedShaders\Includes\PixelShaderPass_PostProcessFinal.hlsl
+```
+
+Open this file in a text/code editor and you'll find the following fields...
+
+```GLSL
+#define TONEMAP_PRESERVE_COLOR_GRADE
+
+//#define TONEMAP_NONE
+//#define TONEMAP_GRAN_TURISMO_7
+//#define TONEMAP_AGX
+//#define TONEMAP_UCHIMURA
+//#define TONEMAP_REINHARD
+//#define TONEMAP_REINHARD2
+//#define TONEMAP_UNCHARTED2
+//#define TONEMAP_ACES
+//#define TONEMAP_ACES_FITTED
+//#define TONEMAP_FILMIC
+//#define TONEMAP_UNREAL_3
+//#define TONEMAP_KHRONOS_NEUTRAL
+//#define TONEMAP_LOTTES
+//#define TONEMAP_EXPONENTIAL
+//#define TONEMAP_EXPONENTIAL_SQUARED
+//#define TONEMAP_MGSV
+//#define TONEMAP_TONY_MC_MAP_FACE
+```
+
+There are many different tonemappers to choose from. You can experiment but the ones I use in my videos/screenshots that is a personal favorite of mine *(and in my opinon the superior one out of all of them)* I use ```TONEMAP_GRAN_TURISMO_7```.
+
+```GLSL
+#define TONEMAP_PRESERVE_COLOR_GRADE
+
+//#define TONEMAP_NONE
+#define TONEMAP_GRAN_TURISMO_7
+//#define TONEMAP_AGX
+//#define TONEMAP_UCHIMURA
+//#define TONEMAP_REINHARD
+//#define TONEMAP_REINHARD2
+//#define TONEMAP_UNCHARTED2
+//#define TONEMAP_ACES
+//#define TONEMAP_ACES_FITTED
+//#define TONEMAP_FILMIC
+//#define TONEMAP_UNREAL_3
+//#define TONEMAP_KHRONOS_NEUTRAL
+//#define TONEMAP_LOTTES
+//#define TONEMAP_EXPONENTIAL
+//#define TONEMAP_EXPONENTIAL_SQUARED
+//#define TONEMAP_MGSV
+//#define TONEMAP_TONY_MC_MAP_FACE
+```
+
+Save changes to the file and tab or open the game back up, and click ```Recompile All```.
+
+![recompile-all](GithubContent/LiveShaderEditing/recompile-all.png)
+
+You should see immediate visual changes after compilation completes, with different tonal range and better color accuracy than the base game!
