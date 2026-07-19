@@ -10,6 +10,7 @@ This document will occasionally be updated with more information collected from 
 - [Vanishing Lights](#vanishing-lights)
 - [Linux Support](#linux-support)
 - [Game Not Launching](#game-not-launching)
+- [HDR](#hdr)
 
 ---
 
@@ -95,6 +96,12 @@ Value: dsound=n,b
 #### Game Not Launching
 
 Some uesrs have reported that when installing the ShaderInjector that the game wouldn't start. A user has reported that Windows' Smart App Control was blocking the dll from being used, and turning it off fixed it and allowed the game to run.
+
+---
+
+#### HDR
+
+As of 2.0 there are some issues currently with the mod that has come to my attention. For best results until a fix is rolled out I would advise playing in SDR for now. [Your game image may become incredibly dark and very contrasted than intended](https://imgur.com/a/HKkba5E). **This is a bug and there are a number of reasons for this.** Main one being at the moment there's no HDR shader variant of "PostProcessFinal" that I have created. This means many of the image adjustments/tonemaps/auto-exposure won't apply or be usable. This should be resolved in future updates. On a similar note, if you are in SDR I'd advise checking your monitor image settings if you have image issues also. I've made all of these tweaks on calibrated SDR monitors and the mod should not crush the darks of the image so ensure your monitor is properly calibrated and not using image presets that overly punches the image more than it should. Any image adjustments can be done through "PostProcessFinal" which has [wired up parameters](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md) that you can use to tune the image to your liking.
 
 ---
 
