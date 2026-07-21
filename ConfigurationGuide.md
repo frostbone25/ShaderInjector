@@ -65,8 +65,9 @@ You should see immediate visual changes after compilation completes, with more v
 
 Currently as of 2.0 these effects, especially ```SSGI_BOUNCE_LIGHT``` can be quite noisy. I plan to improve upon this in the future by introducing dedicated draw passes to filter and downsample the effects for performance/image quality but your kind of limited in terms of how to deal with the noise at the moment. With that said there are some things you can try...
 
+- Increase ```SSGI_RAY_COUNT```: This has a direct impact to the quality of the noise *(more samples become more expensive quickly)*
+- Increase ```SSGI_RAYMARCHING_STEP_COUNT```: This will improve the quality of the raymarch and reduce noise somewhat but of course at a big cost.
 - Increase Rendering Resolution: This will make the impact of the SSGI signifcantly higher because it scales with screen resolution, but more pixels means the noise becomes smaller and the final result appears cleaner.
-- Increase Raymarch Sample Counts: This will improve the quality of the raymarch and reduce noise but of course at a greater cost.
 - Update Game's DLSS Preset: I have noticed while testing on multiple game versions that 1.0.0.5 seems to have an updated DLSS variant that actually led to reduced noise when SSGI was enabled. I would experiment with this as a potential avenue for improving the noise situation.
 
 ### Auto Exposure
