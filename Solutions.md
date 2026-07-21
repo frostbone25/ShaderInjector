@@ -11,11 +11,36 @@ This document will occasionally be updated with more information collected from 
 - [Linux Support](#linux-support)
 - [Game Not Launching](#game-not-launching)
 - [HDR](#hdr)
+- [Optiscalar](#optiscalar)
 
 ---
 
 #### [Lyall FF7RebirthFix](https://codeberg.org/Lyall/FF7RebirthFix)
-Both mods proxy dsound.dll so normally they can't exist together, but [Zaccachino](https://www.nexusmods.com/profile/Zaccachino) has reported renaming Lyalls dsound.dll to winmm.dll allows both mods to run with each other.
+
+[*(Courtesy of x6800)*](https://github.com/x6800)
+
+Lyall's mod uses the Ultimate ASI Loader as its `dsound.dll`, which automatically loads any `.asi` file it finds in the game directory. Since an `.asi` file is just a renamed `.dll`, you can rename the Shader Injector's `dsound.dll` to `ShaderInjector.asi` and let the ASI Loader pick it up.
+
+### Steps
+
+1. Copy the **21:9 mod's** `dsound.dll` into the game root — this is the ASI Loader.
+2. Copy `FF7RebirthFix.asi` and `FF7RebirthFix.ini` into the game root as usual.
+3. Rename the **Shader Injector's** `dsound.dll` to `ShaderInjector.asi` and place it in the game root.
+4. Copy the `ShaderInjector/` folder into the game root as usual.
+
+### Your game root should look like this
+
+| File | Purpose |
+|------|---------|
+| `dsound.dll` | Ultimate ASI Loader |
+| `FF7RebirthFix.asi` | 21:9 Fix |
+| `FF7RebirthFix.ini` | Config |
+| `ShaderInjector.asi` | Shader Injector (**renamed from** `dsound.dll`) |
+| `ShaderInjector/` | Shader Injector resources |
+
+Both mods should load on game start.
+
+*(Courtesy of [Zaccachino](https://www.nexusmods.com/profile/Zaccachino))* You can also rename renaming Lyalls dsound.dll to winmm.dll allows both mods to run with each other.
 
 ---
 
@@ -23,7 +48,7 @@ Both mods proxy dsound.dll so normally they can't exist together, but [Zaccachin
 
 ReShade reportedly is unstable for some users. Make sure that you are using the latest version, during testing myself *(using version 6.7.3)* I haven't ran into any issues/crashes with running Injector and Reshade simultaneously. 
 
-However if you're running into issues, [Zaccachino](https://www.nexusmods.com/profile/Zaccachino) reported that you can disable ReShade during the setup process of Shader Injector *(dragging dxgi.dll temporarily out of the game directory)*. When Shader Injector is fully setup you can go into [ShaderInjector.ini](https://github.com/frostbone25/ShaderInjector/blob/main/InjectorSettings.md) and change ```MenuOpen``` so the menu does not open anymore by default *(it helps to change the keybind to a key you might not hit)*. Then re-enable Reshade and now they should be able to co-exist.
+However if you're running into issues, [Zaccachino](https://www.nexusmods.com/profile/Zaccachino) reported that you can disable ReShade during the setup process of Shader Injector ***(dragging dxgi.dll temporarily out of the game directory)***. When Shader Injector is fully setup you can go into [ShaderInjector.ini](https://github.com/frostbone25/ShaderInjector/blob/main/InjectorSettings.md) and change ```MenuOpen``` so the menu does not open anymore by default *(it helps to change the keybind to a key you might not hit)*. Then re-enable Reshade and now they should be able to co-exist.
 
 ---
 
@@ -55,37 +80,38 @@ I would suggest doing this if you spot artifacts that you may not like brought o
 
 ---
 
-#### Vanishing Lights
-
-For users who are experiencing light sources "vanishing" in interior spaces, if you are not a fan then I would advise disabling the shader replacement for Local Lights. 
-
-Unfortunately this is something that is out of my control as often light sources in the game are placed inside solid objects *(that have shadow casting disabled)*. The side effect is since the mod adds precise shadowing to local lights, those light sources that were visible before now end up appearing blocked because physically... its being blocked by geometry!
-
 #### Linux Support
 
-Courtesy of [smackedwookiee](url=https://www.youtube.com/@SmackedWookiee)!
+*(Courtesy of [smackedwookiee](url=https://www.youtube.com/@SmackedWookiee))*
 
-1) Install directx-shader-compiler
-    For Ubuntu:
-        sudo apt update
-        sudo apt install directx-shader-compiler
-    For Arch-based distros:
-        sudo pacman -S directx-shader-compiler
-    For Fedora
-        sudo dnf install directx-shader-compiler
-2) Clear the shader cache
-    For Steam Users:
-        Click on the Settings gear
-        Manage > Browse Local Files
-        Go up two levels to steamapps
-        Navigate to the following path: /compatdata/2909400/pfx/drive_c/users/steamuser/My Documents/My Games/FINAL FANTASY VII REBIRTH/Saved/
-        Delete the .ushaderprecache files
-    For HGL Users (not tested)
-        Click on the game to open the game profile
-        Click on the path next to WinePrefix folder
-        Navigate to the following path: /drive_c/users/%linuxusername%/My Documents/My Games/FINAL FANTASY VII REBRITH/Saved/
-        Delete the .ushaderprecache files
-3) Add the following launch options for Steam: WINEDLLOVERRIDES="dsound=n,b"
+**1. Install directx-shader-compiler**
+
+***For Ubuntu:***
+```sudo apt update```
+```sudo apt install directx-shader-compiler```
+
+***For Arch-based distros:***
+```sudo pacman -S directx-shader-compiler```
+
+***For Fedora***
+```sudo dnf install directx-shader-compiler```
+
+**2. Clear the shader cache**
+
+***For Steam Users:***
+Click on the Settings gear
+```Manage > Browse Local Files```
+Go up two levels to steamapps
+Navigate to the following path: ```/compatdata/2909400/pfx/drive_c/users/steamuser/My Documents/My Games/FINAL FANTASY VII REBIRTH/Saved/```
+Delete the ```.ushaderprecache``` files
+
+-***For HGL Users (not tested)***
+Click on the game to open the game profile
+Click on the path next to WinePrefix folder
+Navigate to the following path: ```/drive_c/users/%linuxusername%/My Documents/My Games/FINAL FANTASY VII REBRITH/Saved/```
+Delete the ```.ushaderprecache``` files
+
+**3. Add the following launch options for Steam: ```WINEDLLOVERRIDES="dsound=n,b" %command%```**
 or for HGL users (not tested)
 Add the following Variable name to the game settings page:
 Variable name: WINEDLLOVERRIDES
@@ -102,6 +128,21 @@ Some uesrs have reported that when installing the ShaderInjector that the game w
 #### HDR
 
 As of 2.0 there are some issues currently with the mod that has come to my attention. For best results until a fix is rolled out I would advise playing in SDR for now. [Your game image may become incredibly dark and very contrasted than intended](https://imgur.com/a/HKkba5E). **This is a bug and there are a number of reasons for this.** Main one being at the moment there's no HDR shader variant of "PostProcessFinal" that I have created. This means many of the image adjustments/tonemaps/auto-exposure won't apply or be usable. This should be resolved in future updates. On a similar note, if you are in SDR I'd advise checking your monitor image settings if you have image issues also. I've made all of these tweaks on calibrated SDR monitors and the mod should not crush the darks of the image so ensure your monitor is properly calibrated and not using image presets that overly punches the image more than it should. Any image adjustments can be done through "PostProcessFinal" which has [wired up parameters](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md) that you can use to tune the image to your liking.
+
+#### Optiscalar
+
+[*(Courtesy of dmorazasanchez)*](https://github.com/dmorazasanchez)
+
+For **Optiscaler.ini**
+```AllowAsync = false```
+```RestoreComputeSignature = true```
+```RestoreGraphicSignature = true```
+```PreserveSwapChain = true```
+```ModifyBufferState = false```
+```SkipResizeBuffers = true```
+
+For **ShaderInjector.ini**
+```MenuOpen=false```
 
 ---
 
@@ -137,3 +178,9 @@ The other way to fix the issue is to disable Dynamic Resolution entirely setting
 Now if you need the performance boost you can instead edit Engine.ini or use [FFVII Hook](https://www.nexusmods.com/finalfantasy7rebirth/mods/4) to natively render at a lower resolution instead using something like ```r.SetRes 1920x1080f```
 
 ---
+
+#### (FIXED IN 2.0.0+) Vanishing Lights
+
+For users who are experiencing light sources "vanishing" in interior spaces, if you are not a fan then I would advise disabling the shader replacement for Local Lights. 
+
+Unfortunately this is something that is out of my control as often light sources in the game are placed inside solid objects *(that have shadow casting disabled)*. The side effect is since the mod adds precise shadowing to local lights, those light sources that were visible before now end up appearing blocked because physically... its being blocked by geometry!
