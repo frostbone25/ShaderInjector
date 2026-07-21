@@ -63,7 +63,7 @@ You should see immediate visual changes after compilation completes, with more v
 
 #### SSGI / AO Quality Notes
 
-Currently as of 2.0 these effects, the **```SSGI_BOUNCE_LIGHT``` can be quite noisy.** I plan to improve upon this in the future by introducing dedicated draw passes to filter and downsample the effects for performance/image quality but your kind of limited in terms of how to deal with the noise at the moment. With that said there are some things you can try...
+Currently as of 2.0 **```SSGI_BOUNCE_LIGHT``` can be quite noisy.** I plan to improve upon this in the future by introducing dedicated draw passes to filter and downsample the effects for performance/image quality but your kind of limited in terms of how to deal with the noise at the moment. With that said there are some things you can try...
 
 - **Increase ```SSGI_RAY_COUNT```:** This has a direct impact to the quality of the noise *(more samples become more expensive quickly)*
 - **Increase ```SSGI_RAYMARCHING_STEP_COUNT```:** This will improve the quality of the raymarch and reduce noise somewhat but of course at a big cost.
