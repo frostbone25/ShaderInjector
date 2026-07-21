@@ -33,6 +33,165 @@ namespace Hooks
 	static LPVOID gPresent1Target = nullptr;
 	static LPVOID gResizeBuffersTarget = nullptr;
 	static LPVOID gExecuteCommandListsTarget = nullptr;
+	static bool gOptiScalerCompatibilityEnabled = false;
+
+	using FunctionCreateSwapChain = HRESULT(STDMETHODCALLTYPE*)(
+		IDXGIFactory* factory,
+		IUnknown* device,
+		DXGI_SWAP_CHAIN_DESC* description,
+		IDXGISwapChain** swapChain);
+	using FunctionCreateSwapChainForHwnd = HRESULT(STDMETHODCALLTYPE*)(
+		IDXGIFactory2* factory,
+		IUnknown* device,
+		HWND window,
+		const DXGI_SWAP_CHAIN_DESC1* description,
+		const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* fullscreenDescription,
+		IDXGIOutput* restrictToOutput,
+		IDXGISwapChain1** swapChain);
+
+	static FunctionCreateSwapChain gOriginalCreateSwapChain = nullptr;
+	static FunctionCreateSwapChainForHwnd gOriginalCreateSwapChainForHwnd = nullptr;
+
+	static void CaptureCreatedSwapChain(IUnknown* creationDevice, IUnknown* swapChain)
+	{
+		if (!swapChain)
+			return;
+
+		Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain3;
+		if (FAILED(swapChain->QueryInterface(IID_PPV_ARGS(&swapChain3))))
+			return;
+
+		// D3D12 passes the presenting direct command queue as the factory's
+		// device argument. Preserve that exact association for overlay work.
+		HookD3D12::RegisterSwapChainCommandQueue(swapChain3.Get(), creationDevice);
+
+		if (!gOptiScalerCompatibilityEnabled)
+			return;
+
+		if (HookD3D12::InstallSwapChainCompatibility(swapChain3.Get(), "OptiScaler"))
+		{
+			ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+				"Hooks->CaptureCreatedSwapChain: captured OptiScaler swapChain=%p",
+				swapChain3.Get()));
+		}
+	}
+
+	static HRESULT STDMETHODCALLTYPE Hook_CreateSwapChain(
+		IDXGIFactory* factory,
+		IUnknown* device,
+		DXGI_SWAP_CHAIN_DESC* description,
+		IDXGISwapChain** swapChain)
+	{
+		HRESULT result = gOriginalCreateSwapChain
+			? gOriginalCreateSwapChain(factory, device, description, swapChain)
+			: E_POINTER;
+
+		const bool hasExplicitSize = description &&
+			description->BufferDesc.Width != 0 && description->BufferDesc.Height != 0;
+		const bool isOverlaySizedSwapChain = hasExplicitSize &&
+			(description->BufferDesc.Width < 100 || description->BufferDesc.Height < 100);
+
+		if (SUCCEEDED(result) && swapChain && *swapChain && !isOverlaySizedSwapChain)
+			CaptureCreatedSwapChain(device, *swapChain);
+
+		return result;
+	}
+
+	static HRESULT STDMETHODCALLTYPE Hook_CreateSwapChainForHwnd(
+		IDXGIFactory2* factory,
+		IUnknown* device,
+		HWND window,
+		const DXGI_SWAP_CHAIN_DESC1* description,
+		const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* fullscreenDescription,
+		IDXGIOutput* restrictToOutput,
+		IDXGISwapChain1** swapChain)
+	{
+		HRESULT result = gOriginalCreateSwapChainForHwnd
+			? gOriginalCreateSwapChainForHwnd(
+				factory,
+				device,
+				window,
+				description,
+				fullscreenDescription,
+				restrictToOutput,
+				swapChain)
+			: E_POINTER;
+
+		const bool hasExplicitSize = description && description->Width != 0 && description->Height != 0;
+		const bool isOverlaySizedSwapChain = hasExplicitSize &&
+			(description->Width < 100 || description->Height < 100);
+
+		if (SUCCEEDED(result) && swapChain && *swapChain && !isOverlaySizedSwapChain)
+			CaptureCreatedSwapChain(device, *swapChain);
+
+		return result;
+	}
+
+	bool PrepareSwapChainCapture()
+	{
+		const std::string optiScalerSettingsPath =
+			ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetGameDirectory(), "OptiScaler.ini");
+		gOptiScalerCompatibilityEnabled = ShaderInjectorIO::FileExists(optiScalerSettingsPath);
+
+		Microsoft::WRL::ComPtr<IDXGIFactory2> factory;
+		HRESULT factoryResult = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
+		if (FAILED(factoryResult) || !factory)
+		{
+			ShaderInjectorIO::WriteToLogFileError(
+				"Hooks->PrepareSwapChainCapture: failed to create DXGI factory: " +
+				StringHelper::FormatHRESULT(factoryResult));
+			return false;
+		}
+
+		void** factoryVTable = *reinterpret_cast<void***>(factory.Get());
+		void* createSwapChainTarget = factoryVTable[VTableIndex::indexCreateSwapChain];
+		void* createSwapChainForHwndTarget = factoryVTable[VTableIndex::indexCreateSwapChainForHwnd];
+
+		MH_STATUS createHwndStatus = MH_CreateHook(
+			createSwapChainForHwndTarget,
+			reinterpret_cast<void*>(&Hook_CreateSwapChainForHwnd),
+			reinterpret_cast<void**>(&gOriginalCreateSwapChainForHwnd));
+		MH_STATUS enableHwndStatus = createHwndStatus == MH_OK
+			? MH_EnableHook(createSwapChainForHwndTarget)
+			: createHwndStatus;
+
+		if (createHwndStatus != MH_OK || (enableHwndStatus != MH_OK && enableHwndStatus != MH_ERROR_ENABLED))
+		{
+			ShaderInjectorIO::WriteToLogFileError(StringHelper::Format(
+				"Hooks->PrepareSwapChainCapture: CreateSwapChainForHwnd hook failed create=%s enable=%s",
+				MH_StatusToString(createHwndStatus),
+				MH_StatusToString(enableHwndStatus)));
+			return false;
+		}
+
+		MH_STATUS createLegacyStatus = MH_CreateHook(
+			createSwapChainTarget,
+			reinterpret_cast<void*>(&Hook_CreateSwapChain),
+			reinterpret_cast<void**>(&gOriginalCreateSwapChain));
+		MH_STATUS enableLegacyStatus = createLegacyStatus == MH_OK
+			? MH_EnableHook(createSwapChainTarget)
+			: createLegacyStatus;
+
+		if (createLegacyStatus != MH_OK || (enableLegacyStatus != MH_OK && enableLegacyStatus != MH_ERROR_ENABLED))
+		{
+			// Rebirth uses CreateSwapChainForHwnd. Keep the capture path active
+			// when only the legacy fallback could not be installed.
+			ShaderInjectorIO::WriteToLogFileWarning(StringHelper::Format(
+				"Hooks->PrepareSwapChainCapture: legacy CreateSwapChain hook unavailable create=%s enable=%s",
+				MH_StatusToString(createLegacyStatus),
+				MH_StatusToString(enableLegacyStatus)));
+		}
+
+		ShaderInjectorIO::WriteToLogFile(gOptiScalerCompatibilityEnabled
+			? "Hooks->PrepareSwapChainCapture: enabled exact command-queue capture and OptiScaler object-local swap-chain hooks"
+			: "Hooks->PrepareSwapChainCapture: enabled exact swap-chain command-queue capture");
+		return true;
+	}
+
+	bool IsOptiScalerCompatibilityEnabled()
+	{
+		return gOptiScalerCompatibilityEnabled;
+	}
 
 	//create a hidden window, device, command queue, command list, and swap chain so we can read correct vtables on the machine (the game never sees these objects)
 	static HRESULT CreateDeviceAndSwapChain()
@@ -151,6 +310,17 @@ namespace Hooks
 
 		gDummyCommandList->Close();
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateCommandList Success!");
+
+		if (gOptiScalerCompatibilityEnabled)
+		{
+			// OptiScaler owns the frame-generation swap chain and detours its
+			// process-wide Present implementation. Creating a discovery swap chain
+			// is unnecessary because the real object is captured by the factory hook.
+			ShaderInjectorGUI::WriteToRuntimeLog(
+				"Hooks->CreateDeviceAndSwapChain: OptiScaler compatibility active; skipping dummy swap chain");
+			return S_OK;
+		}
+
 		//============================== 8) SwapChainDesc1 ==============================
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateSwapChainForHwnd...");
 
@@ -229,7 +399,6 @@ namespace Hooks
 
 		//======================================== Collect V-Tables ========================================
 
-		auto swapChainVTable = *reinterpret_cast<void***>(gDummySwapChain.Get());
 		auto commandQueueVTable = *reinterpret_cast<void***>(gDummyCommandQueue.Get());
 
 		HookD3D12::InstallPipelineHooksForDevice(gDummyDevice.Get());
@@ -239,26 +408,31 @@ namespace Hooks
 
 		MH_STATUS minHookStatus;
 
-		//======================================== Hook_PresentD3D12 ========================================
-		gPresentTarget = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexPresent]);
-		minHookStatus = MH_CreateHook(gPresentTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_PresentD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_PresentD3D12));
-		
-		if (minHookStatus != MH_OK)
-			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook Present failed: %s", MH_StatusToString(minHookStatus)));
+		if (!gOptiScalerCompatibilityEnabled)
+		{
+			auto swapChainVTable = *reinterpret_cast<void***>(gDummySwapChain.Get());
 
-		//======================================== Hook_Present1D3D12 ========================================
-		gPresent1Target = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexPresent1]);
-		minHookStatus = MH_CreateHook(gPresent1Target, reinterpret_cast<LPVOID>(HookD3D12::Hook_Present1D3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_Present1D3D12));
+			//======================================== Hook_PresentD3D12 ========================================
+			gPresentTarget = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexPresent]);
+			minHookStatus = MH_CreateHook(gPresentTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_PresentD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_PresentD3D12));
 
-		if (minHookStatus != MH_OK)
-			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook Present1 failed: %s", MH_StatusToString(minHookStatus)));
+			if (minHookStatus != MH_OK)
+				ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook Present failed: %s", MH_StatusToString(minHookStatus)));
 
-		//======================================== Hook_ResizeBuffersD3D12 ========================================
-		gResizeBuffersTarget = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexResizeBuffers]);
-		minHookStatus = MH_CreateHook(gResizeBuffersTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_ResizeBuffersD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_ResizeBuffersD3D12));
+			//======================================== Hook_Present1D3D12 ========================================
+			gPresent1Target = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexPresent1]);
+			minHookStatus = MH_CreateHook(gPresent1Target, reinterpret_cast<LPVOID>(HookD3D12::Hook_Present1D3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_Present1D3D12));
 
-		if (minHookStatus != MH_OK)
-			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook ResizeBuffers failed: %s", MH_StatusToString(minHookStatus)));
+			if (minHookStatus != MH_OK)
+				ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook Present1 failed: %s", MH_StatusToString(minHookStatus)));
+
+			//======================================== Hook_ResizeBuffersD3D12 ========================================
+			gResizeBuffersTarget = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexResizeBuffers]);
+			minHookStatus = MH_CreateHook(gResizeBuffersTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_ResizeBuffersD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_ResizeBuffersD3D12));
+
+			if (minHookStatus != MH_OK)
+				ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook ResizeBuffers failed: %s", MH_StatusToString(minHookStatus)));
+		}
 
 		//======================================== Hook_ExecuteCommandListsD3D12 ========================================
 		gExecuteCommandListsTarget = reinterpret_cast<LPVOID>(commandQueueVTable[VTableIndex::indexExecuteCommandLists]);

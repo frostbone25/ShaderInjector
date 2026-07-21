@@ -4,6 +4,14 @@ namespace VTableIndex
 {
 	//NOTE: these indexes for VTables SHOULD stable across windows versions and SDKs.
 
+	//||||||||||||||||||||||||||||||||||||||||||||||||||||| IDXGIFactory |||||||||||||||||||||||||||||||||||||||||||||||||||||
+
+	//IDXGIFactory::CreateSwapChain
+	constexpr size_t indexCreateSwapChain = 10;
+
+	//IDXGIFactory2::CreateSwapChainForHwnd
+	constexpr size_t indexCreateSwapChainForHwnd = 15;
+
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| IDXGISwapChain |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| IDXGISwapChain |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| IDXGISwapChain |||||||||||||||||||||||||||||||||||||||||||||||||||||

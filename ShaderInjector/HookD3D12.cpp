@@ -69,13 +69,20 @@ namespace HookD3D12
 	static ID3D12Device*              gDevice = nullptr;
 	static ID3D12Device*              gDevice2 = nullptr;
 	static ID3D12CommandQueue*        gCommandQueue = nullptr;
+	static ID3D12CommandQueue*        gMostRecentDirectCommandQueue = nullptr;
 	static ID3D12DescriptorHeap*      gHeapRTV = nullptr;
 	static ID3D12DescriptorHeap*      gHeapSRV = nullptr;
 	static ID3D12GraphicsCommandList* gCommandList = nullptr;
 	static ID3D12Fence*               gOverlayFence = nullptr;
 	static HANDLE                     gFenceEvent = nullptr;
 	static UINT64                     gOverlayFenceValue = 0;
-	static uintx_t                    gBufferCount = 0;
+	static UINT                       gBufferCount = 0;
+
+	struct SwapChainCommandQueueBinding
+	{
+		IDXGISwapChain3* swapChain = nullptr;
+		ID3D12CommandQueue* commandQueue = nullptr;
+	};
 
 	static FrameContext* gFrameContexts = nullptr;
 	static bool          gInitialized = false;
@@ -83,11 +90,34 @@ namespace HookD3D12
 	static ULONGLONG     gOverlayInitializedTick = 0;
 	static bool          gLoggedStartupMenuDelay = false;
 	static bool          gOverlayRenderingDisabled = false;
-	static bool          gAfterFirstPresent = false;
+	static bool          gOverlayDeviceObjectsCreated = false;
 	static bool          gLoggedPresentHook = false;
 	static bool          gLoggedPresent1Hook = false;
 	static bool          gLoggedCommandQueueCaptured = false;
+	static bool          gLoggedExactCommandQueueCaptured = false;
+	static bool          gLoggedUnsafeFallbackQueue = false;
 	static bool          gLoggedOverlayInitialized = false;
+	static UINT64        gOverlaySubmissionCount = 0;
+	static std::mutex    gCommandQueueCaptureMutex;
+	static std::vector<SwapChainCommandQueueBinding> gSwapChainCommandQueueBindings;
+	static std::atomic<uint64_t> gCreatePipelineStateFailureCount = 0;
+	static DWORD gMostRecentDirectCommandQueueThreadId = 0;
+	static thread_local bool gInsideOverlayResourceCreation = false;
+
+	// RTSS can install its swap-chain interception after our process-wide MinHook
+	// detour. In that load order, subsequent Presents can bypass our hook entirely.
+	// A private vtable for the game's swap chain lets us wrap RTSS's current targets
+	// without removing RTSS from the call chain.
+	static constexpr size_t gSwapChain3VTableEntryCount = 40;
+	static IDXGISwapChain3* gRTSSCompatibilitySwapChain = nullptr;
+	static void** gRTSSOriginalSwapChainVTable = nullptr;
+	static void** gRTSSCompatibilitySwapChainVTable = nullptr;
+	static FunctionPresentD3D12 gRTSSOriginalPresent = nullptr;
+	static FunctionPresent1D3D12 gRTSSOriginalPresent1 = nullptr;
+	static FunctionResizeBuffersD3D12 gRTSSOriginalResizeBuffers = nullptr;
+	static std::mutex gRTSSCompatibilityMutex;
+	static thread_local bool gInsideSwapChainCompatibilityCall = false;
+	static std::atomic<bool> gRuntimeReady = false;
 
 	static std::vector<UncapturedPipelineStateInfo> gUncapturedPipelineStates;
 	static std::unordered_map<ID3D12GraphicsCommandList*, ID3D12RootSignature*> gCurrentGraphicsRootSignatureByCommandList;
@@ -546,7 +576,7 @@ namespace HookD3D12
 
 		HRESULT hr = Original_CreateGraphicsPipelineState(device, desc, riid, ppPipelineState);
 
-		if (SUCCEEDED(hr) && desc && ppPipelineState && *ppPipelineState)
+		if (SUCCEEDED(hr) && !gInsideOverlayResourceCreation && desc && ppPipelineState && *ppPipelineState)
 			CaptureGraphicsPipelineState(desc, (ID3D12PipelineState*)*ppPipelineState);
 
 		return hr;
@@ -563,10 +593,24 @@ namespace HookD3D12
 	{
 		HRESULT hr = Original_CreatePipelineState(device, desc, riid, ppPipelineState);
 
-		//NOTE: haven't hit any of these yet, seems to pass
 		if (FAILED(hr))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->Hook_CreatePipelineState: not succeded.");
+			const uint64_t failureCount = gCreatePipelineStateFailureCount.fetch_add(1, std::memory_order_relaxed) + 1;
+			const bool shouldLog = failureCount <= 4 || (failureCount & (failureCount - 1)) == 0;
+
+			if (shouldLog)
+			{
+				const HRESULT removedReason = device ? device->GetDeviceRemovedReason() : E_POINTER;
+				ShaderInjectorIO::WriteToLogFileError(StringHelper::Format(
+					"HookD3D12->Hook_CreatePipelineState: original call failed count=%llu result=%s deviceRemovedReason=%s device=%p streamBytes=%llu thread=%lu",
+					static_cast<unsigned long long>(failureCount),
+					StringHelper::FormatHRESULT(hr).c_str(),
+					StringHelper::FormatHRESULT(removedReason).c_str(),
+					device,
+					static_cast<unsigned long long>(desc ? desc->SizeInBytes : 0),
+					static_cast<unsigned long>(GetCurrentThreadId())));
+			}
+
 			return hr;
 		}
 
@@ -1503,6 +1547,284 @@ namespace HookD3D12
 			gUncapturedShaderTargetApplyCursor < gUncapturedPipelineStates.size();
 	}
 
+	void SetRuntimeReady(bool ready)
+	{
+		gRuntimeReady.store(ready, std::memory_order_release);
+	}
+
+	static bool ComObjectsAreSame(IUnknown* firstObject, IUnknown* secondObject)
+	{
+		if (!firstObject || !secondObject)
+			return false;
+
+		if (firstObject == secondObject)
+			return true;
+
+		IUnknown* firstIdentity = nullptr;
+		IUnknown* secondIdentity = nullptr;
+		const HRESULT firstResult = firstObject->QueryInterface(IID_PPV_ARGS(&firstIdentity));
+		const HRESULT secondResult = secondObject->QueryInterface(IID_PPV_ARGS(&secondIdentity));
+		const bool sameObject = SUCCEEDED(firstResult) && SUCCEEDED(secondResult) && firstIdentity == secondIdentity;
+
+		if (firstIdentity)
+			firstIdentity->Release();
+
+		if (secondIdentity)
+			secondIdentity->Release();
+
+		return sameObject;
+	}
+
+	static bool DevicesAreSameObject(ID3D12Device* firstDevice, ID3D12Device* secondDevice)
+	{
+		return ComObjectsAreSame(firstDevice, secondDevice);
+	}
+
+	void RegisterSwapChainCommandQueue(IDXGISwapChain3* swapChain, IUnknown* creationDevice)
+	{
+		if (!swapChain || !creationDevice)
+			return;
+
+		ID3D12CommandQueue* commandQueue = nullptr;
+		if (FAILED(creationDevice->QueryInterface(IID_PPV_ARGS(&commandQueue))) ||
+			commandQueue->GetDesc().Type != D3D12_COMMAND_LIST_TYPE_DIRECT)
+		{
+			if (commandQueue)
+				commandQueue->Release();
+			return;
+		}
+
+		bool registeredNewBinding = false;
+		{
+			std::lock_guard<std::mutex> lock(gCommandQueueCaptureMutex);
+
+			for (SwapChainCommandQueueBinding& binding : gSwapChainCommandQueueBindings)
+			{
+				if (!ComObjectsAreSame(binding.swapChain, swapChain))
+					continue;
+
+				if (ComObjectsAreSame(binding.commandQueue, commandQueue))
+				{
+					commandQueue->Release();
+					return;
+				}
+
+				binding.commandQueue->Release();
+				binding.commandQueue = commandQueue;
+				registeredNewBinding = true;
+				break;
+			}
+
+			if (!registeredNewBinding)
+			{
+				swapChain->AddRef();
+				gSwapChainCommandQueueBindings.push_back({ swapChain, commandQueue });
+				registeredNewBinding = true;
+			}
+		}
+
+		if (registeredNewBinding)
+		{
+			ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+				"HookD3D12->RegisterSwapChainCommandQueue: swapChain=%p exactDirectQueue=%p",
+				swapChain,
+				commandQueue));
+		}
+	}
+
+	static ID3D12CommandQueue* FindRegisteredSwapChainCommandQueue(IDXGISwapChain3* swapChain)
+	{
+		if (!swapChain)
+			return nullptr;
+
+		std::lock_guard<std::mutex> lock(gCommandQueueCaptureMutex);
+
+		for (const SwapChainCommandQueueBinding& binding : gSwapChainCommandQueueBindings)
+		{
+			if (!ComObjectsAreSame(binding.swapChain, swapChain))
+				continue;
+
+			binding.commandQueue->AddRef();
+			return binding.commandQueue;
+		}
+
+		return nullptr;
+	}
+
+	static void RememberDirectCommandQueue(ID3D12CommandQueue* commandQueue)
+	{
+		if (!commandQueue || commandQueue->GetDesc().Type != D3D12_COMMAND_LIST_TYPE_DIRECT)
+			return;
+
+		ID3D12Device* queueDevice = nullptr;
+		if (FAILED(commandQueue->GetDevice(IID_PPV_ARGS(&queueDevice))))
+			return;
+
+		const bool deviceMatches = !gDevice || DevicesAreSameObject(gDevice, queueDevice);
+		queueDevice->Release();
+
+		if (!deviceMatches)
+			return;
+
+		std::lock_guard<std::mutex> lock(gCommandQueueCaptureMutex);
+		if (gMostRecentDirectCommandQueue == commandQueue)
+		{
+			gMostRecentDirectCommandQueueThreadId = GetCurrentThreadId();
+			return;
+		}
+
+		commandQueue->AddRef();
+
+		if (gMostRecentDirectCommandQueue)
+			gMostRecentDirectCommandQueue->Release();
+
+		gMostRecentDirectCommandQueue = commandQueue;
+		gMostRecentDirectCommandQueueThreadId = GetCurrentThreadId();
+	}
+
+	static bool AdoptMostRecentDirectCommandQueue(IDXGISwapChain3* swapChain)
+	{
+		if (!swapChain)
+			return false;
+
+		ID3D12Device* swapChainDevice = nullptr;
+		if (FAILED(swapChain->GetDevice(IID_PPV_ARGS(&swapChainDevice))))
+			return false;
+
+		if (!gDevice)
+		{
+			gDevice = swapChainDevice;
+			swapChainDevice = nullptr;
+		}
+		else if (!DevicesAreSameObject(gDevice, swapChainDevice))
+		{
+			swapChainDevice->Release();
+			return false;
+		}
+
+		if (swapChainDevice)
+			swapChainDevice->Release();
+
+		ID3D12CommandQueue* exactCommandQueue = FindRegisteredSwapChainCommandQueue(swapChain);
+		if (exactCommandQueue)
+		{
+			ID3D12Device* exactQueueDevice = nullptr;
+			const HRESULT getDeviceResult = exactCommandQueue->GetDevice(IID_PPV_ARGS(&exactQueueDevice));
+			const bool exactQueueMatches = SUCCEEDED(getDeviceResult) && DevicesAreSameObject(gDevice, exactQueueDevice);
+
+			if (exactQueueDevice)
+				exactQueueDevice->Release();
+
+			if (!exactQueueMatches)
+			{
+				exactCommandQueue->Release();
+				return false;
+			}
+
+			if (gCommandQueue != exactCommandQueue)
+			{
+				// Fence values and allocator ownership already reference the previous
+				// queue. Changing queues after submission would make that synchronization
+				// ambiguous, so disable only the overlay and leave shader hooks active.
+				if (gOverlaySubmissionCount != 0)
+				{
+					ShaderInjectorIO::WriteToLogFileError(StringHelper::Format(
+						"HookD3D12->AdoptMostRecentDirectCommandQueue: swap-chain queue changed after overlay submission old=%p new=%p; overlay disabled",
+						gCommandQueue,
+						exactCommandQueue));
+					gOverlayRenderingDisabled = true;
+					exactCommandQueue->Release();
+					return false;
+				}
+
+				if (gCommandQueue)
+					gCommandQueue->Release();
+
+				gCommandQueue = exactCommandQueue;
+				exactCommandQueue = nullptr;
+			}
+
+			if (exactCommandQueue)
+				exactCommandQueue->Release();
+
+			if (!gLoggedExactCommandQueueCaptured)
+			{
+				const D3D12_COMMAND_QUEUE_DESC queueDescription = gCommandQueue->GetDesc();
+				ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+					"HookD3D12->AdoptMostRecentDirectCommandQueue: adopted exact swap-chain queue=%p priority=%d flags=0x%X nodeMask=%u",
+					gCommandQueue,
+					queueDescription.Priority,
+					static_cast<unsigned int>(queueDescription.Flags),
+					queueDescription.NodeMask));
+				gLoggedExactCommandQueueCaptured = true;
+			}
+
+			return true;
+		}
+
+		if (gCommandQueue)
+			return true;
+
+		ID3D12CommandQueue* candidateQueue = nullptr;
+		{
+			std::lock_guard<std::mutex> lock(gCommandQueueCaptureMutex);
+			if (gMostRecentDirectCommandQueueThreadId == GetCurrentThreadId())
+				candidateQueue = gMostRecentDirectCommandQueue;
+			else if (gMostRecentDirectCommandQueue && !gLoggedUnsafeFallbackQueue)
+			{
+				ShaderInjectorIO::WriteToLogFileWarning(StringHelper::Format(
+					"HookD3D12->AdoptMostRecentDirectCommandQueue: no exact swap-chain queue and recent queue belongs to another thread queueThread=%lu presentThread=%lu; overlay waiting",
+					static_cast<unsigned long>(gMostRecentDirectCommandQueueThreadId),
+					static_cast<unsigned long>(GetCurrentThreadId())));
+				gLoggedUnsafeFallbackQueue = true;
+			}
+
+			if (candidateQueue)
+				candidateQueue->AddRef();
+		}
+
+		if (!candidateQueue)
+			return false;
+
+		ID3D12Device* candidateDevice = nullptr;
+		const HRESULT getDeviceResult = candidateQueue->GetDevice(IID_PPV_ARGS(&candidateDevice));
+		const bool candidateMatches = SUCCEEDED(getDeviceResult) && DevicesAreSameObject(gDevice, candidateDevice);
+
+		if (candidateDevice)
+			candidateDevice->Release();
+
+		if (!candidateMatches)
+		{
+			candidateQueue->Release();
+			return false;
+		}
+
+		gCommandQueue = candidateQueue;
+
+		if (!gLoggedCommandQueueCaptured)
+		{
+			const D3D12_COMMAND_QUEUE_DESC queueDescription = gCommandQueue->GetDesc();
+			ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+				"HookD3D12->AdoptMostRecentDirectCommandQueue: captured pre-Present direct queue=%p priority=%d flags=0x%X nodeMask=%u",
+				gCommandQueue,
+				queueDescription.Priority,
+				static_cast<unsigned int>(queueDescription.Flags),
+				queueDescription.NodeMask));
+			gLoggedCommandQueueCaptured = true;
+		}
+
+		return true;
+	}
+
+	static void LogOverlayDeviceFailure(const char* operation, HRESULT operationResult)
+	{
+		const HRESULT removedReason = gDevice ? gDevice->GetDeviceRemovedReason() : E_POINTER;
+		ShaderInjectorIO::WriteToLogFileError(
+			std::string("HookD3D12->") + operation +
+			" failed result=" + StringHelper::FormatHRESULT(operationResult) +
+			" deviceRemovedReason=" + StringHelper::FormatHRESULT(removedReason));
+	}
+
 	void ProcessPendingRebuilds()
 	{
 		if (gPendingRebuilds.empty())
@@ -1632,19 +1954,310 @@ namespace HookD3D12
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| PRESENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| PRESENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-	static HRESULT HandlePresentD3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pParams, bool usePresent1);
+	static HRESULT HandlePresentD3D12(
+		IDXGISwapChain3* pSwapChain,
+		UINT SyncInterval,
+		UINT Flags,
+		const DXGI_PRESENT_PARAMETERS* pParams,
+		bool usePresent1,
+		FunctionPresentD3D12 presentOverride = nullptr,
+		FunctionPresent1D3D12 present1Override = nullptr);
+	static HRESULT HandleResizeBuffersD3D12(
+		IDXGISwapChain3* pSwapChain,
+		UINT BufferCount,
+		UINT Width,
+		UINT Height,
+		DXGI_FORMAT NewFormat,
+		UINT SwapChainFlags,
+		FunctionResizeBuffersD3D12 resizeBuffersOverride = nullptr);
+
+	static HMODULE FindRTSSHookModule()
+	{
+#if defined(_WIN64)
+		if (HMODULE module = GetModuleHandleW(L"RTSSHooks64.dll"))
+			return module;
+#endif
+
+		return GetModuleHandleW(L"RTSSHooks.dll");
+	}
+
+	static void RestoreRTSSSwapChainCompatibilityLocked()
+	{
+		if (gRTSSCompatibilitySwapChain && gRTSSCompatibilitySwapChainVTable)
+		{
+			void** currentVTable = *reinterpret_cast<void***>(gRTSSCompatibilitySwapChain);
+
+			// Another overlay may have replaced our table after installation. Only
+			// restore the pointer when this object still owns the active table.
+			if (currentVTable == gRTSSCompatibilitySwapChainVTable)
+			{
+				InterlockedExchangePointer(
+					reinterpret_cast<PVOID volatile*>(gRTSSCompatibilitySwapChain),
+					gRTSSOriginalSwapChainVTable);
+			}
+		}
+
+		if (gRTSSCompatibilitySwapChain)
+			gRTSSCompatibilitySwapChain->Release();
+
+		delete[] gRTSSCompatibilitySwapChainVTable;
+		gRTSSCompatibilitySwapChain = nullptr;
+		gRTSSOriginalSwapChainVTable = nullptr;
+		gRTSSCompatibilitySwapChainVTable = nullptr;
+		gRTSSOriginalPresent = nullptr;
+		gRTSSOriginalPresent1 = nullptr;
+		gRTSSOriginalResizeBuffers = nullptr;
+	}
+
+	static HRESULT STDMETHODCALLTYPE Hook_RTSSCompatibilityPresent(
+		IDXGISwapChain3* pSwapChain,
+		UINT SyncInterval,
+		UINT Flags);
+
+	static HRESULT STDMETHODCALLTYPE Hook_RTSSCompatibilityPresent1(
+		IDXGISwapChain3* pSwapChain,
+		UINT SyncInterval,
+		UINT Flags,
+		const DXGI_PRESENT_PARAMETERS* pParams);
+
+	static HRESULT STDMETHODCALLTYPE Hook_RTSSCompatibilityResizeBuffers(
+		IDXGISwapChain3* pSwapChain,
+		UINT BufferCount,
+		UINT Width,
+		UINT Height,
+		DXGI_FORMAT NewFormat,
+		UINT SwapChainFlags);
+
+	bool InstallSwapChainCompatibility(IDXGISwapChain3* pSwapChain, const char* compatibilitySource)
+	{
+		if (!pSwapChain)
+			return false;
+
+		std::lock_guard<std::mutex> lock(gRTSSCompatibilityMutex);
+		void** currentVTable = *reinterpret_cast<void***>(pSwapChain);
+
+		if (pSwapChain == gRTSSCompatibilitySwapChain && currentVTable == gRTSSCompatibilitySwapChainVTable)
+			return true;
+
+		RestoreRTSSSwapChainCompatibilityLocked();
+		currentVTable = *reinterpret_cast<void***>(pSwapChain);
+
+		void** compatibilityVTable = new void*[gSwapChain3VTableEntryCount];
+		std::memcpy(
+			compatibilityVTable,
+			currentVTable,
+			gSwapChain3VTableEntryCount * sizeof(void*));
+
+		FunctionPresentD3D12 currentPresent =
+			reinterpret_cast<FunctionPresentD3D12>(currentVTable[VTableIndex::indexPresent]);
+		FunctionPresent1D3D12 currentPresent1 =
+			reinterpret_cast<FunctionPresent1D3D12>(currentVTable[VTableIndex::indexPresent1]);
+		FunctionResizeBuffersD3D12 currentResizeBuffers =
+			reinterpret_cast<FunctionResizeBuffersD3D12>(currentVTable[VTableIndex::indexResizeBuffers]);
+
+		compatibilityVTable[VTableIndex::indexPresent] =
+			reinterpret_cast<void*>(&Hook_RTSSCompatibilityPresent);
+		compatibilityVTable[VTableIndex::indexPresent1] =
+			reinterpret_cast<void*>(&Hook_RTSSCompatibilityPresent1);
+		compatibilityVTable[VTableIndex::indexResizeBuffers] =
+			reinterpret_cast<void*>(&Hook_RTSSCompatibilityResizeBuffers);
+
+		// Publish every downstream pointer before making the private table visible
+		// to other threads that may already be presenting this swap chain.
+		pSwapChain->AddRef();
+		gRTSSCompatibilitySwapChain = pSwapChain;
+		gRTSSOriginalSwapChainVTable = currentVTable;
+		gRTSSCompatibilitySwapChainVTable = compatibilityVTable;
+		gRTSSOriginalPresent = currentPresent;
+		gRTSSOriginalPresent1 = currentPresent1;
+		gRTSSOriginalResizeBuffers = currentResizeBuffers;
+
+		InterlockedExchangePointer(
+			reinterpret_cast<PVOID volatile*>(pSwapChain),
+			compatibilityVTable);
+
+		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+			"HookD3D12->InstallSwapChainCompatibility: installed source=%s swapChain=%p Present=%p Present1=%p ResizeBuffers=%p",
+			compatibilitySource ? compatibilitySource : "External",
+			pSwapChain,
+			reinterpret_cast<void*>(currentPresent),
+			reinterpret_cast<void*>(currentPresent1),
+			reinterpret_cast<void*>(currentResizeBuffers)));
+
+		return true;
+	}
+
+	static bool InstallRTSSSwapChainCompatibility(IDXGISwapChain3* pSwapChain)
+	{
+		if (!FindRTSSHookModule())
+			return false;
+
+		return InstallSwapChainCompatibility(pSwapChain, "RTSS");
+	}
+
+	class ScopedSwapChainCompatibilityCall
+	{
+	public:
+		ScopedSwapChainCompatibilityCall()
+		{
+			gInsideSwapChainCompatibilityCall = true;
+		}
+
+		~ScopedSwapChainCompatibilityCall()
+		{
+			gInsideSwapChainCompatibilityCall = false;
+		}
+	};
 
 	HRESULT STDMETHODCALLTYPE Hook_PresentD3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags)
 	{
+		// RTSS may call the process-wide MinHook detour while our private vtable
+		// wrapper is forwarding to it. Continue through MinHook's trampoline in
+		// that case so the overlay chain executes exactly once.
+		if (gInsideSwapChainCompatibilityCall && Original_PresentD3D12)
+			return Original_PresentD3D12(pSwapChain, SyncInterval, Flags);
+
+		if (!gRuntimeReady.load(std::memory_order_acquire))
+			return Original_PresentD3D12
+				? Original_PresentD3D12(pSwapChain, SyncInterval, Flags)
+				: E_POINTER;
+
 		return HandlePresentD3D12(pSwapChain, SyncInterval, Flags, nullptr, false);
 	}
 
 	HRESULT STDMETHODCALLTYPE Hook_Present1D3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pParams)
 	{
+		if (gInsideSwapChainCompatibilityCall && Original_Present1D3D12)
+			return Original_Present1D3D12(pSwapChain, SyncInterval, Flags, pParams);
+
+		if (!gRuntimeReady.load(std::memory_order_acquire))
+			return Original_Present1D3D12
+				? Original_Present1D3D12(pSwapChain, SyncInterval, Flags, pParams)
+				: E_POINTER;
+
 		return HandlePresentD3D12(pSwapChain, SyncInterval, Flags, pParams, true);
 	}
 
-	static HRESULT HandlePresentD3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pParams, bool usePresent1)
+	static HRESULT STDMETHODCALLTYPE Hook_RTSSCompatibilityPresent(
+		IDXGISwapChain3* pSwapChain,
+		UINT SyncInterval,
+		UINT Flags)
+	{
+		FunctionPresentD3D12 downstreamPresent = nullptr;
+		{
+			std::lock_guard<std::mutex> lock(gRTSSCompatibilityMutex);
+			downstreamPresent = gRTSSOriginalPresent;
+		}
+
+		if (!downstreamPresent)
+			return Original_PresentD3D12
+				? Original_PresentD3D12(pSwapChain, SyncInterval, Flags)
+				: E_POINTER;
+
+		if (!gRuntimeReady.load(std::memory_order_acquire))
+			return downstreamPresent(pSwapChain, SyncInterval, Flags);
+
+		ScopedSwapChainCompatibilityCall compatibilityScope;
+		return HandlePresentD3D12(
+			pSwapChain,
+			SyncInterval,
+			Flags,
+			nullptr,
+			false,
+			downstreamPresent,
+			nullptr);
+	}
+
+	static HRESULT STDMETHODCALLTYPE Hook_RTSSCompatibilityPresent1(
+		IDXGISwapChain3* pSwapChain,
+		UINT SyncInterval,
+		UINT Flags,
+		const DXGI_PRESENT_PARAMETERS* pParams)
+	{
+		FunctionPresent1D3D12 downstreamPresent1 = nullptr;
+		{
+			std::lock_guard<std::mutex> lock(gRTSSCompatibilityMutex);
+			downstreamPresent1 = gRTSSOriginalPresent1;
+		}
+
+		if (!downstreamPresent1)
+			return Original_Present1D3D12
+				? Original_Present1D3D12(pSwapChain, SyncInterval, Flags, pParams)
+				: E_POINTER;
+
+		if (!gRuntimeReady.load(std::memory_order_acquire))
+			return downstreamPresent1(pSwapChain, SyncInterval, Flags, pParams);
+
+		ScopedSwapChainCompatibilityCall compatibilityScope;
+		return HandlePresentD3D12(
+			pSwapChain,
+			SyncInterval,
+			Flags,
+			pParams,
+			true,
+			nullptr,
+			downstreamPresent1);
+	}
+
+	static HRESULT STDMETHODCALLTYPE Hook_RTSSCompatibilityResizeBuffers(
+		IDXGISwapChain3* pSwapChain,
+		UINT BufferCount,
+		UINT Width,
+		UINT Height,
+		DXGI_FORMAT NewFormat,
+		UINT SwapChainFlags)
+	{
+		FunctionResizeBuffersD3D12 downstreamResizeBuffers = nullptr;
+		{
+			std::lock_guard<std::mutex> lock(gRTSSCompatibilityMutex);
+			downstreamResizeBuffers = gRTSSOriginalResizeBuffers;
+		}
+
+		if (!downstreamResizeBuffers)
+			return Original_ResizeBuffersD3D12
+				? Original_ResizeBuffersD3D12(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags)
+				: E_POINTER;
+
+		if (!gRuntimeReady.load(std::memory_order_acquire))
+		{
+			HRESULT result = downstreamResizeBuffers(
+				pSwapChain,
+				BufferCount,
+				Width,
+				Height,
+				NewFormat,
+				SwapChainFlags);
+
+			if (SUCCEEDED(result))
+				InstallSwapChainCompatibility(pSwapChain, "External resize");
+
+			return result;
+		}
+
+		ScopedSwapChainCompatibilityCall compatibilityScope;
+		HRESULT result = HandleResizeBuffersD3D12(
+			pSwapChain,
+			BufferCount,
+			Width,
+			Height,
+			NewFormat,
+			SwapChainFlags,
+			downstreamResizeBuffers);
+
+		if (SUCCEEDED(result))
+			InstallSwapChainCompatibility(pSwapChain, "External resize");
+
+		return result;
+	}
+
+	static HRESULT HandlePresentD3D12(
+		IDXGISwapChain3* pSwapChain,
+		UINT SyncInterval,
+		UINT Flags,
+		const DXGI_PRESENT_PARAMETERS* pParams,
+		bool usePresent1,
+		FunctionPresentD3D12 presentOverride,
+		FunctionPresent1D3D12 present1Override)
 	{
 		FPSCounter::UpdateFPSCounter();
 
@@ -1664,13 +2277,29 @@ namespace HookD3D12
 
 		auto CallOriginalPresent = [&]() -> HRESULT
 		{
-			if (usePresent1 && Original_Present1D3D12)
-				return Original_Present1D3D12(pSwapChain, SyncInterval, Flags, pParams);
+			HRESULT presentResult = E_FAIL;
 
-			return Original_PresentD3D12(pSwapChain, SyncInterval, Flags);
+			FunctionPresentD3D12 present = presentOverride ? presentOverride : Original_PresentD3D12;
+			FunctionPresent1D3D12 present1 = present1Override ? present1Override : Original_Present1D3D12;
+
+			if (usePresent1 && present1)
+				presentResult = present1(pSwapChain, SyncInterval, Flags, pParams);
+			else if (present)
+				presentResult = present(pSwapChain, SyncInterval, Flags);
+
+			if (FAILED(presentResult))
+				LogOverlayDeviceFailure(usePresent1 ? "Present1" : "Present", presentResult);
+
+			return presentResult;
 		};
 
-		gAfterFirstPresent = true;
+		if ((Flags & DXGI_PRESENT_TEST) != 0)
+			return CallOriginalPresent();
+
+		// ExecuteCommandLists records the most recently submitted direct queue. The queue
+		// immediately preceding Present is the safest fallback when the swap chain was
+		// created before this DLL installed its hooks.
+		AdoptMostRecentDirectCommandQueue(pSwapChain);
 
 		if (!gCommandQueue)
 		{
@@ -1700,6 +2329,9 @@ namespace HookD3D12
 
 		ProcessPendingRebuilds(); // <-- add here, before gInitialized check and before ImGui
 		ApplyShaderTargetPSOs();
+
+		if (gOverlayRenderingDisabled)
+			return CallOriginalPresent();
 
 		///*
 		//this will execute first because when application starts, this is not set to true
@@ -1829,12 +2461,28 @@ namespace HookD3D12
 			(void)io;
 			io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 			ImGui::StyleColorsDark();
-			ImGui_ImplWin32_Init(desc.OutputWindow); //this initalizes fine, test report: HWND=00000000003D102A IsWindow=1
-			ImGui_ImplDX12_Init(gDevice, gBufferCount,
+			if (!ImGui_ImplWin32_Init(desc.OutputWindow))
+			{
+				ShaderInjectorIO::WriteToLogFileError("HookD3D12->HandlePresentD3D12: ImGui Win32 backend initialization failed; overlay disabled");
+				ImGui::DestroyContext();
+				gOverlayRenderingDisabled = true;
+				return CallOriginalPresent();
+			}
+
+			const bool imguiDX12Initialized = ImGui_ImplDX12_Init(gDevice, gBufferCount,
 				desc.BufferDesc.Format, //test: d3d12 desc buffdesc format | format is 24
 				gHeapSRV,
 				gHeapSRV->GetCPUDescriptorHandleForHeapStart(),
 				gHeapSRV->GetGPUDescriptorHandleForHeapStart()); //this also seemingly initalizes fine
+
+			if (!imguiDX12Initialized)
+			{
+				ShaderInjectorIO::WriteToLogFileError("HookD3D12->HandlePresentD3D12: ImGui D3D12 backend initialization failed; overlay disabled");
+				ImGui_ImplWin32_Shutdown();
+				ImGui::DestroyContext();
+				gOverlayRenderingDisabled = true;
+				return CallOriginalPresent();
+			}
 
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
 			//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: ImGui initialized");
@@ -1899,6 +2547,25 @@ namespace HookD3D12
 
 		if (!gShutdown) 
 		{
+			if (!gOverlayDeviceObjectsCreated)
+			{
+				gInsideOverlayResourceCreation = true;
+				const bool deviceObjectsCreated = ImGui_ImplDX12_CreateDeviceObjects();
+				gInsideOverlayResourceCreation = false;
+
+				if (!deviceObjectsCreated)
+				{
+					const HRESULT removedReason = gDevice ? gDevice->GetDeviceRemovedReason() : E_POINTER;
+					ShaderInjectorIO::WriteToLogFileError(
+						"HookD3D12->HandlePresentD3D12: ImGui device-object creation failed; overlay disabled deviceRemovedReason=" +
+						StringHelper::FormatHRESULT(removedReason));
+					gOverlayRenderingDisabled = true;
+					return CallOriginalPresent();
+				}
+
+				gOverlayDeviceObjectsCreated = true;
+			}
+
 			// Render ImGui
 			ImGui_ImplDX12_NewFrame(); //this seems fine
 			ImGui_ImplWin32_NewFrame(); //this seems fine
@@ -1953,16 +2620,17 @@ namespace HookD3D12
 				return CallOriginalPresent();
 			}
 
-			// Wait for the GPU to finish with the previous frame
+			// Each allocator can only be reset after the GPU has completed the overlay
+			// submission that used that specific back buffer.
 			bool canRender = true;
 
 			if (!gOverlayFence || !gFenceEvent) 
 			{
 				// Missing synchronization objects, skip waiting
 			}
-			else if (gOverlayFence->GetCompletedValue() < gOverlayFenceValue) 
+			else if (ctx.fenceValue != 0 && gOverlayFence->GetCompletedValue() < ctx.fenceValue)
 			{
-				HRESULT hr = gOverlayFence->SetEventOnCompletion(gOverlayFenceValue, gFenceEvent);
+				HRESULT hr = gOverlayFence->SetEventOnCompletion(ctx.fenceValue, gFenceEvent);
 
 				if (SUCCEEDED(hr)) 
 				{
@@ -2046,7 +2714,14 @@ namespace HookD3D12
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
 			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
 			gCommandList->ResourceBarrier(1, &barrier);
-			gCommandList->Close();
+			hr = gCommandList->Close();
+
+			if (FAILED(hr))
+			{
+				LogOverlayDeviceFailure("OverlayCommandListClose", hr);
+				gOverlayRenderingDisabled = true;
+				return CallOriginalPresent();
+			}
 
 			// Execute
 			if (!gCommandQueue) 
@@ -2057,26 +2732,30 @@ namespace HookD3D12
 			{
 				Original_ExecuteCommandListsD3D12(gCommandQueue, 1, reinterpret_cast<ID3D12CommandList* const*>(&gCommandList));
 
-				if (gOverlayFence) 
+				if (gOverlayFence)
 				{
 					// Call Signal directly on the command queue to synchronize the internal overlay.
-					HRESULT hr = gCommandQueue->Signal(gOverlayFence, ++gOverlayFenceValue);
+					const UINT64 submittedFenceValue = ++gOverlayFenceValue;
+					HRESULT hr = gCommandQueue->Signal(gOverlayFence, submittedFenceValue);
 
-					if (FAILED(hr)) 
+					if (SUCCEEDED(hr))
 					{
-						//LogHRESULT("Signal", hr);
+						ctx.fenceValue = submittedFenceValue;
+						++gOverlaySubmissionCount;
 
-						if (gDevice) 
+						if (gOverlaySubmissionCount == 1)
 						{
-							HRESULT reason = gDevice->GetDeviceRemovedReason();
-							//DebugLog("[HookD3D12] DeviceRemovedReason=0x%08X", reason);
-
-							if (reason != S_OK) 
-							{
-								//DebugLog("[HookD3D12] Device lost. Releasing resources.");
-								Release();
-							}
+							ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+								"HookD3D12->HandlePresentD3D12: first overlay submission queue=%p backBuffer=%u fence=%llu",
+								gCommandQueue,
+								frameIdx,
+								static_cast<unsigned long long>(submittedFenceValue)));
 						}
+					}
+					else
+					{
+						LogOverlayDeviceFailure("OverlayFenceSignal", hr);
+						gOverlayRenderingDisabled = true;
 					}
 				}
 			}
@@ -2091,50 +2770,8 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Hook_ExecuteCommandListsD3D12(ID3D12CommandQueue* _this, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists)
 	{
-		if (!gCommandQueue && gAfterFirstPresent) 
-		{
-			ID3D12Device* queueDevice = nullptr;
-
-			if (SUCCEEDED(_this->GetDevice(__uuidof(ID3D12Device), (void**)&queueDevice))) 
-			{
-				if (!gDevice)
-				{
-					gDevice = queueDevice;
-				}
-
-				if (queueDevice == gDevice) 
-				{
-					D3D12_COMMAND_QUEUE_DESC desc = _this->GetDesc();
-					//DebugLog("[HookD3D12] CommandQueue type=%u", desc.Type);
-
-					if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) 
-					{
-						_this->AddRef();
-						gCommandQueue = _this;
-						if (!gLoggedCommandQueueCaptured)
-						{
-							//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->Hook_ExecuteCommandListsD3D12: Captured direct command queue");
-							gLoggedCommandQueueCaptured = true;
-						}
-						//DebugLog("[HookD3D12] Captured CommandQueue=%p", _this);
-					}
-					else 
-					{
-						//DebugLog("[HookD3D12] Skipping capture: non-direct queue");
-					}
-				}
-				else 
-				{
-					//DebugLog("[HookD3D12] Skipping capture: CommandQueue uses different device (%p != %p)", queueDevice, gDevice);
-				}
-
-				if (queueDevice && queueDevice != gDevice)
-					queueDevice->Release();
-			}
-		}
-
-		gAfterFirstPresent = false;
 		Original_ExecuteCommandListsD3D12(_this, NumCommandLists, ppCommandLists);
+		RememberDirectCommandQueue(_this);
 	}
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| RESIZE BUFFERS |||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -2180,6 +2817,8 @@ namespace HookD3D12
 
 	static void ShutdownImGuiOverlayBackend()
 	{
+		gOverlayDeviceObjectsCreated = false;
+
 		if (!ImGui::GetCurrentContext())
 			return;
 
@@ -2248,6 +2887,38 @@ namespace HookD3D12
 		DXGI_FORMAT NewFormat,
 		UINT SwapChainFlags)
 	{
+		if (gInsideSwapChainCompatibilityCall && Original_ResizeBuffersD3D12)
+			return Original_ResizeBuffersD3D12(
+				pSwapChain,
+				BufferCount,
+				Width,
+				Height,
+				NewFormat,
+				SwapChainFlags);
+
+		if (!gRuntimeReady.load(std::memory_order_acquire))
+			return Original_ResizeBuffersD3D12
+				? Original_ResizeBuffersD3D12(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags)
+				: E_POINTER;
+
+		return HandleResizeBuffersD3D12(
+			pSwapChain,
+			BufferCount,
+			Width,
+			Height,
+			NewFormat,
+			SwapChainFlags);
+	}
+
+	static HRESULT HandleResizeBuffersD3D12(
+		IDXGISwapChain3* pSwapChain,
+		UINT BufferCount,
+		UINT Width,
+		UINT Height,
+		DXGI_FORMAT NewFormat,
+		UINT SwapChainFlags,
+		FunctionResizeBuffersD3D12 resizeBuffersOverride)
+	{
 		char buffer[1024];
 		sprintf_s(buffer, "HookD3D12->Hook_ResizeBuffersD3D12: ResizeBuffers %ux%u Buffers=%u", Width, Height, BufferCount);
 		ShaderInjectorGUI::WriteToRuntimeLog(buffer);
@@ -2262,7 +2933,12 @@ namespace HookD3D12
 			ReleaseOverlaySwapChainResources(true);
 		}
 
-		HRESULT hr = Original_ResizeBuffersD3D12(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+		FunctionResizeBuffersD3D12 resizeBuffers = resizeBuffersOverride
+			? resizeBuffersOverride
+			: Original_ResizeBuffersD3D12;
+		HRESULT hr = resizeBuffers
+			? resizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags)
+			: E_POINTER;
 
 		if (FAILED(hr))
 		{
@@ -2281,6 +2957,7 @@ namespace HookD3D12
 		gInitialized = false;
 		gOverlayRenderingDisabled = false;
 		NotifyOverlayResizeBuffersSucceeded();
+		InstallRTSSSwapChainCompatibility(pSwapChain);
 
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->Hook_ResizeBuffersD3D12: ResizeBuffers succeeded. Overlay recreation deferred until resize settles.");
 
@@ -2291,9 +2968,15 @@ namespace HookD3D12
 	{
 		//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->Release: Releasing resources and hooks.");
 
+		gRuntimeReady.store(false, std::memory_order_release);
 		gShutdown = true;
 		ShaderAutomaticDiscovery::Shutdown();
 		ResetOverlayStartupGate();
+
+		{
+			std::lock_guard<std::mutex> lock(gRTSSCompatibilityMutex);
+			RestoreRTSSSwapChainCompatibilityLocked();
+		}
 
 		if (Globals::mainWindow)
 		{
@@ -2319,6 +3002,27 @@ namespace HookD3D12
 		{
 			gCommandQueue->Release();
 			gCommandQueue = nullptr;
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(gCommandQueueCaptureMutex);
+			if (gMostRecentDirectCommandQueue)
+			{
+				gMostRecentDirectCommandQueue->Release();
+				gMostRecentDirectCommandQueue = nullptr;
+			}
+			gMostRecentDirectCommandQueueThreadId = 0;
+
+			for (SwapChainCommandQueueBinding& binding : gSwapChainCommandQueueBindings)
+			{
+				if (binding.commandQueue)
+					binding.commandQueue->Release();
+
+				if (binding.swapChain)
+					binding.swapChain->Release();
+			}
+
+			gSwapChainCommandQueueBindings.clear();
 		}
 
 		ReleaseRootSignatureCache();

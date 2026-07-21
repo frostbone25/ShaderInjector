@@ -278,6 +278,12 @@ namespace ShaderInjectorGUI
 
 	void UI_ShaderInjectorMenu()
 	{
+		if (ImGui::Button("Edit Shaders##EditShaders"))
+		{
+			if (!ShaderInjectorIO::OpenDirectory(ShaderInjectorIO::GetModifiedShadersIncludesDirectory()))
+				WriteToRuntimeLogError("Could not open the Shader Includes folder.");
+		}
+
 		UI_ModifiedShaders();
 		UI_ShaderTargets();
 		UI_DeveloperSettings();

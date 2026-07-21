@@ -15,6 +15,9 @@ namespace HookD3D12
 	bool InstallD3D12CreateDeviceHook(HMODULE d3d12Module);
 	void InstallPipelineHooksForDevice(ID3D12Device* device);
 	void InstallCommandListHooksForCommandList(ID3D12GraphicsCommandList* commandList);
+	bool InstallSwapChainCompatibility(IDXGISwapChain3* swapChain, const char* compatibilitySource);
+	void RegisterSwapChainCommandQueue(IDXGISwapChain3* swapChain, IUnknown* creationDevice);
+	void SetRuntimeReady(bool ready);
 
 	enum class PixelShaderSelectionStyle
 	{
@@ -154,9 +157,10 @@ namespace HookD3D12
 
 	struct FrameContext
 	{
-		ID3D12CommandAllocator* allocator;
-		ID3D12Resource* renderTarget;
-		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle;
+		ID3D12CommandAllocator* allocator = nullptr;
+		ID3D12Resource* renderTarget = nullptr;
+		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {};
+		UINT64 fenceValue = 0;
 	};
 
 	struct ComputePipelineInfo

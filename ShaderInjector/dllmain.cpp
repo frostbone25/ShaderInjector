@@ -32,6 +32,20 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	ShaderInjectorIO::ReadInjectorSettings();
 	RenderDocIntegration::Initialize();
 
+	// Initialize MinHook before the startup delay so an OptiScaler factory can
+	// be captured before it creates its frame-generation swap chain. No shader
+	// or rendering callbacks are enabled by this step alone.
+	MH_STATUS minhookStatus = MH_Initialize();
+
+	if (minhookStatus != MH_OK)
+	{
+		ShaderInjectorIO::WriteToLogFileError(StringHelper::Format("dllmain->OnAttachDLL: MH_Initialize failed: %s", MH_StatusToString(minhookStatus)));
+		return 0;
+	}
+
+	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: minhook initalized!");
+	Hooks::PrepareSwapChainCapture();
+
 	//NOTE TO SELF: not a fan of this, even though it helps...
 	//this is just to ensure we don't get crazy crashes or timing issues with d3d12 because im sick and tired of crashing
 	Sleep(5000);
@@ -128,22 +142,6 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: globals::markerPixelShaderBlob size " + std::to_string(Globals::markerPixelShaderBlob.size()));
 	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: globals::markerComputeShaderBlob size " + std::to_string(Globals::markerComputeShaderBlob.size()));
 
-	//||||||||||||||||||||||||||||||| INITALIZE MINHOOK |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| INITALIZE MINHOOK |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| INITALIZE MINHOOK |||||||||||||||||||||||||||||||
-
-	MH_STATUS minhookStatus = MH_Initialize();
-
-	if (minhookStatus != MH_OK)
-	{
-		ShaderInjectorIO::WriteToLogFileError(StringHelper::Format("dllmain->OnAttachDLL: MH_Initialize failed: %s", MH_StatusToString(minhookStatus)));
-		return 0;
-	}
-
-	//IMPORTANT NOTE 3: We are able to create and initalize minhook, so this does work!
-	//NOTE: keep this comment around for sanity check please!
-	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: minhook initalized!");
-
 	//||||||||||||||||||||||||||||||| D3D12 CHECK |||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||| D3D12 CHECK |||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||| D3D12 CHECK |||||||||||||||||||||||||||||||
@@ -166,6 +164,7 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	HookD3D12::InstallD3D12CreateDeviceHook(d3d12);
 
 	Hooks::Initialize();
+	HookD3D12::SetRuntimeReady(true);
 
 	//log to make sure we're done hooking!
 	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: hook initialization complete.");
