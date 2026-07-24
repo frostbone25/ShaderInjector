@@ -171,7 +171,7 @@ The current implmentations of the following effects...
 - [```SSGI_AMBIENT_OCCLUSION```](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#ssgi--ao)
 - [```AUTO_EXPOSURE```](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#auto-exposure)
 
-Are still experimental, and their implementations are currently flawed due to limitations with the current injector framework. The maximum quality preset does have these effects enabled by default.
+Are still experimental, and their implementations are currently flawed due to limitations with the current injector framework. The maximum quality preset does have these effects enabled by default, while the performance preset does not *(because again their implementations are quite heavy at the moment)*
 
 For instance with ```SSGI_BOUNCE_LIGHT``` and ```SSGI_AMBIENT_OCCLUSION``` I cannot introduce new rendering passes yet which would allow me to do downsampling/filtering to both optimize and clean up those effects for a smoother and more stable final result. Currently the game's TAA/DLSS solutions act as the only denoiser for them but they are obviously not perfect. With that said in the [configuration guide](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md) I have written [solutions](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#ssgi--ao) that you can employ to mitigate these artifacts for a final cleaner result. My recomended order of operations for reducing noise is to go in order...
 
