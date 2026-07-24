@@ -61,6 +61,8 @@ Save changes to the file and tab or open the game back up, and click ```Recompil
 
 You should see immediate visual changes after compilation completes, with more visible ambient occlusion and local bounce light!
 
+If you do not be sure to check for compilation errors in the runtime logs at the bottom of the ShaderInjector window. If there are that means you have created an error due to improper syntax by not following instructions or you accidentally added/removed a character that the compiler can't resolve. So undo your changes until the shader can compile again, by default all shaders can compile successfully.
+
 #### SSGI / AO Quality Notes
 
 Currently as of 2.0 **```SSGI_BOUNCE_LIGHT``` can be quite noisy.** I plan to improve upon this in the future by introducing dedicated draw passes to filter and downsample the effects for performance/image quality but your kind of limited in terms of how to deal with the noise at the moment. With that said there are some things you can try...
@@ -92,7 +94,39 @@ Save changes to the file and tab or open the game back up, and click ```Recompil
 
 ![recompile-all](GithubContent/LiveShaderEditing/recompile-all.png)
 
-You should see immediate visual changes after compilation completes, with more visible ambient occlusion and local bounce light!
+You should see immediate visual changes after compilation completes, with shadowed areas becoming brighter, and brighter areas becoming darker for an overall more consistent exposure.
+
+If you do not be sure to check for compilation errors in the runtime logs at the bottom of the ShaderInjector window. If there are that means you have created an error due to improper syntax by not following instructions or you accidentally added/removed a character that the compiler can't resolve. So undo your changes until the shader can compile again, by default all shaders can compile successfully.
+
+#### Auto Exposure Notes
+
+The current implemetation is still experimental, and is unfortunately slow and prone to flicker. In future updates this should get resolved but it will take some work so in the meantime this is what you can do.
+
+For reducing flicker you have 3 options, the first one being that you can increase the "grid points" that are taken of the overall image.
+```GLSL
+//more samples = more stable auto exposure (less flicker) but can be slower
+//less samples = less stable auto exposure (more flicker) but faster
+#define AUTO_EXPOSURE_GRID_X 16
+#define AUTO_EXPOSURE_GRID_Y 16
+```
+
+The other is you can increase or decrease the concentration of these points which can help for no performance cost.
+By default 1.0 means it will do an average of the entire framebuffer, and values closer to zero will be more focused towards the very center of the screen. If you want stability I recomend increasing up to 1.0.
+```GLSL
+#define AUTO_EXPOSURE_CENTER_FOCUS     0.5
+```
+
+Lastly if you are still not satisfied, ultimately you can just disable the auto exposure effect entirely which will eliminate the flicker.
+
+```GLSL
+//#define AUTO_EXPOSURE
+```
+
+The other note is that you can also control the maximum ranges at which the auto exposure can brighten or darken the final image. In areas of brightness, ```AUTO_EXPOSURE_MIN_EV``` controls how far the auto exposure can darken the image in order to retain a consistent exposure. In areas of darkness ```AUTO_EXPOSURE_MAX_EV``` controls how far the auto exposure can brighten the image in order to retain a consistent exposure.
+```GLSL
+#define AUTO_EXPOSURE_MIN_EV          -6.0
+#define AUTO_EXPOSURE_MAX_EV           1.0
+```
 
 ### Tonemapping
 
@@ -152,7 +186,9 @@ Save changes to the file and tab or open the game back up, and click ```Recompil
 
 ![recompile-all](GithubContent/LiveShaderEditing/recompile-all.png)
 
-You should see immediate visual changes after compilation completes, with different tonal range and better color accuracy than the base game!
+You should see immediate visual changes after compilation completes, with different tonal range and better color accuracy than the base game! 
+
+If you do not be sure to check for compilation errors in the runtime logs at the bottom of the ShaderInjector window. If there are that means you have created an error due to improper syntax by not following instructions or you accidentally added/removed a character that the compiler can't resolve. So undo your changes until the shader can compile again, by default all shaders can compile successfully.
 
 #### Tonemap Screenshots
 
@@ -192,11 +228,19 @@ Bloom is enabled by default and is the original game behavior, however I have im
 #define BLOOM_ADDITIVE_INTENSITY 2
 ```
 
+If you want to disable bloom entirely, just simply add two "//" before the line to disable.
+
+```GLSL
+//#define BLOOM_ENABLE
+```
+
 Save changes to the file and tab or open the game back up, and click ```Recompile All```.
 
 ![recompile-all](GithubContent/LiveShaderEditing/recompile-all.png)
 
-You should see immediate visual changes after compilation completes, depending on the area you'll see bloom more prevelant.
+You should see immediate visual changes after compilation completes, depending on the area you'll see bloom more prevelant. 
+
+If you do not be sure to check for compilation errors in the runtime logs at the bottom of the ShaderInjector window. If there are that means you have created an error due to improper syntax by not following instructions or you accidentally added/removed a character that the compiler can't resolve. So undo your changes until the shader can compile again, by default all shaders can compile successfully.
 
 # Other Configuration Notes
 
@@ -209,6 +253,7 @@ You should see immediate visual changes after compilation completes, depending o
 Open this file in a text/code editor and you'll find the following fields...
 
 ```GLSL
+//default values
 #define ADJUSTMENT_BRIGHTNESS_EV 0.0
 #define ADJUSTMENT_CONTRAST 1.0
 #define ADJUSTMENT_CONTRAST_PIVOT 0.18
@@ -226,3 +271,7 @@ If the image is too dark for you, or in some areas I would advise using these co
 Save changes to the file and tab or open the game back up, and click ```Recompile All```.
 
 ![recompile-all](GithubContent/LiveShaderEditing/recompile-all.png)
+
+You should see immediate visual changes after compilation completes. 
+
+If you do not be sure to check for compilation errors in the runtime logs at the bottom of the ShaderInjector window. If there are that means you have created an error due to improper syntax by not following instructions or you accidentally added/removed a character that the compiler can't resolve. So undo your changes until the shader can compile again, by default all shaders can compile successfully.
