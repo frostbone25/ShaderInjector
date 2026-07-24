@@ -18,6 +18,8 @@ With the release of 2.0 it comes with a whole suite of new shaders and features 
 
 With that said, even in my sessions I find most of the issues managable and performance on my system *(RTX 3080)* at native 1080p is acceptable. If you want the full visual splendor I will guide you on where to enable the features!
 
+***As a final note for this section, [all shaders can be edited live](https://github.com/frostbone25/ShaderInjector/blob/main/LiveShaderEditing.md). You do not need to close or relaunch the game any time you make a change.***
+
 <p float="left">
     <img src="GithubContent/LiveShaderEditing/directory-game.png" width="24%" />
     <img src="GithubContent/LiveShaderEditing/directory-shader-injector.png" width="24%" />
