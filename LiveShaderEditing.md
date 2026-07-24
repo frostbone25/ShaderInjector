@@ -22,7 +22,7 @@ You can open the raw .hlsl source code shaders in a text editor *(or code editor
 
 *LocalLightShader.hlsl written with macros at the very top of the file*
 
-If you are a experienced with HLSL you can skip this explanation, but for those who arent heres a very quick and brief rundown to configure things within a shader source code...
+If you are experienced with HLSL/GLSL you can skip this explanation, but for those who arent heres a very quick and brief rundown to configure things within a shader source code...
 
 Enabling/Disabling a shader feature
 
