@@ -29,7 +29,7 @@ The raw .hlsl shader source code files are located in ```(game directory)/Shader
 
 # Maximum Visual Quality Configuration
 
-By default as of 2.0 SSGI and it's AO counterpart along with auto exposure are disabled. To match the visual fidelity as seen in promotional screenshots and videos heres how to enable them.
+By default as of 2.0 SSGI and it's AO counterpart along with auto exposure are disabled. In 2.1 they are also disabled by default in the performance preset *(but not the maximum quality)*. To match the visual fidelity as seen in promotional screenshots and videos heres how to enable them.
 
 ### SSGI / AO
 
@@ -59,7 +59,7 @@ Save changes to the file and tab or open the game back up, and click ```Recompil
 
 ![recompile-all](GithubContent/LiveShaderEditing/recompile-all.png)
 
-You should see immediate visual changes after compilation completes, with more visible ambient occlusion and local bounce light!
+You should see immediate visual changes after compilation completes, with more visible ambient occlusion and local bounce light from direct lighting sources!
 
 If you do not be sure to check for compilation errors in the runtime logs at the bottom of the ShaderInjector window. If there are that means you have created an error due to improper syntax by not following instructions or you accidentally added/removed a character that the compiler can't resolve. So undo your changes until the shader can compile again, by default all shaders can compile successfully.
 
