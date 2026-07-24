@@ -12,6 +12,8 @@ This document will occasionally be updated with more information collected from 
 - [Game Not Launching](#game-not-launching)
 - [HDR](#hdr)
 - [Optiscalar](#optiscalar)
+- [Save Error / Shader Cache Error](#save-error--shader-cache-error)
+- [Image Noise / Flickering](#image-noise--flickering)
 
 ---
 
@@ -145,6 +147,38 @@ For **ShaderInjector.ini**
 ```MenuOpen=false```
 
 ---
+
+#### Save Error / Shader Cache Error
+
+[*(Courtesy of kikyprat)*](https://www.nexusmods.com/profile/kikyprat)
+
+For users having Saving Errors, or Shader Cache errors when first booting the game, make an exclusion for the game on windows defender.
+
+1. Open the Start menu, type "Windows Security", and open the app.
+2. Click on Virus & threat protection.
+3. Under Virus & threat protection settings, click Manage settings.
+4. Scroll down to the Exclusions section and click Add or remove exclusions.
+5. Click + Add an exclusion and choose Folder.
+6. Find and select your game's main installation folder ```...steamapps\common\FINAL FANTASY VII REBIRTH```, then click Select folder
+
+---
+
+#### Image Noise / Flickering
+
+The current implmentations of the following effects...
+
+- [```SSGI_BOUNCE_LIGHT```](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#ssgi--ao)
+- [```SSGI_AMBIENT_OCCLUSION```](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#ssgi--ao)
+- [```AUTO_EXPOSURE```](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#auto-exposure)
+
+Are still experimental, and their implementations are currently flawed due to limitations with the current injector framework. The maximum quality preset does have these effects enabled by default.
+
+For instance with ```SSGI_BOUNCE_LIGHT``` and ```SSGI_AMBIENT_OCCLUSION``` I cannot introduce new rendering passes yet which would allow me to do downsampling/filtering to both optimize and clean up those effects for a smoother and more stable final result. Currently the game's TAA/DLSS solutions act as the only denoiser for them but they are obviously not perfect. With that said in the [configuration guide](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md) I have written [solutions](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#ssgi--ao) that you can employ to mitigate these artifacts for a final cleaner result. My recomended order of operations for reducing noise is to go in order...
+
+- ```SSGI_BOUNCE_LIGHT```: this currently especially in low light is a significant source of noise/fireflies. [Adjust settings or disable](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#ssgi--ao).
+- ```SSGI_AMBIENT_OCCLUSION```: this is noisy but it's much less prevelant than the prior, but it's current implementation can introduce noise in shadowed areas. [Adjust settings or disable](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#ssgi--ao).
+
+The ```AUTO_EXPOSURE``` also is another experimental effect, and it's current implementation is flawed. Once again due to limitations with the injector framework where it samples a grid of points in the image to get a rough average of the overall exposure to try to balance the origina image. It is slow *(and of course this will be optimized in future updates)* and it is also prone to flicker. [You can adjust the variables associated with it to reduce flickering, or just flat out disable it](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#auto-exposure).
 
 # Resolved Issues
 
