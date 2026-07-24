@@ -42,7 +42,7 @@ Lyall's mod uses the Ultimate ASI Loader as its `dsound.dll`, which automaticall
 
 Both mods should load on game start.
 
-*(Courtesy of [Zaccachino](https://www.nexusmods.com/profile/Zaccachino))* You can also rename renaming Lyalls dsound.dll to winmm.dll allows both mods to run with each other.
+*(Courtesy of [Zaccachino](https://www.nexusmods.com/profile/Zaccachino))* You can also try renaming Lyalls dsound.dll to winmm.dll allowing both mods to run with each other.
 
 ---
 
