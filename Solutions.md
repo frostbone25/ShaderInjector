@@ -52,6 +52,8 @@ ReShade reportedly is unstable for some users. Make sure that you are using the 
 
 However if you're running into issues, [Zaccachino](https://www.nexusmods.com/profile/Zaccachino) reported that you can disable ReShade during the setup process of Shader Injector ***(dragging dxgi.dll temporarily out of the game directory)***. When Shader Injector is fully setup you can go into [ShaderInjector.ini](https://github.com/frostbone25/ShaderInjector/blob/main/InjectorSettings.md) and change ```MenuOpen``` so the menu does not open anymore by default *(it helps to change the keybind to a key you might not hit)*. Then re-enable Reshade and now they should be able to co-exist.
 
+**Preferably this mod should be run without Reshade, as if you need to make image adjustments there are already settings wired up in [```PostProcessFinal.hlsl```](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#image-adjustments) that you can adjust to tune the image to your liking.**
+
 ---
 
 #### Anti-Virus Shenanigans / False Positives
