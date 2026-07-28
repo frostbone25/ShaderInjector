@@ -23,6 +23,7 @@
 #include "ShaderTemplates.h"
 #include "Globals.h"
 #include "ProcessRunner.h"
+#include "ShaderInjectorGUI.h"
 #include "StringHelper.h"
 
 namespace ShaderInjectorIO
@@ -618,6 +619,27 @@ namespace ShaderInjectorIO
 		return GenerateShaderTextDXIL(path);
 	}
 
+	//dxc reports compilation problems on stdout/stderr. Capturing them means a failed compile
+	//can name the file, line, and reason instead of only an exit code.
+	static std::string ReadCompilerDiagnostics(const std::string& compilerOutputPath)
+	{
+		//a single mistake can cascade into a very long error list. Keep the log file readable.
+		constexpr size_t maximumDiagnosticsLength = 4000;
+
+		std::string diagnostics;
+
+		if (!ReadTextFile(compilerOutputPath, diagnostics))
+			return {};
+
+		const size_t lastContentCharacter = diagnostics.find_last_not_of(" \t\r\n");
+		diagnostics.erase(lastContentCharacter == std::string::npos ? 0 : lastContentCharacter + 1);
+
+		if (diagnostics.size() > maximumDiagnosticsLength)
+			diagnostics = diagnostics.substr(0, maximumDiagnosticsLength) + "\n... (truncated)";
+
+		return diagnostics;
+	}
+
 	//given raw HLSL human readable shader source code, compile it into a shader blob
 	bool CompileSourceToDXILBlob(const std::string& shaderSourceFilePath, const std::string& shaderProfile, const std::string& entryPoint, std::string& outBlobPath)
 	{
@@ -643,7 +665,9 @@ namespace ShaderInjectorIO
 		}
 
 		const std::string temporaryBlobPath = outBlobPath + ".compiling";
+		const std::string compilerOutputPath = temporaryBlobPath + ".log";
 		DeleteFileIfExists(temporaryBlobPath);
+		DeleteFileIfExists(compilerOutputPath);
 
 		const std::string shaderSourceDirectory = DirectoryFromPath(shaderSourceFilePath);
 		const std::string modifiedShaderIncludesDirectory = GetModifiedShadersIncludesDirectory();
@@ -659,16 +683,32 @@ namespace ShaderInjectorIO
 
 		const ProcessRunner::ProcessResult processResult = ProcessRunner::Run(
 			dxcPath,
-			dxcArguments);
+			dxcArguments,
+			compilerOutputPath);
+
+		const std::string compilerDiagnostics = ReadCompilerDiagnostics(compilerOutputPath);
+		DeleteFileIfExists(compilerOutputPath);
 
 		if (!processResult.Succeeded())
 		{
 			DeleteFileIfExists(temporaryBlobPath);
-			WriteToLogFileError(
+			ShaderInjectorGUI::WriteToRuntimeLogError(
 				"ShaderInjectorIO->CompileSourceToDXILBlob: DXC failed (exit=" +
 				std::to_string(processResult.exitCode) + "): " + processResult.errorMessage);
+
+			if (!compilerDiagnostics.empty())
+				ShaderInjectorGUI::WriteToRuntimeLogError(
+					"ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath +
+					" reported:\n" + compilerDiagnostics);
+
 			return false;
 		}
+
+		//a compile can succeed and still warn about something that explains an unexpected result in game.
+		if (!compilerDiagnostics.empty())
+			ShaderInjectorGUI::WriteToRuntimeLogWarning(
+				"ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath +
+				" reported:\n" + compilerDiagnostics);
 
 		if (!FileExists(temporaryBlobPath))
 		{
