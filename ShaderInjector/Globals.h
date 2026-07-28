@@ -30,6 +30,11 @@ namespace Globals
 	extern bool gRenderDocIntegrationEnabled;
 	extern bool gRenderDocAutoAttachEnabled;
 
+	// Overlay scale. The overlay is drawn inside the game's swapchain at a fixed pixel size, so it
+	// does not follow Windows display scaling and gets harder to read as display resolution rises.
+	// 1.0 is the original size, 2.0 is comfortable at 4K. Applied once during ImGui setup.
+	extern float gShaderInjectorGUIScale;
+
 	// Shader discovery tuning. WorkerThreads = 0 means automatic half-core scaling.
 	extern ShaderDiscoveryMode gShaderDiscoveryMode;
 	extern int gShaderDiscoveryWorkerThreads;

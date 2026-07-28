@@ -817,6 +817,7 @@ namespace ShaderInjectorIO
 			int keyToggleShaderInjector = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "ToggleInjectorKey", Globals::keyToggleShaderInjector);
 			bool gShaderInjectorEnabled = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "InjectorEnabled", Globals::gShaderInjectorEnabled);
 			bool gShowShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "MenuOpen", Globals::gShowShaderInjectorGUI);
+			double shaderInjectorGUIScale = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "MenuScale", static_cast<double>(Globals::gShaderInjectorGUIScale));
 			bool renderDocIntegrationEnabled = ReadIniValueOrDefault(injectorSettingsINI, "RenderDoc", "Enabled", Globals::gRenderDocIntegrationEnabled);
 			bool renderDocAutoAttachEnabled = ReadIniValueOrDefault(injectorSettingsINI, "RenderDoc", "AutoAttach", Globals::gRenderDocAutoAttachEnabled);
 			int shaderDiscoveryMode = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "Mode", static_cast<int>(Globals::gShaderDiscoveryMode));
@@ -832,6 +833,7 @@ namespace ShaderInjectorIO
 			Globals::keyToggleShaderInjector = keyToggleShaderInjector;
 			Globals::gShaderInjectorEnabled = gShaderInjectorEnabled;
 			Globals::gShowShaderInjectorGUI = gShowShaderInjectorGUI;
+			Globals::gShaderInjectorGUIScale = static_cast<float>((std::clamp)(shaderInjectorGUIScale, 0.5, 4.0));
 			Globals::gRenderDocIntegrationEnabled = renderDocIntegrationEnabled;
 			Globals::gRenderDocAutoAttachEnabled = renderDocAutoAttachEnabled;
 			Globals::gShaderDiscoveryMode = static_cast<Globals::ShaderDiscoveryMode>((std::clamp)(shaderDiscoveryMode, 0, 1));
@@ -880,6 +882,7 @@ namespace ShaderInjectorIO
 		injectorSettingsINI["InjectorSettings"]["ToggleInjectorKey"] = Globals::keyToggleShaderInjector;
 		injectorSettingsINI["InjectorSettings"]["InjectorEnabled"] = Globals::gShaderInjectorEnabled;
 		injectorSettingsINI["InjectorSettings"]["MenuOpen"] = Globals::gShowShaderInjectorGUI;
+		injectorSettingsINI["InjectorSettings"]["MenuScale"] = static_cast<double>(Globals::gShaderInjectorGUIScale);
 		injectorSettingsINI["RenderDoc"]["Enabled"] = Globals::gRenderDocIntegrationEnabled;
 		injectorSettingsINI["RenderDoc"]["AutoAttach"] = Globals::gRenderDocAutoAttachEnabled;
 		injectorSettingsINI["ShaderDiscovery"]["Mode"] = static_cast<int>(Globals::gShaderDiscoveryMode);

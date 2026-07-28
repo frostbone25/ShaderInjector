@@ -30,6 +30,8 @@ namespace Globals
 	bool gRenderDocIntegrationEnabled = false;
 	bool gRenderDocAutoAttachEnabled = false;
 
+	float gShaderInjectorGUIScale = 1.0f;
+
 	ShaderDiscoveryMode gShaderDiscoveryMode = ShaderDiscoveryMode::HashLookup;
 	int gShaderDiscoveryWorkerThreads = 0;
 	int gShaderDiscoveryWorkerThreadPriority = THREAD_PRIORITY_BELOW_NORMAL;

@@ -2461,6 +2461,23 @@ namespace HookD3D12
 			(void)io;
 			io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 			ImGui::StyleColorsDark();
+
+			//The overlay is drawn inside the game's swapchain at a fixed pixel size, so it ignores Windows
+			//display scaling and shrinks as display resolution rises - at 4K the default font is hard to
+			//read. MenuScale in ShaderInjector.ini scales the font and the widget metrics to match.
+			//ScaleAllSizes is applied once here on the freshly initialised style, as it mutates the style
+			//in place and would compound if it ever ran more than once.
+			if (Globals::gShaderInjectorGUIScale != 1.0f)
+			{
+				ImGuiStyle& style = ImGui::GetStyle();
+				style.FontScaleMain = Globals::gShaderInjectorGUIScale;
+
+				//ImGui advises against scaling spacing below the authored values, so only grow it.
+				if (Globals::gShaderInjectorGUIScale > 1.0f)
+					style.ScaleAllSizes(Globals::gShaderInjectorGUIScale);
+
+				ShaderInjectorIO::WriteToLogFile("HookD3D12->HandlePresentD3D12: overlay scale applied menuScale=" + std::to_string(Globals::gShaderInjectorGUIScale));
+			}
 			if (!ImGui_ImplWin32_Init(desc.OutputWindow))
 			{
 				ShaderInjectorIO::WriteToLogFileError("HookD3D12->HandlePresentD3D12: ImGui Win32 backend initialization failed; overlay disabled");
