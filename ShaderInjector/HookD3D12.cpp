@@ -140,7 +140,10 @@ namespace HookD3D12
 	static constexpr size_t gMaximumCapturedReplacementAttemptsPerListPerFrame = 32;
 	static constexpr int gMaximumUncapturedReplacementAttemptsPerFrame = 1;
 	static constexpr ULONGLONG gPipelineActivityQuietPeriodMs = 2500;
+	static constexpr ULONGLONG gShaderTargetDirtyGracePeriodMs = 500;
+	static constexpr ULONGLONG gMinimumCapturedReplacementRebuildIntervalMs = 100;
 	static std::atomic<ULONGLONG> gLastPipelineActivityTick = 0;
+	static std::atomic<ULONGLONG> gNextShaderTargetApplyTick = 0;
 	PixelShaderSelectionStyle gShaderSelectionStyle = PixelShaderSelectionStyle::BluePixelShader;
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -151,6 +154,23 @@ namespace HookD3D12
 	{
 		gShaderTargetApplyDirty = true;
 		gPipelineStateOverridesDirty = true;
+
+		// Loading or editing shader targets can coincide with the game finishing a large
+		// pipeline-library batch. Give D3D12 a short settling window before compiling
+		// replacement PSOs on the Present thread.
+		const ULONGLONG requestedApplyTick =
+			GetTickCount64() + gShaderTargetDirtyGracePeriodMs;
+		ULONGLONG currentApplyTick =
+			gNextShaderTargetApplyTick.load(std::memory_order_relaxed);
+
+		while (currentApplyTick < requestedApplyTick &&
+			!gNextShaderTargetApplyTick.compare_exchange_weak(
+				currentApplyTick,
+				requestedApplyTick,
+				std::memory_order_relaxed,
+				std::memory_order_relaxed))
+		{
+		}
 	}
 
 	void NotifyPipelineActivity()
@@ -991,6 +1011,12 @@ namespace HookD3D12
 
 		ID3D12PipelineState* rebuiltPipelineState = nullptr;
 		const ULONGLONG rebuildStartTick = GetTickCount64();
+		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+			"HookD3D12->RebuildGraphicsPSOWithReplacement: begin replacement=%s shaderHash=%s originalPSO=%p replacementBytes=%llu",
+			replacement.name.c_str(),
+			Hash::FormatHash(shaderHash).c_str(),
+			pipeline.pipelineState,
+			static_cast<unsigned long long>(replacementBytecodeSize)));
 		HRESULT hr = Original_CreateGraphicsPipelineState(gDevice, &desc, IID_PPV_ARGS(&rebuiltPipelineState));
 		const ULONGLONG rebuildDurationMs = GetTickCount64() - rebuildStartTick;
 
@@ -999,7 +1025,14 @@ namespace HookD3D12
 			if (rebuiltPipelineState)
 				rebuiltPipelineState->Release();
 
-			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildGraphicsPSOWithReplacement: failed hr=" + std::to_string((unsigned)hr) + " replacement=" + replacement.name);
+			const HRESULT removedReason =
+				gDevice ? gDevice->GetDeviceRemovedReason() : E_POINTER;
+			ShaderInjectorGUI::WriteToRuntimeLogError(
+				"HookD3D12->RebuildGraphicsPSOWithReplacement: failed hr=" +
+				StringHelper::FormatHRESULT(hr) +
+				" deviceRemovedReason=" +
+				StringHelper::FormatHRESULT(removedReason) +
+				" replacement=" + replacement.name);
 			return false;
 		}
 
@@ -1158,6 +1191,14 @@ namespace HookD3D12
 
 		ID3D12PipelineState* rebuiltPipelineState = nullptr;
 		const ULONGLONG rebuildStartTick = GetTickCount64();
+		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+			"HookD3D12->RebuildStreamPSOWithReplacement: begin replacement=%s shaderHash=%s originalPSO=%p streamBytes=%llu replacementBytes=%llu rootOverride=%p",
+			replacement.name.c_str(),
+			Hash::FormatHash(shaderHash).c_str(),
+			pipeline.pipelineState,
+			static_cast<unsigned long long>(patchedBlob.size()),
+			static_cast<unsigned long long>(replacementBytecodeSize),
+			rootSignatureOverride));
 		HRESULT hr = CreatePipelineStateInternal(device2, &patchedDesc, IID_PPV_ARGS(&rebuiltPipelineState));
 		const ULONGLONG rebuildDurationMs = GetTickCount64() - rebuildStartTick;
 
@@ -1213,7 +1254,9 @@ namespace HookD3D12
 
 			device2->Release();
 
-			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithReplacement: failed hr=" + std::to_string((unsigned)hr) + " replacement=" + replacement.name + " streamBytes=" + std::to_string(patchedBlob.size()) + " root=" + StringHelper::PointerToString(rootSignatureOverride) + " targetType=" + StringHelper::ShaderTypeToString(shaderType) + " replacementBytes=" + std::to_string(replacementBytecodeSize) + " originalTargetBytes=" + std::to_string(originalTargetBytecode ? originalTargetBytecode->size() : 0) + " vsBytes=" + std::to_string(pipeline.vsBytecode.size()) + " psBytes=" + std::to_string(pipeline.psBytecode.size()) + " inputElements=" + std::to_string(pipeline.inputElements.size()));
+			const HRESULT removedReason =
+				gDevice ? gDevice->GetDeviceRemovedReason() : E_POINTER;
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithReplacement: failed hr=" + StringHelper::FormatHRESULT(hr) + " deviceRemovedReason=" + StringHelper::FormatHRESULT(removedReason) + " replacement=" + replacement.name + " streamBytes=" + std::to_string(patchedBlob.size()) + " root=" + StringHelper::PointerToString(rootSignatureOverride) + " targetType=" + StringHelper::ShaderTypeToString(shaderType) + " replacementBytes=" + std::to_string(replacementBytecodeSize) + " originalTargetBytes=" + std::to_string(originalTargetBytecode ? originalTargetBytecode->size() : 0) + " vsBytes=" + std::to_string(pipeline.vsBytecode.size()) + " psBytes=" + std::to_string(pipeline.psBytecode.size()) + " inputElements=" + std::to_string(pipeline.inputElements.size()));
 			if (attemptedOriginalValidation)
 			{
 				if (originalValidationSucceeded)
@@ -1243,7 +1286,7 @@ namespace HookD3D12
 		return true;
 	}
 
-	void TryApplyGraphicsReplacement(GraphicsPipelineInfo& pipeline)
+	bool TryApplyGraphicsReplacement(GraphicsPipelineInfo& pipeline)
 	{
 		struct Candidate { uint64_t hash; ShaderTarget::ShaderType type; };
 		const Candidate candidates[] =
@@ -1262,12 +1305,14 @@ namespace HookD3D12
 			if (replacementIndex >= 0)
 			{
 				RebuildGraphicsPSOWithReplacement(pipeline, replacementIndex, candidate.hash, candidate.type);
-				return;
+				return true;
 			}
 		}
+
+		return false;
 	}
 
-	void TryApplyStreamReplacement(PipelineStateInfo& pipeline)
+	bool TryApplyStreamReplacement(PipelineStateInfo& pipeline)
 	{
 		struct Candidate { uint64_t hash; ShaderTarget::ShaderType type; };
 		const Candidate candidates[] =
@@ -1287,9 +1332,11 @@ namespace HookD3D12
 			if (replacementIndex >= 0)
 			{
 				RebuildStreamPSOWithReplacement(pipeline, replacementIndex, candidate.hash, candidate.type);
-				return;
+				return true;
 			}
 		}
+
+		return false;
 	}
 	
 	bool TryApplyPersistedStreamTemplateToUncaptured(UncapturedPipelineStateInfo& uncaptured, int replacementIndex, uint64_t shaderHash, ShaderTarget::ShaderType shaderType, const char* matchMethod)
@@ -1504,28 +1551,43 @@ namespace HookD3D12
 		if (!gLoadedShaderTargetsOnce)
 			RefreshLoadedShaderTargets();
 
+		const ULONGLONG currentTick = GetTickCount64();
+		if (currentTick <
+			gNextShaderTargetApplyTick.load(std::memory_order_relaxed))
+		{
+			return;
+		}
+
 		std::lock_guard<std::mutex> lock(gPipelineMutex);
 
+		bool capturedReplacementAttempted = false;
 		size_t graphicsAttemptsThisFrame = 0;
 		while (gGraphicsShaderTargetApplyCursor < gGraphicsPipelines.size() &&
-			graphicsAttemptsThisFrame < gMaximumCapturedReplacementAttemptsPerListPerFrame)
+			graphicsAttemptsThisFrame < gMaximumCapturedReplacementAttemptsPerListPerFrame &&
+			!capturedReplacementAttempted)
 		{
-			TryApplyGraphicsReplacement(gGraphicsPipelines[gGraphicsShaderTargetApplyCursor]);
+			capturedReplacementAttempted =
+				TryApplyGraphicsReplacement(
+					gGraphicsPipelines[gGraphicsShaderTargetApplyCursor]);
 			++gGraphicsShaderTargetApplyCursor;
 			++graphicsAttemptsThisFrame;
 		}
 
 		size_t streamAttemptsThisFrame = 0;
 		while (gStreamShaderTargetApplyCursor < gPipelineStates.size() &&
-			streamAttemptsThisFrame < gMaximumCapturedReplacementAttemptsPerListPerFrame)
+			streamAttemptsThisFrame < gMaximumCapturedReplacementAttemptsPerListPerFrame &&
+			!capturedReplacementAttempted)
 		{
-			TryApplyStreamReplacement(gPipelineStates[gStreamShaderTargetApplyCursor]);
+			capturedReplacementAttempted =
+				TryApplyStreamReplacement(
+					gPipelineStates[gStreamShaderTargetApplyCursor]);
 			++gStreamShaderTargetApplyCursor;
 			++streamAttemptsThisFrame;
 		}
 
 		int uncapturedAttemptsThisFrame = 0;
-		while (gUncapturedShaderTargetApplyCursor < gUncapturedPipelineStates.size() &&
+		while (!capturedReplacementAttempted &&
+			gUncapturedShaderTargetApplyCursor < gUncapturedPipelineStates.size() &&
 			uncapturedAttemptsThisFrame < gMaximumUncapturedReplacementAttemptsPerFrame)
 		{
 			auto& uncaptured = gUncapturedPipelineStates[gUncapturedShaderTargetApplyCursor];
@@ -1536,6 +1598,14 @@ namespace HookD3D12
 
 			TryApplyUncapturedReplacement(uncaptured);
 			++uncapturedAttemptsThisFrame;
+		}
+
+		if (capturedReplacementAttempted)
+		{
+			gNextShaderTargetApplyTick.store(
+				GetTickCount64() +
+					gMinimumCapturedReplacementRebuildIntervalMs,
+				std::memory_order_relaxed);
 		}
 
 		if (gPipelineStateOverridesDirty)

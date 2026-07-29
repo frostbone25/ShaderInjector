@@ -33,6 +33,9 @@
 	<ClInclude Include="DatabaseModifiedShaders.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+	<ClInclude Include="DatabaseShaderConfigurations.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="DatabaseGraphicsPSOs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -132,6 +135,9 @@
     <ClInclude Include="ShaderInjectorSettings.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ShaderConfiguration.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="DatabaseStreamPSOs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -156,6 +162,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
 	<ClCompile Include="DatabaseModifiedShaders.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+	<ClCompile Include="DatabaseShaderConfigurations.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DatabaseGraphicsPSOs.cpp">
@@ -240,6 +249,9 @@
 	  <Filter>Source Files</Filter>
 	</ClCompile>
 	<ClCompile Include="ShaderDiscovery.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
+	<ClCompile Include="ShaderConfiguration.cpp">
 	  <Filter>Source Files</Filter>
 	</ClCompile>
 	<ClCompile Include="ShaderAutomaticDiscovery.cpp">

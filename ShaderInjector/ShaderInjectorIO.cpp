@@ -272,6 +272,19 @@ namespace ShaderInjectorIO
 		return PathToUtf8(PathFromUtf8(path).filename());
 	}
 
+	std::string MakeRelativePath(const std::string& path, const std::string& baseDirectory)
+	{
+		if (path.empty() || baseDirectory.empty())
+			return {};
+
+		std::error_code error;
+		const FileSystem::path relativePath = FileSystem::relative(
+			PathFromUtf8(path),
+			PathFromUtf8(baseDirectory),
+			error);
+		return error ? std::string() : PathToUtf8(relativePath);
+	}
+
 	bool IsAbsolutePath(const std::string& path)
 	{
 		if (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
@@ -471,6 +484,11 @@ namespace ShaderInjectorIO
 	std::string GetModifiedShadersIncludesDirectory()
 	{
 		return JoinPath(GetModifiedShadersDirectory(), "Includes");
+	}
+
+	std::string GetShaderConfigurationsPath()
+	{
+		return JoinPath(GetModifiedShadersDirectory(), "ShaderConfigurations" + extensionJSON);
 	}
 
 	std::string GetInjectorSettingsPath()

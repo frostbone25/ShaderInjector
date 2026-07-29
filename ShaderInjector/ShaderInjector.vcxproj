@@ -166,6 +166,7 @@
     <ClInclude Include="FPSCounter.h" />
     <ClInclude Include="DatabaseShaderTargets.h" />
     <ClInclude Include="DatabaseModifiedShaders.h" />
+    <ClInclude Include="DatabaseShaderConfigurations.h" />
     <ClInclude Include="DatabaseGraphicsPSOs.h" />
     <ClInclude Include="Hash.h" />
     <ClInclude Include="HookD3D12.h" />
@@ -193,6 +194,7 @@
     <ClInclude Include="ShaderInjectorGUITooltips.h" />
     <ClInclude Include="ShaderInjectorIO.h" />
     <ClInclude Include="ShaderInjectorSettings.h" />
+    <ClInclude Include="ShaderConfiguration.h" />
     <ClInclude Include="DatabaseStreamPSOs.h" />
     <ClInclude Include="ShaderTarget.h" />
     <ClInclude Include="ShaderTemplates.h" />
@@ -205,6 +207,7 @@
     <ClCompile Include="FPSCounter.cpp" />
     <ClCompile Include="DatabaseShaderTargets.cpp" />
     <ClCompile Include="DatabaseModifiedShaders.cpp" />
+    <ClCompile Include="DatabaseShaderConfigurations.cpp" />
     <ClCompile Include="DatabaseGraphicsPSOs.cpp" />
     <ClCompile Include="Hash.cpp" />
     <ClCompile Include="HookD3D12.cpp" />
@@ -235,6 +238,7 @@
     <ClCompile Include="ShaderAnalyzer.cpp" />
     <ClCompile Include="ShaderAnalysis.cpp" />
     <ClCompile Include="ShaderDiscovery.cpp" />
+    <ClCompile Include="ShaderConfiguration.cpp" />
     <ClCompile Include="ShaderAutomaticDiscovery.cpp" />
     <ClCompile Include="ModifiedShader.cpp" />
     <ClCompile Include="ModifiedShaderCreation.cpp" />

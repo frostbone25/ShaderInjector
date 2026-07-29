@@ -38,6 +38,9 @@ namespace ShaderInjectorGUI
 	//===================== modified shaders =====================
 	void UI_ModifiedShaders();
 
+	//===================== shader configuration =====================
+	void UI_ShaderConfiguration();
+
 	//===================== shader targets =====================
 	void UI_ShaderTargets();
 

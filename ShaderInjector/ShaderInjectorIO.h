@@ -40,6 +40,7 @@ namespace ShaderInjectorIO
 	std::string JoinPath(const std::string& directory, const std::string& childPath);
 	std::string DirectoryFromPath(const std::string& path);
 	std::string FileNameFromPath(const std::string& path);
+	std::string MakeRelativePath(const std::string& path, const std::string& baseDirectory);
 	bool IsAbsolutePath(const std::string& path);
 	bool PathsEqual(const std::string& left, const std::string& right);
 	std::string SanitizeFileStem(const std::string& name);
@@ -60,6 +61,7 @@ namespace ShaderInjectorIO
 	std::string GetShaderTargetsDirectory();
 	std::string GetModifiedShadersDirectory();
 	std::string GetModifiedShadersIncludesDirectory();
+	std::string GetShaderConfigurationsPath();
 	std::string GetInjectorSettingsPath();
 
 	//logs
