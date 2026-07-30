@@ -3,7 +3,7 @@
 This document will occasionally be updated with more information collected from Nexus, mostly from users who found solutions regarding their or others problems. I would like to quickly remind also if you continue to run into issues I would advise reporting them into [Github here](https://github.com/frostbone25/ShaderInjector/issues) as Nexus does not allow attachments of files to bug reports.
 
 **Table of contents**
-- [Lyall FF7RebirthFix](#lyall-ff7rebirthfix)
+- [Lyall FF7RebirthFix (Ultrawide)](#lyall-ff7rebirthfix-ultrawide)
 - [Reshade](#reshade)
 - [Anti-Virus Shenanigans / False Positives](#anti-virus-shenanigans--false-positives)
 - [Shader Adjustments](#shader-configuration-tweaking)
@@ -17,7 +17,7 @@ This document will occasionally be updated with more information collected from 
 
 ---
 
-#### [Lyall FF7RebirthFix](https://codeberg.org/Lyall/FF7RebirthFix)
+#### [Lyall FF7RebirthFix Ultrawide](https://codeberg.org/Lyall/FF7RebirthFix)
 
 [*(Courtesy of x6800)*](https://github.com/x6800)
 
