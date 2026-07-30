@@ -182,6 +182,13 @@ For instance with ```SSGI_BOUNCE_LIGHT``` and ```SSGI_AMBIENT_OCCLUSION``` I can
 
 The ```AUTO_EXPOSURE``` also is another experimental effect, and it's current implementation is flawed. Once again due to limitations with the injector framework where it samples a grid of points in the image to get a rough average of the overall exposure to try to balance the origina image. It is slow *(and of course this will be optimized in future updates)* and it is also prone to flicker. [You can adjust the variables associated with it to reduce flickering, or just flat out disable it](https://github.com/frostbone25/ShaderInjector/blob/main/ConfigurationGuide.md#auto-exposure).
 
+In addition, for some users who might still recieve flickering even if auto-exposure is off, this is likely due to an Engine.ini mod/tweak that you may have installed. Please ensure that in the UE4 Engine.ini file that the following is set/disabled.
+
+```INI
+[SystemSettings]
+r.EyeAdaptationQuality=0
+```
+
 # Resolved Issues
 
 These are issues that are already resolved, but I am keeping them around just in-case there is are some users still running into issues that should have been resolved in future updates
