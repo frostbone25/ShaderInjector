@@ -97,10 +97,12 @@ namespace HookD3D12
 	static bool          gLoggedExactCommandQueueCaptured = false;
 	static bool          gLoggedUnsafeFallbackQueue = false;
 	static bool          gLoggedOverlayInitialized = false;
+	static bool          gLoggedOverlayPipelineActivityDelay = false;
 	static UINT64        gOverlaySubmissionCount = 0;
 	static std::mutex    gCommandQueueCaptureMutex;
 	static std::vector<SwapChainCommandQueueBinding> gSwapChainCommandQueueBindings;
 	static std::atomic<uint64_t> gCreatePipelineStateFailureCount = 0;
+	static std::atomic<uint32_t> gActivePipelineActivityCount = 0;
 	static DWORD gMostRecentDirectCommandQueueThreadId = 0;
 	static thread_local bool gInsideOverlayResourceCreation = false;
 
@@ -160,8 +162,30 @@ namespace HookD3D12
 		gLastPipelineActivityTick.store(GetTickCount64(), std::memory_order_relaxed);
 	}
 
+	ScopedPipelineActivity::ScopedPipelineActivity(bool trackActivity)
+		: trackingActivity(trackActivity)
+	{
+		if (!trackingActivity)
+			return;
+
+		gActivePipelineActivityCount.fetch_add(1, std::memory_order_acq_rel);
+		NotifyPipelineActivity();
+	}
+
+	ScopedPipelineActivity::~ScopedPipelineActivity()
+	{
+		if (!trackingActivity)
+			return;
+
+		gActivePipelineActivityCount.fetch_sub(1, std::memory_order_acq_rel);
+		NotifyPipelineActivity();
+	}
+
 	bool IsPipelineActivityQuiet()
 	{
+		if (gActivePipelineActivityCount.load(std::memory_order_acquire) != 0)
+			return false;
+
 		ULONGLONG lastActivityTick = gLastPipelineActivityTick.load(std::memory_order_relaxed);
 		return lastActivityTick == 0 || GetTickCount64() - lastActivityTick >= gPipelineActivityQuietPeriodMs;
 	}
@@ -547,6 +571,7 @@ namespace HookD3D12
 
 	HRESULT STDMETHODCALLTYPE Hook_CreateComputePipelineState(ID3D12Device* device, const D3D12_COMPUTE_PIPELINE_STATE_DESC* desc, REFIID riid, void** ppPipelineState)
 	{
+		ScopedPipelineActivity pipelineActivity;
 		static bool shown = false;
 
 		if (!shown)
@@ -574,6 +599,10 @@ namespace HookD3D12
 	//not really what I want but going to keep around because it's good to have just in case, but most of the game rendering is actually through CreatePipelineState
 	HRESULT STDMETHODCALLTYPE Hook_CreateGraphicsPipelineState(ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC* desc, REFIID riid, void** ppPipelineState)
 	{
+		// ImGui creates its own graphics PSO immediately before the first overlay submission.
+		// Do not let that internal work extend the game's pipeline-activity startup gate.
+		ScopedPipelineActivity pipelineActivity(!gInsideOverlayResourceCreation);
+
 		//IMPORTANT NOTE: this does get executed!
 
 		HRESULT hr = Original_CreateGraphicsPipelineState(device, desc, riid, ppPipelineState);
@@ -593,6 +622,7 @@ namespace HookD3D12
 	//so this is where some of the real magic actually is
 	HRESULT STDMETHODCALLTYPE Hook_CreatePipelineState(ID3D12Device2* device, const D3D12_PIPELINE_STATE_STREAM_DESC* desc, REFIID riid, void** ppPipelineState)
 	{
+		ScopedPipelineActivity pipelineActivity;
 		HRESULT hr = Original_CreatePipelineState(device, desc, riid, ppPipelineState);
 
 		if (FAILED(hr))
@@ -604,13 +634,14 @@ namespace HookD3D12
 			{
 				const HRESULT removedReason = device ? device->GetDeviceRemovedReason() : E_POINTER;
 				ShaderInjectorIO::WriteToLogFileError(StringHelper::Format(
-					"HookD3D12->Hook_CreatePipelineState: original call failed count=%llu result=%s deviceRemovedReason=%s device=%p streamBytes=%llu thread=%lu",
+					"HookD3D12->Hook_CreatePipelineState: original call failed count=%llu result=%s deviceRemovedReason=%s device=%p streamBytes=%llu thread=%lu activePipelineCalls=%u",
 					static_cast<unsigned long long>(failureCount),
 					StringHelper::FormatHRESULT(hr).c_str(),
 					StringHelper::FormatHRESULT(removedReason).c_str(),
 					device,
 					static_cast<unsigned long long>(desc ? desc->SizeInBytes : 0),
-					static_cast<unsigned long>(GetCurrentThreadId())));
+					static_cast<unsigned long>(GetCurrentThreadId()),
+					static_cast<unsigned int>(gActivePipelineActivityCount.load(std::memory_order_acquire))));
 			}
 
 			return hr;
@@ -1072,6 +1103,7 @@ namespace HookD3D12
 		uint8_t* end = ptr + patchedBlob.size();
 		bool patchedTarget = false;
 		bool missingRootSignature = false;
+		bool missingViewInstancingState = false;
 		auto originalShaderForType = [&](D3D12_PIPELINE_STATE_SUBOBJECT_TYPE type) -> const std::vector<uint8_t>*
 		{
 			switch (type)
@@ -1111,6 +1143,8 @@ namespace HookD3D12
 
 				if (rootSignatureOverride)
 					*rootSignature = rootSignatureOverride;
+				else if (pipeline.rootSignature)
+					*rootSignature = pipeline.rootSignature;
 				else if (!pipeline.pipelineState)
 					missingRootSignature = true;
 			}
@@ -1150,6 +1184,25 @@ namespace HookD3D12
 				so->pBufferStrides = pipeline.soStrides.empty() ? nullptr : pipeline.soStrides.data();
 				so->NumStrides = (UINT)pipeline.soStrides.size();
 			}
+			else if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING)
+			{
+				D3D12_VIEW_INSTANCING_DESC* viewInstancing = reinterpret_cast<D3D12_VIEW_INSTANCING_DESC*>(payloadPtr);
+
+				if (!pipeline.hasViewInstancing && viewInstancing->ViewInstanceCount > 0)
+				{
+					// Older persisted templates did not serialize the pointed-to locations.
+					// Refuse to dereference their process-specific pointer.
+					missingViewInstancingState = true;
+				}
+				else
+				{
+					viewInstancing->ViewInstanceCount = static_cast<UINT>(pipeline.viewInstanceLocations.size());
+					viewInstancing->pViewInstanceLocations =
+						pipeline.viewInstanceLocations.empty() ? nullptr : pipeline.viewInstanceLocations.data();
+					if (pipeline.hasViewInstancing)
+						viewInstancing->Flags = pipeline.viewInstancingFlags;
+				}
+			}
 
 			ptr += subobjectSize;
 		}
@@ -1158,6 +1211,15 @@ namespace HookD3D12
 		{
 			device2->Release();
 			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithReplacement: persisted stream template needs an observed root signature for " + replacement.name);
+			return false;
+		}
+
+		if (missingViewInstancingState)
+		{
+			device2->Release();
+			ShaderInjectorGUI::WriteToRuntimeLogError(
+				"HookD3D12->RebuildStreamPSOWithReplacement: persisted stream template is missing durable view-instancing locations for " +
+				replacement.name + "; recreate this shader target from a fresh capture");
 			return false;
 		}
 
@@ -1264,7 +1326,15 @@ namespace HookD3D12
 		if (!rootSignatureOverride)
 			PersistAppliedStreamPipelineTemplate(replacement, pipeline, -1, shaderType, shaderHash);
 		gPipelineStateOverridesDirty = true;
-		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->RebuildStreamPSOWithReplacement: Applied stream shader replacement: " + replacement.name + (usedFallback ? " (null shader fallback)" : "") + " durationMs=" + std::to_string(rebuildDurationMs));
+		ShaderInjectorGUI::WriteToRuntimeLog(
+			"HookD3D12->RebuildStreamPSOWithReplacement: Applied stream shader replacement: " +
+			replacement.name +
+			" modifiedShader=" + replacement.modifiedShaderId +
+			" originalPSO=" + StringHelper::PointerToString(pipeline.pipelineState) +
+			" root=" + StringHelper::PointerToString(rootSignatureOverride ? rootSignatureOverride : pipeline.rootSignature) +
+			" viewInstances=" + std::to_string(pipeline.viewInstanceLocations.size()) +
+			(usedFallback ? " (null shader fallback)" : "") +
+			" durationMs=" + std::to_string(rebuildDurationMs));
 		return true;
 	}
 
@@ -2596,6 +2666,30 @@ namespace HookD3D12
 			}
 
 			return CallOriginalPresent();
+		}
+
+		// Protect only the first overlay submission from overlapping an active PSO creation call.
+		// Once the overlay has submitted successfully, normal runtime pipeline creation must not
+		// make the menu disappear or wait for the broader shader-rebuild quiet period.
+		if (gOverlaySubmissionCount == 0 &&
+			gActivePipelineActivityCount.load(std::memory_order_acquire) != 0)
+		{
+			if (!gLoggedOverlayPipelineActivityDelay)
+			{
+				ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+					"HookD3D12->HandlePresentD3D12: active game pipeline call; delaying first overlay GPU submission activePipelineCalls=%u",
+					static_cast<unsigned int>(gActivePipelineActivityCount.load(std::memory_order_acquire))));
+				gLoggedOverlayPipelineActivityDelay = true;
+			}
+
+			return CallOriginalPresent();
+		}
+
+		if (gLoggedOverlayPipelineActivityDelay)
+		{
+			ShaderInjectorIO::WriteToLogFile(
+				"HookD3D12->HandlePresentD3D12: active game pipeline call completed; first overlay GPU submission resumed");
+			gLoggedOverlayPipelineActivityDelay = false;
 		}
 
 		if (!gShutdown) 

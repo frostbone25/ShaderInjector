@@ -28,6 +28,11 @@ namespace HookD3D12
 
 		ParsePipelineStream(pipelineStreamDescription, capturedPipeline);
 
+		// The stream supplied by the game only borrows this COM pointer. Replacement
+		// rebuilds may happen much later, after the caller has released its reference.
+		if (capturedPipeline.rootSignature)
+			capturedPipeline.rootSignature->AddRef();
+
 		{
 			std::lock_guard<std::mutex> lock(gPipelineMutex);
 			RegisterKnownPipelineStateLocked(pipelineState);

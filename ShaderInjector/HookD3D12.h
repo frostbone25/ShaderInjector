@@ -129,6 +129,9 @@ namespace HookD3D12
 		std::vector<D3D12_SO_DECLARATION_ENTRY> soDeclarations;
 		std::vector<std::string> soSemanticNames;
 		std::vector<UINT> soStrides;
+		bool hasViewInstancing = false;
+		D3D12_VIEW_INSTANCING_FLAGS viewInstancingFlags = D3D12_VIEW_INSTANCING_FLAG_NONE;
+		std::vector<D3D12_VIEW_INSTANCE_LOCATION> viewInstanceLocations;
 
 		std::vector<uint8_t> vsBytecode;
 		std::vector<uint8_t> psBytecode;
@@ -197,6 +200,19 @@ namespace HookD3D12
 	extern char gShaderTargetNameBuffer[256];
 	extern bool gLoadedShaderTargetsOnce;
 	extern PixelShaderSelectionStyle gShaderSelectionStyle;
+
+	class ScopedPipelineActivity
+	{
+	public:
+		explicit ScopedPipelineActivity(bool trackActivity = true);
+		~ScopedPipelineActivity();
+
+		ScopedPipelineActivity(const ScopedPipelineActivity&) = delete;
+		ScopedPipelineActivity& operator=(const ScopedPipelineActivity&) = delete;
+
+	private:
+		bool trackingActivity = false;
+	};
 
 	int FindEnabledShaderTarget(uint64_t shaderHash, ShaderTarget::ShaderType shaderType);
 	void MarkShaderTargetApplyDirty();

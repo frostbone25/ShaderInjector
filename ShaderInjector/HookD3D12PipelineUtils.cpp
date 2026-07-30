@@ -293,6 +293,14 @@ namespace HookD3D12
 		for (UINT stride : pipeline.soStrides)
 			metadata.streamOutputStrides.push_back(stride);
 
+		metadata.hasViewInstancing = pipeline.hasViewInstancing;
+		metadata.viewInstancingFlags = static_cast<uint32_t>(pipeline.viewInstancingFlags);
+		for (const D3D12_VIEW_INSTANCE_LOCATION& location : pipeline.viewInstanceLocations)
+		{
+			metadata.viewInstanceViewportArrayIndices.push_back(location.ViewportArrayIndex);
+			metadata.viewInstanceRenderTargetArrayIndices.push_back(location.RenderTargetArrayIndex);
+		}
+
 		return metadata;
 	}
 
@@ -303,6 +311,9 @@ namespace HookD3D12
 		pipeline.soDeclarations.clear();
 		pipeline.soSemanticNames.clear();
 		pipeline.soStrides.clear();
+		pipeline.hasViewInstancing = metadata.hasViewInstancing;
+		pipeline.viewInstancingFlags = static_cast<D3D12_VIEW_INSTANCING_FLAGS>(metadata.viewInstancingFlags);
+		pipeline.viewInstanceLocations.clear();
 
 		pipeline.inputElements.reserve(metadata.inputElements.size());
 		pipeline.inputElementSemanticNames.reserve(metadata.inputElements.size());
@@ -340,6 +351,21 @@ namespace HookD3D12
 
 		for (uint32_t stride : metadata.streamOutputStrides)
 			pipeline.soStrides.push_back((UINT)stride);
+
+		if (metadata.viewInstanceViewportArrayIndices.size() ==
+			metadata.viewInstanceRenderTargetArrayIndices.size())
+		{
+			pipeline.viewInstanceLocations.reserve(metadata.viewInstanceViewportArrayIndices.size());
+			for (size_t locationIndex = 0;
+				locationIndex < metadata.viewInstanceViewportArrayIndices.size();
+				++locationIndex)
+			{
+				D3D12_VIEW_INSTANCE_LOCATION location{};
+				location.ViewportArrayIndex = metadata.viewInstanceViewportArrayIndices[locationIndex];
+				location.RenderTargetArrayIndex = metadata.viewInstanceRenderTargetArrayIndices[locationIndex];
+				pipeline.viewInstanceLocations.push_back(location);
+			}
+		}
 	}
 
 	void RebindPipelineStateInfoPointerFields(PipelineStateInfo& info)
@@ -354,6 +380,38 @@ namespace HookD3D12
 		{
 			for (size_t i = 0; i < info.soDeclarations.size(); ++i)
 				info.soDeclarations[i].SemanticName = info.soSemanticNames[i].c_str();
+		}
+
+		if (!info.hasViewInstancing || info.streamBlob.empty())
+			return;
+
+		uint8_t* streamPointer = info.streamBlob.data();
+		uint8_t* streamEnd = streamPointer + info.streamBlob.size();
+		while (streamPointer < streamEnd)
+		{
+			if (streamPointer + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE) > streamEnd)
+				return;
+
+			const auto type = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(streamPointer);
+			const UINT typeIndex = static_cast<UINT>(type);
+			if (typeIndex >= ARRAYSIZE(kSubobjectSizes) || kSubobjectSizes[typeIndex] == 0)
+				return;
+
+			const size_t subobjectSize = kSubobjectSizes[typeIndex];
+			if (streamPointer + subobjectSize > streamEnd)
+				return;
+
+			if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING)
+			{
+				auto* viewInstancing = reinterpret_cast<D3D12_VIEW_INSTANCING_DESC*>(streamPointer + sizeof(void*));
+				viewInstancing->ViewInstanceCount = static_cast<UINT>(info.viewInstanceLocations.size());
+				viewInstancing->pViewInstanceLocations =
+					info.viewInstanceLocations.empty() ? nullptr : info.viewInstanceLocations.data();
+				viewInstancing->Flags = info.viewInstancingFlags;
+				return;
+			}
+
+			streamPointer += subobjectSize;
 		}
 	}
 
@@ -528,6 +586,19 @@ namespace HookD3D12
 					if (subobj->payload.pBufferStrides && subobj->payload.NumStrides > 0)
 					{
 						info.soStrides.assign(subobj->payload.pBufferStrides, subobj->payload.pBufferStrides + subobj->payload.NumStrides);
+					}
+					break;
+				}
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING:
+				{
+					auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING, D3D12_VIEW_INSTANCING_DESC>*>(ptr);
+					info.hasViewInstancing = true;
+					info.viewInstancingFlags = subobject->payload.Flags;
+					if (subobject->payload.pViewInstanceLocations && subobject->payload.ViewInstanceCount > 0)
+					{
+						info.viewInstanceLocations.assign(
+							subobject->payload.pViewInstanceLocations,
+							subobject->payload.pViewInstanceLocations + subobject->payload.ViewInstanceCount);
 					}
 					break;
 				}

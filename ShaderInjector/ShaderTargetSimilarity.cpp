@@ -129,6 +129,10 @@ namespace ShaderTarget
 		score.Add(ShaderInputElementDisk::CalculateSimilarityScore(inputElements, other.inputElements), 6.0);
 		score.Add(ShaderStreamOutputDeclarationDisk::CalculateSimilarityScore(streamOutputDeclarations, other.streamOutputDeclarations), 5.0);
 		score.Add(SimilarityScore::CalculateOrderedNumericCollectionSimilarityScore(streamOutputStrides, other.streamOutputStrides), 3.0);
+		score.Add(SimilarityScore::Exact(hasViewInstancing, other.hasViewInstancing), 2.0);
+		score.Add(SimilarityScore::Exact(viewInstancingFlags, other.viewInstancingFlags), 2.0);
+		score.Add(SimilarityScore::CalculateOrderedNumericCollectionSimilarityScore(viewInstanceViewportArrayIndices, other.viewInstanceViewportArrayIndices), 3.0);
+		score.Add(SimilarityScore::CalculateOrderedNumericCollectionSimilarityScore(viewInstanceRenderTargetArrayIndices, other.viewInstanceRenderTargetArrayIndices), 3.0);
 		return score.Result();
 	}
 	DEFINE_COLLECTION_SCORE(ShaderPipelineStreamMetadataDisk)

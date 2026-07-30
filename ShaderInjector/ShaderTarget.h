@@ -274,6 +274,10 @@ namespace ShaderTarget
 		std::vector<ShaderInputElementDisk> inputElements;
 		std::vector<ShaderStreamOutputDeclarationDisk> streamOutputDeclarations;
 		std::vector<uint32_t> streamOutputStrides;
+		bool hasViewInstancing = false;
+		uint32_t viewInstancingFlags = 0;
+		std::vector<uint32_t> viewInstanceViewportArrayIndices;
+		std::vector<uint32_t> viewInstanceRenderTargetArrayIndices;
 
 		double CalculateSimilarityScore(const ShaderPipelineStreamMetadataDisk& other) const;
 		static double CalculateSimilarityScore(const std::vector<ShaderPipelineStreamMetadataDisk>& left, const std::vector<ShaderPipelineStreamMetadataDisk>& right);
@@ -283,7 +287,11 @@ namespace ShaderTarget
 			ShaderPipelineStreamMetadataDisk,
 			inputElements,
 			streamOutputDeclarations,
-			streamOutputStrides)
+			streamOutputStrides,
+			hasViewInstancing,
+			viewInstancingFlags,
+			viewInstanceViewportArrayIndices,
+			viewInstanceRenderTargetArrayIndices)
 	};
 
 	bool WriteShaderTargetJson(const ShaderTarget::ShaderTargetDisk& replacement);

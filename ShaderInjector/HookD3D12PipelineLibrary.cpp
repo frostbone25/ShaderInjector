@@ -18,6 +18,7 @@ namespace HookD3D12
 
 	HRESULT __stdcall Hook_LoadGraphicsPipeline(ID3D12PipelineLibrary* library, LPCWSTR name, const D3D12_GRAPHICS_PIPELINE_STATE_DESC* desc, REFIID riid, void** ppPipelineState)
 	{
+		ScopedPipelineActivity pipelineActivity;
 		HRESULT hr = Original_LoadGraphicsPipeline(library, name, desc, riid, ppPipelineState);
 
 		if (SUCCEEDED(hr) && desc && ppPipelineState && *ppPipelineState)
@@ -31,6 +32,7 @@ namespace HookD3D12
 
 	HRESULT __stdcall Hook_LoadComputePipeline(ID3D12PipelineLibrary* library, LPCWSTR name, const D3D12_COMPUTE_PIPELINE_STATE_DESC* desc, REFIID riid, void** ppPipelineState)
 	{
+		ScopedPipelineActivity pipelineActivity;
 		HRESULT hr = Original_LoadComputePipeline(library, name, desc, riid, ppPipelineState);
 
 		if (SUCCEEDED(hr) && desc && ppPipelineState && *ppPipelineState)
@@ -44,6 +46,7 @@ namespace HookD3D12
 
 	HRESULT __stdcall Hook_LoadPipeline(ID3D12PipelineLibrary1* library, LPCWSTR name, const D3D12_PIPELINE_STATE_STREAM_DESC* desc, REFIID riid, void** ppPipelineState)
 	{
+		ScopedPipelineActivity pipelineActivity;
 		HRESULT hr = Original_LoadPipeline(library, name, desc, riid, ppPipelineState);
 
 		if (SUCCEEDED(hr) && desc && ppPipelineState && *ppPipelineState)
