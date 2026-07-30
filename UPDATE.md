@@ -6,7 +6,7 @@ For existing users who already have the mod installed and want to learn how to u
 
 **For users who are updating from an older version i.e. before 2.0 I highly recomend nuking the original Shader Injector installation completely.** This is so that way you can start completely clean without any residual files. So in your directory game directory delete everything...
 
-**If you are updating even with 2.0 and want to ensure a very clean install/update, you can still follow the steps for this section to completely nuke the original installation and drop in the new one.**
+**NOTE: If you are updating even with 2.0+ and want to ensure a very clean install/update, you can still follow the steps here to completely nuke the original installation and drop in the new one.**
 
 ![delete-old](GithubContent/Update/delete-old.png)
 
@@ -40,9 +40,9 @@ And you should be done! Shader Injector 2.0 automates the process of finding and
 
 # Updates *(2.0 or after)*
 
-**NOTE: For the most part you do not need to rebuild the game shader cache, unless if a new shader injector update intorduces a brand new modified shader. You do not need to delete your previous Shader Targets and can keep them from before.**
+**NOTE 1: For the most part you do not need to rebuild the game shader cache, unless if a new shader injector update intorduces a brand new modified shader. You do not need to delete your previous Shader Targets and can keep them from before.**
 
-**If you are updating want to ensure a very clean install/update, you can follow the steps for [this section](#updating-from-151) to completely nuke the original installation and drop in the new one.**
+**NOTE 2: If you are updating want to ensure a very clean install/update, you can follow the steps for [this section](#updating-from-151) to completely nuke the original installation and drop in the new one.**
 
 Updating is simple, simply drag the contents of the new zip file to the game directory again and replace files *(You will not lose your shader targets)*.
 
