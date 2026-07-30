@@ -13,6 +13,7 @@
 #include "StringHelper.h"
 #include "DatabaseModifiedShaders.h"
 #include "RenderDocIntegration.h"
+#include "ShaderInjectorVersion.h"
 #include "SystemInfoLogger.h"
 
 //||||||||||||||||||||||||||||||| ON ATTACH |||||||||||||||||||||||||||||||
@@ -29,6 +30,9 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	//Read settings before initializing the optional RenderDoc bridge. Unless AutoAttach is
 	//explicitly enabled, initialization only detects an already injected RenderDoc module.
 	ShaderInjectorIO::RotateLogFiles();
+	ShaderInjectorIO::WriteToLogFile(
+		"dllmain->OnAttachDLL: Shader Injector version " +
+		std::string(SHADER_INJECTOR_VERSION_STRING));
 	ShaderInjectorIO::ReadInjectorSettings();
 	RenderDocIntegration::Initialize();
 

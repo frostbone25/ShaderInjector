@@ -35,11 +35,12 @@ namespace ShaderInjectorIO
 		FileSystem::path PathFromUtf8(const std::string& path)
 		{
 			std::string normalizedPath = path;
+
 #if !defined(_WIN32)
-			// Accept replacement metadata produced on Windows when inspecting or
-			// migrating it on a Unix-like host.
+			//accept replacement metadata produced on Windows when inspecting or migrating it on a Unix-like host.
 			std::replace(normalizedPath.begin(), normalizedPath.end(), '\\', '/');
 #endif
+
 			return FileSystem::u8path(normalizedPath);
 		}
 
@@ -215,8 +216,8 @@ namespace ShaderInjectorIO
 		if (!error)
 			return true;
 
-		// Some Wine/Proton-backed paths are fussy about rename. For files, fall back
-		// to copy+remove so users can still migrate package metadata cleanly.
+		//some Wine/Proton-backed paths are fussy about rename.
+		//for files, fall back to copy+remove so users can still migrate package metadata cleanly.
 		error.clear();
 		if (!FileSystem::is_regular_file(source, error))
 			return false;
@@ -230,25 +231,38 @@ namespace ShaderInjectorIO
 		return !error && FileSystem::exists(destination, error);
 	}
 
+	namespace
+	{
+		bool OpenExistingPath(const std::string& path)
+		{
+#if defined(_WIN32)
+			const FileSystem::path nativePath = PathFromUtf8(path);
+			const HINSTANCE result = ShellExecuteW(
+				nullptr,
+				L"open",
+				nativePath.c_str(),
+				nullptr,
+				nullptr,
+				SW_SHOWNORMAL);
+			return reinterpret_cast<INT_PTR>(result) > 32;
+#else
+			const ProcessRunner::ProcessResult result = ProcessRunner::Run("/usr/bin/xdg-open", { path });
+			return result.Succeeded();
+#endif
+		}
+	}
+
+	bool OpenFile(const std::string& filePath)
+	{
+		return FileExists(filePath) && OpenExistingPath(filePath);
+	}
+
 	bool OpenDirectory(const std::string& directoryPath)
 	{
 		if (!DirectoryExists(directoryPath))
 			return false;
 
-#if defined(_WIN32)
-		const FileSystem::path nativePath = PathFromUtf8(directoryPath);
-		const HINSTANCE result = ShellExecuteW(
-			nullptr,
-			L"open",
-			nativePath.c_str(),
-			nullptr,
-			nullptr,
-			SW_SHOWNORMAL);
-		return reinterpret_cast<INT_PTR>(result) > 32;
-#else
-		const ProcessRunner::ProcessResult result = ProcessRunner::Run("/usr/bin/xdg-open", { directoryPath });
-		return result.Succeeded();
-#endif
+		return OpenExistingPath(directoryPath);
 	}
 
 	std::string JoinPath(const std::string& directory, const std::string& childPath)
@@ -278,10 +292,7 @@ namespace ShaderInjectorIO
 			return {};
 
 		std::error_code error;
-		const FileSystem::path relativePath = FileSystem::relative(
-			PathFromUtf8(path),
-			PathFromUtf8(baseDirectory),
-			error);
+		const FileSystem::path relativePath = FileSystem::relative(PathFromUtf8(path), PathFromUtf8(baseDirectory), error);
 		return error ? std::string() : PathToUtf8(relativePath);
 	}
 
@@ -504,8 +515,7 @@ namespace ShaderInjectorIO
 	{
 		std::lock_guard<std::mutex> lock(gLogMutex);
 
-		// Rotation runs before the rest of IO initialization, so ensure the log
-		// directory exists even on the first launch.
+		//rotation runs before the rest of IO initialization, so ensure the log directory exists even on the first launch.
 		std::error_code error;
 		FileSystem::create_directories(PathFromUtf8(GetLogsDirectory()), error);
 
@@ -521,8 +531,8 @@ namespace ShaderInjectorIO
 			error.clear();
 			FileSystem::rename(currentLogPath, previousLogPath, error);
 
-			// A same-directory rename should normally succeed. Retain a copy fallback
-			// for filesystems exposed through Wine/Proton that implement rename poorly.
+			//a same-directory rename should normally succeed.
+			//retain a copy fallback for filesystems exposed through Wine/Proton that implement rename poorly.
 			if (error)
 			{
 				error.clear();
@@ -600,17 +610,12 @@ namespace ShaderInjectorIO
 		outputPath.replace_extension(extensionDXIL);
 		const std::string dxilTextPath = PathToUtf8(outputPath);
 
-		const ProcessRunner::ProcessResult processResult = ProcessRunner::Run(
-			dxcPath,
-			{ "-dumpbin", shaderBytecodeFilePath },
-			dxilTextPath);
+		const ProcessRunner::ProcessResult processResult = ProcessRunner::Run(dxcPath, { "-dumpbin", shaderBytecodeFilePath }, dxilTextPath);
 
 		if (!processResult.Succeeded())
 		{
 			DeleteFileIfExists(dxilTextPath);
-			WriteToLogFileError(
-				"ShaderInjectorIO->GenerateShaderTextDXIL: DXC failed (exit=" +
-				std::to_string(processResult.exitCode) + "): " + processResult.errorMessage);
+			WriteToLogFileError("ShaderInjectorIO->GenerateShaderTextDXIL: DXC failed (exit=" + std::to_string(processResult.exitCode) + "): " + processResult.errorMessage);
 			return false;
 		}
 
@@ -626,9 +631,7 @@ namespace ShaderInjectorIO
 			return false;
 		}
 
-		const std::string filename = StringHelper::Format(
-			"%016llX.bin",
-			static_cast<unsigned long long>(hash));
+		const std::string filename = StringHelper::Format("%016llX.bin", static_cast<unsigned long long>(hash));
 		const std::string path = JoinPath(directory, namePrefix + "_" + filename);
 
 		if (!WriteBinaryFile(path, bytecode, size))
@@ -699,10 +702,7 @@ namespace ShaderInjectorIO
 			"-Fo", temporaryBlobPath
 		};
 
-		const ProcessRunner::ProcessResult processResult = ProcessRunner::Run(
-			dxcPath,
-			dxcArguments,
-			compilerOutputPath);
+		const ProcessRunner::ProcessResult processResult = ProcessRunner::Run(dxcPath, dxcArguments, compilerOutputPath);
 
 		const std::string compilerDiagnostics = ReadCompilerDiagnostics(compilerOutputPath);
 		DeleteFileIfExists(compilerOutputPath);
@@ -965,6 +965,41 @@ namespace ShaderInjectorIO
 		file.close();
 
 		WriteToLogFile("ShaderInjectorIO->CreateInjectorSettings: new injector settings created. ");
+	}
+
+	bool WriteInjectorMenuScale(float menuScale)
+	{
+		const std::string injectorSettingsPath = GetInjectorSettingsPath();
+
+		try
+		{
+			ini::IniFile injectorSettingsINI;
+
+			if (FileExists(injectorSettingsPath))
+				injectorSettingsINI.load(injectorSettingsPath);
+
+			const float clampedMenuScale = (std::clamp)(menuScale, 0.5f, 4.0f);
+			injectorSettingsINI["InjectorSettings"]["MenuScale"] = static_cast<double>(clampedMenuScale);
+
+			std::ofstream file(PathFromUtf8(injectorSettingsPath), std::ios::out | std::ios::trunc);
+
+			if (!file.is_open())
+			{
+				WriteToLogFileError("ShaderInjectorIO->WriteInjectorMenuScale: failed to open injector settings: " + injectorSettingsPath);
+				return false;
+			}
+
+			injectorSettingsINI.encode(file);
+			file.close();
+
+			WriteToLogFile("ShaderInjectorIO->WriteInjectorMenuScale: saved menuScale=" + std::to_string(clampedMenuScale));
+			return true;
+		}
+		catch (...)
+		{
+			WriteToLogFileError("ShaderInjectorIO->WriteInjectorMenuScale: failed to update injector settings");
+			return false;
+		}
 	}
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INITALIZE |||||||||||||||||||||||||||||||||||||||||||||||||||||

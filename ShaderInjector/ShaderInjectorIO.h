@@ -36,6 +36,7 @@ namespace ShaderInjectorIO
 	void DirectoryCreate(const std::string& path);
 	bool DeleteDirectoryRecursively(const std::string& path);
 	bool MovePath(const std::string& sourcePath, const std::string& destinationPath, bool overwriteExisting = false);
+	bool OpenFile(const std::string& filePath);
 	bool OpenDirectory(const std::string& path);
 	std::string JoinPath(const std::string& directory, const std::string& childPath);
 	std::string DirectoryFromPath(const std::string& path);
@@ -95,6 +96,7 @@ namespace ShaderInjectorIO
 	//injector settings
 	bool ReadInjectorSettings();
 	void CreateInjectorSettings();
+	bool WriteInjectorMenuScale(float menuScale);
 
 	//initalize
 	bool Initialize();

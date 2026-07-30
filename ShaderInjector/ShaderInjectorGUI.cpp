@@ -320,7 +320,6 @@ namespace ShaderInjectorGUI
 		ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse;
 		ImGui::SetNextWindowSize(ImVec2(600, 600), ImGuiCond_FirstUseEver);
 		ImGui::SetNextWindowPos(ImVec2(25, 25), ImGuiCond_FirstUseEver);
-		UI_ApplyStyle();
 
 		std::string windowTitle = std::string("Shader Injector v") + SHADER_INJECTOR_VERSION_STRING;
 
@@ -336,9 +335,35 @@ namespace ShaderInjectorGUI
 			if (context.fpsCounterActive)
 				ImGui::Text("FPS: %.1f (%.4fms)", context.fps, context.frameTimeMs);
 
-			//additional help text
-			ImGui::Text("Toggle Injector: Press %s", Keycodes::KeycodeToString(Globals::keyToggleShaderInjector) + " (" + std::to_string(Globals::keyToggleShaderInjector) + ")");
-			ImGui::Text("Toggle Menu: Press %s", Keycodes::KeycodeToString(Globals::keyOpenShaderInjectorGUI) + " (" + std::to_string(Globals::keyOpenShaderInjectorGUI) + ")");
+			const std::string toggleInjectorKeyText = Keycodes::KeycodeToString(Globals::keyToggleShaderInjector) + " (" + std::to_string(Globals::keyToggleShaderInjector) + ")";
+			const std::string toggleMenuKeyText = Keycodes::KeycodeToString(Globals::keyOpenShaderInjectorGUI) + " (" + std::to_string(Globals::keyOpenShaderInjectorGUI) + ")";
+
+			ImGui::Text("Toggle Injector: Press %s", toggleInjectorKeyText.c_str());
+			ImGui::Text("Toggle Menu: Press %s", toggleMenuKeyText.c_str());
+
+			ImGui::SetNextItemWidth(140.0f * Globals::gShaderInjectorGUIScale);
+			if (ImGui::DragFloat(
+				"Menu Scale",
+				&Globals::gShaderInjectorGUIScale,
+				0.05f,
+				0.5f,
+				4.0f,
+				"%.2fx",
+				ImGuiSliderFlags_AlwaysClamp))
+			{
+				Globals::gShaderInjectorGUIScale = (std::clamp)(Globals::gShaderInjectorGUIScale, 0.5f, 4.0f);
+			}
+
+			if (ImGui::IsItemDeactivatedAfterEdit() &&
+				!ShaderInjectorIO::WriteInjectorMenuScale(Globals::gShaderInjectorGUIScale))
+			{
+				WriteToRuntimeLogError("Could not save MenuScale to ShaderInjector.ini.");
+			}
+
+			if (ImGui::Button("Edit Injector Settings", ImVec2(-FLT_MIN, 0)) && !ShaderInjectorIO::OpenFile( ShaderInjectorIO::GetInjectorSettingsPath()))
+			{
+				WriteToRuntimeLogError("Could not open ShaderInjector.ini.");
+			}
 			ImGui::Spacing();
 
 			//set in HookD3D12, wires up an event that calls UI_ShaderInjectorMenu()
@@ -369,12 +394,6 @@ namespace ShaderInjectorGUI
 
 	void UI_ShaderInjectorMenu()
 	{
-		if (ImGui::Button("Edit Shaders##EditShaders"))
-		{
-			if (!ShaderInjectorIO::OpenDirectory(ShaderInjectorIO::GetModifiedShadersIncludesDirectory()))
-				WriteToRuntimeLogError("Could not open the Shader Includes folder.");
-		}
-
 		UI_ModifiedShaders();
 		UI_ShaderConfiguration();
 		UI_ShaderTargets();
@@ -1915,6 +1934,8 @@ namespace ShaderInjectorGUI
 	void UI_ApplyStyle()
 	{
 		ImGuiStyle& style = ImGui::GetStyle();
+		style = ImGuiStyle();
+		ImGui::StyleColorsDark(&style);
 
 		//cool rounding and spacing!
 		style.WindowRounding = 6.0f;
@@ -1999,5 +2020,11 @@ namespace ShaderInjectorGUI
 		c[ImGuiCol_MenuBarBg] = ImVec4(0.12f, 0.12f, 0.12f, 1.00f);
 		c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.45f);
 		c[ImGuiCol_NavHighlight] = accent;
+
+		//Rebuild the style from an unscaled baseline every frame so live scale changes never
+		//compound the previous frame's dimensions.
+		const float menuScale = (std::clamp)(Globals::gShaderInjectorGUIScale, 0.5f, 4.0f);
+		style.ScaleAllSizes(menuScale);
+		style.FontScaleMain = menuScale;
 	}
 }

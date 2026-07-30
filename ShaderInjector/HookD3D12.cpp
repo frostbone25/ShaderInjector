@@ -140,7 +140,6 @@ namespace HookD3D12
 	static constexpr size_t gMaximumCapturedReplacementAttemptsPerListPerFrame = 32;
 	static constexpr int gMaximumUncapturedReplacementAttemptsPerFrame = 1;
 	static constexpr ULONGLONG gPipelineActivityQuietPeriodMs = 2500;
-	static constexpr ULONGLONG gShaderTargetDirtyGracePeriodMs = 500;
 	static constexpr ULONGLONG gMinimumCapturedReplacementRebuildIntervalMs = 100;
 	static std::atomic<ULONGLONG> gLastPipelineActivityTick = 0;
 	static std::atomic<ULONGLONG> gNextShaderTargetApplyTick = 0;
@@ -154,23 +153,6 @@ namespace HookD3D12
 	{
 		gShaderTargetApplyDirty = true;
 		gPipelineStateOverridesDirty = true;
-
-		// Loading or editing shader targets can coincide with the game finishing a large
-		// pipeline-library batch. Give D3D12 a short settling window before compiling
-		// replacement PSOs on the Present thread.
-		const ULONGLONG requestedApplyTick =
-			GetTickCount64() + gShaderTargetDirtyGracePeriodMs;
-		ULONGLONG currentApplyTick =
-			gNextShaderTargetApplyTick.load(std::memory_order_relaxed);
-
-		while (currentApplyTick < requestedApplyTick &&
-			!gNextShaderTargetApplyTick.compare_exchange_weak(
-				currentApplyTick,
-				requestedApplyTick,
-				std::memory_order_relaxed,
-				std::memory_order_relaxed))
-		{
-		}
 	}
 
 	void NotifyPipelineActivity()
@@ -2532,22 +2514,6 @@ namespace HookD3D12
 			io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 			ImGui::StyleColorsDark();
 
-			//The overlay is drawn inside the game's swapchain at a fixed pixel size, so it ignores Windows
-			//display scaling and shrinks as display resolution rises - at 4K the default font is hard to
-			//read. MenuScale in ShaderInjector.ini scales the font and the widget metrics to match.
-			//ScaleAllSizes is applied once here on the freshly initialised style, as it mutates the style
-			//in place and would compound if it ever ran more than once.
-			if (Globals::gShaderInjectorGUIScale != 1.0f)
-			{
-				ImGuiStyle& style = ImGui::GetStyle();
-				style.FontScaleMain = Globals::gShaderInjectorGUIScale;
-
-				//ImGui advises against scaling spacing below the authored values, so only grow it.
-				if (Globals::gShaderInjectorGUIScale > 1.0f)
-					style.ScaleAllSizes(Globals::gShaderInjectorGUIScale);
-
-				ShaderInjectorIO::WriteToLogFile("HookD3D12->HandlePresentD3D12: overlay scale applied menuScale=" + std::to_string(Globals::gShaderInjectorGUIScale));
-			}
 			if (!ImGui_ImplWin32_Init(desc.OutputWindow))
 			{
 				ShaderInjectorIO::WriteToLogFileError("HookD3D12->HandlePresentD3D12: ImGui Win32 backend initialization failed; overlay disabled");
@@ -2654,6 +2620,9 @@ namespace HookD3D12
 			}
 
 			// Render ImGui
+			//Apply MenuScale before NewFrame so font and layout metrics update together on the
+			//frame after the user edits the live scale control.
+			ShaderInjectorGUI::UI_ApplyStyle();
 			ImGui_ImplDX12_NewFrame(); //this seems fine
 			ImGui_ImplWin32_NewFrame(); //this seems fine
 
