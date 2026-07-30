@@ -3,6 +3,8 @@
 #include "LibraryMath.hlsl"
 
 #ifndef LIBRARY_BRDF
+
+//[NO CONFIG]
 #define LIBRARY_BRDF
 
 //reference - https://github.com/chendi-YU/UnrealEngine/blob/master/Engine/Shaders/BRDF.usf

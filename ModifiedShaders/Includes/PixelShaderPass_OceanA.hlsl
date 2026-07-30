@@ -1,5 +1,39 @@
 //Ocean.hlsl
 
+//library includes
+//NOTE: this is where we have various useful shader functions
+#include "LibraryMath.hlsl"
+#include "LibraryRandom.hlsl"
+#include "LibraryColor.hlsl"
+#include "LibraryBRDF.hlsl"
+#include "LibraryMicroShadows.hlsl"
+#include "LibraryGBuffer.hlsl"
+
+//|||||||||||||||||||||||||||||||||| CONFIGURATION ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION ||||||||||||||||||||||||||||||||||
+
+#define ENABLE_REFRACTION_CHROMATIC_DISPERSION
+#define REFRACTION_DISPERSION_STRENGTH 0.075
+#define REFRACTION_WATER_PLANE_Z_BIAS 0.0
+
+//unreal units are centimeters. 
+//missing depth is treated as open water at this optical thickness instead of as an almost-clear black scene-buffer hole.
+#define WATER_FOG_MAX_OPTICAL_DEPTH_CM 10000.0
+
+#define CAUSTICS_ENABLED
+#define CAUSTICS_WORLD_SCALE 0.04
+#define CAUSTICS_ANIMATION_SPEED 5.7
+#define CAUSTICS_EDGE_WIDTH 0.095
+#define CAUSTICS_INTENSITY 5.5
+#define CAUSTICS_SHALLOW_FADE 0.02
+#define CAUSTICS_DEPTH_FALLOFF 0.0008
+
+//|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
+//resources passed in to the shader
+
 //SamplerComparisonState View_SharedPointClampedSampler : register(s0, space0); // can't disambiguate
 //SamplerComparisonState View_SharedBilinearWrappedSampler : register(s1, space0); // can't disambiguate
 //SamplerComparisonState View_SharedBilinearClampedSampler : register(s2, space0); // can't disambiguate
@@ -60,6 +94,11 @@ Texture3D<float4> View_PerlinNoiseVolumeTexture : register(t1, space0);
 #endif
 
 TextureCube<float4> ReflectionCubemaps[] : register(t0, space1);
+
+//|||||||||||||||||||||||||||||||||| CONSTANT BUFFERS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONSTANT BUFFERS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONSTANT BUFFERS ||||||||||||||||||||||||||||||||||
+//game data passed in to the shader
 
 cbuffer View : register(b0, space0) 
 {
@@ -631,6 +670,10 @@ cbuffer Material : register(b4, space0)
 	float4 Material_ScalarExpressions[6] : packoffset(c20.x);
 };
 
+//|||||||||||||||||||||||||||||||||| STRUCTS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| STRUCTS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| STRUCTS ||||||||||||||||||||||||||||||||||
+
 struct InputStruct
 {
     float4 TEXCOORD10 : TEXCOORD10;
@@ -672,11 +715,6 @@ void GetWaterShadowMapDimensions(int shadowMapIndex, out uint width, out uint he
 #endif
 }
 
-float3 SafeNormalize(float3 value)
-{
-    return value * rsqrt(max(dot(value, value), 1.0e-12));
-}
-
 float DeviceZToWorldDepth(float deviceZ)
 {
     float numerator = mad(View_InvDeviceZToWorldZTransform.x, deviceZ, View_InvDeviceZToWorldZTransform.y);
@@ -706,13 +744,6 @@ float4 TransformHomogeneous(float3 position, row_major float4x4 transform)
     return mul(float4(position, 1.0), transform);
 }
 
-struct HZBTraceResult
-{
-    float2 HZBUv;
-    float DeviceZ;
-    float Confidence;
-};
-
 struct SurfaceState
 {
     float2 MaterialUV;
@@ -727,72 +758,6 @@ struct SurfaceState
     float3 ReflectionDirection;
     float3 TransmissionDirection;
 };
-
-HZBTraceResult TraceHierarchicalZ(
-    float3 rayStartNdc,
-    float3 rayEndNdc,
-    float2 projectedLimitNdc,
-    float projectedLimitDepth,
-    float2 hzbUvScale,
-    float randomOffset)
-{
-    HZBTraceResult result = (HZBTraceResult)0;
-
-    float3 rayDelta = rayEndNdc - rayStartNdc;
-    float2 projectedDelta = projectedLimitNdc - rayStartNdc.xy;
-    float halfScreenLength = 0.5 * length(rayDelta.xy);
-
-    // Clip the screen-space ray to the conservative unit-square footprint used
-    // by the original UE forward-translucency HZB traversal.
-    float2 centeredRay = rayDelta.xy + halfScreenLength * rayStartNdc.xy;
-    float2 outsideDistance = max(abs(centeredRay) - halfScreenLength, 0.0);
-    float2 remainingFraction = 1.0 - outsideDistance / abs(rayDelta.xy);
-    float clipScale = min(remainingFraction.x, remainingFraction.y) / halfScreenLength;
-    float3 traceStep = clipScale * rayDelta;
-    float thickness = max(abs(traceStep.z), rayStartNdc.z - projectedLimitDepth);
-
-    uint hzbWidth, hzbHeight, hzbMipCount;
-    TranslucentBasePass_HZBTexture.GetDimensions(0, hzbWidth, hzbHeight, hzbMipCount);
-
-    float projectedLength = length(projectedDelta);
-    float stepLength = max(length(traceStep.xy), 1.0e-4);
-    uint traceStepCount = clamp((uint)ceil(saturate(projectedLength / stepLength) * 8.0 + randomOffset), 1u, 8u);
-
-    float2 traceUv = float2(rayStartNdc.x * 0.5 + 0.5, 0.5 - rayStartNdc.y * 0.5) * hzbUvScale;
-    float2 uvStep = float2(hzbUvScale.x * 0.0625 * traceStep.x, hzbUvScale.y * -0.0625 * traceStep.y);
-    float depthStep = traceStep.z * 0.125;
-    thickness *= 0.125;
-
-    float previousDepthDelta = 0.0;
-
-    [loop]
-    for (uint stepIndex = 0u; stepIndex < traceStepCount; ++stepIndex)
-    {
-        float sampleTime = (float)stepIndex + randomOffset;
-        float2 sampleUv = mad(sampleTime, uvStep, traceUv);
-        float rayDepth = mad(sampleTime, depthStep, rayStartNdc.z);
-        int2 texel = int2(floor(sampleUv * float2(hzbWidth, hzbHeight)));
-        float sceneDepth = TranslucentBasePass_HZBTexture.Load(int3(texel, 0)).x;
-        float depthDelta = rayDepth - sceneDepth;
-        bool crossedSurface = abs(-thickness - depthDelta) < thickness;
-
-        if (crossedSurface && sceneDepth != 0.0)
-        {
-            float previous = stepIndex == 0u ? depthDelta - depthStep : previousDepthDelta;
-            float interpolation = saturate(previous / (previous - depthDelta));
-            float hitTime = abs(randomOffset - 1.0 + (float)stepIndex + interpolation);
-            result.HZBUv = mad(hitTime, uvStep, traceUv);
-            result.DeviceZ = mad(hitTime, depthStep, rayStartNdc.z);
-            float edgeFade = min(hitTime * 0.125, 1.0);
-            result.Confidence = 1.0 - edgeFade * edgeFade;
-            return result;
-        }
-
-        previousDepthDelta = depthDelta;
-    }
-
-    return result;
-}
 
 // Reconstructed material helpers
 float HashWrappedGridPoint(int2 gridPoint)
@@ -818,64 +783,9 @@ float WrappedValueNoise2D(float2 position)
     //return View_SpatiotemporalBlueNoiseVolumeTexture.SampleLevel(View_SharedBilinearWrappedSampler, float3(position * 0.1f, 0), 0).r;
 }
 
-// Cheap, deterministic 2-D hash used by the procedural Worley cells. This
-// avoids a texture dependency (and avoids the relatively expensive sin hash).
-float2 HashWorleyCell(int2 cell)
-{
-    float3 p = frac(float3((float)cell.x, (float)cell.y, (float)cell.x) * float3(0.1031, 0.1030, 0.0973));
-    p += dot(p, p.yzx + 33.33);
-    return frac((p.xx + p.yz) * p.zy);
-}
-
-// Returns distance to the nearest Voronoi boundary (F2 - F1). Keeping the
-// distance rather than thresholding here lets the caller use fwidth for stable,
-// antialiased caustic lines.
-float WorleyEdgeDistance(float2 position, float animationTime)
-{
-    int2 baseCell = int2(floor(position));
-    float2 localPosition = frac(position);
-    float nearestDistanceSq = 1.0e10;
-    float secondDistanceSq = 1.0e10;
-
-    [unroll]
-    for (int cellY = -1; cellY <= 1; ++cellY)
-    {
-        [unroll]
-        for (int cellX = -1; cellX <= 1; ++cellX)
-        {
-            int2 neighborOffset = int2(cellX, cellY);
-            int2 neighborCell = baseCell + neighborOffset;
-            float2 randomPhase = HashWorleyCell(neighborCell) * 6.28318530718;
-
-            // Feature points orbit inside their own cells, which gives motion
-            // without popping as points cross cell boundaries.
-            float2 featurePoint = 0.5 + 0.42 * sin(randomPhase + animationTime * float2(1.0, 1.173));
-            float2 delta = float2(neighborOffset) + featurePoint - localPosition;
-            float distanceSq = dot(delta, delta);
-
-            if (distanceSq < nearestDistanceSq)
-            {
-                secondDistanceSq = nearestDistanceSq;
-                nearestDistanceSq = distanceSq;
-            }
-            else
-            {
-                secondDistanceSq = min(secondDistanceSq, distanceSq);
-            }
-        }
-    }
-
-    return sqrt(secondDistanceSq) - sqrt(nearestDistanceSq);
-}
-
 float2 RotateDensityOctave(float2 value)
 {
     return float2(mad(value.y,  0.809017, value.x * -0.587785), mad(value.y, -0.587785, value.x * -0.809017));
-}
-
-float Luminance(float3 color)
-{
-    return dot(color, float3(0.2126, 0.7152, 0.0722));
 }
 
 float EvaluateAmbientDice(float3 direction, float3 positiveAxisWeights, float3 negativeAxisWeights)
@@ -2468,6 +2378,83 @@ DirectionalLightingResult EvaluateDirectionalLighting(
     return result;
 }
 
+//||||||||||||||||||||||||||||||| SSR |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| SSR |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| SRR |||||||||||||||||||||||||||||||
+
+struct HZBTraceResult
+{
+    float2 HZBUv;
+    float DeviceZ;
+    float Confidence;
+};
+
+HZBTraceResult TraceHierarchicalZ(
+    float3 rayStartNdc,
+    float3 rayEndNdc,
+    float2 projectedLimitNdc,
+    float projectedLimitDepth,
+    float2 hzbUvScale,
+    float randomOffset)
+{
+    HZBTraceResult result = (HZBTraceResult)0;
+
+    float3 rayDelta = rayEndNdc - rayStartNdc;
+    float2 projectedDelta = projectedLimitNdc - rayStartNdc.xy;
+    float halfScreenLength = 0.5 * length(rayDelta.xy);
+
+    // Clip the screen-space ray to the conservative unit-square footprint used
+    // by the original UE forward-translucency HZB traversal.
+    float2 centeredRay = rayDelta.xy + halfScreenLength * rayStartNdc.xy;
+    float2 outsideDistance = max(abs(centeredRay) - halfScreenLength, 0.0);
+    float2 remainingFraction = 1.0 - outsideDistance / abs(rayDelta.xy);
+    float clipScale = min(remainingFraction.x, remainingFraction.y) / halfScreenLength;
+    float3 traceStep = clipScale * rayDelta;
+    float thickness = max(abs(traceStep.z), rayStartNdc.z - projectedLimitDepth);
+
+    uint hzbWidth, hzbHeight, hzbMipCount;
+    TranslucentBasePass_HZBTexture.GetDimensions(0, hzbWidth, hzbHeight, hzbMipCount);
+
+    float projectedLength = length(projectedDelta);
+    float stepLength = max(length(traceStep.xy), 1.0e-4);
+    uint traceStepCount = clamp((uint)ceil(saturate(projectedLength / stepLength) * 8.0 + randomOffset), 1u, 8u);
+
+    float2 traceUv = float2(rayStartNdc.x * 0.5 + 0.5, 0.5 - rayStartNdc.y * 0.5) * hzbUvScale;
+    float2 uvStep = float2(hzbUvScale.x * 0.0625 * traceStep.x, hzbUvScale.y * -0.0625 * traceStep.y);
+    float depthStep = traceStep.z * 0.125;
+    thickness *= 0.125;
+
+    float previousDepthDelta = 0.0;
+
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < traceStepCount; ++stepIndex)
+    {
+        float sampleTime = (float)stepIndex + randomOffset;
+        float2 sampleUv = mad(sampleTime, uvStep, traceUv);
+        float rayDepth = mad(sampleTime, depthStep, rayStartNdc.z);
+        int2 texel = int2(floor(sampleUv * float2(hzbWidth, hzbHeight)));
+        float sceneDepth = TranslucentBasePass_HZBTexture.Load(int3(texel, 0)).x;
+        float depthDelta = rayDepth - sceneDepth;
+        bool crossedSurface = abs(-thickness - depthDelta) < thickness;
+
+        if (crossedSurface && sceneDepth != 0.0)
+        {
+            float previous = stepIndex == 0u ? depthDelta - depthStep : previousDepthDelta;
+            float interpolation = saturate(previous / (previous - depthDelta));
+            float hitTime = abs(randomOffset - 1.0 + (float)stepIndex + interpolation);
+            result.HZBUv = mad(hitTime, uvStep, traceUv);
+            result.DeviceZ = mad(hitTime, depthStep, rayStartNdc.z);
+            float edgeFade = min(hitTime * 0.125, 1.0);
+            result.Confidence = 1.0 - edgeFade * edgeFade;
+            return result;
+        }
+
+        previousDepthDelta = depthDelta;
+    }
+
+    return result;
+}
+
 float4 EvaluateScreenSpaceReflection(
     SurfaceState surface,
     float pixelDepth,
@@ -2569,14 +2556,6 @@ struct WaterSurfaceEvaluation
     float3 RefractionReceiverWorldPosition;
     float RefractionWaterDepth;
 };
-
-#define ENABLE_REFRACTION_CHROMATIC_DISPERSION
-#define REFRACTION_DISPERSION_STRENGTH 0.075f
-#define REFRACTION_WATER_PLANE_Z_BIAS 0.0f
-
-// Unreal units are centimeters. Missing depth is treated as open water at this
-// optical thickness instead of as an almost-clear black scene-buffer hole.
-#define WATER_FOG_MAX_OPTICAL_DEPTH_CM 10000.0f // 100 m
 
 float2 ClampRefractionUvToView(float2 uv)
 {
@@ -3011,13 +2990,59 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     return result;
 }
 
-// Caustic tuning. Unreal world positions are centimeters in this shader.
-#define CAUSTICS_WORLD_SCALE       0.04f // one primary cell per ~80 cm
-#define CAUSTICS_ANIMATION_SPEED   5.70f
-#define CAUSTICS_EDGE_WIDTH        0.095f
-#define CAUSTICS_INTENSITY         5.5f
-#define CAUSTICS_SHALLOW_FADE      0.020f  // reaches full strength by ~50 cm
-#define CAUSTICS_DEPTH_FALLOFF     0.0008f // half strength after ~12.5 m
+//|||||||||||||||||||||||||||||||||| CAUSTICS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CAUSTICS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CAUSTICS ||||||||||||||||||||||||||||||||||
+
+// Cheap, deterministic 2-D hash used by the procedural Worley cells. This
+// avoids a texture dependency (and avoids the relatively expensive sin hash).
+float2 HashWorleyCell(int2 cell)
+{
+    float3 p = frac(float3((float)cell.x, (float)cell.y, (float)cell.x) * float3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yzx + 33.33);
+    return frac((p.xx + p.yz) * p.zy);
+}
+
+// Returns distance to the nearest Voronoi boundary (F2 - F1). Keeping the
+// distance rather than thresholding here lets the caller use fwidth for stable,
+// antialiased caustic lines.
+float WorleyEdgeDistance(float2 position, float animationTime)
+{
+    int2 baseCell = int2(floor(position));
+    float2 localPosition = frac(position);
+    float nearestDistanceSq = 1.0e10;
+    float secondDistanceSq = 1.0e10;
+
+    [unroll]
+    for (int cellY = -1; cellY <= 1; ++cellY)
+    {
+        [unroll]
+        for (int cellX = -1; cellX <= 1; ++cellX)
+        {
+            int2 neighborOffset = int2(cellX, cellY);
+            int2 neighborCell = baseCell + neighborOffset;
+            float2 randomPhase = HashWorleyCell(neighborCell) * 6.28318530718;
+
+            // Feature points orbit inside their own cells, which gives motion
+            // without popping as points cross cell boundaries.
+            float2 featurePoint = 0.5 + 0.42 * sin(randomPhase + animationTime * float2(1.0, 1.173));
+            float2 delta = float2(neighborOffset) + featurePoint - localPosition;
+            float distanceSq = dot(delta, delta);
+
+            if (distanceSq < nearestDistanceSq)
+            {
+                secondDistanceSq = nearestDistanceSq;
+                nearestDistanceSq = distanceSq;
+            }
+            else
+            {
+                secondDistanceSq = min(secondDistanceSq, distanceSq);
+            }
+        }
+    }
+
+    return sqrt(secondDistanceSq) - sqrt(nearestDistanceSq);
+}
 
 float3 ApplyProjectedWorleyCaustics(
     float intersectionCausticsDepth,
@@ -3084,6 +3109,10 @@ float3 SampleRefractedSceneColor(float2 refractedUv, float2 unrefractedUv)
 #endif
 }
 
+//|||||||||||||||||||||||||||||||||| MAIN ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| MAIN ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| MAIN ||||||||||||||||||||||||||||||||||
+
 OutputStruct main(InputStruct _IN)
 {
     OutputStruct output = (OutputStruct)0;
@@ -3125,7 +3154,7 @@ OutputStruct main(InputStruct _IN)
 
     // Match reflection-probe energy to Unreal's directional ambient dice.
     float3 ambientColor = View_OneOverPreExposure * _IN.ENVIRONMENT_AMBIENT_DICE_0.xyz;
-    float ambientLuminance = Luminance(_IN.ENVIRONMENT_AMBIENT_DICE_0.xyz);
+    float ambientLuminance = LuminanceRec709(_IN.ENVIRONMENT_AMBIENT_DICE_0.xyz);
     float inverseAmbientLuminance = ambientLuminance > 0.0 ? rcp(ambientLuminance) : 0.0;
 
     float reflectionAmbient = EvaluateAmbientDice(surface.ReflectionDirection, _IN.ENVIRONMENT_AMBIENT_DICE_1.xyz, _IN.ENVIRONMENT_AMBIENT_DICE_2.xyz);
@@ -3133,11 +3162,11 @@ OutputStruct main(InputStruct _IN)
     float3 reflectionIrradiance = ambientColor * (reflectionAmbient * inverseAmbientLuminance);
     float3 normalIrradiance = ambientColor * (normalAmbient * inverseAmbientLuminance);
 
-    float indirectDiffuseLuminance = Luminance(captures.Diffuse);
-    float indirectSpecularLuminance = Luminance(captures.Specular);
-    float reflectionIrradianceLuminance = Luminance(reflectionIrradiance);
-    float normalIrradianceLuminance = Luminance(normalIrradiance);
-    float secondaryDiffuseLuminance = Luminance(captures.SecondaryDiffuse);
+    float indirectDiffuseLuminance = LuminanceRec709(captures.Diffuse);
+    float indirectSpecularLuminance = LuminanceRec709(captures.Specular);
+    float reflectionIrradianceLuminance = LuminanceRec709(reflectionIrradiance);
+    float normalIrradianceLuminance = LuminanceRec709(normalIrradiance);
+    float secondaryDiffuseLuminance = LuminanceRec709(captures.SecondaryDiffuse);
     float secondarySpecularLuminance = Luminance(captures.SecondarySpecular);
 
     float secondaryDiffuseScale = (secondaryDiffuseLuminance > 0.0 ? rcp(secondaryDiffuseLuminance) : 0.0) * reflectionIrradianceLuminance;
@@ -3196,12 +3225,12 @@ OutputStruct main(InputStruct _IN)
     float2 refractionUv = material.RefractionUv;
     float3 backgroundSceneColor = SampleRefractedSceneColor(refractionUv, material.ScreenUv);
 
-    //backgroundSceneColor = ApplyProjectedWorleyCaustics(backgroundSceneColor, material.RefractionReceiverDeviceDepth, material.RefractionReceiverWorldPosition, material.RefractionWaterDepth, directional.Visibility);
-
-    float causticsSceneDeviceDepth = TranslucentBasePass_SceneTextures_SceneDepthTexture.Load(int3(pixelPosition, 0)).x;
-    float causticsSceneLinearDepth = DeviceZToWorldDepth(causticsSceneDeviceDepth);
-    float causticsFade = max(0.0, causticsSceneLinearDepth - _IN.SV_Position.w);
-    backgroundSceneColor = ApplyProjectedWorleyCaustics(causticsFade, backgroundSceneColor, material.RefractionReceiverDeviceDepth, material.RefractionReceiverWorldPosition, material.RefractionWaterDepth, directional.Visibility);
+    #if defined(CAUSTICS_ENABLED)
+        float causticsSceneDeviceDepth = TranslucentBasePass_SceneTextures_SceneDepthTexture.Load(int3(pixelPosition, 0)).x;
+        float causticsSceneLinearDepth = DeviceZToWorldDepth(causticsSceneDeviceDepth);
+        float causticsFade = max(0.0, causticsSceneLinearDepth - _IN.SV_Position.w);
+        backgroundSceneColor = ApplyProjectedWorleyCaustics(causticsFade, backgroundSceneColor, material.RefractionReceiverDeviceDepth, material.RefractionReceiverWorldPosition, material.RefractionWaterDepth, directional.Visibility);
+    #endif
 
     float3 mediumTransmittance = saturate(reflectionCaptureWeight * material.PathTransmittance * material.DeepReferenceTransmittance * exp2(material.DeepExtinctionLog));
     float3 refractedSceneColor = backgroundSceneColor * mediumTransmittance * saturate(material.OpenWaterMask);
@@ -3217,6 +3246,9 @@ OutputStruct main(InputStruct _IN)
     float3 originalSceneColor = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, pixelPosition * View_BufferSizeAndInvSize.zw, 0).rgb;
 
     finalColor = lerp(originalSceneColor, finalColor, saturate(intersectionFade * 2.0));
+
+    //last ditch effort to ensure that we dont get nan's or fireflies later
+    finalColor = max(0.0002f, finalColor);
 
     output.SV_Target0 = float4(finalColor, 1.0);
     output.SV_Target1 = float4(1.0, 1.0, 1.0, 0.0);

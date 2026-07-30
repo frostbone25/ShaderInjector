@@ -14,14 +14,19 @@
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - BRDF ||||||||||||||||||||||||||||||||||
 //here are parameters that are wired up for easy tweakin...
 
-//this is the default (physically inaccurate) shading model for the game
-//if you are not a fan of the other shading models just disable them and enable this to return to the original shading
-//#define SHADING_DEFAULT_LIT_LAMBERT //<--- original game
+//this is the original shading model used for the game
+//its simple, and efficent, but not accurate
+//if you want to retain the original game shading turn this on
+// #define SHADING_DEFAULT_LIT_LAMBERT
 
-//this is a physically accurate shading model, making diffuse materials more "diffuse"-like
-//#define SHADING_DEFAULT_LIT_BURLEY
+//new shading model, little different but more accurate to diffuse shading in real life
+//visually it makes diffuse materials more "diffuse" and matte as it should caused by retro-reflection (when you look away from the light direction)
+//but for some artistically this might be undesirable
+// #define SHADING_DEFAULT_LIT_BURLEY
 
-//this is a physically accurate shading model, making diffuse materials more "diffuse"-like
+//new shading model, little different but more accurate to diffuse shading in real life
+//similar to burley, visually it makes diffuse materials more "diffuse" and matte as it should caused by retro-reflection (when you look away from the light direction)
+//but for some artistically this might be undesirable
 #define SHADING_DEFAULT_LIT_OREN_NAYAR
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - MICRO SHADOWS ||||||||||||||||||||||||||||||||||
@@ -36,16 +41,17 @@
 
 //applies microshadows to skin, generally shadowing terms should be mostly unified, however this can lead to an overly dark appearance characters in certain conditions and areas
 //I would leave it off if you desire characters to stay true to their original game shading
-//#define ENABLE_MICRO_SHADOWS_SKIN
+// #define ENABLE_MICRO_SHADOWS_SKIN
 
 //applies microshadows to hair, generally shadowing terms should be mostly unified, however this can lead to an overly dark appearance characters in certain conditions and areas
 //I would leave it off if you desire characters to stay true to their original game shading
-//#define ENABLE_MICRO_SHADOWS_HAIR
+// #define ENABLE_MICRO_SHADOWS_HAIR
 
 //requested feature for control over strength of shadows, the uncharted 4 micro shadow application at full intensity can be quite strong
 //leaving some places a little too dark when in direct sunlight, but here you have control over how strong it is
-//RANGE: this should be between [0.0 <---> 1.0]
-//DEFAULT: 1
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
+//[CONFIG RANGE]: [0, 1]
 #define MICRO_SHADOWS_STRENGTH 1.0
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - SSAO ||||||||||||||||||||||||||||||||||
@@ -56,18 +62,18 @@
 //apply SSAO to the direct lighting for more contrast
 //NOTE: I don't recomend this, as it's not only physically in-accurate, but can create too much "shadowing" for things that are supposed to be in direct light
 //but... it's here if you prefer the look
-//#define APPLY_SSAO_IN_DIRECT_LIGHT
+// #define APPLY_SSAO_IN_DIRECT_LIGHT
 
 //[APPLY_SSAO_IN_DIRECT_LIGHT ONLY!] This only works if APPLY_SSAO_IN_DIRECT_LIGHT is enabled!
 //this controls the "contrast" of the SSAO term when applied to direct light
-//RANGE: this should be between [0.0 <---> 8.0]
-//DEFAULT: 1.0
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define SSAO_POWER 1.0
 
 //[APPLY_SSAO_IN_DIRECT_LIGHT ONLY!] This only works if APPLY_SSAO_IN_DIRECT_LIGHT is enabled!
 //this controls the "brightness" of the SSAO term when applied to direct light, I suggest using this in tandem with SSAO_POWER
-//RANGE: this should be between [1.0 <---> 8.0]
-//DEFAULT: 1.0
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define SSAO_BRIGHTNESS 1.0
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - CONTACT SHADOWS ||||||||||||||||||||||||||||||||||
@@ -86,7 +92,7 @@
 //more "noisy" pattern, less stable and slightly worse perfoming
 //NOTE 1: for NON-animated noise, I recomend using this (because it's sample pattern has better distribution across a single frame)
 //NOTE 2: game uses this by default
-//#define RANDOM_BLUE_NOISE
+// #define RANDOM_BLUE_NOISE
 
 //the main attraction, contact shadows!
 //in short it raymarches against the scene depth buffer to estimate shadows
@@ -94,64 +100,70 @@
 #define ENABLE_CONTACT_SHADOWS
 
 //this directly controls the quality of the contact shadows, the more the better!
-//RANGE: this should be between [4 <---> 128]
-//DEFAULT: 8
 //HIGHER VALUES: better quality shadows, less noise (more stable), and denser but expensive performance
 //LOWER VALUES: lower quality shadows, more noise (less stable), and lighter but cheaper performance
+//[CONFIG TYPE]: int
+//[CONFIG DEFAULT]: 8
+//[CONFIG RANGE]: [4, 128]
 #define CONTACT_SHADOWS_SAMPLES 16
 
 //this controls how far out the shadows go in screen space (and also can make shadows appear darker/denser or lighter depending on sample count)
-//RANGE: this should be between [10.0 <---> 200.0]
-//DEFAULT: 50.0
 //HIGHER VALUES: shadows can reach farther, but can become noiser, and more expensive (more screen area)
 //LOWER VALUES: shadows don't reach as far, but can become more stable, and cheaper (less screen area)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 50.0
 #define CONTACT_SHADOWS_RAY_LENGTH 75.0
 
-
-// Maximum assumed view-space thickness of an occluder. With the improved path,
-// the actual thickness starts at CONTACT_SHADOWS_MIN_THICKNESS and grows with
-// the projected pixel footprint up to this cap. With the legacy path this is
-// the constant thickness used for every sample.
-#define CONTACT_SHADOWS_THICKNESS 0.325
-
+//use a more accurate thickness hueristic that grows with the projected pixel footprint of the occluder, instead of a constant thickness for every sample
 #define CONTACT_SHADOWS_IMPROVED_THICKNESS
 
-// Directional-light values are scaled to the shader's existing 0.325
-// thickness range instead of using the local-light world-unit values.
+//maximum assumed view-space thickness of an occluder. 
+//with the improved path, the actual thickness starts at CONTACT_SHADOWS_MIN_THICKNESS and grows with the projected pixel footprint up to this cap. 
+//with the legacy path this is the constant thickness used for every sample.
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.325
+#define CONTACT_SHADOWS_THICKNESS 0.325
+
+//minimum thickness value of an occluder
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.065
 #define CONTACT_SHADOWS_MIN_THICKNESS 0.065
 
-// Multiplier for the view-space size of one pixel at the sampled depth.
+//multiplier for the view-space size of one pixel at the sampled depth.
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 25.0
 #define CONTACT_SHADOWS_PIXEL_THICKNESS_SCALE 25.0
 
-// Receiver exclusion in march steps. This prevents the first tested depth
-// interval from overlapping the surface that launched the ray.
+//receiver exclusion in march steps. 
+//this prevents the first tested depth interval from overlapping the surface that launched the ray.
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.5
 #define CONTACT_SHADOWS_SELF_OCCLUSION_SKIP_STEPS 0.5
 
-// Extra exclusion at grazing light angles, where the ray remains close to
-// the receiver plane for longer.
+//extra exclusion at grazing light angles, where the ray remains close to the receiver plane for longer.
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define CONTACT_SHADOWS_GRAZING_EXTRA_SKIP_STEPS 1.0
 
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces
 //high values = reduced acne but can introduce visual issues where shadows appear less grounded
 //low values = potentially increased acne but keeps shadows grounded
-//RANGE: this should be between [0.0 <---> 5.0]
-//DEFAULT: 0.1
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.1
 #define CONTACT_SHADOWS_BIAS 0.1
 
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces for hair specifically
-//RANGE: this should be between [0.0 <---> 5.0]
 //high values = reduced acne but can introduce visual issues where shadows appear less grounded
 //low values = potentially increased acne but keeps shadows grounded
-//RANGE: this should be between [0.0 <---> 5.0]
-//DEFAULT: 0.1
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.1
 #define CONTACT_SHADOWS_BIAS_HAIR 0.1
 
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces using surface normal
-//RANGE: this should be between [0.0 <---> 5.0]
 //high values = reduced acne but can introduce visual issues where shadows appear less grounded
 //low values = potentially increased acne but keeps shadows grounded
-//RANGE: this should be between [0.0 <---> 5.0]
-//DEFAULT: 0.1
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.1
 #define CONTACT_SHADOWS_NORMAL_BIAS 0.1
 
 //OPTIMIZATION: this avoids calculating contact shadows for sky pixels
@@ -162,7 +174,7 @@
 //OPTIMIZATION: this calculates contact shadows for every other pixel in a checkerboard like pattern that switches every frame
 //it saves a small bit of frametime, but does have a quality degredation with more visible shimmering at distances
 //disable if you want sharper true per-pixel contact shadows (at a bit of a perf hit)
-//#define CONTACT_SHADOW_CHECKERBOARD
+// #define CONTACT_SHADOW_CHECKERBOARD
 
 //[CONTACT_SHADOW_CHECKERBOARD ONLY!] This only works if checkerboarding is enabled!
 //this tries to fill in the gaps intelligently during checkerboard rendering minimize holes where no shadow is calculated 
@@ -170,7 +182,7 @@
 
 //[CONTACT_SHADOW_CHECKERBOARD and CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION ONLY!] This only works if checkerboarding and quad reconstruction is enabled!
 //sharper | checks within the 2x2 checker block and if there is a shadow pixel it just copies it
-//#define CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION_TYPE_MIN
+// #define CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION_TYPE_MIN
 
 //smoother | takes the values within the 2x2 checker block and averages them together for a slightly softer apperance
 #define CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION_TYPE_AVG
@@ -180,21 +192,33 @@
 //however the games GI term is far from perfect and can leave some areas quite dark so here you can control it
 //reduction in shadow strength can create an odd 90s style look where you can see a semblance of light leaking through to "fill in" for the shadow.
 //not a fan of it, and it's not accurate, but hey to each their own!
-//RANGE: this should be between [0.0 <---> 1.0]
-//DEFAULT: 1
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
+//[CONFIG RANGE]: [0, 1]
 #define CONTACT_SHADOWS_STRENGTH 1.0
 
 //this was requested by a couple of users who wanted to selectively disable contact shadows for specific material types
 //while this could create visual inconsistencies, I've wired them up anyway so you can use them at your own descretion
 //these both are used essentially for all materials within the game
-//#define DISABLE_CONTACT_SHADOWS_FOR_DEFAULT_LIT
-//#define DISABLE_CONTACT_SHADOWS_FOR_CLOTH //<-- this does get used on characters but it's not common, default_lit
+
+// #define DISABLE_CONTACT_SHADOWS_FOR_DEFAULT_LIT
+
+//this does get used on characters but it's not common, default_lit
+// #define DISABLE_CONTACT_SHADOWS_FOR_CLOTH
 
 //all these 4 below generally cover a majority of the character
-//#define DISABLE_CONTACT_SHADOWS_FOR_PREINTEGRATED_SKIN
-//#define DISABLE_CONTACT_SHADOWS_FOR_SUBSURFACE_PROFILE
-//#define DISABLE_CONTACT_SHADOWS_FOR_HAIR
-//#define DISABLE_CONTACT_SHADOWS_FOR_EYE
+
+//(common on characters)
+// #define DISABLE_CONTACT_SHADOWS_FOR_PREINTEGRATED_SKIN
+
+//(common on characters)
+// #define DISABLE_CONTACT_SHADOWS_FOR_SUBSURFACE_PROFILE
+
+//(common on characters)
+// #define DISABLE_CONTACT_SHADOWS_FOR_HAIR
+
+//(common on characters)
+// #define DISABLE_CONTACT_SHADOWS_FOR_EYE
 
 //another requested feature...
 //this is an added effect that will gradually "fade" contact shadows as it goes further out
@@ -206,7 +230,8 @@
 //this shapes the falloff
 //higher values = sharper/darker shadow further out
 //lower values = softer/lighter shadow further out
-//DEFAULT: 4
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 3.0
 #define CONTACT_SHADOWS_FALLOFF_CONTRAST 3.0
 
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -925,11 +950,11 @@ float LinearEyeDepth(float sceneDepth)
 /*
 //NOTE: this implementation seems to solve the view direction towards light and normals at grazing angles over self shadow occlusion
 
-#define CONTACT_SHADOWS_START_BIAS     0.0
+#define CONTACT_SHADOWS_START_BIAS 0.0
 #define CONTACT_SHADOWS_Z_EXTENT_SCALE 1.0
-#define CONTACT_SHADOWS_MIN_Z_EXTENT   1e-5
-#define CONTACT_SHADOWS_MAX_Z_EXTENT   0.001
-#define CONTACT_SHADOWS_Z_BIAS         1e-5
+#define CONTACT_SHADOWS_MIN_Z_EXTENT 0.00001
+#define CONTACT_SHADOWS_MAX_Z_EXTENT 0.001
+#define CONTACT_SHADOWS_Z_BIAS 0.00001
 
 float FastContactShadowClipSpace(
     float3 worldPosition,
@@ -1930,9 +1955,8 @@ PSOutput main(PSInput input)
         output.Color *= pow(graphicsBuffer.ScreenAO, SSAO_POWER);
     #endif
 
-    //output.Color = 0.0f;
-    //output.Color = saturate(dot(graphicsBuffer.WorldNormal, resolvedPixel.LightVector)) * saturate(dot(-resolvedPixel.CameraVector, resolvedPixel.LightVector));
-    //output.Color = saturate(dot(graphicsBuffer.WorldNormal, normalize(-resolvedPixel.CameraVector + resolvedPixel.LightVector)));
+    //last ditch effort to ensure that we dont get nan's or fireflies later
+    output.Color = max(0.0002f, output.Color);
 
     return output;
 }

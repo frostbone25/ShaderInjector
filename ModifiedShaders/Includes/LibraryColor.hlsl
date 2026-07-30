@@ -1,6 +1,7 @@
 //LibraryColor.hlsl
 
 #ifndef LIBRARY_COLOR
+//[NO CONFIG]
 #define LIBRARY_COLOR
 
 //reference - https://github.com/chendi-YU/UnrealEngine/blob/master/Engine/Shaders/Common.usf

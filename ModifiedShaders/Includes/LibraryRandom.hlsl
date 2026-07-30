@@ -1,6 +1,7 @@
 //LibraryRandom.hlsl
 
 #ifndef LIBRARY_RANDOM
+//[NO CONFIG]
 #define LIBRARY_RANDOM
 
 //||||||||||||||||||||||||||||||| INTERLEAVED GRADIENT NOISE |||||||||||||||||||||||||||||||

@@ -3,43 +3,82 @@
 //library includes
 //NOTE: this is where we have various useful shader functions
 #include "LibraryMath.hlsl"
+#include "LibraryRandom.hlsl"
 
 //||||||||||||||||||||||||||||||| CONFIGURATION - FOG |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| CONFIGURATION - FOG |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| CONFIGURATION - FOG |||||||||||||||||||||||||||||||
 
-//#define DISABLE_NEAR_FOG
+//disables the near field volumetric fog (with volumetric rays) close to the player/camera
+// #define DISABLE_NEAR_FOG
 
-//DEFAULT: 1.0
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define FOG_DENSITY_NEAR_FIELD_MULTIPLIER 1.0
 
-//#define DISABLE_FAR_FOG
+//disables the far field volumetric fog far away from the player/camera
+// #define DISABLE_FAR_FOG
 
-//DEFAULT: 1.0
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define FOG_DENSITY_FAR_FIELD_MULTIPLIER 2.0
 
 //||||||||||||||||||||||||||||||| CONFIGURATION - PROCEDUAL SKY (EXPERIMENTAL!!!) |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| CONFIGURATION - PROCEDUAL SKY (EXPERIMENTAL!!!) |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| CONFIGURATION - PROCEDUAL SKY (EXPERIMENTAL!!!) |||||||||||||||||||||||||||||||
 
-//#define ATMOSPHERE
-//#define ATMOSPHERE_ENABLE_GROUND  
-#define ATMOSPHERE_BOTTOM_RADIUS_KM       6360.0
-#define ATMOSPHERE_TOP_RADIUS_KM          6460.0
-#define ATMOSPHERE_RAYLEIGH_SCALE_KM         4.0
-#define ATMOSPHERE_MIE_SCALE_KM              2.2
-#define ATMOSPHERE_VIEW_STEPS                 16
-#define ATMOSPHERE_SUN_STEPS                   8
-#define ATMOSPHERE_GROUND_HEIGHT_CM            10000.0
-#define ATMOSPHERE_MIN_EYE_ALTITUDE_KM         0.002
-#define ATMOSPHERE_MIE_G                       0.8
-#define ATMOSPHERE_MULTISCATTER_STRENGTH       0.35
-#define ATMOSPHERE_SUN_ANGULAR_RADIUS          0.004675
-#define ATMOSPHERE_SUN_DISK_SCALE             20.0
+//(EXPERIMENTAL) enables a procedual sky shading that replaces the static skybox
+// #define ATMOSPHERE
 
+//(EXPERIMENTAL)
+// #define ATMOSPHERE_ENABLE_GROUND
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_BOTTOM_RADIUS_KM 6360.0
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_TOP_RADIUS_KM 6460.0
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_RAYLEIGH_SCALE_KM 4.0
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_MIE_SCALE_KM 2.2
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_VIEW_STEPS 16
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_SUN_STEPS 8
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_GROUND_HEIGHT_CM 10000.0
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_MIN_EYE_ALTITUDE_KM 0.002
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_MIE_G 0.8
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_MULTISCATTER_STRENGTH 0.35
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_SUN_ANGULAR_RADIUS 0.004675
+
+//(EXPERIMENTAL)
+#define ATMOSPHERE_SUN_DISK_SCALE 20.0
+
+//[NO CONFIG]
 #define ATMOSPHERE_APPROX_SUN_DIRECTION_SIGN 1.0
+
+//[NO CONFIG]
 #define ATMOSPHERE_APPROX_RAYLEIGH_SCALE_KM 6.0
+
+//[NO CONFIG]
 #define ATMOSPHERE_APPROX_MIE_SCALE_KM 6.2
+
+//[NO CONFIG]
 #define ATMOSPHERE_APPROX_SKYLIGHT_STRENGTH 1.0
 
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -369,6 +408,10 @@ cbuffer FogStruct : register(b1)
 	float4 FogStruct_IntegratedScatteringVolumeTextureContext : packoffset(c38.x);
 };
 
+//|||||||||||||||||||||||||||||||||| STRUCTS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| STRUCTS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| STRUCTS ||||||||||||||||||||||||||||||||||
+
 struct FApplyFogPSInput
 {
     float2 UV       : TEXCOORD0;
@@ -381,6 +424,49 @@ struct FApplyFogPSOutput
     float4 FogColor       : SV_Target0;
     float4 Transmittance  : SV_Target1;
 };
+
+//||||||||||||||||||||||||||||||| RANDOM |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| RANDOM |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| RANDOM |||||||||||||||||||||||||||||||
+
+//128x128x64 R8G8B8A8
+float4 GetBlueNoise(float2 pixelPosition, uint rayIndex)
+{
+	int2 rayOffset = int2(47, 113) * (int)rayIndex;
+
+	#if defined(RANDOM_ANIMATE_NOISE)
+		uint temporalSeed = JenkinsHash((uint)View_FrameNumber);
+		int2 temporalOffset = int2((int)(temporalSeed & 127u), (int)((temporalSeed >> 7u) & 127u));
+		int frameSlice = (int)((temporalSeed >> 14u) & 63u);
+		int3 noiseCoordinate = int3(((int2)pixelPosition + rayOffset + temporalOffset) & 127, (frameSlice + (int)rayIndex * 17) & 63);
+	#else
+		int3 noiseCoordinate = int3(((int2)pixelPosition + rayOffset) & 127, ((int)rayIndex * 17) & 63);
+	#endif
+
+    return View_SpatiotemporalBlueNoiseVolumeTexture.Load(int4(noiseCoordinate, 0));
+}
+
+float4 GetRandom(float2 pixelPosition, uint rayIndex)
+{
+	#if defined(RANDOM_BLUE_NOISE)
+		return GetBlueNoise(pixelPosition, rayIndex);
+	#elif defined(RANDOM_WHITE_NOISE)
+		#if defined(RANDOM_ANIMATE_NOISE)
+			int frameIndex = View_FrameNumber;
+		#else
+			int frameIndex = 0;
+		#endif
+
+		uint raySeed = rayIndex * 0x9e3779b9u;
+		return float4(
+				GenerateHashedRandomFloat(uint4(pixelPosition, frameIndex, 0x68bc21ebu ^ raySeed)),
+				GenerateHashedRandomFloat(uint4(pixelPosition, frameIndex, 0x02e5be93u ^ raySeed)),
+				GenerateHashedRandomFloat(uint4(pixelPosition, frameIndex, 0x03e56253u ^ raySeed)),
+				GenerateHashedRandomFloat(uint4(pixelPosition, frameIndex, 0x01aabe43u ^ raySeed)));
+	#else
+		return float4(1, 1, 1, 1);
+	#endif
+}
 
 float ConvertFromDeviceZ(float deviceZ)
 {

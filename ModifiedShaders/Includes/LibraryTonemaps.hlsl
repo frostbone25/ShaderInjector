@@ -1,24 +1,51 @@
 //LibraryTonemaps.hlsl
 
 #ifndef LIBRARY_TONEMAPS
+//[NO CONFIG]
 #define LIBRARY_TONEMAPS
 
 //operators for each of the tonemaps
 
-//Defines the SDR reference white level used in our tone mapping (typically 250 nits).
-//#define GRAN_TURISMO_SDR_PAPER_WHITE = 250.0 // cd/m^2
-#define TONEMAP_GRAN_TURISMO_7_SDR_PAPER_WHITE 100.0 //NOTE TO SELF: game has 100 by default
+//defines the SDR reference white level used in our tone mapping (typically 250 nits). cd/m^2
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 100.0
+#define TONEMAP_GRAN_TURISMO_7_SDR_PAPER_WHITE 100.0
 
+//white point for the reinhard 2 tonemapper
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 4.0
 #define TONEMAP_REINHARD2_WHITE 4.0
 
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define TONEMAP_UCHIMURA_MAX_DISPLAY_BRIGHTNESS 1.0
+
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define TONEMAP_UCHIMURA_CONTRAST 1.0
+
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.22
 #define TONEMAP_UCHIMURA_LINEAR_SECTION_START 0.22
+
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.4
 #define TONEMAP_UCHIMURA_LINEAR_SECTION_LENGTH 0.4
+
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.33
 #define TONEMAP_UCHIMURA_BLACK 1.33
+
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.0
 #define TONEMAP_UCHIMURA_PEDESTAL 0.0
 
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 11.2
 #define TONEMAP_UNCHARTED2_WHITE_POINT 11.2
+
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 2.0
 #define TONEMAP_UNCHARTED2_EXPOSURE_BIAS 2.0
 
 //|||||||||||||||||||||||||||||||||||||||||||| ACES (2015) TONEMAP ||||||||||||||||||||||||||||||||||||||||||||
@@ -227,7 +254,7 @@ struct GT7ToneMapping
 };
 
 // Mode options.
-#define TONE_MAPPING_UCS_ICTCP  0
+#define TONE_MAPPING_UCS_ICTCP 0
 #define TONE_MAPPING_UCS_JZAZBZ 1
 
 #define TONE_MAPPING_UCS TONE_MAPPING_UCS_ICTCP

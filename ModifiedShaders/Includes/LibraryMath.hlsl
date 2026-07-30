@@ -1,6 +1,7 @@
 //LibraryMath.hlsl
 
 #ifndef LIBRARY_MATH
+//[NO CONFIG]
 #define LIBRARY_MATH
 
 static const float MATH_FLT_EPSILON   = 1.192092896e-07; //smallest positive number

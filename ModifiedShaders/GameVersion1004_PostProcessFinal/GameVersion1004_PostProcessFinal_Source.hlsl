@@ -2,6 +2,7 @@
 //Game Shader Version: 1.0.0.4
 
 //NOTE: bloom has some monkey buisness that occured in 1.0.0.3 | 1.0.0.2 | 1.0.0.1 | 1.0.0.0
+//[NO CONFIG]
 //#define GAME_VERSION_1_0_0_3
 
 //NOTE: you'll find this in ShaderInjector/ModifiedShaders/Includes

@@ -1,5 +1,5 @@
 //SSR.hlsl
-// Define GAME_VERSION_1_0_0_3 before including this file for the 1.0.0.3 ABI.
+//Define GAME_VERSION_1_0_0_3 before including this file for the 1.0.0.3 ABI.
 
 #include "LibraryMath.hlsl"
 #include "LibraryRandom.hlsl"
@@ -9,9 +9,9 @@
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - SSR ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - SSR ||||||||||||||||||||||||||||||||||
 
-//this completely disables the entire SSR pass and effectively makes it return no data
+//this completely disables the entire SSR pass and effectively makes it return no data (performant)
 //if you want no SSR you can enable this
-//#define DISABLE_SSR
+// #define DISABLE_SSR
 
 //this changes the noise pattern every frame, which with Temporal Anti-Aliasing (or DLSS or anything related)
 //you want to do this, that way samples change every frame and results get blended together over time for a better final apperance
@@ -21,26 +21,39 @@
 //that would lead to a performance speedup but worse looking reflections
 
 //this is used by the game by default, recomended
-//#define RANDOM_BLUE_NOISE
+#define RANDOM_BLUE_NOISE
 
 //this is a non-texture based, more random than blue noise but can look worse because of that
-#define RANDOM_WHITE_NOISE
+// #define RANDOM_WHITE_NOISE
 
 //factors in surface roughness for much better/higher quality reflections
-//this does make the SSR a little more expensive (more randomness = less coherence)
+//this does make the SSR a little more expensive and introduces more noise (more randomness = less coherence)
+//but overall reflections are higher quality, and respect the material properties within the scene (the original does not)
 #define ENABLE_SSR_ROUGHNESS
 
 //number of independent reflection rays traced per pixel
+//expensive, but if you want to reduce the noise from ENABLE_SSR_ROUGHNESS this is one way to control it
+//[CONFIG TYPE]: int
+//[CONFIG DEFAULT]: 1
+//[CONFIG RANGE]: [1, 64]
 #define SSR_RAY_COUNT 1
 
 //disabled by default, but enabling this allows you to set the sample count in regards to the raymarch
 //higher quality means less artifacts
-//#define SSR_OVERRIDE_STEP_COUNT
-#define SSR_STEP_COUNT 16
+// #define SSR_OVERRIDE_STEP_COUNT
+
+//how many raymarching steps we do for the SSR, higher steps mean better quality/accuracy but more expensive
+//[CONFIG TYPE]: int
+//[CONFIG DEFAULT]: 8
+//[CONFIG RANGE]: [1, 64]
+#define SSR_STEP_COUNT 8
 
 //disabled by default, but this allows you to control the thickness factor in regards to the raymarching
 //smaller values meanse less artifacts, but reflections appear less "full"
-//#define SSR_DEPTH_THICKNESS_MULTIPLIER
+// #define SSR_DEPTH_THICKNESS_MULTIPLIER
+
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.5
 #define SSR_DEPTH_THICKNESS_MULTIPLIER_FACTOR 0.5
 
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -73,8 +86,8 @@ cbuffer _Globals : register(b0)
 	float4 SSRParams : packoffset(c1.x);
 
 #if defined(GAME_VERSION_1_0_0_3)
-	// Present in the 1.0.0.3 layout even though the optimized original shader
-	// does not consume it. Its insertion shifts every following SSR parameter.
+	//present in the 1.0.0.3 layout even though the optimized original shader does not consume it. 
+	//its insertion shifts every following SSR parameter.
 	float PrevSceneColorPreExposureCorrection : packoffset(c2.x);
 	float4 HZBUvFactorAndInvFactor : packoffset(c3.x);
 	float4 PrevScreenPositionScaleBias : packoffset(c4.x);
@@ -403,6 +416,12 @@ struct TraceResult
     float  confidence;
 };
 
+struct ResolvedReflectionRay
+{
+    float3 historyColor;
+    float  confidence;
+};
+
 //||||||||||||||||||||||||||||||| RANDOM |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| RANDOM |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| RANDOM |||||||||||||||||||||||||||||||
@@ -413,11 +432,12 @@ float4 GetBlueNoise(float2 pixelPosition, uint rayIndex)
 	int2 rayOffset = int2(47, 113) * (int)rayIndex;
 
 	#if defined(RANDOM_ANIMATE_NOISE)
-		int3 noiseCoordinate = int3(((int2)pixelPosition + rayOffset) & 127,
-			(View_StateFrameIndex + (int)rayIndex * 17) & 63);
+		uint temporalSeed = JenkinsHash((uint)View_FrameNumber);
+		int2 temporalOffset = int2((int)(temporalSeed & 127u), (int)((temporalSeed >> 7u) & 127u));
+		int frameSlice = (int)((temporalSeed >> 14u) & 63u);
+		int3 noiseCoordinate = int3(((int2)pixelPosition + rayOffset + temporalOffset) & 127, (frameSlice + (int)rayIndex * 17) & 63);
 	#else
-		int3 noiseCoordinate = int3(((int2)pixelPosition + rayOffset) & 127,
-			((int)rayIndex * 17) & 63);
+		int3 noiseCoordinate = int3(((int2)pixelPosition + rayOffset) & 127, ((int)rayIndex * 17) & 63);
 	#endif
 
     return View_SpatiotemporalBlueNoiseVolumeTexture.Load(int4(noiseCoordinate, 0));
@@ -429,7 +449,7 @@ float4 GetRandom(float2 pixelPosition, uint rayIndex)
 		return GetBlueNoise(pixelPosition, rayIndex);
 	#elif defined(RANDOM_WHITE_NOISE)
 		#if defined(RANDOM_ANIMATE_NOISE)
-			int frameIndex = View_StateFrameIndex;
+			int frameIndex = View_FrameNumber;
 		#else
 			int frameIndex = 0;
 		#endif
@@ -444,6 +464,7 @@ float4 GetRandom(float2 pixelPosition, uint rayIndex)
 		return float4(1, 1, 1, 1);
 	#endif
 }
+
 
 //||||||||||||||||||||||||||||||| GGX SPECULAR |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| GGX SPECULAR |||||||||||||||||||||||||||||||
@@ -493,10 +514,7 @@ half3 ImportanceSampleGGX_VNDF(
 
 float ConvertFromDeviceZ(float deviceZ)
 {
-    return deviceZ * View_InvDeviceZToWorldZTransform.x
-         + View_InvDeviceZToWorldZTransform.y
-         + rcp(deviceZ * View_InvDeviceZToWorldZTransform.z
-             - View_InvDeviceZToWorldZTransform.w);
+    return deviceZ * View_InvDeviceZToWorldZTransform.x + View_InvDeviceZToWorldZTransform.y + rcp(deviceZ * View_InvDeviceZToWorldZTransform.z - View_InvDeviceZToWorldZTransform.w);
 }
 
 float3 ReconstructTranslatedWorldPosition(float2 pixelPosition, float linearDepth)
@@ -511,8 +529,8 @@ float3 ReconstructTranslatedWorldPosition(float2 pixelPosition, float linearDept
 
 float3 ReconstructTranslatedWorldVector(float2 ndc, float deviceZ)
 {
-    // w=0 deliberately omits the translation row. The DXIL compares two such
-    // vectors, so the translation would cancel in the distance test anyway.
+    //w=0 deliberately omits the translation row. 
+	//the DXIL compares two such vectors, so the translation would cancel in the distance test anyway.
     float linearDepth = ConvertFromDeviceZ(deviceZ);
     return mul(View_ScreenToTranslatedWorld, float4(linearDepth * float3(ndc, 1.0f), 0.0f)).xyz;
 }
@@ -526,37 +544,40 @@ uint DecodeShadingModelId(float packedGBufferAlpha)
     return ((uint)round(packedGBufferAlpha * 255.0f)) & 0x0fu;
 }
 
-SurfaceData DecodeSurface(float2 pixelPosition)
+SurfaceData DecodeSurface(float2 pixelPosition, int2 pixelCoordinate, float4 gbufferB)
 {
     SurfaceData surface;
 
-    float2 bufferUv = pixelPosition * View_BufferSizeAndInvSize.zw;
-    float4 gbufferA = GBufferATexture.SampleLevel(View_SharedPointClampedSampler, bufferUv, 0.0f);
-    float4 gbufferB = GBufferBTexture.SampleLevel(View_SharedPointClampedSampler, bufferUv, 0.0f);
-    float4 gbufferE = GBufferETexture.SampleLevel(View_SharedPointClampedSampler, bufferUv, 0.0f);
-    float deviceZ = SceneDepthTexture.SampleLevel(View_SharedPointClampedSampler, bufferUv, 0.0f).r;
+    float4 gbufferA = GBufferATexture.Load(int3(pixelCoordinate, 0));
+    float deviceZ = SceneDepthTexture.Load(int3(pixelCoordinate, 0)).r;
 
     surface.shadingModelId = DecodeShadingModelId(gbufferB.a);
     surface.normal = DecodeUnitVector(gbufferA.xyz);
     surface.linearDepth = ConvertFromDeviceZ(deviceZ);
     surface.translatedWorldPosition = ReconstructTranslatedWorldPosition(pixelPosition, surface.linearDepth);
 
-    // DXIL decodes the low nibble of CustomData.a as a 0..1 blend. This path
-    // is gated by the view's wetness intensity and bends the normal toward the
-    // vector stored in GBufferE.xyz while reducing roughness.
-    uint customBlendBits = ((uint)round(saturate(gbufferE.a) * 255.0f)) & 0x0fu;
-    float customBlend = (customBlendBits / 15.0f) * (View_WetnessIntensity > 0.0f ? 1.0f : 0.0f);
-
     float rawRoughness = gbufferB.b;
-    surface.roughness = sqrt(saturate(rawRoughness * rawRoughness * (1.0f - customBlend)));
-    surface.normal = normalize(lerp(surface.normal, DecodeUnitVector(gbufferE.xyz), customBlend));
+    surface.roughness = saturate(rawRoughness);
+
+    if (View_WetnessIntensity > 0.0f)
+    {
+        float4 gbufferE = GBufferETexture.Load(int3(pixelCoordinate, 0));
+        uint customBlendBits = ((uint)round(saturate(gbufferE.a) * 255.0f)) & 0x0fu;
+
+        if (customBlendBits != 0u)
+        {
+            float customBlend = customBlendBits / 15.0f;
+            surface.roughness *= sqrt(1.0f - customBlend);
+            surface.normal = normalize(lerp(surface.normal, DecodeUnitVector(gbufferE.xyz), customBlend));
+        }
+    }
 
     if (surface.shadingModelId == SHADINGMODELID_PREINTEGRATED_SKIN)
         surface.roughness *= 0.93655f;
     else if (surface.shadingModelId == SHADINGMODELID_HAIR)
         surface.roughness = 0.48f;
 
-    // Same position without the matrix translation, used by hit-distance logic.
+    //same position without the matrix translation, used by hit-distance logic.
     float2 viewNdc;
     viewNdc.x = (pixelPosition.x - View_ViewRectMin.x) * View_ViewSizeAndInvSize.z * 2.0f - 1.0f;
     viewNdc.y = 1.0f - (pixelPosition.y - View_ViewRectMin.y) * View_ViewSizeAndInvSize.w * 2.0f;
@@ -575,10 +596,8 @@ float2 HzbUvToNdc(float2 hzbUv)
 	return mad(screenUv, float2(2.0f, -2.0f), float2(-1.0f, 1.0f));
 }
 
-float3 ComputeReflectionTraceDirection(SurfaceData surface, float2 random, out bool valid)
+float3 ComputeReflectionTraceDirection(SurfaceData surface, float3 viewDirection, float2 random, out bool valid)
 {
-    float3 viewDirection = normalize(View_TranslatedWorldCameraOrigin - surface.translatedWorldPosition);
-
 	#if defined(ENABLE_SSR_ROUGHNESS)
 		//GBuffer roughness looks to be perceptual roughness
 		//GGX expects roughness to be "roughness", plus this better matches the cubemap specular convolution level
@@ -593,17 +612,12 @@ float3 ComputeReflectionTraceDirection(SurfaceData surface, float2 random, out b
 
 		half roughness = perceptualRoughness * perceptualRoughness;
 
-		half3 sampledDirection = ImportanceSampleGGX_VNDF(
+		return ImportanceSampleGGX_VNDF(
 			random,
 			surface.normal,
 			viewDirection,
 			roughness,
 			valid);
-
-		float directionLengthSquared = dot(sampledDirection, sampledDirection);
-
-		valid = valid && directionLengthSquared > 1.0e-6f;
-		return valid ? sampledDirection : 0.0f;
 	#else
 		//no randomness from the GGX specular
 		//so the reflection direction should always be valid here
@@ -624,7 +638,7 @@ float3 ComputeReflectionTraceDirection(SurfaceData surface, float2 random, out b
 	#endif
 }
 
-ScreenRay BuildScreenRay(SurfaceData surface, float3 traceDirection, float random)
+ScreenRay BuildScreenRay(SurfaceData surface, float3 traceDirection, float roughnessSquared, float random)
 {
     ScreenRay ray;
 
@@ -632,15 +646,13 @@ ScreenRay BuildScreenRay(SurfaceData surface, float3 traceDirection, float rando
     float3 endWorld = surface.translatedWorldPosition + traceDirection * surface.linearDepth;
     float4 endClip = mul(View_TranslatedWorldToClip, float4(endWorld, 1.0f));
 
-    ray.startNdc = startClip.xyz * rcp(startClip.w);
-    ray.startNdc.z += 0.05f * rcp(startClip.w);
+    float inverseStartW = rcp(startClip.w);
+    ray.startNdc = startClip.xyz * inverseStartW;
+    ray.startNdc.z += 0.05f * inverseStartW;
     float3 endNdc = endClip.xyz * rcp(endClip.w);
 
-    float roughnessSquared = max(1.0e-5f, surface.roughness * surface.roughness);
-    float roughnessLimitedDistance = 10.0f / roughnessSquared;
+    float roughnessLimitedDistance = 10.0f / max(1.0e-5f, roughnessSquared);
 
-    // The compiled shader estimates a second end point directly from two rows
-    // of ViewToClip. Keep the component-level form to avoid changing results.
     float roughEndW = startClip.w + roughnessLimitedDistance * View_ViewToClip[0].w;
     float2 roughEndNdc = (startClip.xy + roughnessLimitedDistance * View_ViewToClip[0].xy) * rcp(roughEndW);
 
@@ -649,8 +661,8 @@ ScreenRay BuildScreenRay(SurfaceData surface, float3 traceDirection, float rando
 
     float3 unclippedDelta = endNdc - ray.startNdc;
 
-    // Clip the projected segment to the screen using the algebra found in DXIL.
-    float screenRadius = 0.5f * length(unclippedDelta.xy);
+    float unclippedProjectedLength = length(unclippedDelta.xy);
+    float screenRadius = 0.5f * unclippedProjectedLength;
     float2 overshoot = max(abs(unclippedDelta.xy + screenRadius * ray.startNdc.xy) - screenRadius, 0.0f);
     float2 axisFraction = 1.0f - overshoot / abs(unclippedDelta.xy);
     float clipScale = min(axisFraction.x, axisFraction.y) / screenRadius;
@@ -662,7 +674,7 @@ ScreenRay BuildScreenRay(SurfaceData surface, float3 traceDirection, float rando
 	#endif
 
     float roughProjectedLength = length(roughEndNdc - ray.startNdc.xy);
-    float traceProjectedLength = max(1.0e-4f, length(ray.deltaNdc.xy));
+    float traceProjectedLength = max(1.0e-4f, unclippedProjectedLength * abs(clipScale));
     float stepEstimate = saturate(roughProjectedLength / traceProjectedLength) * 8.0f + random;
 
 	#if defined(SSR_OVERRIDE_STEP_COUNT)
@@ -672,13 +684,16 @@ ScreenRay BuildScreenRay(SurfaceData surface, float3 traceDirection, float rando
 	#endif
 
     ray.startHzbUv = float2(ray.startNdc.x * 0.5f + 0.5f, 0.5f - ray.startNdc.y * 0.5f) * HZBUvFactorAndInvFactor.xy;
-    ray.hzbStep = float3(ray.deltaNdc.x * HZBUvFactorAndInvFactor.x,
-                        -ray.deltaNdc.y * HZBUvFactorAndInvFactor.y,
-                         ray.deltaNdc.z) * float3(1.0f / 16.0f,
-                                                  1.0f / 16.0f,
-                                                  1.0f / 8.0f);
 
-	ray.depthThickness *= 0.125f; //(1.0f / 8.0f)
+	#if defined(SSR_OVERRIDE_STEP_COUNT)
+		const float inverseStepCount = 1.0f / (float)SSR_STEP_COUNT;
+		ray.hzbStep = float3(ray.deltaNdc.x * HZBUvFactorAndInvFactor.x, -ray.deltaNdc.y * HZBUvFactorAndInvFactor.y, ray.deltaNdc.z) * float3(0.5f * inverseStepCount, 0.5f * inverseStepCount, inverseStepCount);
+		ray.depthThickness *= inverseStepCount;
+	#else
+		ray.hzbStep = float3(ray.deltaNdc.x * HZBUvFactorAndInvFactor.x, -ray.deltaNdc.y * HZBUvFactorAndInvFactor.y, ray.deltaNdc.z) * float3(1.0f / 16.0f, 1.0f / 16.0f, 1.0f / 8.0f);
+		ray.depthThickness *= 0.125f;
+	#endif
+
     return ray;
 }
 
@@ -689,36 +704,46 @@ TraceResult TraceHierarchicalZ(ScreenRay ray, float random)
     uint hzbWidth;
 	uint hzbHeight;
     HZB.GetDimensions(hzbWidth, hzbHeight);
+    float2 hzbDimensions = float2(hzbWidth, hzbHeight);
 
     float previousDepthDifference = 0.0f;
+    float sampleDistance = random;
+    float2 sampleUv = ray.startHzbUv + sampleDistance * ray.hzbStep.xy;
+    float rayDeviceZ = ray.startNdc.z + sampleDistance * ray.hzbStep.z;
 
     [loop]
     for (uint stepIndex = 0u; stepIndex < ray.stepCount; ++stepIndex)
     {
-        float sampleDistance = (float)stepIndex + random;
-        float2 sampleUv = ray.startHzbUv + sampleDistance * ray.hzbStep.xy;
-        float rayDeviceZ = ray.startNdc.z + sampleDistance * ray.hzbStep.z;
-
-        int2 samplePixel = (int2)floor(sampleUv * float2(hzbWidth, hzbHeight));
+        int2 samplePixel = (int2)(sampleUv * hzbDimensions);
         float hzbDeviceZ = HZB.Load(int3(samplePixel, 0)).r;
         float depthDifference = rayDeviceZ - hzbDeviceZ;
 
         bool crossesSurface = abs(-ray.depthThickness - depthDifference) < ray.depthThickness;
+
         if (crossesSurface && hzbDeviceZ != 0.0f)
         {
             float previous = (stepIndex == 0u) ? depthDifference - ray.hzbStep.z : previousDepthDifference;
             float refinement = saturate(previous / (previous - depthDifference));
-            float hitDistance = abs(random - 1.0f + (float)stepIndex + refinement);
+            float hitDistance = abs(sampleDistance - 1.0f + refinement);
 
             result.hzbUv = ray.startHzbUv + hitDistance * ray.hzbStep.xy;
             result.deviceZ = ray.startNdc.z + hitDistance * ray.hzbStep.z;
-            //float normalizedDistance = min(hitDistance / 8.0f, 1.0f);
-			float normalizedDistance = min(hitDistance * 0.125f, 1.0f);
+
+			#if defined(SSR_OVERRIDE_STEP_COUNT)
+				float normalizedDistance = min(hitDistance * (1.0f / (float)SSR_STEP_COUNT), 1.0f);
+			#else
+				float normalizedDistance = min(hitDistance * 0.125f, 1.0f);
+			#endif
+
             result.confidence = 1.0f - normalizedDistance * normalizedDistance;
+
             return result;
         }
 
         previousDepthDifference = depthDifference;
+        sampleDistance += 1.0f;
+        sampleUv += ray.hzbStep.xy;
+        rayDeviceZ += ray.hzbStep.z;
     }
 
     return result;
@@ -730,10 +755,8 @@ TraceResult TraceHierarchicalZ(ScreenRay ray, float random)
 
 int2 GetVelocityPixel(float2 hitNdc)
 {
-    float2 clampedNdc = clamp(hitNdc, -1.0f, 1.0f);
-    float2 bufferUv = clampedNdc * View_ScreenPositionScaleBias.xy + View_ScreenPositionScaleBias.wz;
+    float2 bufferUv = hitNdc * View_ScreenPositionScaleBias.xy + View_ScreenPositionScaleBias.wz;
     int2 pixel = (int2)(bufferUv * View_BufferSizeAndInvSize.xy);
-
     int2 viewMin = (int2)View_ViewRectMin.xy;
     int2 viewMax = (int2)(View_ViewRectMin.xy + View_ViewSizeAndInvSize.xy) - 1;
     return clamp(pixel, viewMin, viewMax);
@@ -744,9 +767,7 @@ float2 GetScreenMotion(float2 hitNdc, float hitDeviceZ)
     float2 encodedVelocity = GBufferVelocityTexture.Load(int3(GetVelocityPixel(hitNdc), 0)).xy;
 
     if (encodedVelocity.x != 0.0f)
-    {
         return clamp((encodedVelocity - 0.500008f) * 4.00018f, -2.0f, 2.0f);
-    }
 
     float4 previousClip = mul(View_ClipToPrevClip, float4(hitNdc, hitDeviceZ, 1.0f));
     float2 previousNdc = previousClip.xy * rcp(previousClip.w);
@@ -755,14 +776,19 @@ float2 GetScreenMotion(float2 hitNdc, float hitDeviceZ)
 
 float2 FoldNdcAtScreenEdges(float2 ndc)
 {
-    float2 folded = ndc - sign(ndc) * 2.0f * max(abs(ndc) - 1.0f, 0.0f);
+    float2 folded;
+
+    folded.x = (ndc.x > 1.0f) ? (2.0f - ndc.x) : (ndc.x < -1.0f) ? (-2.0f - ndc.x) : ndc.x;
+    folded.y = (ndc.y > 1.0f) ? (2.0f - ndc.y) : (ndc.y < -1.0f) ? (-2.0f - ndc.y) : ndc.y;
+
     return clamp(folded, -1.0f, 1.0f);
 }
 
 float ComputePreviousScreenFade(float2 previousNdc)
 {
-    float2 clampDeltaUv = (clamp(previousNdc, -1.0f, 1.0f) - previousNdc) * 0.5f;
-    float2 edgePenalty = saturate(abs(clampDeltaUv) * 5.0f - 4.0f);
+    //abs(clamp(x, -1, 1) - x) == max(abs(x) - 1, 0).
+    float2 outsideNdc = max(abs(previousNdc) - 1.0f, 0.0f);
+    float2 edgePenalty = saturate(outsideNdc * 2.5f - 4.0f);
     return max(0.0f, 1.0f - dot(edgePenalty, edgePenalty));
 }
 
@@ -783,6 +809,48 @@ float3 LoadPreviousSceneColor(float2 previousNdc)
     return min(history, 65504.0f) * View_PreviousOneOverPreExposure;
 }
 
+ResolvedReflectionRay ResolveReflectionRay(SurfaceData surface, float3 viewDirection, float roughnessSquared, float2 pixelPosition, uint rayIndex)
+{
+    ResolvedReflectionRay resolved = (ResolvedReflectionRay)0;
+    float4 random = GetRandom(pixelPosition, rayIndex);
+
+    bool validMicrofacetSample;
+    float3 traceDirection = ComputeReflectionTraceDirection(surface, viewDirection, random.xy, validMicrofacetSample);
+
+    if (!validMicrofacetSample)
+        return resolved;
+
+    ScreenRay ray = BuildScreenRay(surface, traceDirection, roughnessSquared, random.z);
+    TraceResult trace = TraceHierarchicalZ(ray, random.w);
+
+    if (trace.confidence <= 0.0f)
+        return resolved;
+
+    float2 hitNdc = HzbUvToNdc(trace.hzbUv);
+    float3 hitPositionNoOffset = ReconstructTranslatedWorldVector(hitNdc, trace.deviceZ);
+    float3 hitDelta = surface.translatedWorldPositionNoOffset - hitPositionNoOffset;
+    float hitDistanceSquared = dot(hitDelta, hitDelta);
+
+    //SSR temporal blending.
+    float2 motion = GetScreenMotion(hitNdc, trace.deviceZ);
+    float2 previousNdc = hitNdc - motion;
+    float previousScreenFade = ComputePreviousScreenFade(previousNdc);
+    float distanceFade = saturate(rcp(max(1.0e-5f, roughnessSquared * roughnessSquared * hitDistanceSquared)));
+
+    resolved.confidence = previousScreenFade * trace.confidence * SSRParams.x * distanceFade;
+
+    //defer the history lookup until confidence is known to contribute.
+    if (resolved.confidence <= 0.0f)
+    {
+        resolved.confidence = 0.0f;
+        return resolved;
+    }
+
+    resolved.historyColor = LoadPreviousSceneColor(previousNdc);
+
+    return resolved;
+}
+
 //||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
@@ -796,59 +864,49 @@ OutputStruct main(in InputStruct IN)
 	#endif
 
     float2 pixelPosition = IN.Position.xy;
-    SurfaceData surface = DecodeSurface(pixelPosition);
+    int2 pixelCoordinate = (int2)pixelPosition;
 
-    if (surface.shadingModelId == SHADINGMODELID_UNLIT)
+    // Decode the shading model first so unlit pixels avoid the rest of the pass.
+    float4 gbufferB = GBufferBTexture.Load(int3(pixelCoordinate, 0));
+    uint shadingModelId = DecodeShadingModelId(gbufferB.a);
+
+    if (shadingModelId == SHADINGMODELID_UNLIT)
         return OUT;
 
-	float3 weightedHistoryColor = 0.0f;
-	float totalConfidence = 0.0f;
+    SurfaceData surface = DecodeSurface(pixelPosition, pixelCoordinate, gbufferB);
+    float3 viewDirection = normalize(View_TranslatedWorldCameraOrigin - surface.translatedWorldPosition);
+    float roughnessSquared = surface.roughness * surface.roughness;
 
-	[loop]
-	for (uint rayIndex = 0u; rayIndex < SSR_RAY_COUNT; ++rayIndex)
-	{
-		float4 random = GetRandom(pixelPosition, rayIndex);
+	#if SSR_RAY_COUNT == 1
+		// Avoid a generic one-iteration loop and the redundant
+		// (history * confidence) / confidence accumulation path.
+		ResolvedReflectionRay resolved = ResolveReflectionRay(surface, viewDirection, roughnessSquared, pixelPosition, 0u);
 
-		bool validMicrofacetSample;
-		float3 traceDirection = ComputeReflectionTraceDirection(surface, random.xy, validMicrofacetSample);
+		if (resolved.confidence <= 0.0f)
+			return OUT;
 
-		if (!validMicrofacetSample)
-			continue;
+		OUT.Target0 = float4(resolved.historyColor * View_PreExposure, resolved.confidence);
+	#else
+		float3 weightedHistoryColor = 0.0f;
+		float totalConfidence = 0.0f;
 
-		ScreenRay ray = BuildScreenRay(surface, traceDirection, random.z);
-		TraceResult trace = TraceHierarchicalZ(ray, random.w);
-
-		if (trace.confidence <= 0.0f)
-			continue;
-
-		float2 hitNdc = HzbUvToNdc(trace.hzbUv);
-		float3 hitPositionNoOffset = ReconstructTranslatedWorldVector(hitNdc, trace.deviceZ);
-		float3 hitDelta = surface.translatedWorldPositionNoOffset - hitPositionNoOffset;
-		float hitDistanceSquared = dot(hitDelta, hitDelta);
-
-		//SSR temporal blending
-		float2 motion = GetScreenMotion(hitNdc, trace.deviceZ);
-		float2 previousNdc = hitNdc - motion;
-		float previousScreenFade = ComputePreviousScreenFade(previousNdc);
-		float3 historyColor = LoadPreviousSceneColor(previousNdc);
-
-		float roughnessSquared = surface.roughness * surface.roughness;
-		float distanceFade = saturate(rcp(max(1.0e-5f, roughnessSquared * roughnessSquared * hitDistanceSquared)));
-		float confidence = previousScreenFade * trace.confidence * SSRParams.x * distanceFade;
-
-		if (confidence > 0.0f)
+		[loop]
+		for (uint rayIndex = 0u; rayIndex < SSR_RAY_COUNT; ++rayIndex)
 		{
-			weightedHistoryColor += historyColor * confidence;
-			totalConfidence += confidence;
+			ResolvedReflectionRay resolved = ResolveReflectionRay(
+				surface, viewDirection, roughnessSquared, pixelPosition, rayIndex);
+
+			weightedHistoryColor += resolved.historyColor * resolved.confidence;
+			totalConfidence += resolved.confidence;
 		}
-	}
 
-	if (totalConfidence <= 0.0f)
-		return OUT;
+		if (totalConfidence <= 0.0f)
+			return OUT;
 
-	float3 resolvedHistoryColor = weightedHistoryColor * rcp(totalConfidence);
-	float resolvedConfidence = totalConfidence / (float)SSR_RAY_COUNT;
-	OUT.Target0 = float4(resolvedHistoryColor * View_PreExposure, resolvedConfidence);
+		float3 resolvedHistoryColor = weightedHistoryColor * rcp(totalConfidence);
+		float resolvedConfidence = totalConfidence / (float)SSR_RAY_COUNT;
+		OUT.Target0 = float4(resolvedHistoryColor * View_PreExposure, resolvedConfidence);
+	#endif
 
     return OUT;
 }

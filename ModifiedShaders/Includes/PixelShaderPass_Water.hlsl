@@ -1,22 +1,60 @@
-// WaterB.hlsl
+//Water.hlsl
 
-#define WATERB_WAVE_NORMAL_STRENGTH             0.5f
-#define WATERB_REFRACTION_STRENGTH              0.15f
-#define WATERB_REFRACTION_NOISE_STRENGTH        0.0075f
-#define WATERB_REFRACTION_NOISE_DEPTH_SCALE     0.0015f
-#define WATERB_DEPTH_BLUR_START_CM              1000.0f
-#define WATERB_DEPTH_BLUR_FULL_CM               4000.0f
-#define WATERB_DEPTH_BLUR_MAX_RADIUS_PIXELS     16.0f
+//Define SHADER_VARIANT_WATER_B to select the WaterB material layout and tuning.
+
+//library includes
+//NOTE: this is where we have various useful shader functions
+#include "LibraryMath.hlsl"
+#include "LibraryRandom.hlsl"
+#include "LibraryColor.hlsl"
+#include "LibraryBRDF.hlsl"
+#include "LibraryMicroShadows.hlsl"
+#include "LibraryGBuffer.hlsl"
+
+//|||||||||||||||||||||||||||||||||| CONFIGURATION ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION ||||||||||||||||||||||||||||||||||
+
+#define WATER_WAVE_NORMAL_STRENGTH 0.5
+
+//increase the UV tiling for water waves since on average they are way to large scale
+#define WATER_WAVE_SCALE_A_MULTIPLIER 16.0
+#define WATER_WAVE_SCALE_B_MULTIPLIER 8.0
+
+//slow speed down a bit because most water sources in the game move TOO fast
+#define WATER_WAVE_FLOW_MAP_SPEED_MULTIPLER 0.5
+
+#define WATER_REFRACTION_STRENGTH 0.15
+#define WATER_REFRACTION_NOISE_STRENGTH 0.0075
+#define WATER_REFRACTION_NOISE_DEPTH_SCALE 0.0015
+#define WATER_REFRACTION_SURFACE_PLANE_BIAS_CM 0.0
+
 #define ENABLE_REFRACTION_CHROMATIC_DISPERSION
-#define REFRACTION_DISPERSION_STRENGTH           0.075f
-#define WATERB_REFRACTION_WATER_PLANE_Z_BIAS    0.0f
+#define REFRACTION_DISPERSION_STRENGTH 0.075
 
-#define CAUSTICS_WORLD_SCALE       0.04f // one primary cell per ~80 cm
-#define CAUSTICS_ANIMATION_SPEED   5.70f
-#define CAUSTICS_EDGE_WIDTH        0.095f
-#define CAUSTICS_INTENSITY         5.5f
-#define CAUSTICS_SHALLOW_FADE      0.020f  // reaches full strength by ~50 cm
-#define CAUSTICS_DEPTH_FALLOFF     0.0008f // half strength after ~12.5 m
+#define WATER_DEPTH_BLUR
+#define WATER_DEPTH_BLUR_START_CM 1000.0
+#define WATER_DEPTH_BLUR_FULL_CM 4000.0
+#define WATER_DEPTH_BLUR_MAX_RADIUS_PIXELS 16.0
+
+#define CAUSTICS_ENABLED
+#define CAUSTICS_WORLD_SCALE 0.04
+#define CAUSTICS_ANIMATION_SPEED 5.7
+#define CAUSTICS_ANIMATION_MOVE_SPEED 35.0
+#define CAUSTICS_EDGE_WIDTH 0.095
+#define CAUSTICS_INTENSITY 5.5
+#define CAUSTICS_SHALLOW_FADE 0.02
+#define CAUSTICS_DEPTH_FALLOFF 0.0008
+
+//bound energy matching and the final pre-exposed HDR result so invalid or
+//near-singular inputs cannot turn into bloom-amplified fireflies.
+#define WATER_MAX_INDIRECT_ENERGY_SCALE 8.0
+#define WATER_MAX_OUTPUT_LUMINANCE 64.0
+
+//|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
+//resources passed in to the shader
 
 SamplerState View_SharedPointClampedSampler : register(s0, space0);
 SamplerState View_SharedBilinearWrappedSampler : register(s1, space0);
@@ -106,6 +144,11 @@ Texture2D<float4> ForwardLightProfileTextures[] : register(t0, space13);
 #endif
 
 TextureCube<float4> ReflectionCubemaps[] : register(t0, space1);
+
+//|||||||||||||||||||||||||||||||||| CONSTANT BUFFERS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONSTANT BUFFERS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONSTANT BUFFERS ||||||||||||||||||||||||||||||||||
+//game data passed in to the shader
 
 cbuffer View : register(b0, space0) 
 {
@@ -641,9 +684,18 @@ cbuffer ReflectionCapture : register(b2, space0)
 
 cbuffer Material : register(b3, space0) 
 {
+#if defined(SHADER_VARIANT_WATER_B)
 	float4 Material_VectorExpressions[24] : packoffset(c0.x);
 	float4 Material_ScalarExpressions[7] : packoffset(c24.x);
+#else
+	float4 Material_VectorExpressions[20] : packoffset(c0.x);
+	float4 Material_ScalarExpressions[6] : packoffset(c20.x);
+#endif
 };
+
+//|||||||||||||||||||||||||||||||||| STRUCTS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| STRUCTS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| STRUCTS ||||||||||||||||||||||||||||||||||
 
 struct InputStruct
 {
@@ -670,9 +722,9 @@ struct OutputStruct
     float4 SV_Target1 : SV_Target1;
 };
 
-// -----------------------------------------------------------------------------
-// Reconstructed source-level helpers
-// -----------------------------------------------------------------------------
+//|||||||||||||||||||||||||||||||||| HELPERS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| HELPERS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| HELPERS ||||||||||||||||||||||||||||||||||
 
 float4 GatherWaterShadowMapRed(int shadowMapIndex, float2 uv, int2 offset)
 {
@@ -692,22 +744,74 @@ void GetWaterShadowMapDimensions(int shadowMapIndex, out uint width, out uint he
 #endif
 }
 
-float3 SafeNormalize(float3 value)
+float WaterSafeReciprocal(float value, float minimumMagnitude)
 {
-    return value * rsqrt(max(dot(value, value), 1.0e-12));
+    if (!isfinite(value))
+        return 0.0;
+
+    float safeValue = abs(value) >= minimumMagnitude
+        ? value
+        : (value < 0.0 ? -minimumMagnitude : minimumMagnitude);
+    return rcp(safeValue);
+}
+
+float3 WaterSafeNormalize(float3 value, float3 fallback)
+{
+    float lengthSquared = dot(value, value);
+
+    if (!all(isfinite(value)) || !isfinite(lengthSquared) || lengthSquared <= 1.0e-12)
+        return fallback;
+
+    return value * rsqrt(lengthSquared);
+}
+
+float WaterSanitizePositive(float value)
+{
+    return isfinite(value) ? max(value, 0.0) : 0.0;
+}
+
+float WaterSafePositiveRatio(float numerator, float denominator, float maximumRatio)
+{
+    numerator = WaterSanitizePositive(numerator);
+    denominator = WaterSanitizePositive(denominator);
+
+    if (numerator == 0.0 || denominator <= 1.0e-6)
+        return 0.0;
+
+    return min(numerator * WaterSafeReciprocal(denominator, 1.0e-6), maximumRatio);
+}
+
+float3 WaterSanitizeColor(float3 color)
+{
+    return float3(
+        isfinite(color.r) ? max(color.r, 0.0) : 0.0,
+        isfinite(color.g) ? max(color.g, 0.0) : 0.0,
+        isfinite(color.b) ? max(color.b, 0.0) : 0.0);
+}
+
+float3 WaterClampLuminance(float3 color, float maximumLuminance)
+{
+    color = WaterSanitizeColor(color);
+
+    //This component bound also prevents overflow in the luminance dot product.
+    color = min(color, maximumLuminance / 0.0722);
+    float luminance = WaterSanitizePositive(LuminanceRec709(color));
+    float scale = min(1.0, maximumLuminance * WaterSafeReciprocal(max(luminance, 1.0e-6), 1.0e-6));
+    return color * scale;
 }
 
 float DeviceZToWorldDepth(float deviceZ)
 {
     float numerator = mad(View_InvDeviceZToWorldZTransform.x, deviceZ, View_InvDeviceZToWorldZTransform.y);
     float denominator = mad(View_InvDeviceZToWorldZTransform.z, deviceZ, -View_InvDeviceZToWorldZTransform.w);
-    return numerator + rcp(denominator);
+    return numerator + WaterSafeReciprocal(denominator, 1.0e-6);
 }
 
 float3 ReconstructTranslatedWorldPosition(float2 screenPosition, float deviceZ)
 {
     float4 worldH = mul(float4(screenPosition, deviceZ, 1.0), View_SVPositionToTranslatedWorld);
-    return worldH.xyz / worldH.w;
+    float3 worldPosition = worldH.xyz * WaterSafeReciprocal(worldH.w, 1.0e-8);
+    return all(isfinite(worldPosition)) ? worldPosition : 0.0;
 }
 
 float3 ReconstructTranslatedWorldFromNdc(float2 ndc, float worldDepth)
@@ -725,13 +829,6 @@ float4 TransformHomogeneous(float3 position, row_major float4x4 transform)
     return mul(float4(position, 1.0), transform);
 }
 
-struct HZBTraceResult
-{
-    float2 HZBUv;
-    float DeviceZ;
-    float Confidence;
-};
-
 struct SurfaceState
 {
     float2 MaterialUV;
@@ -739,6 +836,7 @@ struct SurfaceState
     float3 WorldPosition;
     float3 CameraToPixelDirection;
     float3 Normal;
+    float3 RefractionPlaneNormal;
     float FilteredRoughness;
     float RoughnessSquared;
     float RoughnessCubed;
@@ -746,70 +844,6 @@ struct SurfaceState
     float3 ReflectionDirection;
     float3 TransmissionDirection;
 };
-
-HZBTraceResult TraceHierarchicalZ(
-    float3 rayStartNdc,
-    float3 rayEndNdc,
-    float2 projectedLimitNdc,
-    float projectedLimitDepth,
-    float2 hzbUvScale,
-    float randomOffset)
-{
-    HZBTraceResult result = (HZBTraceResult)0;
-
-    float3 rayDelta = rayEndNdc - rayStartNdc;
-    float2 projectedDelta = projectedLimitNdc - rayStartNdc.xy;
-    float halfScreenLength = 0.5 * length(rayDelta.xy);
-
-    float2 centeredRay = rayDelta.xy + halfScreenLength * rayStartNdc.xy;
-    float2 outsideDistance = max(abs(centeredRay) - halfScreenLength, 0.0);
-    float2 remainingFraction = 1.0 - outsideDistance / abs(rayDelta.xy);
-    float clipScale = min(remainingFraction.x, remainingFraction.y) / halfScreenLength;
-    float3 traceStep = clipScale * rayDelta;
-    float thickness = max(abs(traceStep.z), rayStartNdc.z - projectedLimitDepth);
-
-    uint hzbWidth, hzbHeight, hzbMipCount;
-    TranslucentBasePass_HZBTexture.GetDimensions(0, hzbWidth, hzbHeight, hzbMipCount);
-
-    float projectedLength = length(projectedDelta);
-    float stepLength = max(length(traceStep.xy), 1.0e-4);
-    uint traceStepCount = clamp((uint)ceil(saturate(projectedLength / stepLength) * 8.0 + randomOffset), 1u, 8u);
-
-    float2 traceUv = float2(rayStartNdc.x * 0.5 + 0.5, 0.5 - rayStartNdc.y * 0.5) * hzbUvScale;
-    float2 uvStep = float2(hzbUvScale.x * 0.0625 * traceStep.x, hzbUvScale.y * -0.0625 * traceStep.y);
-    float depthStep = traceStep.z * 0.125;
-    thickness *= 0.125;
-
-    float previousDepthDelta = 0.0;
-
-    [loop]
-    for (uint stepIndex = 0u; stepIndex < traceStepCount; ++stepIndex)
-    {
-        float sampleTime = (float)stepIndex + randomOffset;
-        float2 sampleUv = mad(sampleTime, uvStep, traceUv);
-        float rayDepth = mad(sampleTime, depthStep, rayStartNdc.z);
-        int2 texel = int2(floor(sampleUv * float2(hzbWidth, hzbHeight)));
-        float sceneDepth = TranslucentBasePass_HZBTexture.Load(int3(texel, 0)).x;
-        float depthDelta = rayDepth - sceneDepth;
-        bool crossedSurface = abs(-thickness - depthDelta) < thickness;
-
-        if (crossedSurface && sceneDepth != 0.0)
-        {
-            float previous = stepIndex == 0u ? depthDelta - depthStep : previousDepthDelta;
-            float interpolation = saturate(previous / (previous - depthDelta));
-            float hitTime = abs(randomOffset - 1.0 + (float)stepIndex + interpolation);
-            result.HZBUv = mad(hitTime, uvStep, traceUv);
-            result.DeviceZ = mad(hitTime, depthStep, rayStartNdc.z);
-            float edgeFade = min(hitTime * 0.125, 1.0);
-            result.Confidence = 1.0 - edgeFade * edgeFade;
-            return result;
-        }
-
-        previousDepthDelta = depthDelta;
-    }
-
-    return result;
-}
 
 float HashWrappedGridPoint(int2 gridPoint)
 {
@@ -834,62 +868,9 @@ float WrappedValueNoise2D(float2 position)
     //return View_SpatiotemporalBlueNoiseVolumeTexture.SampleLevel(View_SharedBilinearWrappedSampler, float3(position * 0.1f, 0), 0).r;
 }
 
-// Cheap, deterministic 2-D hash used by the procedural Worley cells. This
-// avoids a texture dependency (and avoids the relatively expensive sin hash).
-float2 HashWorleyCell(int2 cell)
-{
-    float3 p = frac(float3((float)cell.x, (float)cell.y, (float)cell.x) * float3(0.1031, 0.1030, 0.0973));
-    p += dot(p, p.yzx + 33.33);
-    return frac((p.xx + p.yz) * p.zy);
-}
-
-// Returns distance to the nearest Voronoi boundary (F2 - F1). Keeping the
-// distance rather than thresholding here lets the caller use fwidth for stable,
-// antialiased caustic lines.
-float WorleyEdgeDistance(float2 position, float animationTime)
-{
-    int2 baseCell = int2(floor(position));
-    float2 localPosition = frac(position);
-    float nearestDistanceSq = 1.0e10;
-    float secondDistanceSq = 1.0e10;
-
-    [unroll]
-    for (int cellY = -1; cellY <= 1; ++cellY)
-    {
-        [unroll]
-        for (int cellX = -1; cellX <= 1; ++cellX)
-        {
-            int2 neighborOffset = int2(cellX, cellY);
-            int2 neighborCell = baseCell + neighborOffset;
-            float2 randomPhase = HashWorleyCell(neighborCell) * 6.28318530718;
-
-            float2 featurePoint = 0.5 + 0.42 * sin(randomPhase + animationTime * float2(1.0, 1.173));
-            float2 delta = float2(neighborOffset) + featurePoint - localPosition;
-            float distanceSq = dot(delta, delta);
-
-            if (distanceSq < nearestDistanceSq)
-            {
-                secondDistanceSq = nearestDistanceSq;
-                nearestDistanceSq = distanceSq;
-            }
-            else
-            {
-                secondDistanceSq = min(secondDistanceSq, distanceSq);
-            }
-        }
-    }
-
-    return sqrt(secondDistanceSq) - sqrt(nearestDistanceSq);
-}
-
 float2 RotateDensityOctave(float2 value)
 {
     return float2(mad(value.y,  0.809017, value.x * -0.587785), mad(value.y, -0.587785, value.x * -0.809017));
-}
-
-float Luminance(float3 color)
-{
-    return dot(color, float3(0.2126, 0.7152, 0.0722));
 }
 
 float EvaluateAmbientDice(float3 direction, float3 positiveAxisWeights, float3 negativeAxisWeights)
@@ -2496,6 +2477,94 @@ DirectionalLightingResult EvaluateDirectionalLighting(
     return result;
 }
 
+//||||||||||||||||||||||||||||||| SSR |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| SSR |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| SRR |||||||||||||||||||||||||||||||
+
+struct HZBTraceResult
+{
+    float2 HZBUv;
+    float DeviceZ;
+    float Confidence;
+};
+
+HZBTraceResult TraceHierarchicalZ(
+    float3 rayStartNdc,
+    float3 rayEndNdc,
+    float2 projectedLimitNdc,
+    float projectedLimitDepth,
+    float2 hzbUvScale,
+    float randomOffset)
+{
+    HZBTraceResult result = (HZBTraceResult)0;
+
+    float3 rayDelta = rayEndNdc - rayStartNdc;
+    float2 projectedDelta = projectedLimitNdc - rayStartNdc.xy;
+    float rayScreenLengthSquared = dot(rayDelta.xy, rayDelta.xy);
+
+    if (!all(isfinite(rayDelta)) || !all(isfinite(projectedDelta)) || !isfinite(rayScreenLengthSquared) || rayScreenLengthSquared <= 1.0e-10)
+        return result;
+
+    float halfScreenLength = 0.5 * sqrt(rayScreenLengthSquared);
+    float2 centeredRay = rayDelta.xy + halfScreenLength * rayStartNdc.xy;
+    float2 outsideDistance = max(abs(centeredRay) - halfScreenLength, 0.0);
+    float2 remainingFraction = 1.0 - outsideDistance / max(abs(rayDelta.xy), 1.0e-5);
+    float clipScale = max(min(remainingFraction.x, remainingFraction.y), 0.0) / max(halfScreenLength, 1.0e-5);
+    float3 traceStep = clipScale * rayDelta;
+    float thickness = max(abs(traceStep.z), rayStartNdc.z - projectedLimitDepth);
+
+    if (!all(isfinite(traceStep)) || !isfinite(thickness))
+        return result;
+
+    uint hzbWidth, hzbHeight, hzbMipCount;
+    TranslucentBasePass_HZBTexture.GetDimensions(0, hzbWidth, hzbHeight, hzbMipCount);
+
+    if (hzbWidth == 0u || hzbHeight == 0u)
+        return result;
+
+    float projectedLength = length(projectedDelta);
+    float stepLength = max(length(traceStep.xy), 1.0e-4);
+    uint traceStepCount = clamp((uint)ceil(saturate(projectedLength / stepLength) * 8.0 + randomOffset), 1u, 8u);
+
+    float2 traceUv = float2(rayStartNdc.x * 0.5 + 0.5, 0.5 - rayStartNdc.y * 0.5) * hzbUvScale;
+    float2 uvStep = float2(hzbUvScale.x * 0.0625 * traceStep.x, hzbUvScale.y * -0.0625 * traceStep.y);
+    float depthStep = traceStep.z * 0.125;
+    thickness *= 0.125;
+
+    float previousDepthDelta = 0.0;
+
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < traceStepCount; ++stepIndex)
+    {
+        float sampleTime = (float)stepIndex + randomOffset;
+        float2 sampleUv = mad(sampleTime, uvStep, traceUv);
+        float rayDepth = mad(sampleTime, depthStep, rayStartNdc.z);
+        int2 texel = clamp(int2(floor(sampleUv * float2(hzbWidth, hzbHeight))), 0, int2(hzbWidth, hzbHeight) - 1);
+        float sceneDepth = TranslucentBasePass_HZBTexture.Load(int3(texel, 0)).x;
+        float depthDelta = rayDepth - sceneDepth;
+        bool crossedSurface = abs(-thickness - depthDelta) < thickness;
+
+        if (crossedSurface && sceneDepth != 0.0)
+        {
+            float previous = stepIndex == 0u ? depthDelta - depthStep : previousDepthDelta;
+            float interpolationDenominator = previous - depthDelta;
+            float interpolation = abs(interpolationDenominator) > 1.0e-6
+                ? saturate(previous / interpolationDenominator)
+                : 0.0;
+            float hitTime = abs(randomOffset - 1.0 + (float)stepIndex + interpolation);
+            result.HZBUv = mad(hitTime, uvStep, traceUv);
+            result.DeviceZ = mad(hitTime, depthStep, rayStartNdc.z);
+            float edgeFade = min(hitTime * 0.125, 1.0);
+            result.Confidence = 1.0 - edgeFade * edgeFade;
+            return result;
+        }
+
+        previousDepthDelta = depthDelta;
+    }
+
+    return result;
+}
+
 float4 EvaluateScreenSpaceReflection(
     SurfaceState surface,
     float pixelDepth,
@@ -2507,16 +2576,24 @@ float4 EvaluateScreenSpaceReflection(
     float4 reflectionStartClip = mad(surface.TranslatedWorldPosition.z, View_TranslatedWorldToClip[2], mad(surface.TranslatedWorldPosition.y, View_TranslatedWorldToClip[1], surface.TranslatedWorldPosition.x * View_TranslatedWorldToClip[0])) + View_TranslatedWorldToClip[3];
     float4 reflectionEndClip = mad(reflectionRayEndTranslated.z, View_TranslatedWorldToClip[2], mad(reflectionRayEndTranslated.y, View_TranslatedWorldToClip[1], reflectionRayEndTranslated.x * View_TranslatedWorldToClip[0])) + View_TranslatedWorldToClip[3];
 
-    float inverseStartW = rcp(reflectionStartClip.w);
-    float inverseEndW = rcp(reflectionEndClip.w);
+    if (!all(isfinite(reflectionStartClip)) || !all(isfinite(reflectionEndClip)) || abs(reflectionStartClip.w) <= 1.0e-6 || abs(reflectionEndClip.w) <= 1.0e-6)
+        return 0.0;
+
+    float inverseStartW = WaterSafeReciprocal(reflectionStartClip.w, 1.0e-6);
+    float inverseEndW = WaterSafeReciprocal(reflectionEndClip.w, 1.0e-6);
     float roughnessRayScale = 10.0 / max(1.0e-5, surface.RoughnessSquared);
     float3 reflectionStartNdc = reflectionStartClip.xyz * inverseStartW;
     reflectionStartNdc.z += 0.05 * inverseStartW;
     float3 reflectionEndNdc = reflectionEndClip.xyz * inverseEndW;
 
     float projectedRayW = View_ViewToClip[0].w * roughnessRayScale + reflectionStartClip.w;
-    float2 projectedRayXY = (View_ViewToClip[0].xy * roughnessRayScale + reflectionStartClip.xy) / projectedRayW;
-    float projectedRayDepth = mad(pixelDepth, View_ViewToClip[2].z, reflectionStartClip.z) / mad(pixelDepth, View_ViewToClip[2].w, reflectionStartClip.w);
+    float projectedRayDepthDenominator = mad(pixelDepth, View_ViewToClip[2].w, reflectionStartClip.w);
+
+    if (!isfinite(projectedRayW) || !isfinite(projectedRayDepthDenominator) || abs(projectedRayW) <= 1.0e-6 || abs(projectedRayDepthDenominator) <= 1.0e-6)
+        return 0.0;
+
+    float2 projectedRayXY = (View_ViewToClip[0].xy * roughnessRayScale + reflectionStartClip.xy) * WaterSafeReciprocal(projectedRayW, 1.0e-6);
+    float projectedRayDepth = mad(pixelDepth, View_ViewToClip[2].z, reflectionStartClip.z) * WaterSafeReciprocal(projectedRayDepthDenominator, 1.0e-6);
 
     HZBTraceResult reflectionHit = TraceHierarchicalZ(
         reflectionStartNdc,
@@ -2529,7 +2606,6 @@ float4 EvaluateScreenSpaceReflection(
     float reflectionHitDeviceZ = reflectionHit.DeviceZ;
     float reflectionHitConfidence = reflectionHit.Confidence;
 
-    // Resolve the HZB hit into the scene-color/depth buffers.
     float4 screenSpaceReflection = 0.0;
     float2 reflectionHitNdc = float2(saturate(reflectionHit.HZBUv.x * hzbUvFactorAndInverse.z) * 2.0 - 1.0, 1.0 - saturate(reflectionHit.HZBUv.y * hzbUvFactorAndInverse.w) * 2.0);
 
@@ -2551,10 +2627,17 @@ float4 EvaluateScreenSpaceReflection(
 
         float sceneDepth = TranslucentBasePass_SceneTextures_SceneDepthTexture.Load(int3(hitTexel, 0)).x;
         float3 reflectedSceneColor = TranslucentBasePass_SceneColorCopyTexture.Load(int3(hitTexel, 0)).rgb;
-        screenSpaceReflection.rgb = View_OneOverPreExposure * min(reflectedSceneColor, 65504.0);
-        screenSpaceReflection.a = (float)(uint)(sceneDepth != 0.0) * reflectionHitConfidence * saturate(rcp(max(1.0e-5, surface.RoughnessSquared * surface.RoughnessSquared * dot(reflectionHitSeparation, reflectionHitSeparation))));
+        screenSpaceReflection.rgb = WaterSanitizeColor(View_OneOverPreExposure * min(reflectedSceneColor, 65504.0));
+
+        float reflectionDistanceSquared = dot(reflectionHitSeparation, reflectionHitSeparation);
+        float confidenceDenominator = surface.RoughnessSquared * surface.RoughnessSquared * reflectionDistanceSquared;
+        float confidence = isfinite(confidenceDenominator)
+            ? saturate(WaterSafeReciprocal(max(1.0e-5, confidenceDenominator), 1.0e-5))
+            : 0.0;
+        screenSpaceReflection.a = (float)(uint)(sceneDepth != 0.0) * WaterSanitizePositive(reflectionHitConfidence) * confidence;
     }
 
+    screenSpaceReflection.a = isfinite(screenSpaceReflection.a) ? saturate(screenSpaceReflection.a) : 0.0;
     return screenSpaceReflection;
 }
 
@@ -2594,36 +2677,58 @@ struct WaterSurfaceEvaluation
     float RefractionWaterDepth;
 };
 
-float2 ClampWaterBRefractionUv(float2 uv)
+float2 ClampWaterRefractionUv(float2 uv)
 {
     float2 uvMin = (View_ViewRectMin.xy + 0.5) * View_BufferSizeAndInvSize.zw;
     float2 uvMax = (View_ViewRectMin.xy + View_ViewSizeAndInvSize.xy - 0.5) * View_BufferSizeAndInvSize.zw;
     return clamp(uv, uvMin, uvMax);
 }
 
-int2 WaterBRefractionUvToTexel(float2 uv)
+int2 WaterRefractionUvToTexel(float2 uv)
 {
     int2 viewMin = int2(View_ViewRectMin.xy);
     int2 viewMax = int2(View_ViewRectMin.xy + View_ViewSizeAndInvSize.xy) - 1;
     return clamp(int2(uv * View_BufferSizeAndInvSize.xy), viewMin, viewMax);
 }
 
-bool WaterBRefractionTexelIsBelowWater(int2 texel, float waterSurfaceWorldZ)
+bool WaterRefractionReceiverIsBehindSurface(
+    float3 receiverWorldPosition,
+    float3 waterSurfaceWorldPosition,
+    float3 waterSurfacePlaneNormal)
+{
+    float signedPlaneDistance = dot(receiverWorldPosition - waterSurfaceWorldPosition, waterSurfacePlaneNormal);
+    return isfinite(signedPlaneDistance) && signedPlaneDistance <= WATER_REFRACTION_SURFACE_PLANE_BIAS_CM;
+}
+
+bool WaterRefractionTexelIsValidReceiver(
+    int2 texel,
+    float waterSurfaceLinearDepth,
+    float3 waterSurfaceWorldPosition,
+    float3 waterSurfacePlaneNormal)
 {
     float deviceDepth = TranslucentBasePass_SceneTextures_SceneDepthTexture.Load(int3(texel, 0)).x;
 
     if (deviceDepth == 0.0)
         return false;
 
+    float receiverLinearDepth = DeviceZToWorldDepth(deviceDepth);
+
+    if (!isfinite(receiverLinearDepth) || receiverLinearDepth <= waterSurfaceLinearDepth)
+        return false;
+
     float2 receiverPixel = float2(texel) + 0.5;
     float3 receiverTranslatedWorldPosition = ReconstructTranslatedWorldPosition(receiverPixel, deviceDepth);
     float3 receiverWorldPosition = receiverTranslatedWorldPosition - View_PreViewTranslation.xyz;
-    return receiverWorldPosition.z <= waterSurfaceWorldZ + WATERB_REFRACTION_WATER_PLANE_Z_BIAS;
+    return WaterRefractionReceiverIsBehindSurface(receiverWorldPosition, waterSurfaceWorldPosition, waterSurfacePlaneNormal);
 }
 
-bool WaterBRefractionUvFootprintIsBelowWater(float2 uv, float waterSurfaceWorldZ)
+bool WaterRefractionUvFootprintIsValid(
+    float2 uv,
+    float waterSurfaceLinearDepth,
+    float3 waterSurfaceWorldPosition,
+    float3 waterSurfacePlaneNormal)
 {
-    uv = ClampWaterBRefractionUv(uv);
+    uv = ClampWaterRefractionUv(uv);
 
     float2 texelPosition = uv * View_BufferSizeAndInvSize.xy - 0.5;
     int2 baseTexel = int2(floor(texelPosition));
@@ -2636,61 +2741,61 @@ bool WaterBRefractionUvFootprintIsBelowWater(float2 uv, float waterSurfaceWorldZ
     int2 texel11 = clamp(baseTexel + int2(1, 1), viewMin, viewMax);
 
     return
-        WaterBRefractionTexelIsBelowWater(texel00, waterSurfaceWorldZ) &&
-        WaterBRefractionTexelIsBelowWater(texel10, waterSurfaceWorldZ) &&
-        WaterBRefractionTexelIsBelowWater(texel01, waterSurfaceWorldZ) &&
-        WaterBRefractionTexelIsBelowWater(texel11, waterSurfaceWorldZ);
+        WaterRefractionTexelIsValidReceiver(texel00, waterSurfaceLinearDepth, waterSurfaceWorldPosition, waterSurfacePlaneNormal) &&
+        WaterRefractionTexelIsValidReceiver(texel10, waterSurfaceLinearDepth, waterSurfaceWorldPosition, waterSurfacePlaneNormal) &&
+        WaterRefractionTexelIsValidReceiver(texel01, waterSurfaceLinearDepth, waterSurfaceWorldPosition, waterSurfacePlaneNormal) &&
+        WaterRefractionTexelIsValidReceiver(texel11, waterSurfaceLinearDepth, waterSurfaceWorldPosition, waterSurfacePlaneNormal);
 }
 
-void GetWaterBDepthBlurOffsets(
+void GetWaterDepthBlurOffsets(
     float waterDepth,
     float4 blueNoise,
     out float depthBlur,
     out float2 blurOffsetA,
     out float2 blurOffsetB)
 {
-    depthBlur = saturate(
-        (waterDepth - WATERB_DEPTH_BLUR_START_CM) /
-        max(WATERB_DEPTH_BLUR_FULL_CM - WATERB_DEPTH_BLUR_START_CM, 1.0));
+    depthBlur = saturate((waterDepth - WATER_DEPTH_BLUR_START_CM) / max(WATER_DEPTH_BLUR_FULL_CM - WATER_DEPTH_BLUR_START_CM, 1.0));
 
     float2 blurAxis = blueNoise.xy * 2.0 - 1.0;
     blurAxis *= rsqrt(max(dot(blurAxis, blurAxis), 1.0e-4));
     float2 blurPerpendicular = float2(-blurAxis.y, blurAxis.x);
-    float blurRadiusPixels = WATERB_DEPTH_BLUR_MAX_RADIUS_PIXELS * depthBlur;
+    float blurRadiusPixels = WATER_DEPTH_BLUR_MAX_RADIUS_PIXELS * depthBlur;
     blurOffsetA = blurAxis * blurRadiusPixels * View_BufferSizeAndInvSize.zw;
     blurOffsetB = blurPerpendicular * (blurRadiusPixels * 0.73) * View_BufferSizeAndInvSize.zw;
 }
 
-bool WaterBRefractionCandidateIsSafe(
+bool WaterRefractionCandidateIsSafe(
     float2 refractedUv,
     float2 unrefractedUv,
-    float waterSurfaceWorldZ,
+    float waterSurfaceLinearDepth,
+    float3 waterSurfaceWorldPosition,
+    float3 waterSurfacePlaneNormal,
     float candidateWaterDepth,
     float4 blueNoise)
 {
-    bool isSafe = WaterBRefractionUvFootprintIsBelowWater(refractedUv, waterSurfaceWorldZ);
+    bool isSafe = WaterRefractionUvFootprintIsValid(refractedUv, waterSurfaceLinearDepth, waterSurfaceWorldPosition, waterSurfacePlaneNormal);
 
 #if defined(ENABLE_REFRACTION_CHROMATIC_DISPERSION)
     float2 dispersionOffset = (refractedUv - unrefractedUv) * REFRACTION_DISPERSION_STRENGTH;
     isSafe =
         isSafe &&
-        WaterBRefractionUvFootprintIsBelowWater(refractedUv + dispersionOffset, waterSurfaceWorldZ) &&
-        WaterBRefractionUvFootprintIsBelowWater(refractedUv - dispersionOffset, waterSurfaceWorldZ);
+        WaterRefractionUvFootprintIsValid(refractedUv + dispersionOffset, waterSurfaceLinearDepth, waterSurfaceWorldPosition, waterSurfacePlaneNormal) &&
+        WaterRefractionUvFootprintIsValid(refractedUv - dispersionOffset, waterSurfaceLinearDepth, waterSurfaceWorldPosition, waterSurfacePlaneNormal);
 #endif
 
     float depthBlur;
     float2 blurOffsetA;
     float2 blurOffsetB;
-    GetWaterBDepthBlurOffsets(candidateWaterDepth, blueNoise, depthBlur, blurOffsetA, blurOffsetB);
+    GetWaterDepthBlurOffsets(candidateWaterDepth, blueNoise, depthBlur, blurOffsetA, blurOffsetB);
 
     if (depthBlur > 0.0)
     {
         isSafe =
             isSafe &&
-            WaterBRefractionUvFootprintIsBelowWater(refractedUv + blurOffsetA, waterSurfaceWorldZ) &&
-            WaterBRefractionUvFootprintIsBelowWater(refractedUv - blurOffsetA, waterSurfaceWorldZ) &&
-            WaterBRefractionUvFootprintIsBelowWater(refractedUv + blurOffsetB, waterSurfaceWorldZ) &&
-            WaterBRefractionUvFootprintIsBelowWater(refractedUv - blurOffsetB, waterSurfaceWorldZ);
+            WaterRefractionUvFootprintIsValid(refractedUv + blurOffsetA, waterSurfaceLinearDepth, waterSurfaceWorldPosition, waterSurfacePlaneNormal) &&
+            WaterRefractionUvFootprintIsValid(refractedUv - blurOffsetA, waterSurfaceLinearDepth, waterSurfaceWorldPosition, waterSurfacePlaneNormal) &&
+            WaterRefractionUvFootprintIsValid(refractedUv + blurOffsetB, waterSurfaceLinearDepth, waterSurfaceWorldPosition, waterSurfacePlaneNormal) &&
+            WaterRefractionUvFootprintIsValid(refractedUv - blurOffsetB, waterSurfaceLinearDepth, waterSurfaceWorldPosition, waterSurfacePlaneNormal);
     }
 
     return isSafe;
@@ -2701,28 +2806,28 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     SurfaceState surface = (SurfaceState)0;
     float2 pixelXY = _IN.SV_Position.xy;
 
-    #if defined(GAME_VERSION_1_0_0_4)
-        float2 baseUv = _IN.TEXCOORD[0];
-        float2 detailUv = _IN.TEXCOORD[1];
-        float2 secondaryFlowUv = _IN.TEXCOORD[2];
-        float2 flowVector = _IN.TEXCOORD[3];
-        uint coverageContext = _IN.COVERAGE_CONTEXT;
-        uint primitiveIndex = _IN.PRIMITIVE_ID;
-    #else
-        float2 baseUv = _IN.TEXCOORD0.xy;
-        float2 detailUv = _IN.TEXCOORD0.zw;
-        float2 secondaryFlowUv = _IN.TEXCOORD1.xy;
-        float2 flowVector = _IN.TEXCOORD1.zw;
-        uint coverageContext = (uint)round(_IN.CONSTANT_CONTEXT.x);
-        uint primitiveIndex = (uint)round(_IN.CONSTANT_CONTEXT.y);
-    #endif
+#if defined(GAME_VERSION_1_0_0_4)
+    float2 baseUv = _IN.TEXCOORD[0];
+    float2 detailUv = _IN.TEXCOORD[1];
+    float2 secondaryFlowUv = _IN.TEXCOORD[2];
+    float2 flowVector = _IN.TEXCOORD[3];
+    uint coverageContext = _IN.COVERAGE_CONTEXT;
+    uint primitiveIndex = _IN.PRIMITIVE_ID;
+#else
+    float2 baseUv = _IN.TEXCOORD0.xy;
+    float2 detailUv = _IN.TEXCOORD0.zw;
+    float2 secondaryFlowUv = _IN.TEXCOORD1.xy;
+    float2 flowVector = _IN.TEXCOORD1.zw;
+    uint coverageContext = (uint)round(_IN.CONSTANT_CONTEXT.x);
+    uint primitiveIndex = (uint)round(_IN.CONSTANT_CONTEXT.y);
+#endif
 
     float materialBias = View_TemporalSamplerBias.y;
 
     surface.MaterialUV = baseUv;
     surface.TranslatedWorldPosition = ReconstructTranslatedWorldPosition(pixelXY, _IN.SV_Position.z);
     surface.WorldPosition = surface.TranslatedWorldPosition - View_PreViewTranslation.xyz;
-    surface.CameraToPixelDirection = SafeNormalize(surface.TranslatedWorldPosition);
+    surface.CameraToPixelDirection = WaterSafeNormalize(surface.TranslatedWorldPosition, float3(0.0, 0.0, 1.0));
 
     int noiseSlice = ((int)coverageContext + (int)View_StateFrameIndex) & 63;
     int3 blueNoiseTexel = int3(int2(pixelXY) & 127, noiseSlice);
@@ -2741,12 +2846,19 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     float flowScaleTexture = Material_Texture2D_17.SampleBias(View_SharedAnisotropic4XWrappedSampler, detailUv, materialBias).r;
 
     //slow speed down a bit
-	flowScaleTexture *= 0.5f;
+	flowScaleTexture *= WATER_WAVE_FLOW_MAP_SPEED_MULTIPLER;
 
+#if defined(SHADER_VARIANT_WATER_B)
     float phaseA = frac(flowPhaseTexture + Material_VectorExpressions[19].z * Material_VectorExpressions[20].x);
     float phaseB = frac(flowPhaseTexture + Material_VectorExpressions[19].z * Material_VectorExpressions[21].x);
     float2 flowVectorA = flowScaleTexture * Material_VectorExpressions[20].y * flowVector;
     float2 flowVectorB = flowScaleTexture * Material_VectorExpressions[21].y * flowVector;
+#else
+    float phaseA = frac(flowPhaseTexture + Material_VectorExpressions[15].z * Material_VectorExpressions[16].x);
+    float phaseB = frac(flowPhaseTexture + Material_VectorExpressions[15].z * Material_VectorExpressions[17].x);
+    float2 flowVectorA = flowScaleTexture * Material_VectorExpressions[16].y * flowVector;
+    float2 flowVectorB = flowScaleTexture * Material_VectorExpressions[17].y * flowVector;
+#endif
     float2 flowUvA0 = baseUv - phaseA * flowVectorA;
     float2 flowUvA1 = baseUv + (1.0 - phaseA) * flowVectorA;
     float2 flowUvB0 = secondaryFlowUv - phaseB * flowVectorB;
@@ -2755,38 +2867,39 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     float flowBlendB = phaseB * phaseB * (3.0 - 2.0 * phaseB);
 
     //bump up normals because water often looks too sparse
-	flowUvA0 *= 12;
-	flowUvA1 *= 12;
-    flowUvB0 *= 6;
-	flowUvB1 *= 6;
+	flowUvA0 *= WATER_WAVE_SCALE_A_MULTIPLIER;
+	flowUvA1 *= WATER_WAVE_SCALE_A_MULTIPLIER;
+    flowUvB0 *= WATER_WAVE_SCALE_B_MULTIPLIER;
+	flowUvB1 *= WATER_WAVE_SCALE_B_MULTIPLIER;
 
     float2 normalEncodedA0 = Material_Texture2D_2.SampleBias(View_SharedAnisotropic4XWrappedSampler, flowUvA0, materialBias).rg;
     float2 normalEncodedA1 = Material_Texture2D_2.SampleBias(View_SharedAnisotropic4XWrappedSampler, flowUvA1, materialBias).rg;
     float2 normalXYA = lerp(normalEncodedA0, normalEncodedA1, flowBlendA) * 2.0 - 1.0;
 
-    float3 tangentNormalA = SafeNormalize(float3(normalXYA, sqrt(max(0.0, 1.0 - dot(normalXYA, normalXYA)))));
-
-	//tangentNormalA += View_SpatiotemporalBlueNoiseVolumeTexture.SampleLevel(View_SharedBilinearWrappedSampler, surface.WorldPosition.xyz * 2, 0).r;
-	//tangentNormalA = normalize(tangentNormalA);
+    float3 tangentNormalA = WaterSafeNormalize(float3(normalXYA, sqrt(max(0.0, 1.0 - dot(normalXYA, normalXYA)))), float3(0.0, 0.0, 1.0));
 
     float2 normalEncodedB0 = Material_Texture2D_20.SampleBias(View_SharedAnisotropic4XWrappedSampler, flowUvB0, materialBias).rg;
     float2 normalEncodedB1 = Material_Texture2D_20.SampleBias(View_SharedAnisotropic4XWrappedSampler, flowUvB1, materialBias).rg;
     float2 normalXYB = lerp(normalEncodedB0, normalEncodedB1, flowBlendB) * 2.0 - 1.0;
-    float3 tangentNormalB = SafeNormalize(float3(normalXYB, sqrt(max(0.0, 1.0 - dot(normalXYB, normalXYB)))));
+    float3 tangentNormalB = WaterSafeNormalize(float3(normalXYB, sqrt(max(0.0, 1.0 - dot(normalXYB, normalXYB)))), float3(0.0, 0.0, 1.0));
 
     float secondaryNormalMask = saturate(Material_Texture2D_7.SampleBias(View_SharedAnisotropic4XWrappedSampler, baseUv, materialBias).r);
-    float3 reorientedNormal = SafeNormalize(float3(tangentNormalA.xy + tangentNormalB.xy, max(1.0e-4, tangentNormalA.z * tangentNormalB.z)));
-    float3 tangentNormal = SafeNormalize(lerp(tangentNormalA, reorientedNormal, secondaryNormalMask));
+    float3 reorientedNormal = WaterSafeNormalize(float3(tangentNormalA.xy + tangentNormalB.xy, max(1.0e-4, tangentNormalA.z * tangentNormalB.z)), float3(0.0, 0.0, 1.0));
+    float3 tangentNormal = WaterSafeNormalize(lerp(tangentNormalA, reorientedNormal, secondaryNormalMask), float3(0.0, 0.0, 1.0));
 
-    float2 enhancedNormalXY = tangentNormal.xy * WATERB_WAVE_NORMAL_STRENGTH;
+    float2 enhancedNormalXY = tangentNormal.xy * WATER_WAVE_NORMAL_STRENGTH;
     float enhancedNormalLengthSq = dot(enhancedNormalXY, enhancedNormalXY);
     enhancedNormalXY *= min(1.0, sqrt(0.98 / max(enhancedNormalLengthSq, 1.0e-6)));
     tangentNormal = float3(enhancedNormalXY, sqrt(max(0.0, 1.0 - dot(enhancedNormalXY, enhancedNormalXY))));
 
-    float3 tangentAxis = SafeNormalize(_IN.TEXCOORD10.xyz);
-    float3 geometricNormal = SafeNormalize(_IN.TEXCOORD11.xyz);
-    float3 bitangentAxis = SafeNormalize(-cross(tangentAxis, geometricNormal) * _IN.TEXCOORD11.w);
-    surface.Normal = SafeNormalize(tangentAxis * tangentNormal.x + bitangentAxis * tangentNormal.y + geometricNormal * tangentNormal.z);
+    float3 tangentAxis = WaterSafeNormalize(_IN.TEXCOORD10.xyz, float3(1.0, 0.0, 0.0));
+    float3 geometricNormal = WaterSafeNormalize(_IN.TEXCOORD11.xyz, float3(0.0, 0.0, 1.0));
+    float3 bitangentFallback = abs(geometricNormal.z) < 0.999
+        ? WaterSafeNormalize(cross(float3(0.0, 0.0, 1.0), geometricNormal), float3(0.0, 1.0, 0.0))
+        : float3(0.0, 1.0, 0.0);
+    float3 bitangentAxis = WaterSafeNormalize(-cross(tangentAxis, geometricNormal) * _IN.TEXCOORD11.w, bitangentFallback);
+    surface.Normal = WaterSafeNormalize(tangentAxis * tangentNormal.x + bitangentAxis * tangentNormal.y + geometricNormal * tangentNormal.z, geometricNormal);
+    surface.RefractionPlaneNormal = dot(geometricNormal, -surface.CameraToPixelDirection) >= 0.0 ? geometricNormal : -geometricNormal;
 
     float roughnessA0 = Material_Texture2D_3.SampleBias(View_SharedAnisotropic4XWrappedSampler, flowUvA0, materialBias).r;
     float roughnessA1 = Material_Texture2D_3.SampleBias(View_SharedAnisotropic4XWrappedSampler, flowUvA1, materialBias).r;
@@ -2795,6 +2908,12 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     float roughnessA = sqrt(saturate(lerp(roughnessA0 * roughnessA0, roughnessA1 * roughnessA1, flowBlendA)));
     float roughnessB = sqrt(saturate(lerp(roughnessB0 * roughnessB0, roughnessB1 * roughnessB1, flowBlendB)));
     float materialRoughness = saturate(lerp(roughnessA, sqrt(saturate(roughnessA * roughnessA + roughnessB * roughnessB)), secondaryNormalMask));
+
+    //(IMPORTANT NOTE: undo foam UV scale textures
+	flowUvA0 /= WATER_WAVE_SCALE_A_MULTIPLIER;
+	flowUvA1 /= WATER_WAVE_SCALE_A_MULTIPLIER;
+    flowUvB0 /= WATER_WAVE_SCALE_B_MULTIPLIER;
+	flowUvB1 /= WATER_WAVE_SCALE_B_MULTIPLIER;
 
     float foamA0 = Material_Texture2D_15.SampleBias(View_SharedAnisotropic4XWrappedSampler, flowUvA0, materialBias).r;
     float foamA1 = Material_Texture2D_15.SampleBias(View_SharedAnisotropic4XWrappedSampler, flowUvA1, materialBias).r;
@@ -2805,11 +2924,14 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     float foamGate = saturate(Material_Texture2D_18.SampleBias(View_SharedAnisotropic4XWrappedSampler, detailUv, materialBias).r);
     float surfaceCoverage = saturate((foamA + (1.0 - foamA) * foamB * secondaryNormalMask) * foamGate);
 
+#if defined(SHADER_VARIANT_WATER_B)
 	surfaceCoverage *= 0.15f;
+#endif
 
     float3 normalDx = ddx_fine(surface.Normal);
     float3 normalDy = ddy_fine(surface.Normal);
-    float normalVariance = dot(normalDx, normalDx) + dot(normalDy, normalDy);
+    float normalVariance = WaterSanitizePositive(dot(normalDx, normalDx) + dot(normalDy, normalDy));
+    materialRoughness = saturate(WaterSanitizePositive(materialRoughness));
     surface.FilteredRoughness = sqrt(saturate(min(normalVariance * 0.159155, 0.18) + materialRoughness * materialRoughness));
 
     bool hasParticipatingMedium = View_FogContextMediumIOR > 1.0;
@@ -2823,13 +2945,13 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     float3 reflectionBasis = normalViewDot * surface.Normal + surface.CameraToPixelDirection;
     float3 reflectedDirection = reflect(-viewDirection, surface.Normal);
     float transmittedCosine = sqrt(max(0.0, 1.0 - (1.0 - normalViewDot * normalViewDot) * 0.562781));
-    float3 refractedDirection = SafeNormalize(0.750188 * reflectionBasis - transmittedCosine * surface.Normal);
+    float3 refractedDirection = WaterSafeNormalize(0.750188 * reflectionBasis - transmittedCosine * surface.Normal, -surface.Normal);
 
     surface.RoughnessSquared = surface.FilteredRoughness * surface.FilteredRoughness;
     surface.RoughnessCubed = surface.RoughnessSquared * surface.FilteredRoughness;
     surface.ReflectionVector = reflectedDirection;
-    surface.ReflectionDirection = SafeNormalize(reflectedDirection);
-    surface.TransmissionDirection = SafeNormalize(lerp(refractedDirection, -surface.Normal, surface.RoughnessCubed));
+    surface.ReflectionDirection = WaterSafeNormalize(reflectedDirection, surface.Normal);
+    surface.TransmissionDirection = WaterSafeNormalize(lerp(refractedDirection, -surface.Normal, surface.RoughnessCubed), -surface.Normal);
 
     float2 screenUv = pixelXY * View_BufferSizeAndInvSize.zw;
     int2 sourceTexel = int2(pixelXY);
@@ -2838,22 +2960,30 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     float sourceWaterDepth = max(0.0, sourceLinearDepth - _IN.SV_Position.w);
     float3 refractedView = mul(float4(refractedDirection, 0.0), View_TranslatedWorldToView).xyz;
     float refractionStrength = saturate(sourceWaterDepth * 0.02) * (1.0 - 0.65 * surface.FilteredRoughness);
-    float2 refractionUv = screenUv + refractedView.xy * (0.025 * WATERB_REFRACTION_STRENGTH * refractionStrength / max(abs(refractedView.z), 0.25));
+    float2 refractionUv = screenUv + refractedView.xy * (0.025 * WATER_REFRACTION_STRENGTH * refractionStrength / max(abs(refractedView.z), 0.25));
 
-    float depthNoiseFade = saturate(sourceWaterDepth * WATERB_REFRACTION_NOISE_DEPTH_SCALE);
-    float2 refractionNoisePosition = surface.WorldPosition.xy * 0.01 + float2(View_RealTime * 0.37, -View_RealTime * 0.29);
+    float depthNoiseFade = saturate(sourceWaterDepth * WATER_REFRACTION_NOISE_DEPTH_SCALE);
+    float2 refractionNoiseSurfacePosition = float2(
+        dot(surface.WorldPosition, tangentAxis),
+        dot(surface.WorldPosition, bitangentAxis));
+#if defined(SHADER_VARIANT_WATER_B)
+    float2 refractionNoisePosition = refractionNoiseSurfacePosition * 0.01 + float2(View_RealTime * 0.37, -View_RealTime * 0.29);
+#else
+    float2 refractionNoisePosition = refractionNoiseSurfacePosition * 0.02 + float2(View_RealTime * 0.37, -View_RealTime * 0.29);
+#endif
     float refractionNoiseX = WrappedValueNoise2D(refractionNoisePosition);
     float refractionNoiseY = WrappedValueNoise2D(RotateDensityOctave(refractionNoisePosition * 1.73 + float2(37.17, 91.73)));
     float2 coherentRefractionNoise = float2(refractionNoiseX, refractionNoiseY) * 2.0 - 1.0;
     coherentRefractionNoise = lerp(coherentRefractionNoise, tangentNormal.xy, 0.38);
-    refractionUv += coherentRefractionNoise * WATERB_REFRACTION_NOISE_STRENGTH * lerp(0.35, 1.0, depthNoiseFade);
+    refractionUv += coherentRefractionNoise * WATER_REFRACTION_NOISE_STRENGTH * lerp(0.35, 1.0, depthNoiseFade);
 
     float jitterPixels = lerp(1.0, 5.0, depthNoiseFade) * refractionStrength;
     refractionUv += (blueNoiseSample.xy - 0.5) * View_BufferSizeAndInvSize.zw * jitterPixels;
 
-    refractionUv = ClampWaterBRefractionUv(refractionUv);
+    refractionUv = all(isfinite(refractionUv)) ? refractionUv : screenUv;
+    refractionUv = ClampWaterRefractionUv(refractionUv);
 
-    int2 candidateReceiverTexel = WaterBRefractionUvToTexel(refractionUv);
+    int2 candidateReceiverTexel = WaterRefractionUvToTexel(refractionUv);
     float candidateReceiverDeviceDepth = TranslucentBasePass_SceneTextures_SceneDepthTexture.Load(int3(candidateReceiverTexel, 0)).x;
     float candidateReceiverLinearDepth = DeviceZToWorldDepth(candidateReceiverDeviceDepth);
     float3 candidateReceiverWorldPosition = surface.WorldPosition;
@@ -2863,14 +2993,26 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
         candidateReceiverWorldPosition = ReconstructTranslatedWorldPosition(float2(candidateReceiverTexel) + 0.5, candidateReceiverDeviceDepth) - View_PreViewTranslation.xyz;
     }
 
-    bool candidateHasReceiver = candidateReceiverDeviceDepth != 0.0 && candidateReceiverLinearDepth > _IN.SV_Position.w && candidateReceiverWorldPosition.z <= surface.WorldPosition.z + WATERB_REFRACTION_WATER_PLANE_Z_BIAS;
+    bool candidateHasReceiver =
+        candidateReceiverDeviceDepth != 0.0 &&
+        isfinite(candidateReceiverLinearDepth) &&
+        candidateReceiverLinearDepth > _IN.SV_Position.w &&
+        WaterRefractionReceiverIsBehindSurface(candidateReceiverWorldPosition, surface.WorldPosition, surface.RefractionPlaneNormal);
     float candidateWaterDepth = candidateHasReceiver ? max(candidateReceiverLinearDepth - _IN.SV_Position.w, 0.0) : 0.0;
 
-    bool useRefractedUv = WaterBRefractionCandidateIsSafe(refractionUv, screenUv, surface.WorldPosition.z, candidateWaterDepth, blueNoiseSample);
+    bool useRefractedUv = WaterRefractionCandidateIsSafe(
+        refractionUv,
+        screenUv,
+        _IN.SV_Position.w,
+        surface.WorldPosition,
+        surface.RefractionPlaneNormal,
+        candidateWaterDepth,
+        blueNoiseSample);
+
     refractionUv = useRefractedUv ? refractionUv : screenUv;
 
     //fog, extinction, caustics, and final scene color all use the resolved UV.
-    int2 receiverTexel = WaterBRefractionUvToTexel(refractionUv);
+    int2 receiverTexel = WaterRefractionUvToTexel(refractionUv);
     float receiverDeviceDepth = TranslucentBasePass_SceneTextures_SceneDepthTexture.Load(int3(receiverTexel, 0)).x;
     float receiverLinearDepth = DeviceZToWorldDepth(receiverDeviceDepth);
     float3 receiverWorldPosition = surface.WorldPosition;
@@ -2878,7 +3020,11 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     if (receiverDeviceDepth != 0.0)
         receiverWorldPosition = ReconstructTranslatedWorldPosition(float2(receiverTexel) + 0.5, receiverDeviceDepth) - View_PreViewTranslation.xyz;
 
-    bool hasReceiver = receiverDeviceDepth != 0.0 && receiverLinearDepth > _IN.SV_Position.w && receiverWorldPosition.z <= surface.WorldPosition.z + WATERB_REFRACTION_WATER_PLANE_Z_BIAS;
+    bool hasReceiver =
+        receiverDeviceDepth != 0.0 &&
+        isfinite(receiverLinearDepth) &&
+        receiverLinearDepth > _IN.SV_Position.w &&
+        WaterRefractionReceiverIsBehindSurface(receiverWorldPosition, surface.WorldPosition, surface.RefractionPlaneNormal);
     float receiverWaterDepth = hasReceiver ? min(max(receiverLinearDepth - _IN.SV_Position.w, 0.0), 6.55040e+06) : 0.0;
 
     float3 transmissionTint = Material_Texture2D_25.SampleBias(View_SharedAnisotropic4XClampedSampler, baseUv, materialBias).rgb;
@@ -2890,13 +3036,15 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     float3 unitTransmittance = exp2(log2(max(unitSample, 1.0e-6)) * spectralExponent);
 
     float rayThickness = max(0.001, receiverWaterDepth);
-    float verticalThickness = hasReceiver ? max(0.001, min(max(surface.WorldPosition.z - receiverWorldPosition.z, 0.0), 6.55040e+06)) : 0.001;
+    float surfaceNormalThickness = hasReceiver
+        ? max(0.001, min(max(-dot(receiverWorldPosition - surface.WorldPosition, surface.RefractionPlaneNormal), 0.0), 6.55040e+06))
+        : 0.001;
     float referenceExtinctionLog = log2(max(referenceUnitTransmittance, 1.0e-6));
     float3 extinctionLog = log2(max(unitTransmittance, 1.0e-6));
     float referencePathTransmittance = exp2(referenceExtinctionLog * rayThickness);
     float3 pathTransmittance = exp2(extinctionLog * rayThickness);
-    float deepReferenceTransmittance = exp2(referenceExtinctionLog * verticalThickness);
-    float3 deepExtinctionLog = extinctionLog * verticalThickness;
+    float deepReferenceTransmittance = exp2(referenceExtinctionLog * surfaceNormalThickness);
+    float3 deepExtinctionLog = extinctionLog * surfaceNormalThickness;
 
     float oneMinusRoughness = 1.0 - surface.FilteredRoughness;
     float fresnelResponse = dielectricF0 + (1.0 - dielectricF0) * pow(1.0 - clampedNormalViewDot, 5.0);
@@ -2947,6 +3095,57 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     return result;
 }
 
+//|||||||||||||||||||||||||||||||||| CAUSTICS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CAUSTICS ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CAUSTICS ||||||||||||||||||||||||||||||||||
+
+//cheap, deterministic 2-D hash used by the procedural Worley cells. 
+//this avoids a texture dependency (and avoids the relatively expensive sin hash).
+float2 HashWorleyCell(int2 cell)
+{
+    float3 p = frac(float3((float)cell.x, (float)cell.y, (float)cell.x) * float3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yzx + 33.33);
+    return frac((p.xx + p.yz) * p.zy);
+}
+
+//returns distance to the nearest Voronoi boundary (F2 - F1). 
+//keeping the distance rather than thresholding here lets the caller use fwidth for stable, antialiased caustic lines.
+float WorleyEdgeDistance(float2 position, float animationTime)
+{
+    int2 baseCell = int2(floor(position));
+    float2 localPosition = frac(position);
+    float nearestDistanceSq = 1.0e10;
+    float secondDistanceSq = 1.0e10;
+
+    [unroll]
+    for (int cellY = -1; cellY <= 1; ++cellY)
+    {
+        [unroll]
+        for (int cellX = -1; cellX <= 1; ++cellX)
+        {
+            int2 neighborOffset = int2(cellX, cellY);
+            int2 neighborCell = baseCell + neighborOffset;
+            float2 randomPhase = HashWorleyCell(neighborCell) * 6.28318530718;
+
+            float2 featurePoint = 0.5 + 0.42 * sin(randomPhase + animationTime * float2(1.0, 1.173));
+            float2 delta = float2(neighborOffset) + featurePoint - localPosition;
+            float distanceSq = dot(delta, delta);
+
+            if (distanceSq < nearestDistanceSq)
+            {
+                secondDistanceSq = nearestDistanceSq;
+                nearestDistanceSq = distanceSq;
+            }
+            else
+            {
+                secondDistanceSq = min(secondDistanceSq, distanceSq);
+            }
+        }
+    }
+
+    return sqrt(secondDistanceSq) - sqrt(nearestDistanceSq);
+}
+
 float3 ApplyProjectedWorleyCaustics(
     float intersectionCausticsDepth,
     float3 backgroundSceneColor,
@@ -2955,20 +3154,24 @@ float3 ApplyProjectedWorleyCaustics(
     float waterToReceiverDepth,
     float directionalLightVisibility)
 {
-    // Reuse the exact refracted receiver already sampled for water fog.
-    float validReceiver = (float)(uint)(receiverDeviceDepth != 0.0 && waterToReceiverDepth > 0.0);
-    receiverWorldPosition += View_RealTime * 35.1;
+    //Invalid receivers must return before the procedural math: multiplying a
+    //NaN by a zero validity mask would still leave a NaN in the result.
+    if (receiverDeviceDepth == 0.0 || waterToReceiverDepth <= 0.0 || !all(isfinite(receiverWorldPosition)))
+        return WaterSanitizeColor(backgroundSceneColor);
+
+    //shift the world position over time
+    receiverWorldPosition += View_RealTime * CAUSTICS_ANIMATION_MOVE_SPEED;
 
     float causticsScale = CAUSTICS_WORLD_SCALE;
     //causticsScale -= saturate(intersectionCausticsDepth * 0.001f) * 0.001f;
 
-    float3 causticLightDirection = SafeNormalize(TranslucentBasePass_Shared_Forward_DirectionalLightDirection);
+    float3 causticLightDirection = WaterSafeNormalize(TranslucentBasePass_Shared_Forward_DirectionalLightDirection, float3(0.0, 0.0, -1.0));
     float3 causticReferenceAxis = abs(causticLightDirection.z) < 0.999 ? float3(0.0, 0.0, 1.0) : float3(0.0, 1.0, 0.0);
-    float3 causticBasisX = SafeNormalize(cross(causticReferenceAxis, causticLightDirection));
+    float3 causticBasisX = WaterSafeNormalize(cross(causticReferenceAxis, causticLightDirection), float3(1.0, 0.0, 0.0));
     float3 causticBasisY = cross(causticLightDirection, causticBasisX);
     float2 causticProjection = float2(dot(receiverWorldPosition, causticBasisX), dot(receiverWorldPosition, causticBasisY)) * causticsScale;
 
-    // A rotated second layer breaks up the recognizably regular Voronoi cells.
+    //a rotated second layer breaks up the recognizably regular Voronoi cells.
     float2 causticProjection2 = float2(mad(causticProjection.x, 0.798636, -causticProjection.y * 0.601815), mad(causticProjection.x, 0.601815,  causticProjection.y * 0.798636));
     causticProjection2 = causticProjection2 * 1.73 + float2(17.13, 41.71);
 
@@ -2982,20 +3185,20 @@ float3 ApplyProjectedWorleyCaustics(
     float causticPattern = saturate(causticLayer1 * 0.78 + causticLayer2 * 0.55 - 0.36);
     causticPattern *= causticPattern;
 
-    // Fade grazing receivers to avoid extreme projection stretching. abs()
-    // makes the result independent of reconstructed derivative winding.
+    //fade grazing receivers to avoid extreme projection stretching. 
+    //abs() makes the result independent of reconstructed derivative winding.
     float3 receiverDx = ddx_fine(receiverWorldPosition);
     float3 receiverDy = ddy_fine(receiverWorldPosition);
-    float3 receiverNormal = SafeNormalize(cross(receiverDx, receiverDy));
+    float3 receiverNormal = WaterSafeNormalize(cross(receiverDx, receiverDy), 0.0);
     float receiverFacing = saturate(abs(dot(receiverNormal, causticLightDirection)) * 1.5);
     float causticDepthMask = saturate(waterToReceiverDepth * CAUSTICS_SHALLOW_FADE) * exp2(-waterToReceiverDepth * CAUSTICS_DEPTH_FALLOFF);
     float hasDirectionalLight = (float)(uint)(TranslucentBasePass_Shared_Forward_HasDirectionalLight != 0);
-    float causticVisibility = validReceiver * hasDirectionalLight * receiverFacing * causticDepthMask * saturate(directionalLightVisibility);
+    float causticVisibility = hasDirectionalLight * receiverFacing * causticDepthMask * saturate(directionalLightVisibility);
 
     //float3 causticRadiance = causticPattern * CAUSTICS_INTENSITY * causticVisibility * directionalShadowTranslucentbasepassShared_Forward_DirectionalLightColorData.xyz * View_OneOverPreExposure;
     float3 causticRadiance = causticPattern * CAUSTICS_INTENSITY * causticVisibility;
     backgroundSceneColor *= 1.0f + causticRadiance;
-    return backgroundSceneColor;
+    return WaterSanitizeColor(backgroundSceneColor);
 }
 
 float3 SampleRefractedSceneColor(float2 refractedUv, float2 unrefractedUv, float waterDepth, float4 blueNoise)
@@ -3004,36 +3207,44 @@ float3 SampleRefractedSceneColor(float2 refractedUv, float2 unrefractedUv, float
 
 #if defined(ENABLE_REFRACTION_CHROMATIC_DISPERSION)
     float2 dispersionOffset = (refractedUv - unrefractedUv) * REFRACTION_DISPERSION_STRENGTH;
-    float red = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterBRefractionUv(refractedUv + dispersionOffset), 0.0).r;
-    float green = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterBRefractionUv(refractedUv), 0.0).g;
-    float blue = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterBRefractionUv(refractedUv - dispersionOffset), 0.0).b;
+    float red = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterRefractionUv(refractedUv + dispersionOffset), 0.0).r;
+    float green = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterRefractionUv(refractedUv), 0.0).g;
+    float blue = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterRefractionUv(refractedUv - dispersionOffset), 0.0).b;
     refractedColor = float3(red, green, blue);
 #else
-    refractedColor = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterBRefractionUv(refractedUv), 0.0).rgb;
+    refractedColor = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterRefractionUv(refractedUv), 0.0).rgb;
 #endif
 
     //stochastic cross blur
-    float depthBlur;
-    float2 blurOffsetA;
-    float2 blurOffsetB;
-    GetWaterBDepthBlurOffsets(waterDepth, blueNoise, depthBlur, blurOffsetA, blurOffsetB);
+    float depthBlur = 0.0;
+    float2 blurOffsetA = 0.0;
+    float2 blurOffsetB = 0.0;
 
-    // A native-UV fallback must remain completely untouched: no depth blur.
+    #if defined(WATER_DEPTH_BLUR)
+        GetWaterDepthBlurOffsets(waterDepth, blueNoise, depthBlur, blurOffsetA, blurOffsetB);
+    #endif
+
+    //native-UV fallback must remain completely untouched: no depth blur.
     bool useResolvedRefraction = any(abs(refractedUv - unrefractedUv) > 1.0e-7);
 
     if (useResolvedRefraction && depthBlur > 0.0)
     {
-        float3 blurCenter = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterBRefractionUv(refractedUv), 0.0).rgb;
-        float3 blurA0 = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterBRefractionUv(refractedUv + blurOffsetA), 0.0).rgb;
-        float3 blurA1 = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterBRefractionUv(refractedUv - blurOffsetA), 0.0).rgb;
-        float3 blurB0 = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterBRefractionUv(refractedUv + blurOffsetB), 0.0).rgb;
-        float3 blurB1 = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterBRefractionUv(refractedUv - blurOffsetB), 0.0).rgb;
+        float3 blurCenter = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterRefractionUv(refractedUv), 0.0).rgb;
+        float3 blurA0 = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterRefractionUv(refractedUv + blurOffsetA), 0.0).rgb;
+        float3 blurA1 = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterRefractionUv(refractedUv - blurOffsetA), 0.0).rgb;
+        float3 blurB0 = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterRefractionUv(refractedUv + blurOffsetB), 0.0).rgb;
+        float3 blurB1 = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, ClampWaterRefractionUv(refractedUv - blurOffsetB), 0.0).rgb;
         float3 depthBlurredColor = blurCenter * 0.28 + (blurA0 + blurA1 + blurB0 + blurB1) * 0.18;
+
         refractedColor = lerp(refractedColor, depthBlurredColor, depthBlur * 0.88);
     }
 
     return View_OneOverPreExposure * refractedColor;
 }
+
+//|||||||||||||||||||||||||||||||||| MAIN ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| MAIN ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| MAIN ||||||||||||||||||||||||||||||||||
 
 OutputStruct main(InputStruct _IN)
 {
@@ -3070,42 +3281,45 @@ OutputStruct main(InputStruct _IN)
     ReflectionCaptureLighting captures = EvaluateReflectionCaptures(surface, material.ClusterCellIndex, reflectionCaptureWeight);
 
     TranslucencyAmbientDice ambientDice = SampleTranslucencyAmbientDice(surface.WorldPosition);
-    float3 ambientColor = View_OneOverPreExposure * ambientDice.BaseColor;
-    float ambientLuminance = Luminance(ambientDice.BaseColor);
-    float inverseAmbientLuminance = ambientLuminance > 0.0 ? rcp(ambientLuminance) : 0.0;
+    float3 ambientColor = WaterSanitizeColor(View_OneOverPreExposure * ambientDice.BaseColor);
+    float ambientLuminance = WaterSanitizePositive(LuminanceRec709(ambientDice.BaseColor));
+    float inverseAmbientLuminance = ambientLuminance > 1.0e-6 ? WaterSafeReciprocal(ambientLuminance, 1.0e-6) : 0.0;
 
     float reflectionAmbient = EvaluateAmbientDice(surface.ReflectionDirection, ambientDice.PositiveAxisWeights, ambientDice.NegativeAxisWeights);
     float normalAmbient = EvaluateAmbientDice(surface.Normal, ambientDice.PositiveAxisWeights, ambientDice.NegativeAxisWeights);
     float3 reflectionIrradiance = ambientColor * (reflectionAmbient * inverseAmbientLuminance);
     float3 normalIrradiance = ambientColor * (normalAmbient * inverseAmbientLuminance);
 
-    float indirectDiffuseLuminance = Luminance(captures.Diffuse);
-    float indirectSpecularLuminance = Luminance(captures.Specular);
-    float reflectionIrradianceLuminance = Luminance(reflectionIrradiance);
-    float normalIrradianceLuminance = Luminance(normalIrradiance);
-    float secondaryDiffuseLuminance = Luminance(captures.SecondaryDiffuse);
-    float secondarySpecularLuminance = Luminance(captures.SecondarySpecular);
+    float indirectDiffuseLuminance = WaterSanitizePositive(LuminanceRec709(captures.Diffuse));
+    float indirectSpecularLuminance = WaterSanitizePositive(LuminanceRec709(captures.Specular));
+    float reflectionIrradianceLuminance = WaterSanitizePositive(LuminanceRec709(reflectionIrradiance));
+    float normalIrradianceLuminance = WaterSanitizePositive(LuminanceRec709(normalIrradiance));
+    float secondaryDiffuseLuminance = WaterSanitizePositive(LuminanceRec709(captures.SecondaryDiffuse));
+    float secondarySpecularLuminance = WaterSanitizePositive(LuminanceRec709(captures.SecondarySpecular));
 
-    float secondaryDiffuseScale = (secondaryDiffuseLuminance > 0.0 ? rcp(secondaryDiffuseLuminance) : 0.0) * reflectionIrradianceLuminance;
-    float secondarySpecularScale = (secondarySpecularLuminance > 0.0 ? rcp(secondarySpecularLuminance) : 0.0) * normalIrradianceLuminance;
+    float secondaryDiffuseScale = WaterSafePositiveRatio(reflectionIrradianceLuminance, secondaryDiffuseLuminance, WATER_MAX_INDIRECT_ENERGY_SCALE);
+    float secondarySpecularScale = WaterSafePositiveRatio(normalIrradianceLuminance, secondarySpecularLuminance, WATER_MAX_INDIRECT_ENERGY_SCALE);
     float diffuseScaleError = secondaryDiffuseScale - 1.0;
     float specularScaleError = secondarySpecularScale - 1.0;
-    float diffuseEnergyBlend = saturate(diffuseScaleError * diffuseScaleError / (diffuseScaleError * diffuseScaleError + 0.25));
-    float specularEnergyBlend = saturate(specularScaleError * specularScaleError / (specularScaleError * specularScaleError + 0.25));
+    float diffuseScaleErrorSquared = diffuseScaleError * diffuseScaleError;
+    float specularScaleErrorSquared = specularScaleError * specularScaleError;
+    float diffuseEnergyBlend = saturate(diffuseScaleErrorSquared / (diffuseScaleErrorSquared + 0.25));
+    float specularEnergyBlend = saturate(specularScaleErrorSquared / (specularScaleErrorSquared + 0.25));
 
-    float3 matchedIndirectDiffuse = reflectionIrradiance * indirectDiffuseLuminance / max(reflectionIrradianceLuminance, 1.0e-30);
-    float3 matchedIndirectSpecular = normalIrradiance * indirectSpecularLuminance / max(normalIrradianceLuminance, 1.0e-30);
+    float3 matchedIndirectDiffuse = reflectionIrradiance * WaterSafePositiveRatio(indirectDiffuseLuminance, reflectionIrradianceLuminance, WATER_MAX_INDIRECT_ENERGY_SCALE);
+    float3 matchedIndirectSpecular = normalIrradiance * WaterSafePositiveRatio(indirectSpecularLuminance, normalIrradianceLuminance, WATER_MAX_INDIRECT_ENERGY_SCALE);
     float3 balancedIndirectDiffuse = lerp(captures.Diffuse, matchedIndirectDiffuse, diffuseEnergyBlend);
     float3 balancedIndirectSpecular = lerp(captures.Specular, matchedIndirectSpecular, specularEnergyBlend);
 
-    // Reconstruct spectral transmission from the per-channel extinction ratios.
+    //reconstruct spectral transmission from the per-channel extinction ratios.
     float3 spectralTransmissionWeight = 0.0;
 
-    if (material.ReferenceUnitTransmittance < 1.0)
+    if (material.ReferenceUnitTransmittance < 1.0 - 1.0e-6)
     {
-        float referenceExtinction = log2(material.ReferenceUnitTransmittance);
-        float3 channelExtinction = log2(material.UnitTransmittance);
-        spectralTransmissionWeight = material.TransmissionTint / (channelExtinction / referenceExtinction + 1.0);
+        float referenceExtinction = min(log2(max(material.ReferenceUnitTransmittance, 1.0e-6)), -1.0e-6);
+        float3 channelExtinction = log2(max(material.UnitTransmittance, 1.0e-6));
+        float3 extinctionRatio = channelExtinction * WaterSafeReciprocal(referenceExtinction, 1.0e-6);
+        spectralTransmissionWeight = WaterSanitizeColor(material.TransmissionTint / max(extinctionRatio + 1.0, 1.0e-4));
     }
 
     float transmissionAmbient = EvaluateAmbientDice(surface.TransmissionDirection, ambientDice.PositiveAxisWeights, ambientDice.NegativeAxisWeights);
@@ -3127,26 +3341,26 @@ OutputStruct main(InputStruct _IN)
     float3 specularLighting = (specularStrength * secondarySpecular + direct.Primary.Specular) * material.SurfaceCoverage;
 
     float4 screenSpaceReflection = EvaluateScreenSpaceReflection(surface, _IN.SV_Position.w, material.BlueNoise.x);
-    float3 safeReflectionColor = max(1.0e-9, screenSpaceReflection.rgb);
-    float3 safeTransmissionColor = max(1.0e-9, balancedIndirectDiffuse * secondaryDiffuseScale);
+    float3 safeReflectionColor = max(1.0e-9, WaterSanitizeColor(screenSpaceReflection.rgb));
+    float3 safeTransmissionColor = max(1.0e-9, WaterSanitizeColor(balancedIndirectDiffuse * secondaryDiffuseScale));
 
     //occlude reflections in shadow
     safeTransmissionColor *= lerp(0.15, 1.0, saturate(directional.Visibility));
 
     //SSR contribution should be very strong, because it's the most accurate reflection data we have access to
-    screenSpaceReflection.a = saturate(screenSpaceReflection.a * 1000000);
+    screenSpaceReflection.a = isfinite(screenSpaceReflection.a) ? saturate(screenSpaceReflection.a * 1000000) : 0.0;
 
     float3 blendedTransmissionColor = exp2(lerp(log2(safeTransmissionColor), log2(safeReflectionColor), screenSpaceReflection.a));
 
     float2 refractionUv = material.RefractionUv;
-    float3 backgroundSceneColor = SampleRefractedSceneColor(refractionUv, material.ScreenUv, material.RefractionWaterDepth, material.BlueNoise);
+    float3 backgroundSceneColor = WaterSanitizeColor(SampleRefractedSceneColor(refractionUv, material.ScreenUv, material.RefractionWaterDepth, material.BlueNoise));
 
-    //backgroundSceneColor = ApplyProjectedWorleyCaustics(backgroundSceneColor, material.RefractionReceiverDeviceDepth, material.RefractionReceiverWorldPosition, material.RefractionWaterDepth, directional.Visibility);
-
-    float causticsSceneDeviceDepth = TranslucentBasePass_SceneTextures_SceneDepthTexture.Load(int3(pixelPosition, 0)).x;
-    float causticsSceneLinearDepth = DeviceZToWorldDepth(causticsSceneDeviceDepth);
-    float causticsFade = max(0.0, causticsSceneLinearDepth - _IN.SV_Position.w);
-    backgroundSceneColor = ApplyProjectedWorleyCaustics(causticsFade, backgroundSceneColor, material.RefractionReceiverDeviceDepth, material.RefractionReceiverWorldPosition, material.RefractionWaterDepth, directional.Visibility);
+    #if defined(CAUSTICS_ENABLED)
+        float causticsSceneDeviceDepth = TranslucentBasePass_SceneTextures_SceneDepthTexture.Load(int3(pixelPosition, 0)).x;
+        float causticsSceneLinearDepth = DeviceZToWorldDepth(causticsSceneDeviceDepth);
+        float causticsFade = max(0.0, causticsSceneLinearDepth - _IN.SV_Position.w);
+        backgroundSceneColor = ApplyProjectedWorleyCaustics(causticsFade, backgroundSceneColor, material.RefractionReceiverDeviceDepth, material.RefractionReceiverWorldPosition, material.RefractionWaterDepth, directional.Visibility);
+    #endif
 
     float3 mediumTransmittance = saturate(reflectionCaptureWeight * material.PathTransmittance * material.DeepReferenceTransmittance * exp2(material.DeepExtinctionLog));
     float3 refractedSceneColor = backgroundSceneColor * mediumTransmittance * saturate(material.OpenWaterMask);
@@ -3155,15 +3369,19 @@ OutputStruct main(InputStruct _IN)
     float3 reflectionContribution = reflectionFresnelWeight * material.MultipleScatteringWeight * (blendedTransmissionColor + direct.SecondaryDiffuse);
 
     float3 accumulatedColor = specularLighting + direct.Primary.Subsurface + diffuseLighting + refractedSceneColor + reflectionContribution;
-    float3 finalColor = View_PreExposure * accumulatedColor;
+    float3 finalColor = WaterSanitizeColor(View_PreExposure * accumulatedColor);
 
     //water-surface edge test: intentionally stays at the original pixel and is not a refracted-receiver lookup.
     float sceneDeviceDepth = TranslucentBasePass_SceneTextures_SceneDepthTexture.Load(int3(pixelPosition, 0)).x;
     float sceneLinearDepth = DeviceZToWorldDepth(sceneDeviceDepth);
     float intersectionFade = saturate(max(0.0, sceneLinearDepth - _IN.SV_Position.w) * 0.02);
-    float3 originalSceneColor = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, pixelPosition * View_BufferSizeAndInvSize.zw, 0).rgb;
+    float3 originalSceneColor = WaterSanitizeColor(TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, pixelPosition * View_BufferSizeAndInvSize.zw, 0).rgb);
 
     finalColor = lerp(originalSceneColor, finalColor, saturate(intersectionFade * 2.0));
+    finalColor = WaterClampLuminance(finalColor, WATER_MAX_OUTPUT_LUMINANCE);
+
+    //last ditch effort to ensure that we dont get nan's or fireflies later
+    finalColor = max(0.0002f, finalColor);
 
     output.SV_Target0 = float4(finalColor, 1.0);
     output.SV_Target1 = float4(1.0, 1.0, 1.0, 0.0);

@@ -7,138 +7,157 @@
 #include "LibraryColor.hlsl"
 #include "LibraryGBuffer.hlsl"
 
-//#define DEFAULT_GAME_SHADING
-
-#define CORRECT_REFLECTION_DIRECTION
-
 //by default it appears that the irradiance volume data is basically ambient cube
 //it's efficent but not the best quality and has it's problems
 //but we can project those irradiance coefficents into SH to get the data in spherical harmonics.
-#define CONVERT_TO_SPHERICAL_HARMONICS
+//#define DEFAULT_GAME_SHADING
 
-//derrive a specular highlight based on the dominant direction of ambient light
-//this helps give specular materials a very nice and plausible/accurate kick of reflection that is based on the baked ambient global illumination
-//I HIGHLY recomend keeping this on
-#define SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT
-#define SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT_BOOST 2.0
-
-//#define SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SPHERICAL HARMONICS IRRADIANCE/DIFFUSE ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SPHERICAL HARMONICS IRRADIANCE/DIFFUSE ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SPHERICAL HARMONICS IRRADIANCE/DIFFUSE ||||||||||||||||||||||||||||||||||
 
 //in plain english: this is more accurate, and leads to less contrast
 //technical yapping: this evaluates the converted spherical harmonics "irradiance/diffuse" global illumination term using zonal harmonics
 //where the coefficents we reconstructed are effectively order 2, but with zonal harmonics we can "hallucinate" a 3rd order leading to less ringing
 #define SPHERICAL_HARMONICS_IRRADIANCE_ZH3
 
-//in plain english: this is more accurate, and leads to less contrast
-//technical yapping: this evaluates the converted spherical harmonics "radiance/reflection" global illumination term using zonal harmonics
-//where the coefficents we reconstructed are effectively order 2, but with zonal harmonics we can "hallucinate" a 3rd order leading to less ringing
-#define SPHERICAL_HARMONICS_RADIANCE_ZH3
+//this uses the dominant direction of baked global illumination to help give extra shading/contrast to characters when in ambient light (half-lambert)
+//this is not physically accurate at all, just purely an artistic effect
+#define CHARACTER_DOMINANT_DIRECTION_SHADING
 
-//derrive a specular highlight from the camera
-//this is more artistic admittedly, and is not entirely accurate/plausible unless there is a light at camera
-//with that said this also like the dominant SH specular highlight gives a very nice kick to the reflection term for the baked ambient global illumination
-#define CAMERA_VIEW_SPECULAR_HIGHLIGHT
+//when CHARACTER_DOMINANT_DIRECTION_SHADING is active, this controlshow strong the contrast is for character materials when in ambient light (half-lambert)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.25
+//[CONFIG RANGE]: [0, 1]
+#define CHARACTER_DOMINANT_DIRECTION_SHADING_AMOUNT 0.25
 
-//|||||||||||||||||||||||||||||||||| CONFIGURATION - CONTACT SHADOWS ||||||||||||||||||||||||||||||||||
-//|||||||||||||||||||||||||||||||||| CONFIGURATION - CONTACT SHADOWS ||||||||||||||||||||||||||||||||||
-//|||||||||||||||||||||||||||||||||| CONFIGURATION - CONTACT SHADOWS ||||||||||||||||||||||||||||||||||
-//here are parameters that are wired up for easy tweakin...
+//this is an experimental feature, that uses the dominant direction and treats it like a light source to get additional shading/contrast in ambient areas.
+//it also uses contact shadows to help give a more grounded look to the shading, and to help mitigate some of the shortcomings of baked global illumination
+//this is not physically accurate at all, this is purely just an artistic effect.
+//#define SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE
 
-//this changes the noise pattern every frame, which with Temporal Anti-Aliasing (or DLSS or anything related)
+//(CONTACT SHADOWS) this changes the noise pattern every frame, which with Temporal Anti-Aliasing (or DLSS or anything related)
 //you want to do, that way samples change every frame and results get blended together over time for a better final apperance
 #define RANDOM_ANIMATE_NOISE
 
-//the main attraction, contact shadows!
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
+//calculates contact shadows for dominant direction of ambient light
 //in short it raymarches against the scene depth buffer to estimate shadows
 //significantly improves overall shadow quality
-//#define ENABLE_CONTACT_SHADOWS
+#define ENABLE_CONTACT_SHADOWS
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //this directly controls the quality of the contact shadows, the more the better!
-//RANGE: this should be between [4 <---> 128]
-//DEFAULT: 8
 //HIGHER VALUES: better quality shadows, less noise (more stable), and denser but expensive performance
 //LOWER VALUES: lower quality shadows, more noise (less stable), and lighter but cheaper performance
+//[CONFIG TYPE]: int
+//[CONFIG DEFAULT]: 8
+//[CONFIG RANGE]: [4, 128]
 #define CONTACT_SHADOWS_SAMPLES 8
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //this controls how far out the shadows go in screen space (and also can make shadows appear darker/denser or lighter depending on sample count)
-//RANGE: this should be between [10.0 <---> 200.0]
-//DEFAULT: 50.0
 //HIGHER VALUES: shadows can reach farther, but can become noiser, and more expensive (more screen area)
 //LOWER VALUES: shadows don't reach as far, but can become more stable, and cheaper (less screen area)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 50.0
 #define CONTACT_SHADOWS_RAY_LENGTH 75.0
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //this controls how "thick" objects are in the depth buffer
-//RANGE: this should be between [0.1 <---> 1.0]
-//DEFAULT: 0.325
 //HIGHER VALUES: larger volume of shadow, but can lead to alot of wierd false shadowing. objects up close can cast shadows onto objects far behind it which can look odd.
 //LOWER VALUES: smaller volume of shadow, less false shadowing, but they can appear less dense and might be too thin
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.325
 #define CONTACT_SHADOWS_THICKNESS 0.325
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces
 //high values = reduced acne but can introduce visual issues where shadows appear less grounded
 //low values = potentially increased acne but keeps shadows grounded
-//RANGE: this should be between [0.0 <---> 5.0]
-//DEFAULT: 0.1
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.1
 #define CONTACT_SHADOWS_BIAS 0.1
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces for hair specifically
-//RANGE: this should be between [0.0 <---> 5.0]
 //high values = reduced acne but can introduce visual issues where shadows appear less grounded
 //low values = potentially increased acne but keeps shadows grounded
-//RANGE: this should be between [0.0 <---> 5.0]
-//DEFAULT: 0.1
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.1
 #define CONTACT_SHADOWS_BIAS_HAIR 0.1
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //this is a small bias factor to minimize contact shadow acne on sloped surfaces using surface normal
-//RANGE: this should be between [0.0 <---> 5.0]
 //high values = reduced acne but can introduce visual issues where shadows appear less grounded
 //low values = potentially increased acne but keeps shadows grounded
-//RANGE: this should be between [0.0 <---> 5.0]
-//DEFAULT: 0.1
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.325
 #define CONTACT_SHADOWS_NORMAL_BIAS 0.1
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //OPTIMIZATION: this avoids calculating contact shadows for sky pixels
 //has no effect visually, but can save you quite a bit of frametime especially the more you look up :P 
 //honestly no reason you should turn this off unless you want to suffer in vain...
 #define CONTACT_SHADOW_EARLY_SKY_OUT
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //OPTIMIZATION: this calculates contact shadows for every other pixel in a checkerboard like pattern that switches every frame
 //it saves a small bit of frametime, but does have a quality degredation with more visible shimmering at distances
 //disable if you want sharper true per-pixel contact shadows (at a bit of a perf hit)
-//#define CONTACT_SHADOW_CHECKERBOARD
+// #define CONTACT_SHADOW_CHECKERBOARD
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //[CONTACT_SHADOW_CHECKERBOARD ONLY!] This only works if checkerboarding is enabled!
 //this tries to fill in the gaps intelligently during checkerboard rendering minimize holes where no shadow is calculated 
 #define CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //[CONTACT_SHADOW_CHECKERBOARD and CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION ONLY!] This only works if checkerboarding and quad reconstruction is enabled!
 //sharper | checks within the 2x2 checker block and if there is a shadow pixel it just copies it
-//#define CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION_TYPE_MIN
+// #define CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION_TYPE_MIN
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //smoother | takes the values within the 2x2 checker block and averages them together for a slightly softer apperance
 #define CONTACT_SHADOW_CHECKERBOARD_QUAD_RECONSTRUCTION_TYPE_AVG
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //this was requested by quite a few people who wanted to control the strength of the shadows
 //physical accuracy is at 1.0 full power, and natrually global illumination (ambient, bounce, transmission light) fills in shadows
 //however the games GI term is far from perfect and can leave some areas quite dark so here you can control it
 //reduction in shadow strength can create an odd 90s style look where you can see a semblance of light leaking through to "fill in" for the shadow.
 //not a fan of it, and it's not accurate, but hey to each their own!
-//RANGE: this should be between [0.0 <---> 1.0]
-//DEFAULT: 1
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
+//[CONFIG RANGE]: [0, 1]
 #define CONTACT_SHADOWS_STRENGTH 1.0
 
 //this was requested by a couple of users who wanted to selectively disable contact shadows for specific material types
 //while this could create visual inconsistencies, I've wired them up anyway so you can use them at your own descretion
 //these both are used essentially for all materials within the game
-//#define DISABLE_CONTACT_SHADOWS_FOR_DEFAULT_LIT
-//#define DISABLE_CONTACT_SHADOWS_FOR_CLOTH //<-- this does get used on characters but it's not common, default_lit
+
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
+// #define DISABLE_CONTACT_SHADOWS_FOR_DEFAULT_LIT
+
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
+//this does get used on characters but it's not common, default_lit
+// #define DISABLE_CONTACT_SHADOWS_FOR_CLOTH
 
 //all these 4 below generally cover a majority of the character
-//#define DISABLE_CONTACT_SHADOWS_FOR_PREINTEGRATED_SKIN
-//#define DISABLE_CONTACT_SHADOWS_FOR_SUBSURFACE_PROFILE
-//#define DISABLE_CONTACT_SHADOWS_FOR_HAIR
-//#define DISABLE_CONTACT_SHADOWS_FOR_EYE
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
+// #define DISABLE_CONTACT_SHADOWS_FOR_PREINTEGRATED_SKIN
+
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
+// #define DISABLE_CONTACT_SHADOWS_FOR_SUBSURFACE_PROFILE
+
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
+// #define DISABLE_CONTACT_SHADOWS_FOR_HAIR
+
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
+// #define DISABLE_CONTACT_SHADOWS_FOR_EYE
+
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //another requested feature...
 //this is an added effect that will gradually "fade" contact shadows as it goes further out
 //this does have a bit of a perf hit with (extra instructions per iteration in the loop now)
@@ -146,11 +165,61 @@
 //still, in the grand scheme of things this should be pretty light and enabled if you really want to mitigate some of shortcomings (atleast its not another texture sample)
 #define CONTACT_SHADOWS_FALLOFF
 
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_DIFFUSE ONLY)
 //this shapes the falloff
 //higher values = sharper/darker shadow further out
 //lower values = softer/lighter shadow further out
-//DEFAULT: 4
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 3.0
 #define CONTACT_SHADOWS_FALLOFF_CONTRAST 3.0
+
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SPHERICAL HARMONICS RADIANCE/REFLECTION ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SPHERICAL HARMONICS RADIANCE/REFLECTION ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SPHERICAL HARMONICS RADIANCE/REFLECTION ||||||||||||||||||||||||||||||||||
+
+//game doing a stretched reflection vector based on roughness for some reason? it looks ugly and wrong
+#define CORRECT_REFLECTION_DIRECTION
+
+//derrive a specular highlight based on the dominant direction of ambient light
+//this helps give specular materials a very nice and plausible/accurate kick of reflection that is based on the baked ambient global illumination
+//I HIGHLY recomend keeping this on
+#define SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT
+
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 2.0
+#define SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT_BOOST 2.0
+
+//for an extra "artistic" specular kick we can calculate another specular highlight but coming from the opposite dominant direction
+//this can help give an extra shine in areas of shadow or facing away from the main dominant direction
+#define SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT_DUAL
+
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.05
+#define SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT_DUAL_BOOST 0.05
+
+//derrive a specular highlight from the camera
+//this is more artistic admittedly, and is not entirely accurate/plausible unless there is a light at camera
+//with that said this also like the dominant SH specular highlight gives a very nice kick to the reflection term for the baked ambient global illumination
+#define CAMERA_VIEW_SPECULAR_HIGHLIGHT
+
+//calculate a specular occlusion term (half lambert) that darkens reflections on the dominant direction of ambient light
+#define SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION
+
+//controls how strong the specular occlusion term is, higher values darken reflections facing away from the dominant direction of ambient light
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.5
+//[CONFIG RANGE]: [0, 1]
+#define SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION_FACTOR 0.5
+
+//DONT TOUCH
+//NOTE TO SELF: since this shader does get a little heavier with the extra specular highlights
+//this is our attempt at reducing the cost, since most of the terms are based on dominant direction
+#if defined(SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT) || defined(CAMERA_VIEW_SPECULAR_HIGHLIGHT) || defined(CHARACTER_DOMINANT_DIRECTION_SHADING)
+
+	//[NO CONFIG]
+	#define REQUIRE_NOV
+
+#endif
 
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -534,24 +603,23 @@ struct FProbeDirectionalField
     float3 NegativeAxisLobes;
 };
 
-//CUSTOM
-//NOTE TO SELF: because the original probe data is essentially ambient cube
-//this pretty much means that we can only get so much resolution out of what is basically diffuse/irradiance
-//so for this we should only need up to order 2 spherical harmonics
-struct SphericalHarmonicsData
+//the games ambient-cube projection has one shared chromaticity and only six non-zero scalar coefficients.
+//normally i'd keep this fleshed out... but that's not entirely optimal performance wise
+//lugging around 9 float3 coefficents will kind of inflate things
+struct SimplifiedSH2
 {
-    float3 Coefficient[9];
+	float3 Chromaticity;
+	float Coefficient0;
+	float Coefficient1;
+	float Coefficient2;
+	float Coefficient3;
+	float Coefficient6;
+	float Coefficient8;
 };
 
 //|||||||||||||||||||||||||||||||||| MATH ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| MATH ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| MATH ||||||||||||||||||||||||||||||||||
-
-static const float PI            = 3.14159265359;
-static const float PI_TWO        = 6.28318530717;
-static const float INV_PI        = 0.31830988618;
-static const float INV_4PI       = 0.0795775;
-static const float MIN_ROUGHNESS = 0.04;
 
 static const uint INVALID_INDEX_28 = 0x0fffffffu;
 static const uint INDEX_MASK_28    = 0x0fffffffu;
@@ -579,11 +647,10 @@ float3 ReconstructWorldPosition(uint2 localPixel, float worldDepth)
     return mul(screenVector, View_ScreenToWorld).xyz;
 }
 
-float3 TransformEnvironmentPositionToGrid(
-    float3 environmentLocalPosition,
-    FPrecomputedLightEnvironmentProbeBoundsInfo info)
+float3 TransformEnvironmentPositionToGrid(float3 environmentLocalPosition, FPrecomputedLightEnvironmentProbeBoundsInfo info)
 {
     float4 p = float4(environmentLocalPosition, 1.0f);
+
     return float3(
         dot(p, float4(info.LocalToGridRow0.x, info.LocalToGridRow1.x, info.LocalToGridRow2.x, info.LocalToGridRow3.x)),
         dot(p, float4(info.LocalToGridRow0.y, info.LocalToGridRow1.y, info.LocalToGridRow2.y, info.LocalToGridRow3.y)),
@@ -605,7 +672,7 @@ bool FindProbeBounds(
     [loop]
     for (uint candidate = 0; candidate < (uint)NumPrecomputedLightEnvironments; ++candidate)
     {
-        // -2 in the bit representation of w marks an inactive environment.
+        //-2 in the bit representation of w marks an inactive environment.
         float4 environment = PLESceneInfo_PLEPositions[candidate];
 
         if (asint(environment.w) == -2)
@@ -618,14 +685,12 @@ bool FindProbeBounds(
         float3 candidateGridPosition = TransformEnvironmentPositionToGrid(localPosition, info);
 
         if (any(candidateGridPosition < 0.0f) || any(candidateGridPosition >= float3(info.GridSize)))
-        {
             continue;
-        }
 
         uint3 integerGridPosition = (uint3)floor(candidateGridPosition);
 
-        // The first indirection indexes a coarse 3-D grid. Its high nibble
-        // tells how many hierarchy bits must be resolved by a second lookup.
+        //the first indirection indexes a coarse 3-D grid.
+		//its high nibble tells how many hierarchy bits must be resolved by a second lookup.
         uint coarseShift = (info.HierarchyLog2 - 1u) & 31u;
         uint3 coarseCell = integerGridPosition >> coarseShift;
         uint cellWidth = 1u << coarseShift;
@@ -654,12 +719,9 @@ bool FindProbeBounds(
 
             packedEntry = PrecomputedLightProbeBoundsIndicesSRVs[descriptor][fineIndex];
 
+			//unlike an empty coarse cell, an empty refinement entry ends the search in the captured shader and produces black.
             if (packedEntry == -1)
-            {
-                // Unlike an empty coarse cell, an empty refinement entry ends
-                // the search in the captured shader and produces black.
                 return false;
-            }
 
             entryIndex = (uint)packedEntry & INDEX_MASK_28;
         }
@@ -677,18 +739,14 @@ bool FindProbeBounds(
     return false;
 }
 
-float EvaluateDistanceCubeVisibility(
-    uint descriptor,
-    int distanceCubeSlice,
-    float3 directionFromProbeToPoint,
-    float probeDistance)
+float EvaluateDistanceCubeVisibility(uint descriptor, int distanceCubeSlice, float3 directionFromProbeToPoint, float probeDistance)
 {
     if (distanceCubeSlice == -1)
         return 1.0f;
 
     float2 distanceMoments = DistanceCubeArray[descriptor].SampleLevel(View_SharedBilinearClampedSampler, float4(directionFromProbeToPoint, (float)distanceCubeSlice), 0.0f).rg;
 
-    // The capture stores distances and squared distances in hundredths.
+    //the capture stores distances and squared distances in hundredths.
     float meanDistance = distanceMoments.x * 100.0f;
     float secondMoment = distanceMoments.y * 100.0f;
     float biasedMean = meanDistance + 1.0f;
@@ -701,15 +759,9 @@ float EvaluateDistanceCubeVisibility(
     return variance / (delta * delta + variance);
 }
 
-bool IntersectsTriangleSegment(
-    float3 rayOrigin,
-    float3 rayDirection,
-    float rayLength,
-    float3 vertex0,
-    float3 vertex1,
-    float3 vertex2)
+bool IntersectsTriangleSegment(float3 rayOrigin, float3 rayDirection, float rayLength, float3 vertex0, float3 vertex1, float3 vertex2)
 {
-    // Moller-Trumbore intersection, matching the DXIL's epsilon and bounds.
+    //moller-trumbore intersection, matching the DXIL's epsilon and bounds.
     float3 edge1 = vertex1 - vertex0;
     float3 edge2 = vertex2 - vertex0;
     float3 p = cross(rayDirection, edge2);
@@ -721,11 +773,13 @@ bool IntersectsTriangleSegment(
     float inverseDeterminant = rcp(determinant);
     float3 t = rayOrigin - vertex0;
     float u = dot(t, p) * inverseDeterminant;
+
     if (u < 0.0f || u > 1.0f)
         return false;
 
     float3 q = cross(t, edge1);
     float v = dot(rayDirection, q) * inverseDeterminant;
+
     if (v < 0.0f || u + v > 1.0f)
         return false;
 
@@ -733,13 +787,7 @@ bool IntersectsTriangleSegment(
     return hitDistance >= 1.0e-6f && hitDistance < rayLength;
 }
 
-float EvaluateTriangleVisibility(
-    uint environmentIndex,
-    uint descriptor,
-    uint boundsIndex,
-    float3 rayOrigin,
-    float3 rayDirection,
-    float rayLength)
+float EvaluateTriangleVisibility(uint environmentIndex, uint descriptor, uint boundsIndex, float3 rayOrigin, float3 rayDirection, float rayLength)
 {
     uint packedOccluderRange = OccluderIndicesSRVs[descriptor][boundsIndex];
     uint triangleCount = packedOccluderRange & 0xffu;
@@ -770,19 +818,13 @@ float EvaluateTriangleVisibility(
             OccluderTrianglesSRVs[descriptor][firstFloat + 8u]);
 
         if (IntersectsTriangleSegment(rayOrigin, rayDirection, rayLength, vertex0, vertex1, vertex2))
-        {
             return 0.0f;
-        }
     }
 
     return 1.0f;
 }
 
-FProbeDirectionalField BlendProbeField(
-    uint environmentIndex,
-    uint boundsIndex,
-    float3 environmentLocalPosition,
-    float3 gridPosition)
+FProbeDirectionalField BlendProbeField(uint environmentIndex, uint boundsIndex, float3 environmentLocalPosition, float3 gridPosition)
 {
     uint descriptor = NonUniformResourceIndex(environmentIndex);
     FPrecomputedLightEnvironmentProbeBound bounds = PrecomputedLightProbeBoundsSRVs[descriptor][boundsIndex];
@@ -852,7 +894,7 @@ float3 EvaluateDirectionalField(FProbeDirectionalField field, float3 direction)
     float3 positiveDirection = saturate(direction);
     float3 negativeDirection = saturate(-direction);
     float directionalIntensity = dot(field.PositiveAxisLobes, positiveDirection * positiveDirection) + dot(field.NegativeAxisLobes, negativeDirection * negativeDirection);
-    float baseLuminance = dot(field.BaseColor, float3(0.2126f, 0.7152f, 0.0722f));
+	float baseLuminance = LuminanceRec709(field.BaseColor);
     float inverseBaseLuminance = baseLuminance > 0.0f ? rcp(baseLuminance) : 0.0f;
     return field.BaseColor * (directionalIntensity * inverseBaseLuminance);
 }
@@ -864,14 +906,18 @@ float3 ComputeDominantReflectionDirection(
     uint shadingModelId)
 {
     #if defined(CORRECT_REFLECTION_DIRECTION)
-	    //im not sure why on earth the game decides to stretch reflections with roughness
-	    return normalize(reflect(-directionToCamera, worldNormal));
+	    //the normal correct way
+	    //N and V are already normalized, so reflect() is unit length apart
+	    //from insignificant floating-point drift. Avoid a redundant rsqrt.
+	    return reflect(-directionToCamera, worldNormal);
     #else
         //these two material-specific roughness adjustments are explicit in DXIL for some reason
         if (shadingModelId == SHADINGMODELID_PREINTEGRATED_SKIN)
             roughness *= 0.93655f;
         else if (shadingModelId == SHADINGMODELID_HAIR)
             roughness = 0.48f;
+
+		//im not sure why on earth the game decides to stretch reflections with roughness
         float normalDotView = dot(worldNormal, directionToCamera);
         float3 reflectedDirection = normalize(2.0f * (normalDotView * worldNormal - directionToCamera) + abs(normalDotView) * worldNormal);
         return normalize(lerp(reflectedDirection, worldNormal, roughness * roughness * roughness));
@@ -886,273 +932,194 @@ float3 ComputeDominantReflectionDirection(
 //we can convert this "ambient cube" into spherical harmonics by reprojecting ambient cube into SH coefficents
 //this will allow us to do stuff with spherical harmonics!
 
-SphericalHarmonicsData AmbientCubeToSH2(FProbeDirectionalField field)
+//precomputed constants
+static const float Y00  = 0.2820947918f;
+static const float Y1   = 0.4886025119f;
+static const float Y20  = 0.3153915653f;
+static const float Y21  = 1.0925484306f;
+static const float Y22  = 0.5462742153f;
+
+static const float Y00_A = Y00 * 4.1887902f; //4.1887902f = (4.0f * PI / 3.0f)
+static const float Y1_PI = Y1 * MATH_PI;
+static const float Y20_A = Y20 * 1.675516f; //1.675516f = (8.0f * PI / 15.0f)
+static const float Y22_A = Y22 * 1.675516f; //1.675516f = (8.0f * PI / 15.0f)
+
+SimplifiedSH2 AmbientCubeToSH2(FProbeDirectionalField field)
 {
-    static const float Y00  = 0.2820947918f;
-    static const float Y1   = 0.4886025119f;
-    static const float Y20  = 0.3153915653f;
-    static const float Y22  = 0.5462742153f;
-
-    // Symmetric and signed portions of each axis pair.
     float3 axisAverage = 0.5f * (field.PositiveAxisLobes + field.NegativeAxisLobes);
-
     float3 axisDifference = 0.5f * (field.PositiveAxisLobes - field.NegativeAxisLobes);
+    float baseLuminance = LuminanceRec709(field.BaseColor);
+    float validProbe = baseLuminance > 1e-6f ? 1.0f : 0.0f;
 
-    float scalarSH[9];
+    SimplifiedSH2 result;
+    result.Chromaticity = validProbe > 0.0f ? field.BaseColor / baseLuminance : 0.0f;
 
 	//order 0
-    scalarSH[0] = Y00 * (4.0f * PI / 3.0f) * (axisAverage.x + axisAverage.y + axisAverage.z);
+	result.Coefficient0 = validProbe * Y00_A * (axisAverage.x + axisAverage.y + axisAverage.z);
 
 	//order 1
-    scalarSH[1] = Y1 * PI * axisDifference.y;
-    scalarSH[2] = Y1 * PI * axisDifference.z;
-    scalarSH[3] = Y1 * PI * axisDifference.x;
+	result.Coefficient1 = validProbe * Y1_PI * axisDifference.y;
+	result.Coefficient2 = validProbe * Y1_PI * axisDifference.z;
+	result.Coefficient3 = validProbe * Y1_PI * axisDifference.x;
 
 	//order 2
-    scalarSH[4] = 0.0f;
-    scalarSH[5] = 0.0f;
-    scalarSH[6] = Y20 * (8.0f * PI / 15.0f) * (2.0f * axisAverage.z - axisAverage.x - axisAverage.y);
-    scalarSH[7] = 0.0f;
-    scalarSH[8] = Y22 * (8.0f * PI / 15.0f) * (axisAverage.x - axisAverage.y);
-
-    float baseLuminance = dot(field.BaseColor, float3(0.2126f, 0.7152f, 0.0722f));
-    float3 chromaticity = baseLuminance > 1e-6f ? field.BaseColor / baseLuminance : 0.0f;
-
-    SphericalHarmonicsData result;
-
-    [unroll]
-    for (uint i = 0; i < 9; ++i)
-        result.Coefficient[i] = chromaticity * scalarSH[i];
+	result.Coefficient6 = validProbe * Y20_A * (2.0f * axisAverage.z - axisAverage.x - axisAverage.y);
+	result.Coefficient8 = validProbe * Y22_A * (axisAverage.x - axisAverage.y);
 
     return result;
 }
 
-//||||||||||||||||||||||||||||||| SPHERICAL HARMONICS IRRADIANCE |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| SPHERICAL HARMONICS IRRADIANCE |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| SPHERICAL HARMONICS IRRADIANCE |||||||||||||||||||||||||||||||
-//technically the "ambient cube" probe data that we have should already be convolved for irradiance
-
-float3 EvaluateIrradiance(SphericalHarmonicsData sh, float3 direction)
+float EvaluateSphericalHarmonicsScalar(SimplifiedSH2 sh, float3 direction)
 {
-	float3 color = float3(0, 0, 0);
-
-	float basis[9] =
-    {
-        0.2820947918f,
-        0.4886025119f * direction.y,
-        0.4886025119f * direction.z,
-        0.4886025119f * direction.x,
-        1.0925484306f * direction.x * direction.y,
-        1.0925484306f * direction.y * direction.z,
-        0.3153915653f * (3.0f * direction.z * direction.z - 1.0f),
-        1.0925484306f * direction.x * direction.z,
-        0.5462742153f * (direction.x * direction.x - direction.y * direction.y)
-    };
-
-    [unroll]
-    for (uint i = 0; i < 9; ++i)
-        color += sh.Coefficient[i] * basis[i];
-
-	return color;
+	float value = sh.Coefficient0 * Y00;
+	value += Y1 * dot(float3(sh.Coefficient3, sh.Coefficient1, sh.Coefficient2), direction);
+	value += sh.Coefficient6 * Y20 * (3.0f * direction.z * direction.z - 1.0f);
+	value += sh.Coefficient8 * Y22 * (direction.x * direction.x - direction.y * direction.y);
+	return value;
 }
 
-//||||||||||||||||||||||||||||||| SPHERICAL HARMONICS RADIANCE |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| SPHERICAL HARMONICS RADIANCE |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| SPHERICAL HARMONICS RADIANCE |||||||||||||||||||||||||||||||
-//technically the "ambient cube" probe data that we have should already be convolved for irradiance
+float3 EvaluateSphericalHarmonics(SimplifiedSH2 sh, float3 direction)
+{
+	return sh.Chromaticity * EvaluateSphericalHarmonicsScalar(sh, direction);
+}
+
+//reference - https://highperformancegraphics.org/untracked/2025/presentations/Pa5_1_hpg_2025_slides.pdf
+//equation 12 in the HPG 2025 paper attenuates SH band l by exp(-l(l+1)/(2*kappa)) with kappa = 1/alpha.
+//this gives the raw exp(-0.5*l(l+1)*alpha) weight.
+float2 GetGlossySHBandWeights(float alpha)
+{
+	float l1RawWeight = exp(-alpha);
+	float l2RawWeight = l1RawWeight * l1RawWeight * l1RawWeight;
+
+	//x: exp(-1), y: exp(-3)
+	const float2 fullyRoughWeight = float2(0.3678794412f, 0.0497870684f);
+	const float2 inverseWeightRange = float2(1.5819767069f, 1.0523956965f);
+	return saturate((float2(l1RawWeight, l2RawWeight) - fullyRoughWeight) * inverseWeightRange);
+}
+
+float3 EvaluateRoughnessFilteredRadiance(SimplifiedSH2 irradianceSH, float3 direction, float alpha)
+{
+	float2 bandWeights = GetGlossySHBandWeights(alpha);
+
+	float value = irradianceSH.Coefficient0 * MATH_PI_INV * Y00;
+	value += bandWeights.x * 0.47746482927568f * Y1 * dot(float3(irradianceSH.Coefficient3, irradianceSH.Coefficient1, irradianceSH.Coefficient2), direction);
+	value += bandWeights.y * 1.273239544735162f * (irradianceSH.Coefficient6 * Y20 * (3.0f * direction.z * direction.z - 1.0f) + irradianceSH.Coefficient8 * Y22 * (direction.x * direction.x - direction.y * direction.y));
+
+	return irradianceSH.Chromaticity * value;
+}
+
+//||||||||||||||||||||||||||||||| HALLUCINATED ZH3 |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| HALLUCINATED ZH3 |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| HALLUCINATED ZH3 |||||||||||||||||||||||||||||||
+
+float3 EvaluateIrradianceZH3Hallucinated(
+	SimplifiedSH2 irradianceSH,
+	float3 direction,
+	float3 dominantAxis,
+	float momentLength)
+{
+    //original input already contains the Lambert-convolved L0/L1 bands.
+	float value = irradianceSH.Coefficient0 * Y00;
+	value += Y1 * dot(float3(
+		irradianceSH.Coefficient3,
+		irradianceSH.Coefficient1,
+		irradianceSH.Coefficient2), direction);
+
+	float radianceL0 = irradianceSH.Coefficient0 * MATH_PI_INV;
+	float zonalL1Coefficient = momentLength * 0.47746482927568f;
+	float ratio = min(zonalL1Coefficient / max(radianceL0, 1e-6f), 1.7320508076f);
+	float radianceL2Coefficient = radianceL0 * (0.08f * ratio + 0.6f * ratio * ratio);
+
+	float z = dot(dominantAxis, direction);
+	value += radianceL2Coefficient * MATH_PI_INV4 * Y20 * (3.0f * z * z - 1.0f);
+
+	return irradianceSH.Chromaticity * value;
+}
+
+//||||||||||||||||||||||||||||||| SPHERICAL HARMONICS DOMINANT DIRECTION |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| SPHERICAL HARMONICS DOMINANT DIRECTION |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| SPHERICAL HARMONICS DOMINANT DIRECTION |||||||||||||||||||||||||||||||
 
 struct FSHDominantLight
 {
     float3 Direction;
-    float3 PeakRadiance;
     float3 HighlightRadiance;
     float  Directionality;
+	float  MomentLength;
 };
 
-FSHDominantLight ExtractDominantLight(SphericalHarmonicsData radianceSH)
+FSHDominantLight ExtractDominantLight(SimplifiedSH2 irradianceSH)
 {
-    static const float Y00 = 0.2820947918f;
-    static const float Y1  = 0.4886025119f;
-
     float3 firstMoment = float3(
-        LuminanceRec709(radianceSH.Coefficient[3]), // X
-        LuminanceRec709(radianceSH.Coefficient[1]), // Y
-        LuminanceRec709(radianceSH.Coefficient[2])  // Z
+        irradianceSH.Coefficient3, // X
+        irradianceSH.Coefficient1, // Y
+        irradianceSH.Coefficient2  // Z
     );
 
     float momentLength = length(firstMoment);
+    float dcCoefficient = max(irradianceSH.Coefficient0, 1e-6f);
+    float averageRadiance = max(irradianceSH.Coefficient0 * Y00, 0.0f);
 
     FSHDominantLight light;
     light.Direction = momentLength > 1e-6f ? firstMoment / momentLength : float3(0.0f, 0.0f, 1.0f);
-
-    float dcCoefficient = max(LuminanceRec709(radianceSH.Coefficient[0]), 1e-6f);
-
-    // Ratio between the directional moment and total spherical energy.
-    // For a nonnegative radiance distribution this should lie in [0,1].
     light.Directionality = saturate((Y00 / Y1) * momentLength / dcCoefficient);
+	light.MomentLength = momentLength;
 
-    light.PeakRadiance = max(EvaluateIrradiance(radianceSH, light.Direction), 0.0f);
-
-    float3 averageRadiance = max(radianceSH.Coefficient[0] * Y00, 0.0f);
-
-    // Remove the omnidirectional component so uniform lighting does not
-    // manufacture an artificial directional highlight.
-    light.HighlightRadiance = max(light.PeakRadiance - averageRadiance, 0.0f) * light.Directionality;
+	float peakRadiance = max(EvaluateSphericalHarmonicsScalar(irradianceSH, light.Direction), 0.0f);
+    light.HighlightRadiance = irradianceSH.Chromaticity * (max(peakRadiance - averageRadiance, 0.0f) * light.Directionality);
 
     return light;
 }
 
-SphericalHarmonicsData DeconvolveLambertianIrradiance(SphericalHarmonicsData irradianceSH)
+//||||||||||||||||||||||||||||||| GGX SPECULAR |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| GGX SPECULAR |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| GGX SPECULAR |||||||||||||||||||||||||||||||
+
+float DistributionGGX(float NoH, float alpha2)
 {
-    SphericalHarmonicsData radianceSH;
-
-    // L0
-	//runtime: coefficent / PI
-	//precomputed: coefficent * INV_PI
-    radianceSH.Coefficient[0] = irradianceSH.Coefficient[0] * INV_PI;
-
-    // L1
-	//runtime: coefficent * (3.0 / (2.0 * PI)) 
-	//precomputed: 0.47746482927568600730665129011754
-	radianceSH.Coefficient[1] = irradianceSH.Coefficient[1] * 0.47746482927568;
-	radianceSH.Coefficient[2] = irradianceSH.Coefficient[2] * 0.47746482927568;
-	radianceSH.Coefficient[3] = irradianceSH.Coefficient[3] * 0.47746482927568;
-
-    // L2
-	//runtime: coefficent * (4.0 / PI)
-	//precomputed: 1.2732395447351626861510701069801
-	radianceSH.Coefficient[4] = irradianceSH.Coefficient[4] * 1.273239544735162;
-	radianceSH.Coefficient[5] = irradianceSH.Coefficient[5] * 1.273239544735162;
-	radianceSH.Coefficient[6] = irradianceSH.Coefficient[6] * 1.273239544735162;
-	radianceSH.Coefficient[7] = irradianceSH.Coefficient[7] * 1.273239544735162;
-	radianceSH.Coefficient[8] = irradianceSH.Coefficient[8] * 1.273239544735162;
-
-    return radianceSH;
-}
-
-float DistributionGGX(float NoH, float roughness)
-{
-    float alpha  = roughness * roughness;
-    float alpha2 = alpha * alpha;
-
     float denominator = NoH * NoH * (alpha2 - 1.0f) + 1.0f;
-
-    return alpha2 / max(PI * denominator * denominator, 1e-6f);
+    return alpha2 / max(MATH_PI * denominator * denominator, 1e-6f);
 }
 
-float GeometrySchlickGGX(float NoX, float roughness)
+float GeometrySchlickGGX(float NoX, float k)
 {
-    float k = roughness + 1.0f;
-    k = (k * k) * 0.125f;
-
     return NoX / max(NoX * (1.0f - k) + k, 1e-6f);
 }
 
-float3 EvaluateRadiance(SphericalHarmonicsData sh, float3 direction)
-{
-	float3 color = float3(0, 0, 0);
-
-	float basis[9] =
-    {
-        0.2820947918f,
-        0.4886025119f * direction.y,
-        0.4886025119f * direction.z,
-        0.4886025119f * direction.x,
-        1.0925484306f * direction.x * direction.y,
-        1.0925484306f * direction.y * direction.z,
-        0.3153915653f * (3.0f * direction.z * direction.z - 1.0f),
-        1.0925484306f * direction.x * direction.z,
-        0.5462742153f * (direction.x * direction.x - direction.y * direction.y)
-    };
-
-	sh = DeconvolveLambertianIrradiance(sh);
-
-    [unroll]
-    for (uint i = 0; i < 9; ++i)
-        color += sh.Coefficient[i] * basis[i];
-
-	return color;
-}
-
-float3 EvaluateDominantSHHighlight(
-    FSHDominantLight light,
-    float3 normal,
-    float3 directionToCamera,
-    float roughness)
+float GGXSpecular(
+	float3 normalDirection,
+	float3 directionToCamera,
+	float3 lightDirection,
+	float NoL,
+	float NoV,
+	float geometryV,
+	float alpha2,
+	float k)
 {
 	//NOTE TO SELF: we ignore F0 and fresnel, as this is handled in a later pass when we combine specular
 	//we only want a sharp highlight that scales with surface roughness
 	//because in theory, the "radiance" should be just a cubemap
 
-    float3 N = normal;
-    float3 V = directionToCamera;
-    float3 L = light.Direction;
-
-    float NoL = saturate(dot(N, L));
-    float NoV = saturate(dot(N, V));
-
-    if (NoL <= 0.0f || NoV <= 0.0f)
+    if (NoL <= 1e-5f || NoV <= 1e-5f)
         return 0.0f;
 
-    float3 H = normalize(V + L);
+    float3 H = normalize(directionToCamera + lightDirection);
+    float NoH = saturate(dot(normalDirection, H));
+    float distribution = DistributionGGX(NoH, alpha2);
+	float geometryL = GeometrySchlickGGX(NoL, k);
 
-    float NoH = saturate(dot(N, H));
-    float VoH = saturate(dot(V, H));
-
-    //roughness /= light.Directionality;
-
-    float D = DistributionGGX(NoH, roughness);
-    float G = GeometrySchlickGGX(NoV, roughness) * GeometrySchlickGGX(NoL, roughness);
-
-    float3 specularBRDF = (D * G) / max(4.0f * NoV * NoL, 1e-6f);
-
-    return light.HighlightRadiance * specularBRDF * NoL;
-	//return light.HighlightRadiance * specularBRDF * NoL * MATH_PI_TWO;
-    //return light.HighlightRadiance * specularBRDF * NoL * MATH_PI_TWO * (1.0f + light.Directionality);
-    //return light.HighlightRadiance * specularBRDF * NoL * PI * (1.0f + rcp(light.Directionality));
+	//the final NoL exactly cancels the BRDF denominator's NoL away from the rejected horizon epsilon.
+    return (distribution * geometryV * geometryL) / max(4.0f * NoV, 1e-6f);
 }
 
-float3 CalculateViewSpecularHighlight(
-    float3 normal,
-    float3 directionToCamera,
-    float roughness)
+float GGXViewSpecular(float NoV, float geometryV, float alpha2)
 {
-	//NOTE TO SELF: we ignore F0 and fresnel, as this is handled in a later pass when we combine specular
-	//we only want a sharp highlight that scales with surface roughness
-	//because in theory, the "radiance" should be just a cubemap
+	if (NoV <= 1e-5f)
+		return 0.0f;
 
-    float3 N = normal;
-    float3 V = directionToCamera;
-    float3 L = directionToCamera;
-
-    float NoL = saturate(dot(N, L));
-    float NoV = saturate(dot(N, V));
-
-    if (NoL <= 0.0f || NoV <= 0.0f)
-        return 0.0f;
-
-    float3 H = normalize(V + L);
-
-    float NoH = saturate(dot(N, H));
-    float VoH = saturate(dot(V, H));
-
-    //roughness /= light.Directionality;
-
-    float D = DistributionGGX(NoH, roughness);
-    float G = GeometrySchlickGGX(NoV, roughness) * GeometrySchlickGGX(NoL, roughness);
-
-    float3 specularBRDF = (D * G) / max(4.0f * NoV * NoL, 1e-6f);
-
-    return specularBRDF * NoL;
+	float distribution = DistributionGGX(NoV, alpha2);
+	return (distribution * geometryV * geometryV) / max(4.0f * NoV, 1e-6f);
 }
-
-
-
-
-
-
-
-
 
 //||||||||||||||||||||||||||||||| CONTACT SHADOWS |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| CONTACT SHADOWS |||||||||||||||||||||||||||||||
@@ -1283,7 +1250,6 @@ float FastContactShadowClipSpace(
                 {
                     //how far along the ray are we? (we are going from point towards the light)
                     float rayProgress = i * invSamples;
-                    float thicknessFade = 1.0 - saturate((penetration - contactShadowBias) / (CONTACT_SHADOWS_THICKNESS - contactShadowBias));
                     float distanceFade = 1.0 - saturate(rayProgress);
                     float sampleShadow = 1.0 - distanceFade;
                     sampleShadow *= sampleShadow;
@@ -1349,110 +1315,9 @@ float CalculateContactShadows(int2 pixelPos, float3 worldPosition, float3 worldN
     return contactShadow;
 }
 
-//||||||||||||||||||||||||||||||| HALLUCINATED ZH3 |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| HALLUCINATED ZH3 |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| HALLUCINATED ZH3 |||||||||||||||||||||||||||||||
-
-struct FHallucinatedZH3
-{
-    float3 Axis;
-    float3 RadianceL2Coefficient;
-    float3 RadianceL0;
-    float3 RadianceL1Y;
-    float3 RadianceL1Z;
-    float3 RadianceL1X;
-};
-
-float3 EvaluateLinearSH(SphericalHarmonicsData sh, float3 direction)
-{
-    return sh.Coefficient[0] * 0.2820947918f
-         + sh.Coefficient[1] * (0.4886025119f * direction.y)
-         + sh.Coefficient[2] * (0.4886025119f * direction.z)
-         + sh.Coefficient[3] * (0.4886025119f * direction.x);
-}
-
-FHallucinatedZH3 BuildHallucinatedZH3(SphericalHarmonicsData irradianceSH)
-{
-    //Only L0/L1 are needed. Recover their radiance coefficients from the
-    //stored irradiance without deconvolving the unused quadratic band.
-    FHallucinatedZH3 zh;
-    zh.RadianceL0  = irradianceSH.Coefficient[0] * INV_PI;
-    zh.RadianceL1Y = irradianceSH.Coefficient[1] * 0.47746482927568f;
-    zh.RadianceL1Z = irradianceSH.Coefficient[2] * 0.47746482927568f;
-    zh.RadianceL1X = irradianceSH.Coefficient[3] * 0.47746482927568f;
-
-    //Use one luminance-derived axis for RGB to avoid color fringing.
-    float3 luminanceMoment = float3(
-        LuminanceRec709(zh.RadianceL1X), // X
-        LuminanceRec709(zh.RadianceL1Y), // Y
-        LuminanceRec709(zh.RadianceL1Z)  // Z
-    );
-
-    float momentLength = length(luminanceMoment);
-
-    zh.Axis = momentLength > 1e-6f ? luminanceMoment / momentLength : float3(0.0f, 0.0f, 1.0f);
-
-    //Project each channel's L1 vector onto the shared zonal axis. The
-    //absolute value follows the published shared-axis reconstruction.
-    float3 zonalL1Coefficient = abs(
-        zh.RadianceL1X * zh.Axis.x
-      + zh.RadianceL1Y * zh.Axis.y
-      + zh.RadianceL1Z * zh.Axis.z);
-
-    float3 ratio = zonalL1Coefficient / max(zh.RadianceL0, 1e-6f);
-
-    //sqrt(3) is the L1/DC ratio bound for a nonnegative radiance signal.
-    //Clamping keeps deconvolution noise or malformed probes from exploding
-    //the fitted quadratic term.
-    ratio = min(ratio, 1.7320508076f);
-
-    //Least-squares fit from production lighting data in "ZH3: Quadratic
-    //Zonal Harmonics". This produces the local-frame radiance Y20 coefficient.
-    zh.RadianceL2Coefficient = zh.RadianceL0 * (0.08f * ratio + 0.6f * ratio * ratio);
-
-    return zh;
-}
-
-float EvaluateZonalL2Basis(float3 axis, float3 direction)
-{
-    float z = dot(axis, direction);
-    return 0.3153915653f * (3.0f * z * z - 1.0f);
-}
-
-float3 EvaluateIrradianceZH3Hallucinated(SphericalHarmonicsData irradianceSH, FHallucinatedZH3 zh, float3 direction)
-{
-    //original input already contains the Lambert-convolved L0/L1 bands.
-    float3 color = EvaluateLinearSH(irradianceSH, direction);
-
-    //unnormalized clamped-cosine transfer for l = 2 is PI / 4
-    color += zh.RadianceL2Coefficient * (0.25f * PI) * EvaluateZonalL2Basis(zh.Axis, direction);
-
-    return color;
-}
-
-float3 EvaluateRadianceZH3Hallucinated(FHallucinatedZH3 zh, float3 direction)
-{
-    float3 color = zh.RadianceL0 * 0.2820947918f
-         + zh.RadianceL1Y * (0.4886025119f * direction.y)
-         + zh.RadianceL1Z * (0.4886025119f * direction.z)
-         + zh.RadianceL1X * (0.4886025119f * direction.x);
-
-    color += zh.RadianceL2Coefficient * EvaluateZonalL2Basis(zh.Axis, direction);
-
-    return color;
-}
-
-float3 EvaluateIrradianceZH3Hallucinated(SphericalHarmonicsData irradianceSH, float3 direction)
-{
-    FHallucinatedZH3 zh = BuildHallucinatedZH3(irradianceSH);
-    return EvaluateIrradianceZH3Hallucinated(irradianceSH, zh, direction);
-}
-
-float3 EvaluateRadianceZH3Hallucinated(SphericalHarmonicsData irradianceSH, float3 direction)
-{
-    FHallucinatedZH3 zh = BuildHallucinatedZH3(irradianceSH);
-    return EvaluateRadianceZH3Hallucinated(zh, direction);
-}
+//||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
 
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -1464,21 +1329,27 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     uint2 outputPixel = uint2(float2(localPixel) + 0.5f + View_ViewRectMin.xy);
 
-    float3 encodedNormal = GBufferATexture.Load(int3(outputPixel, 0)).xyz;
     float4 gBufferB = GBufferBTexture.Load(int3(outputPixel, 0));
-    float environmentLobeBlend = GBufferDTexture.Load(int3(outputPixel, 0)).z;
-    float deviceZ = SceneDepthTexture.Load(int3(outputPixel, 0)).x;
-
     uint packedShadingModel = (uint)round(gBufferB.a * 255.0f);
     uint shadingModelId = packedShadingModel & 0x0fu;
+
+	if (shadingModelId == SHADINGMODELID_UNLIT)
+	{
+		float4 unlitOutput = float4(0.004f * View_PreExposure.xxx, 0.0f);
+		RWEnvironmentIrradianceATexture[outputPixel] = unlitOutput;
+		RWEnvironmentIrradianceBTexture[outputPixel] = unlitOutput;
+		return;
+	}
+
+    float3 encodedNormal = GBufferATexture.Load(int3(outputPixel, 0)).xyz;
+    float deviceZ = SceneDepthTexture.Load(int3(outputPixel, 0)).x;
     float roughness = gBufferB.b;
 
     float3 radiance = 0.0f;
     float3 irradiance = 0.0f;
     float outputAlpha = 0.0f;
 
-    if (shadingModelId != SHADINGMODELID_UNLIT)
-    {
+
         float3 worldNormal = normalize(encodedNormal * 2.0f - 1.0f);
         float worldDepth = ConvertFromDeviceZ(deviceZ);
         float3 worldPosition = ReconstructWorldPosition(localPixel, worldDepth);
@@ -1502,23 +1373,32 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
                 //the captured default-lit path uses GBufferD.z to blend the normal-evaluated result back toward the field's base color
                 if (shadingModelId == SHADINGMODELID_DEFAULT_LIT)
+				{
+					float environmentLobeBlend = GBufferDTexture.Load(int3(outputPixel, 0)).z;
                     irradiance = lerp(irradiance, field.BaseColor, environmentLobeBlend);
+				}
 
                 outputAlpha = 1.0f;
             #else
-                SphericalHarmonicsData sphericalHarmonics = AmbientCubeToSH2(field);
+				//The ambient-cube projection shares one chromaticity, so keep
+				//only its six non-zero scalar SH coefficients.
+                SimplifiedSH2 sphericalHarmonicsIrradiance = AmbientCubeToSH2(field);
 
                 //now that our probe data is in spherical harmonics
                 //we can use this to derive a dominant direction of light, and with this direction, we can use it to calculate a fresh specular highlight!
                 //now even if our coefficents were spherical harmonics (and not ambient cube) trying to get sharp rough reflections is not possible
                 //so the best thing we can do is to approximate a sharp specular highlight that varies with roughness, this will aid in our final "rough reflection" quality
-                FSHDominantLight dominantLight = ExtractDominantLight(sphericalHarmonics);
+                FSHDominantLight dominantLight = ExtractDominantLight(sphericalHarmonicsIrradiance);
 
                 //diffuse lighting
                 #if defined(SPHERICAL_HARMONICS_IRRADIANCE_ZH3)
-                    irradiance = EvaluateIrradianceZH3Hallucinated(sphericalHarmonics, worldNormal);
+                    irradiance = EvaluateIrradianceZH3Hallucinated(
+						sphericalHarmonicsIrradiance,
+						worldNormal,
+						dominantLight.Direction,
+						dominantLight.MomentLength);
                 #else
-                    irradiance = EvaluateIrradiance(sphericalHarmonics, worldNormal);
+                    irradiance = EvaluateSphericalHarmonics(sphericalHarmonicsIrradiance, worldNormal);
                 #endif
         
                 //specular lighting
@@ -1529,43 +1409,67 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                 //soooo, with that in mind, the neat thing is that now that we converted these coeffiecnts into SH, we can utilize some tricks to make this more plausible/accurate
                 //the assumption is that these coefficents are already convolved for irradiance/diffuse, but thanks to spherical harmonic math it's possible to deconvolve these coefficents back into radiance
                 //and that, is what we want for reflections!
-                #if defined(SPHERICAL_HARMONICS_RADIANCE_ZH3)
-                    radiance = EvaluateRadianceZH3Hallucinated(sphericalHarmonics, reflectionDirection);
-                #else
-                    radiance = EvaluateRadiance(sphericalHarmonics, reflectionDirection); //resamples coefficents again, but using reflection direction, and also followed by a de-convolution step
-                #endif
+				float alpha = roughness * roughness;
+				float alpha2 = alpha * alpha;
+				radiance = EvaluateRoughnessFilteredRadiance(sphericalHarmonicsIrradiance, reflectionDirection, alpha2);
 
-                //experiment: since we know the dominant light direction
+                //since we know the dominant light direction
                 //we can try to use this to occlude specular reflections that are away from the dominant source of light
-                //radiance = saturate(dot(reflectionDirection, dominantLight.Direction)) * View_OneOverPreExposure;
-                //radiance = saturate(dot(reflectionDirection, dominantLight.Direction) * 0.5f + 0.5f) * View_OneOverPreExposure;
-                //radiance = lerp(1.0f, saturate(dot(reflectionDirection, dominantLight.Direction) * 0.5f + 0.5f), dominantLight.Directionality) * View_OneOverPreExposure;
-                //radiance *= saturate(dot(reflectionDirection, normalize(dominantLight.Direction)) * 0.5f + 0.5f);
-                //radiance *= lerp(1.0f, saturate(dot(reflectionDirection, normalize(dominantLight.Direction)) * 0.5f + 0.5f), dominantLight.Directionality);
-
+                //this can certainly help us get a little more dimension and shape out of the radiance data and make it appear somewhat less flat and blurry
+                #if defined(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION)
+                    radiance *= lerp(1.0f, saturate(dot(reflectionDirection, dominantLight.Direction) * 0.5f + 0.5f), SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION_FACTOR);
+                #endif
+                
                 float domiantHighlightLuminance = 0.0f;
 
-                #if defined(SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT)
-                    float3 dominantHighlight = EvaluateDominantSHHighlight(dominantLight, worldNormal, directionToCamera, roughness);
+				//calculate NdotV
+				#if defined(REQUIRE_NOV)
+					float NoV = saturate(dot(worldNormal, directionToCamera));
+				#endif
 
-                    //boost specular highlight on non character surfaces
-                    if (shadingModelId != SHADINGMODELID_UNLIT ||
-                        shadingModelId != SHADINGMODELID_SUBSURFACE_PROFILE ||
-                        shadingModelId != SHADINGMODELID_PREINTEGRATED_SKIN ||
-                        shadingModelId != SHADINGMODELID_EYE ||
-                        shadingModelId != SHADINGMODELID_HAIR)
-                    {
-                        dominantHighlight *= MATH_PI * SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT_BOOST; 
-                        dominantHighlight *= (1.0f + dominantLight.Directionality);
-                    }
+				#if defined(SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT) || defined(CAMERA_VIEW_SPECULAR_HIGHLIGHT)
+					float k = roughness + 1.0f;
+					k = (k * k) * 0.125f;
+					float geometryV = GeometrySchlickGGX(NoV, k);
+				#endif
+
+                #if defined(SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT)
+					float3 highlightDirection = dominantLight.Direction;
+					float signedDominantNoL = dot(worldNormal, highlightDirection);
+					float dominantNoL;
+					float highlightScale = 1.0f;
+
+					//for extra artistic specular kick
+					#if defined(SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT_DUAL)
+						bool useDualHighlight = signedDominantNoL < 0.0f;
+						highlightDirection = useDualHighlight ? -highlightDirection : highlightDirection;
+						dominantNoL = saturate(abs(signedDominantNoL));
+						highlightScale = useDualHighlight ? SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT_DUAL_BOOST : 1.0f;
+					#else
+						dominantNoL = saturate(signedDominantNoL);
+					#endif
+
+					float dominantSpecular = GGXSpecular(
+						worldNormal,
+						directionToCamera,
+						highlightDirection,
+						dominantNoL,
+						NoV,
+						geometryV,
+						alpha2,
+						k);
+
+					float3 dominantHighlight = dominantLight.HighlightRadiance * (dominantSpecular * highlightScale);
+
+					dominantHighlight *= MATH_PI * SPHERICAL_HARMONICS_DOMINANT_SPECULAR_HIGHLIGHT_BOOST * (1.0f + dominantLight.Directionality);
 
                     radiance += dominantHighlight;
                     domiantHighlightLuminance = LuminanceRec709(dominantHighlight);
                 #endif
 
                 #if defined(CAMERA_VIEW_SPECULAR_HIGHLIGHT)
-                    float viewSpecularHighlight = CalculateViewSpecularHighlight(worldNormal, directionToCamera, roughness);
-                    radiance += radiance * viewSpecularHighlight / MATH_PI;
+					float viewSpecularHighlight = GGXViewSpecular(NoV, geometryV, alpha2);
+                    radiance += radiance * viewSpecularHighlight * MATH_PI_INV;
                     //domiantHighlightLuminance = saturate(domiantHighlightLuminance + viewSpecularHighlight);
                 #endif
 
@@ -1574,30 +1478,34 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                     float contactShadow = CalculateContactShadows(outputPixel, worldPosition, worldNormal, dominantLight.Direction, deviceZ, random, shadingModelId);
 
                     float dominantDiffuseShading = saturate(dot(worldNormal, dominantLight.Direction));
-                    //float dominantDiffuseShading = saturate(dot(worldNormal, dominantLight.Direction) * 0.5f + 0.5f);
                     dominantDiffuseShading *= contactShadow;
 
                     irradiance *= lerp(dominantDiffuseShading, 1.0f, 0.25f);
                     radiance *= lerp(dominantDiffuseShading, 1.0f, 0.0f);
                 #endif
 
-                if (shadingModelId == SHADINGMODELID_HAIR || 
-                    shadingModelId == SHADINGMODELID_EYE || 
-                    shadingModelId == SHADINGMODELID_PREINTEGRATED_SKIN)
-                {
-                    float skinDominantDiffuseContrast = saturate(dot(worldNormal, dominantLight.Direction) * 0.5f + 0.5f);
-                    irradiance *= lerp(1.0f, skinDominantDiffuseContrast, 0.25f);
-                }
+				#if defined(CHARACTER_DOMINANT_DIRECTION_SHADING)
+					if (shadingModelId == SHADINGMODELID_HAIR || 
+						shadingModelId == SHADINGMODELID_EYE || 
+						shadingModelId == SHADINGMODELID_PREINTEGRATED_SKIN)
+					{
+						float skinDominantDiffuseContrast = saturate(dot(worldNormal, dominantLight.Direction) * 0.5f + 0.5f);
+						irradiance *= lerp(1.0f, skinDominantDiffuseContrast, CHARACTER_DOMINANT_DIRECTION_SHADING_AMOUNT);
+					}
+				#endif
 
                 //the captured default-lit path uses GBufferD.z to blend the normal-evaluated result back toward the field's base color
                 if (shadingModelId == SHADINGMODELID_DEFAULT_LIT)
+				{
+					float environmentLobeBlend = GBufferDTexture.Load(int3(outputPixel, 0)).z;
                     irradiance = lerp(irradiance, field.BaseColor, environmentLobeBlend);
+				}
 
                 //outputAlpha = 1.0f;
                 outputAlpha = saturate(0.0001f + domiantHighlightLuminance);
             #endif
         }
-    }
+
 	
 	//downside with SH is negative values can happen, so make sure we don't output them
 	irradiance = max(0.004f, irradiance);

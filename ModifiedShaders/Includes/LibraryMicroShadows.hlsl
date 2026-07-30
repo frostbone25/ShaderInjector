@@ -1,6 +1,7 @@
 //LibraryMicroShadows.hlsl
 
 #ifndef LIBRARY_MICRO_SHADOWS
+//[NO CONFIG]
 #define LIBRARY_MICRO_SHADOWS
 
 //NEW: from uncharted 4

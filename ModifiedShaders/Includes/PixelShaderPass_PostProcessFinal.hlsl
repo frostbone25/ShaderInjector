@@ -7,31 +7,53 @@
 #include "LibraryTonemaps.hlsl"
 
 //only for debugging purposes
+//[NO CONFIG]
 //#define DEBUG_COLOR_CHART
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - VIGNETTE ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - VIGNETTE ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - VIGNETTE ||||||||||||||||||||||||||||||||||
 
-//disabled, I hate how strong the vignettes are by default
+//original game vignettes, disabled by default because I hate how strong and wide they tend to be
 //#define VIGNETTE_ENABLED
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - BLOOM ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - BLOOM ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - BLOOM ||||||||||||||||||||||||||||||||||
 
-//game has bloom by default
+//(BLOOM) game has bloom by default
 #define BLOOM_ENABLE
 
+//(BLOOM) this changes the bloom compositing to be more "physically" accurate, making it more prevelant in some areas, but it's energy conserving
 //NOTE: if you want the original game bloom just disable BLOOM_PHYSICAL and BLOOM_ADDITIVE
+// #define BLOOM_PHYSICAL
 
-//this changes the bloom compositing to be more "physically" accurate
-//#define BLOOM_PHYSICAL
+//(BLOOM) how strong the physical bloom compositing is, higher values means a more of a natrual "soft-focus" effect, lower values means much less soft focus effect (only very bright sources can still bloom)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.125
 #define BLOOM_PHYSICAL_INTENSITY 0.125
 
-//this changes the bloom compositing to be more of a classic "additive"
-//#define BLOOM_ADDITIVE
-#define BLOOM_ADDITIVE_INTENSITY 2
+//(BLOOM) this changes the bloom compositing to be more of a classic "additive"
+// #define BLOOM_ADDITIVE
+
+//(BLOOM) how strong the additive bloom compoisting is, higher values means a more intense bloom.
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 2
+#define BLOOM_ADDITIVE_INTENSITY 2.0
+
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SHARPEN ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SHARPEN ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - SHARPEN ||||||||||||||||||||||||||||||||||
+
+//Applies a sample-free 2x2 quad sharpen to the tonemapped scene before UI compositing.
+//#define SHARPEN_ENABLE
+
+//How strongly each pixel is separated from the average of the other three pixels in its quad.
+//0.0 disables sharpening while higher values produce a stronger effect.
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.25
+//[CONFIG RANGE]: [0, 2]
+#define SHARPEN_AMOUNT 0.25
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - AUTO EXPOSURE ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - AUTO EXPOSURE ||||||||||||||||||||||||||||||||||
@@ -40,20 +62,59 @@
 //by leveraging mip generation and calculating average exposure based off of that... instead of doing AUTO_EXPOSURE_GRID_X x AUTO_EXPOSURE_GRID_Y samples for every pixel
 //but for now... we are limited so just deal with it
 
-//this is unusally expensive, but because we are kinda limited... we just gotta deal with it
+//(AUTO_EXPOSURE) automatic exposure, checks the overall exposure of the final image and adjusts the expousre so that it is not too bright or too dark.
+//unfortunately this is unusally expensive at the moment but because we are kinda limited... we just gotta deal with it for now
 //it's not perfect and will flicker occasionally, brightness changes are instantaneous also
 #define AUTO_EXPOSURE
 
+//(AUTO_EXPOSURE) how many horizontal samples we take of the final image to gauge overall image exposure
 //more samples = more stable auto exposure (less flicker) but can be slower
 //less samples = less stable auto exposure (more flicker) but faster
+//[CONFIG TYPE]: int
+//[CONFIG DEFAULT]: 16
+//[CONFIG RANGE]: [1, 256]
 #define AUTO_EXPOSURE_GRID_X 16
+
+//(AUTO_EXPOSURE) how many vertical samples we take of the final image to gauge overall image exposure
+//more samples = more stable auto exposure (less flicker) but can be slower
+//less samples = less stable auto exposure (more flicker) but faster
+//[CONFIG TYPE]: int
+//[CONFIG DEFAULT]: 16
+//[CONFIG RANGE]: [1, 256]
 #define AUTO_EXPOSURE_GRID_Y 16
-#define AUTO_EXPOSURE_MIDDLE_GRAY      0.18
-#define AUTO_EXPOSURE_STRENGTH         0.5
-#define AUTO_EXPOSURE_MIN_EV          -6.0
-#define AUTO_EXPOSURE_MAX_EV           1.0
+
+//(AUTO_EXPOSURE) this is the middle gray value that the auto exposure will try to achieve, this is a standard value for middle gray
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.18
+#define AUTO_EXPOSURE_MIDDLE_GRAY 0.18
+
+//(AUTO_EXPOSURE) this is the strength of the auto exposure.
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.5
+#define AUTO_EXPOSURE_STRENGTH 0.5
+
+//(AUTO_EXPOSURE) this is the minimum (darkened) exposure value that the auto exposure can go to, this is in EV (exposure value) which is a logarithmic scale
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: -6.0
+#define AUTO_EXPOSURE_MIN_EV -6.0
+
+//(AUTO_EXPOSURE) this is the maximum (brightened) exposure value that the auto exposure can go to, this is in EV (exposure value) which is a logarithmic scale
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
+#define AUTO_EXPOSURE_MAX_EV 1.0
+
+//(AUTO_EXPOSURE) this is the exposure compensation value that the auto exposure will apply to the final image, this is in EV (exposure value) which is a logarithmic scale
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: -0.35
 #define AUTO_EXPOSURE_COMPENSATION_EV -0.35
-#define AUTO_EXPOSURE_CENTER_FOCUS     0.5
+
+//(AUTO_EXPOSURE) this controls how focused the grid points are when sampling the final image to determine the automatic exposure value
+//values closer to 1.0 are focused towards the center of the screen
+//values closer to 0.0 are more spread out across the entire screen
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.5
+//[CONFIG RANGE]: [0, 1]
+#define AUTO_EXPOSURE_CENTER_FOCUS 0.5
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - COLOR / BRIGHTNESS ADJUSTMENTS ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - COLOR / BRIGHTNESS ADJUSTMENTS ||||||||||||||||||||||||||||||||||
@@ -61,15 +122,67 @@
 //these are simple artistic controls for being able to control the final image
 //these get applied BEFORE the tonemaps
 
-#define ADJUSTMENT_BRIGHTNESS_EV -0.35
-#define ADJUSTMENT_CONTRAST 0.99
+//how bright the image is
+//(applied before tonemap)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: -0.35
+#define ADJUSTMENT_BRIGHTNESS_EV -0.45
+
+//how much contrast the image has
+//(applied before tonemap)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
+#define ADJUSTMENT_CONTRAST 1.0
+
+//the pivot point for the contrast adjustment, this is the value that the contrast adjustment will be centered around
+//(applied before tonemap)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.18
 #define ADJUSTMENT_CONTRAST_PIVOT 0.18
+
+//how much saturation the image has
+//(applied before tonemap)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define ADJUSTMENT_SATURATION 1.0
+
+//how much vibrance the image has, this is a more subtle saturation adjustment that only affects the less saturated colors
+//(applied before tonemap)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.0
 #define ADJUSTMENT_VIBRANCE 0.0
+
+//how much tint the image has, this is a color adjustment that shifts the overall color balance of the image
+//(applied before tonemap)
+//[CONFIG TYPE]: float3
+//[CONFIG DEFAULT]: (1.0, 1.0, 1.0)
 #define ADJUSTMENT_TINT_COLOR float3(1.0, 1.0, 1.0)
+
+//how much tint the image has, this is a color adjustment that shifts the overall color balance of the image
+//(applied before tonemap)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.0
+//[CONFIG RANGE]: [0, 1]
 #define ADJUSTMENT_TINT_FACTOR 0.0
-#define ADJUSTMENT_GAMMA 1.1
+
+//how much gamma the image has, this functions almost like a contrast adjustment (but think of it as a "soft" contrast adjustment)
+//higher values make for a brighter/less contrasty image
+//lower values make for a darker/more contrasty image
+//(applied before tonemap)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
+#define ADJUSTMENT_GAMMA 1.15
+
+//how much lift the image has, this is a color adjustment that shifts the overall color balance of the image
+//(applied before tonemap)
+//[CONFIG TYPE]: float3
+//[CONFIG DEFAULT]: (0.0, 0.0, 0.0)
 #define ADJUSTMENT_LIFT float3(0.0, 0.0, 0.0)
+
+//how much gain the image has, this is a color adjustment that shifts the overall color balance of the image
+//(applied before tonemap)
+//[CONFIG TYPE]: float3
+//[CONFIG DEFAULT]: (1.0, 1.0, 1.0)
 #define ADJUSTMENT_GAIN float3(1.0, 1.0, 1.0)
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - TONEMAPPING ||||||||||||||||||||||||||||||||||
@@ -81,23 +194,60 @@
 //because in the original game the tonemapping is baked into the LUTs that get used, good for performance but not for flexibility
 #define TONEMAP_PRESERVE_COLOR_GRADE
 
-//#define TONEMAP_NONE //raw untonemapped framebuffer to screen with srgb conversion
-//#define TONEMAP_GRAN_TURISMO_7 //personal favorite, not 'filmic' but gives a much more natrual tonal and color response (ironically this matches more closely to the tonal response in the pre-rendered cutscenes)
-//#define TONEMAP_AGX
-//#define TONEMAP_UCHIMURA
-//#define TONEMAP_REINHARD
-//#define TONEMAP_REINHARD2
-//#define TONEMAP_UNCHARTED2
-//#define TONEMAP_ACES
-//#define TONEMAP_ACES_FITTED //this is what the game is definetly using
-//#define TONEMAP_FILMIC
-//#define TONEMAP_UNREAL_3
-//#define TONEMAP_KHRONOS_NEUTRAL
-//#define TONEMAP_LOTTES
-//#define TONEMAP_EXPONENTIAL
-//#define TONEMAP_EXPONENTIAL_SQUARED
-//#define TONEMAP_MGSV //(metal gear solid v)
-//#define TONEMAP_TONY_MC_MAP_FACE
+//raw untonemapped framebuffer to screen with srgb conversion
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_NONE
+
+//personal favorite, not 'filmic' but gives a much more natrual tonal and color response (ironically this matches more closely to the tonal response in the pre-rendered cutscenes)
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_GRAN_TURISMO_7
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_AGX
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_UCHIMURA
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_REINHARD
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_REINHARD2
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_UNCHARTED2
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_ACES
+
+//this is what the game is definetly using
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_ACES_FITTED
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_FILMIC
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_UNREAL_3
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_KHRONOS_NEUTRAL
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_LOTTES
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_EXPONENTIAL
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_EXPONENTIAL_SQUARED
+
+//(metal gear solid v)
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_MGSV
+
+//(NOTE: only one tonemap can be active at a time)
+// #define TONEMAP_TONY_MC_MAP_FACE
 
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -536,7 +686,7 @@ float2 DestinationUVToGlareTextureUV(float2 destinationUV)
 
 float2 MakeCenteredCompositeUV(float2 destinationUV)
 {
-    // Fit a 16:9 surface inside the destination while retaining a centered UV.
+    //Fit a 16:9 surface inside the destination while retaining a centered UV.
     float2 fitScale;
     fitScale.x = min(ViewportDestination_ViewportSize.x * (9.0f / 16.0f) * ViewportDestination_ViewportSizeInverse.y, 1.0f);
     fitScale.y = min(ViewportDestination_ViewportSize.y * (16.0f / 9.0f) * ViewportDestination_ViewportSizeInverse.x, 1.0f);
@@ -702,7 +852,7 @@ float3 AdjustImage(float3 inputColor)
 
     color *= tintMultiplier;
 
-    // Artistic gamma. Gamma > 1 brightens the midtones.
+    //Artistic gamma. Gamma > 1 brightens the midtones.
     color = pow(max(color, 0.0f.xxx), rcp(max(ADJUSTMENT_GAMMA, 1.0e-4f)));
 
     return color;
@@ -728,7 +878,7 @@ float3 Linear100NitsToPQ(float3 linearColor)
 //NOTE 2: this was checked later but it looks like the game is using ACES 1... pretty standard for UE
 float3 SampleColorConversionLUTs(float3 linearSceneColor)
 {
-    // Both LUTs are 32^3; map [0,1] to texel centers [0.5/32,31.5/32].
+    // Both LUTs are 32^3; map [0,1] to texel centers [0.5 / 32, 31.5 / 32].
     const float lutScale = 31.0f / 32.0f;
     const float lutBias  = 0.5f / 32.0f;
     float3 bt709PQ = Linear100NitsToPQ(linearSceneColor);
@@ -798,7 +948,9 @@ float3 ApplyTonemap_AcesFitted_Inv(float3 color)
     return max(color, 0.0f);
 }
 
-#define ORIGINAL_GAME_ACES_EXPOSURE 2.0f
+//The original game used a hard-coded ACES exposure of 2.0, so we need to invert that to get back to the raw scene color.
+//[NO CONFIG]
+#define ORIGINAL_GAME_ACES_EXPOSURE 2.0
 
 float3 SampleGameFinalLinear(float3 linearSceneColor)
 {
@@ -810,11 +962,11 @@ float3 SampleGradedNoTonemapNoSRGB(float3 linearSceneColor)
 {
     float3 gameFinalLinear = SampleGameFinalLinear(linearSceneColor);
 
-    // Invert the ACES fitted curve from the game's final display-linear result.
+    //invert the ACES fitted curve from the game's final display-linear result.
     float3 untonemapped = ApplyTonemap_AcesFitted_Inv(gameFinalLinear);
 
-    // Your ACES fitted match used sceneColor *= 2.0, so inverse gives us that
-    // exposed domain. Divide it back down to raw scene scale.
+    //ACES fitted match used sceneColor *= 2.0, so inverse gives us that exposed domain. 
+	//divide it back down to raw scene scale.
     return untonemapped / ORIGINAL_GAME_ACES_EXPOSURE;
 }
 
@@ -848,6 +1000,64 @@ float3 ApplyOutputDither(float3 encodedColor, float uniformNoise)
 
 	return saturate(encodedColor + finalDither);
 }
+
+//||||||||||||||||||||||||||||||| SHARPEN |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| SHARPEN |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| SHARPEN |||||||||||||||||||||||||||||||
+
+#if defined(SHARPEN_ENABLE)
+float3 ApplyQuadSharpen(float3 centerColor, float2 pixelPosition)
+{
+	float3 neighborAcrossX = QuadReadAcrossX(centerColor);
+	float3 neighborAcrossY = QuadReadAcrossY(centerColor);
+	float3 neighborDiagonal = QuadReadAcrossDiagonal(centerColor);
+
+	int2 pixel = int2(pixelPosition);
+	int2 viewportPixel = pixel - ViewportDestination_ViewportMin;
+	int2 viewportSize = int2(ViewportDestination_ViewportSize);
+
+	int2 pairedPixelOffset = int2(
+		((pixel.x & 1) == 0) ? 1 : -1,
+		((pixel.y & 1) == 0) ? 1 : -1
+	);
+
+	int2 pairedPixelX = viewportPixel + int2(pairedPixelOffset.x, 0);
+	int2 pairedPixelY = viewportPixel + int2(0, pairedPixelOffset.y);
+	int2 pairedPixelDiagonal = viewportPixel + pairedPixelOffset;
+
+	bool validX = pairedPixelX.x >= 0 && pairedPixelX.x < viewportSize.x;
+	bool validY = pairedPixelY.y >= 0 && pairedPixelY.y < viewportSize.y;
+	bool validDiagonal =
+		pairedPixelDiagonal.x >= 0 && pairedPixelDiagonal.x < viewportSize.x &&
+		pairedPixelDiagonal.y >= 0 && pairedPixelDiagonal.y < viewportSize.y;
+
+	float3 neighborSum = 0.0f;
+	float neighborCount = 0.0f;
+
+	if (validX)
+	{
+		neighborSum += neighborAcrossX;
+		neighborCount += 1.0f;
+	}
+
+	if (validY)
+	{
+		neighborSum += neighborAcrossY;
+		neighborCount += 1.0f;
+	}
+
+	if (validDiagonal)
+	{
+		neighborSum += neighborDiagonal;
+		neighborCount += 1.0f;
+	}
+
+	float3 neighborAverage = neighborCount > 0.0f ? neighborSum / neighborCount : centerColor;
+	float3 sharpenedColor = centerColor + (centerColor - neighborAverage) * max(SHARPEN_AMOUNT, 0.0f);
+
+	return max(sharpenedColor, 0.0f);
+}
+#endif
 
 //||||||||||||||||||||||||||||||| DEBUG |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| DEBUG |||||||||||||||||||||||||||||||
@@ -1054,33 +1264,13 @@ PixelOutput main(PixelInput input)
 		tonemapOutput = SRGBToLinear(tonemapOutput);
 	#endif
 
-	/*
-	//combine UI
-	//NOTE: some of these tonemappers factor in SRGB mapping already
-	#if defined(TONEMAP_AGX) || defined(TONEMAP_UNREAL_3)
-		float4 uiColor = CompositeSDRTexture.SampleLevel(View_SharedBilinearClampedSampler, compositeUV, 0.0f);
-		uiColor.rgb = LinearToSRGB(uiColor.rgb);
-		//uiColor.a = LinearToSRGB(uiColor.a);
-		uiColor.a = SRGBToLinear(uiColor.a);
-
-		tonemapOutput = lerp(uiColor.rgb + uiColor.a, tonemapOutput, uiColor.a);
-
-		float3 compositedLinear = saturate(tonemapOutput);
-		float3 encodedOutput = compositedLinear;
-
-		//output.Color = uiColor;
-	#else
-		float4 uiColor = CompositeSDRTexture.SampleLevel(View_SharedBilinearClampedSampler, compositeUV, 0.0f);
-		float3 compositedLinear = saturate(tonemapOutput * uiColor.a + uiColor.rgb);
-		float3 encodedOutput = LinearToSRGB(compositedLinear);
-
-		//output.Color = uiColor;
-	#endif
-	*/
-
 	//uI compositing has to happen in linear
 	#if defined(TONEMAP_AGX) || defined(TONEMAP_UNREAL_3)
 		tonemapOutput = SRGBToLinear(tonemapOutput);
+	#endif
+
+	#if defined(SHARPEN_ENABLE)
+		tonemapOutput = ApplyQuadSharpen(tonemapOutput, input.Position.xy);
 	#endif
 	
 	float4 uiColor = CompositeSDRTexture.SampleLevel(View_SharedBilinearClampedSampler, compositeUV, 0.0f);

@@ -13,27 +13,40 @@
 
 //this controls the brightness of the final calculated ambient term that this shader calculates
 //NOTE: this does not affect direct lighting
-//DEFAULT: 1.0
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define AMBIENT_BRIGHTNESS 1.0
 
 //this controls the brightness of the final combined ambient + direct light that this shader ultimately returns
-//DEFAULT: 1.0
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define FINAL_BRIGHTNESS 1.0
 
 //calculates a fresh direct lighting term for a "light source" that is placed right where the camera is (capcom style)
 //this lighs up the diffuse/specular terms in ambient areas
 #define CAMERA_AMBIENT_LIGHT
 
-//in (cm) units
+//how far out the camera light reaches (in (cm) units)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 250000.0
 #define CAMERA_AMBIENT_LIGHT_RANGE 250000.0
+
+//how bright the camera light is (affects diffuse and specular)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define CAMERA_AMBIENT_LIGHT_BRIGHTNESS 1.0
+
+//how bright the camera light specular contribution is (affects specular only)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.5
 #define CAMERA_AMBIENT_LIGHT_SPECULAR_BOOST 0.5
 
 //||||||||||||||||||||||||||||||| CONFIGURATION - GLOBAL ILLUMINATION (DIFFUSE / IRRADIANCE) |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| CONFIGURATION - GLOBAL ILLUMINATION (DIFFUSE / IRRADIANCE) |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| CONFIGURATION - GLOBAL ILLUMINATION (DIFFUSE / IRRADIANCE) |||||||||||||||||||||||||||||||
 
-//#define DISABLE_IRRADIANCE
+//(DEBUG) disables the final global illumination irradiance/diffuse shading term
+// #define DISABLE_IRRADIANCE
 
 //this is the default diffuse/irradiance global illumination the game does.
 //they sample the regular baked GI irradiance volumes, and then also try to use the "cubemap reflections" resampling them for "irradiance" and combine the two together
@@ -47,14 +60,22 @@
 //plus... I think everyone prefers them looking flat rather than bug-eyed in ambient light
 //the downside is less contrast/shading on their face, and even less color in certain spots, but generally overall this improves their faces during gameplay significantly.
 //far less of a "frog face" look.
-#define FLATTEN_CHARACTER_AMBIENT
+// #define FLATTEN_CHARACTER_AMBIENT
 
 //controls how strong the AO term is in ambient light (use in tandem with SSAO_BRIGHTNESS)
 //NOTE: original game SSAO is much weaker than the SSGI AO, if your flipping back and fourth you'll need to readjust the values
+//Higher Values: more contrast
+//Lower Values: less contrast
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define SSAO_POWER 1.0
 
 //controls how bright the AO term is in ambient light (use in tandem with SSAO_POWER)
 //NOTE: original game SSAO is much weaker than the SSGI AO, if your flipping back and fourth you'll need to readjust the values
+//Higher Values: brighter
+//Lower Values: darker
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define SSAO_BRIGHTNESS 1.0
 
 //controls for a new SSGI solution, ground-truth visibility bitmask ambient occlusion
@@ -68,32 +89,52 @@
 //ideally also in the future this would be relegated to it's own special new render pass, where we can render at a much lower resolution
 //and in addition do our own filtering/upsampling passes to not only clean up the noise but also make it MUCH more performant
 
-//changes the noise pattern every frame (HIGHLY recomended, so the TAA in the game natrually blends results)
+//(SSGI) changes the noise pattern every frame for the new SSGI / AO (HIGHLY recomended, so the TAA in the game natrually blends results)
 #define RANDOM_ANIMATE_NOISE
 
 //how many SSGI/AO rays we fire
 //IMPORTANT NOTE: this settings is insanely expensive, if you want to send your GPU to heaven in the name of less noise and better quality... be my geust!
-//DEFAULT: 1
-//RANGE: [1, 32]
+//[CONFIG TYPE]: int
+//[CONFIG DEFAULT]: 1
+//[CONFIG RANGE]: [1, 32]
 #define SSGI_RAY_COUNT 1
 
 //how many raymarching samples we do
 //higher samples = better quality / less noise / worse performance
 //lower samples = worse quality / more noise / better performance
-//DEFAULT: 16
-//RANGE: [1 <-> 128]
+//[CONFIG TYPE]: int
+//[CONFIG DEFAULT]: 16
+//[CONFIG RANGE]: [1, 128]
 #define SSGI_RAYMARCHING_STEP_COUNT 16
 
 //how far out does the SSGI max screen-pixel reach
 //NOTE: affects both the SSGI AO and bounce light
-#define SSGI_RAYMARCHING_WIDTH 512.0 
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 512.0
+#define SSGI_RAYMARCHING_WIDTH 512.0
 
 //world-space depth thickness
 //NOTE: affects both the SSGI AO and bounce light
+//this controls how thick occluders are in the scene (since there is no way to properly determine the actual thickness of objects, we have to assume a generalized thickness)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 75.0
 #define SSGI_THICKNESS 75.0
 
+//how much the SSGI/AO ray is pushed away from the surface it originates from to prevent self-occlusion
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.0005
 #define SSGI_NORMAL_BIAS 0.0005
+
+//(for HAIR materials) how much the SSGI/AO ray is pushed away from the surface it originates from to prevent self-occlusion
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.0005
 #define SSGI_NORMAL_BIAS_HAIR 0.1
+
+//control over how strong AO is for hair materials for SSAO/SSGI
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
+//[CONFIG RANGE]: [0, 1]
+#define AO_HAIR 1.0
 
 //calculate ground truth visibility based ambient occlusion
 //this heavier than the original games SSAO, but it's far higher quality
@@ -108,19 +149,33 @@
 
 //shade half of the expensive SSGI rays each frame and reconstruct the missing half from the two computed neighbors in the same 2x2 pixel quad
 //NOTE: checkerboard rendering is a definite WIN for performance especially at high resolutions, I think it's wise to leave this on even at the expense of quality
-//#define SSGI_CHECKERBOARD
+// #define SSGI_CHECKERBOARD
+
+//(SSGI_CHECKERBOARD ONLY) reconstruct the missing half of the checkerboard SSGI rays from the two computed neighbors in the same 2x2 pixel quad
 #define SSGI_CHECKERBOARD_QUAD_RECONSTRUCTION
 
+//A very small sample-free denoise pass that averages the SSGI bounce-light color
+//across all four pixels in the current 2x2 quad.
+//NOTE: this only filters SSGI color; ambient occlusion and the fallback mask are untouched.
+//NOTE 2: personally I would not use this, this is just a last-ditch cheap effort to help somewhat mitigate the noise, in the future this will be replaced by a proper filter pass but for now can somewhat help.
+//#define SSGI_BASIC_QUAD_DENOISE
+
 //||||||||||||||||||||||||||||||| CONFIGURATION - GLOBAL ILLUMINATION (REFLECTION / RADIANCE) |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| CONFIGURATION - GLOBAL ILLUMINATION (REFLECTION / RADIANCE) |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| CONFIGURATION - GLOBAL ILLUMINATION (REFLECTION / RADIANCE) |||||||||||||||||||||||||||||||
 
+//(DEBUG) disables the final global illumination radiance/reflection shading term
 //#define DISABLE_RADIANCE
+
+//#define REFLECTIONS_DISABLE_CUBEMAP
+
+//#define REFLECTIONS_DISABLE_RADIANCE_VOLUME
 
 //this disables SSR blending and instead fully relies on the reflection probes / irradiance volume the game uses for reflections
 //NOTE: this does not give you a performance boost, SSR pass still runs, it just wont be used (if you do want a boost, find the SSR pass hlsl file and there is also a disable macro written there)
 //#define DISABLE_SSR
 
+//this corrects the original strange stretched reflection vectors
 #define CORRECT_REFLECTION_DIRECTION
 
 //this is the default reflection/radiance global illumination the game does.
@@ -130,25 +185,62 @@
 //NOTE TO SELF: to improve on their original idea I think we should calculate an "influence distance" since technically the closer we get to a reflection probe the more accurate the irradiance is at that point (more so than the irradiance volume)
 //#define RADIANCE_BLENDING_DEFAULT
 
-//#define REFLECTIONS_DISABLE_CUBEMAP
-//#define REFLECTIONS_DISABLE_RADIANCE_VOLUME
-//#define REFLECTIONS_COMBINED
+//maximum amount of cubemap chromaticity allowed to replace the radiance-volume color
+//0.0 keeps reflections fully radiance tinted; 1.0 permits the original cubemap chromaticity
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.75
+//[CONFIG RANGE]: [0, 1]
+#define RADIANCE_CUBEMAP_MAX_SATURATION 0.5
+
+//maximum roughness that still receives RADIANCE_CUBEMAP_MAX_SATURATION
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.1
+//[CONFIG RANGE]: [0, 1]
+#define RADIANCE_CUBEMAP_MAX_SATURATION_ROUGHNESS 0.15
+
+//minimum roughness at which the cubemap is fully tinted by the radiance-volume color
+//roughness values between the two thresholds smoothly reduce cubemap chromaticity
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.5
+//[CONFIG RANGE]: [0, 1]
+#define RADIANCE_CUBEMAP_FULL_RADIANCE_TINT_ROUGHNESS 0.4
+
+//radianceVolume.a contains the SampleGI-derived specular-highlight mask
+//highlighted pixels force the reflection chromaticity back to the radiance-volume color
+#define RADIANCE_SPECULAR_HIGHLIGHT_FORCE_VOLUME_TINT
+
+//strength of the radianceVolume.a chromaticity override
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
+//[CONFIG RANGE]: [0, 1]
+#define RADIANCE_SPECULAR_HIGHLIGHT_VOLUME_TINT_STRENGTH 1.0
 
 //controls how much of the SSR is visible
 //higher values = SSR more visible
 //lower vlaues = SSR less visible
-//DEFAULT: 100000 (why? because I modified the SSR shader and now its way higher quality. reflection quality is better + way less specular leaks... and plus the original game reflection cubemaps are really ugly and bad. SSR is the only hope of retaining some dignity for good quality reflections)
-#define SSR_CONTRIBUTION_MULTIPLIER 100000
+//default is at 100000 (why? because I modified the SSR shader and now its way higher quality. reflection quality is better + way less specular leaks... and plus the original game reflection cubemaps are really ugly and bad. SSR is the only hope of retaining some dignity for good quality reflections)
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 100000
+#define SSR_CONTRIBUTION_MULTIPLIER 100000.0
 
 //this is an artistic tweak that darkens only rough cubemap-based reflections (not SSR reflections)
 //this is because a significant amount of specular/light leak comes from these imprecise reflection sources
 //so to mitigate that we go in and use the direct light buffer (which already has all direct light shading) and effectively derive a "non direct light" mask
 //using that mask we darken rough reflections that are not in direct light of anything
 #define SPECULAR_OCCLUSION_DIRECT_LIGHT_SHADOW
-#define SPECULAR_OCCLUSION_DIRECT_LIGHT_SHADOW_FACTOR 0.95
+
+//how much do we darken the original cubemap reflections when they are not in direct light
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 0.99
+//[CONFIG RANGE]: [0, 1]
+#define SPECULAR_OCCLUSION_DIRECT_LIGHT_SHADOW_FACTOR 0.99
 
 //this is mostly artistic, but this adds an additional highlight for character eyes that comes from the camera to give them an extra specular kick
 #define SPECULAR_EYE_HIGHLIGHT
+
+//how intense the specular highlight is for character eyes
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
 #define SPECULAR_EYE_HIGHLIGHT_BOOST 1.0
 
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -1111,11 +1203,14 @@ void CombineIrradianceVolumesAndReflections(inout EnvironmentSamples environment
     //remake funny enough does a similar thing with their lightmaps in the first game... so we are kinda leveraging that same idea here
     #if defined(SPECULAR_OCCLUSION_DIRECT_LIGHT_SHADOW)
         float directLightContribution = saturate(LuminanceRec709(directLighting));
+        //float directLightContribution = saturate(LuminanceRec709(directLighting) * View_OneOverPreExposure);
+        //float directLightContribution = saturate(pow(LuminanceRec709(directLighting) * View_PreExposure, 1.0f / 2.2f));
         float directLightSpecularOcclusion = lerp(1.0f, min(directLightContribution, 1.0f), SPECULAR_OCCLUSION_DIRECT_LIGHT_SHADOW_FACTOR);
+        //float directLightSpecularOcclusion = lerp(1.0f, directLightContribution, SPECULAR_OCCLUSION_DIRECT_LIGHT_SHADOW_FACTOR);
 
         //NOTE: only apply this to the reflection probes, radiance volume and SSR should remain at full intensity as it's the most accurate
-        //environment.CubemapReflection *= directLightSpecularOcclusion; 
-        //environment.CubemapReflectionRough *= directLightSpecularOcclusion; 
+        environment.CubemapReflection *= directLightSpecularOcclusion; 
+        environment.CubemapReflectionRough *= directLightSpecularOcclusion; 
     #endif
 
     //============================= RADIANCE (REFLECTION) =============================
@@ -1139,7 +1234,6 @@ void CombineIrradianceVolumesAndReflections(inout EnvironmentSamples environment
     float cubemapRadianceAndRadianceVolumeInvert = cubemapRadianceAndRadianceVolume - 1.0;
     float radianceReject = saturate((cubemapRadianceAndRadianceVolumeInvert * cubemapRadianceAndRadianceVolumeInvert) / (cubemapRadianceAndRadianceVolumeInvert * cubemapRadianceAndRadianceVolumeInvert + 0.25));
     float3 radianceTarget = cubemapReflectionLuminance * radianceVolume.rgb * radianceVolumeLuminanceInverse;
-    //float3 radianceTarget = environment.CubemapReflection * radianceVolume.rgb * radianceVolumeLuminanceInverse; //NOTE TO SELF: we lose original cubemap colors too much... gotta be a way to preserve them
 
     #if defined(REFLECTIONS_DISABLE_CUBEMAP)
         environment.CubemapReflection = 0.0f;
@@ -1148,7 +1242,17 @@ void CombineIrradianceVolumesAndReflections(inout EnvironmentSamples environment
     #if defined(RADIANCE_BLENDING_DEFAULT)
         environment.CubemapReflection = lerp(environment.CubemapReflection, radianceTarget, radianceReject) * cubemapRadianceAndRadianceVolume;
     #else
-        //environment.CubemapReflection = radianceVolume.rgb;
+        //Save only the original cubemap chromaticity. 
+        //The original blend below remains responsible for the reflection luminance.
+        const float chromaticityEpsilon = 1e-5f;
+        float3 radianceChromaticity =
+            radianceVolumeLuminance > chromaticityEpsilon
+                ? radianceVolume.rgb * radianceVolumeLuminanceInverse
+                : 0.0f;
+        float3 cubemapChromaticity =
+            cubemapReflectionLuminance > chromaticityEpsilon
+                ? environment.CubemapReflection * cubemapReflectionLuminanceInverse
+                : radianceChromaticity;
 
         float radianceToCubemapBlend = gbufferData.Roughness;
 
@@ -1156,15 +1260,60 @@ void CombineIrradianceVolumesAndReflections(inout EnvironmentSamples environment
         radianceToCubemapBlend -= 0.35f;
         radianceToCubemapBlend *= 3.5f;
         radianceToCubemapBlend = saturate(radianceToCubemapBlend);
-        //radianceToCubemapBlend = lerp(radianceToCubemapBlend, 1.0f, radianceVolume.a);
 
-        //environment.CubemapReflection = radianceToCubemapBlend * View_OneOverPreExposure;
-
-        //environment.CubemapReflection = lerp(0.0f, radianceVolume.rgb, radianceToCubemapBlend);
-        //environment.CubemapReflection = lerp(radianceTarget, radianceVolume.rgb, radianceToCubemapBlend);
         environment.CubemapReflection = lerp(radianceTarget * cubemapRadianceAndRadianceVolume, radianceVolume.rgb, radianceToCubemapBlend);
 
-        //environment.CubemapReflection.rgb *= 1.0f + radianceVolume.a;
+        //Keep the exact luminance produced by the RGB blend. Only chromaticity is
+        //controlled below, so cubemap color cannot independently raise reflection energy.
+        float blendedReflectionLuminance = max(LuminanceRec709(environment.CubemapReflection), 0.0f);
+        float3 blendedReflectionChromaticity =
+            blendedReflectionLuminance > chromaticityEpsilon
+                ? environment.CubemapReflection * rcp(blendedReflectionLuminance)
+                : radianceChromaticity;
+
+        //If the radiance volume is black or invalid, preserve the existing blend's
+        //normalized color as the safest radiance-tint fallback.
+        if (radianceVolumeLuminance <= chromaticityEpsilon)
+            radianceChromaticity = blendedReflectionChromaticity;
+
+        float maximumSaturationRoughness = min(
+            RADIANCE_CUBEMAP_MAX_SATURATION_ROUGHNESS,
+            RADIANCE_CUBEMAP_FULL_RADIANCE_TINT_ROUGHNESS);
+        float fullRadianceTintRoughness = max(
+            RADIANCE_CUBEMAP_MAX_SATURATION_ROUGHNESS,
+            RADIANCE_CUBEMAP_FULL_RADIANCE_TINT_ROUGHNESS);
+        float roughnessTintRange = max(
+            fullRadianceTintRoughness - maximumSaturationRoughness,
+            chromaticityEpsilon);
+        float radianceTintProgress = saturate(
+            (saturate(gbufferData.Roughness) - maximumSaturationRoughness) *
+            rcp(roughnessTintRange));
+        radianceTintProgress =
+            radianceTintProgress * radianceTintProgress *
+            (3.0f - 2.0f * radianceTintProgress);
+
+        float cubemapSaturation =
+            saturate(RADIANCE_CUBEMAP_MAX_SATURATION) *
+            (1.0f - radianceTintProgress);
+        float3 controlledChromaticity = lerp(
+            radianceChromaticity,
+            cubemapChromaticity,
+            cubemapSaturation);
+
+        #if defined(RADIANCE_SPECULAR_HIGHLIGHT_FORCE_VOLUME_TINT)
+            //SampleGI stores its derived specular-highlight mask in radianceVolume.a.
+            //At full mask strength, no cubemap chromaticity survives.
+            float specularHighlightTint = saturate(
+                radianceVolume.a *
+                RADIANCE_SPECULAR_HIGHLIGHT_VOLUME_TINT_STRENGTH);
+            controlledChromaticity = lerp(
+                controlledChromaticity,
+                radianceChromaticity,
+                specularHighlightTint);
+        #endif
+
+        environment.CubemapReflection =
+            controlledChromaticity * blendedReflectionLuminance;
     #endif
 
     //============================= IRRADIANCE (DIFFUSE) =============================
@@ -1703,10 +1852,6 @@ float3 CalculateSpecularHighlight(float3 normal, float3 directionToCamera, float
 	return specularBRDF * NoL * MATH_PI;
 }
 
-//||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
-
 //||||||||||||||||||||||||||||||| VIGNETTE |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| VIGNETTE |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| VIGNETTE |||||||||||||||||||||||||||||||
@@ -1716,6 +1861,10 @@ float Vignette(float2 uv, float radius, float smoothness)
 	float diff = radius - distance(uv, float2(0.5, 0.5));
 	return smoothstep(-smoothness, smoothness, diff);
 }
+
+//||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||
 
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -1769,6 +1918,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
             float3 vector_rayOriginSSGI = worldPosition + gbufferData.WorldNormal * ssgiNormalBias;
 
+            //self shadowing issues when really close to surfaces
+            vector_rayOriginSSGI += gbufferData.WorldNormal * 0.025f * gbufferData.DeviceDepth;
+
             ssgi = ComputeGTVBGI(
                 viewPixelPosition,
                 vector_rayOriginSSGI,
@@ -1798,9 +1950,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             }
         #endif
 
+        #if defined(SSGI_BOUNCE_LIGHT) && defined(SSGI_BASIC_QUAD_DENOISE)
+            //Average the current lane and the other three lanes in its 2x2 pixel quad.
+            float3 ssgiAcrossX = QuadReadAcrossX(ssgi.rgb);
+            float3 ssgiAcrossY = QuadReadAcrossY(ssgi.rgb);
+            float3 ssgiAcrossDiagonal = QuadReadAcrossDiagonal(ssgi.rgb);
+            ssgi.rgb = (ssgi.rgb + ssgiAcrossX + ssgiAcrossY + ssgiAcrossDiagonal) * 0.25f;
+        #endif
+
 	#endif
 
-    //these returns occur after the quad operations so helper lanes remain defined during checkerboard reconstruction.
+    //These returns occur after the quad operations so helper lanes remain defined
+    //during checkerboard reconstruction and basic quad denoising.
     if (!pixelInView || !supportedShadingModel)
         return;
 
@@ -1855,6 +2016,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	//apply screen space ao
 	#if defined(SSGI_AMBIENT_OCCLUSION)
 		ambientOcclusion *= saturate(pow(ssgi.a, SSAO_POWER) * SSAO_BRIGHTNESS);
+
+        //quick fix for some users complaining about thick hairy characters like cait sith/red/moogle where they appear grey
+		if (gbufferData.ShadingModelID == SHADINGMODELID_HAIR)
+            ambientOcclusion = lerp(1.0f, ambientOcclusion, AO_HAIR);
 	#else //NOTE: original game SSAO is quite a bit weaker than the SSGI AO
 		//manual adjustment to get the original game SSAO to match the strength of the SSGI AO
 
@@ -1866,6 +2031,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		    gbufferData.ScreenAO = lerp(gbufferData.ScreenAO, 1.0f, 0.5f);
 
 		ambientOcclusion *= saturate(pow(gbufferData.ScreenAO, SSAO_POWER) * SSAO_BRIGHTNESS);
+
+        //quick fix for some users complaining about thick hairy characters like cait sith/red/moogle where they appear grey
+        if (gbufferData.ShadingModelID == SHADINGMODELID_HAIR)
+            ambientOcclusion = lerp(1.0f, ambientOcclusion, AO_HAIR);
 	#endif
 
 	//apply material AO
@@ -1928,7 +2097,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 directLightContribution = SampleSceneRadiance(viewPixelPosition);
 
-    if (radianceVolume.a != 0.0 && irradianceVolume.a != 0.0)
+    //radianceVolume.a is now the SampleGI specular-highlight mask, not a
+    //radiance-volume validity flag. The paired irradiance volume retains validity.
+    if (irradianceVolume.a != 0.0)
         CombineIrradianceVolumesAndReflections(environment, radianceVolume, irradianceVolume, gbufferData, directLightContribution);
 
     float environmentModifier = ((gbufferData.PackedFlags & 16u) != 0u) ? View_LightModifierEnvironmentLight : 1.0;
