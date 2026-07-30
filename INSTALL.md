@@ -2,6 +2,10 @@
 
 *If you run into any issues with the mod please report an issue here on GitHub, or whevever the mod is hosted. Please be as descriptive as possible when reporting an issue, otherwise it will be ignored!*
 
+# [Linux Users](https://github.com/frostbone25/ShaderInjector/blob/main/Solutions.md#linux-support)
+
+For Linux Users specifically, if you are trying to run this mod on Linux most of the installation steps 1 and 2 are roughly the same except before step 3 you need to introduce additional launch commands/trickery to ensure that everything runs. [Please follow the guide here to do so](https://github.com/frostbone25/ShaderInjector/blob/main/Solutions.md#linux-support)
+
 # Installation Guide
 
 Installation of the mod should only take a minute at most, but I need to make something very clear especially if this is your first time installing the mod. 
