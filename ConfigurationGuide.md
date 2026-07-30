@@ -1,5 +1,9 @@
 # Configuration Guide
 
+#### NOTE: 2.2.0+
+
+Starting with 2.2.0, while most of this guide is still applicable, there is now an in-menu UI called Shader Configuration, which parses many of the wired up pre-processor macros in the HLSL shaders. Allowing users to easily find/search and adjust parameters in-game without needing to tab back in and out of the game to recompile shaders.
+
 #### Contents
 
 - [Maximum Visual Quality Configuration](#maximum-visual-quality-configuration)
