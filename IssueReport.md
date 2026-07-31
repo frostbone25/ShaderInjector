@@ -2,6 +2,8 @@
 
 This is a document to help give you an idea on how to provide a good issue report if you want to increase the chances of your issue getting resolved successfuly. **The first most important and obvious thing is, the more information you provide the better.**
 
+**[Make issue reports here on Github, as it allows you to attach the necessary files and any other necessary information *(i.e. screenshots)*.](https://github.com/frostbone25/ShaderInjector/issues)**
+
 # ShaderInjector Logs
 
 First important thing to cover is that Shader Injector writes to it's own log file within the game directory in the ```ShaderInjector/Logs/ShaderInjector.log```
