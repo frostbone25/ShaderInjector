@@ -86,25 +86,44 @@ I would suggest doing this if you spot artifacts that you may not like brought o
 
 #### Linux Support
 
-*(Courtesy of [smackedwookiee](https://www.youtube.com/@SmackedWookiee))*
+*(Courtesy of [smackedwookiee](https://www.youtube.com/@SmackedWookiee) and 
+[daemon_mouse](https://codeberg.org/daemon_mouse))*
 
-**1. Install directx-shader-compiler**
+**1. Install DirectX Shader Compiler**
 
-**Ubuntu:**
+Microsoft's [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler)
+is used to compile shaders (HLSL files) provided by ShaderInjector.
+
+**Arch-based distributions (including CachyOS):**
 ```bash
-sudo apt update
-sudo apt install directx-shader-compiler
+sudo pacman -Sy directx-shader-compiler
 ```
 
-**Arch:**
+**Fedora-based distributions (including Bazzite and Nobara)**
+
+Fedora does not ship this program in its default repositories, but Terra 
+does. If you're using a distribution downstream of Fedora, you may already have 
+Terra repositories configured.
+
+First, follow 
+[Terra's instructions](https://docs.terrapkg.com/usage/installing/) to
+install the repositories if necessary. Then, run the appropriate command:
+
 ```bash
-sudo pacman -S directx-shader-compiler
+# DNF-based distributions (Fedora, Nobara)
+sudo dnf install DirectXShaderCompiler
 ```
 
-**Fedora:**
 ```bash
-sudo dnf install directx-shader-compiler
+# OSTree-based distributions (Bazzite, Silverblue, Kinoite)
+sudo rpm-ostree install DirectXShaderCompiler
 ```
+
+**Other / Manual installation:**
+
+- [Download the latest linux_dxc build](https://github.com/microsoft/DirectXShaderCompiler/releases/latest)
+  from the releases page
+- Extract the contents somewhere and add the `bin/` folder to your `$PATH`
 
 **2. Clear the shader cache**
 
