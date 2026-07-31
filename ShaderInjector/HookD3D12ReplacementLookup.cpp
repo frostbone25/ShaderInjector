@@ -300,6 +300,11 @@ namespace HookD3D12
 		return outHash != 0;
 	}
 
+	bool SupportsCachedBlobContentMatching(SIZE_T cachedBlobSize)
+	{
+		return cachedBlobSize >= minimumContentMatchSize;
+	}
+
 	bool ReplacementHasCachedBlobHash(const ShaderTarget::ShaderTargetDisk& replacement, uint64_t cachedBlobHash)
 	{
 		if (!cachedBlobHash)

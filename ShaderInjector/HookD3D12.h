@@ -217,7 +217,7 @@ namespace HookD3D12
 
 	int FindEnabledShaderTarget(uint64_t shaderHash, ShaderTarget::ShaderType shaderType);
 	void MarkShaderTargetApplyDirty();
-	void NotifyPipelineActivity();
+	void QueueShaderTargetApplyWork();
 	void InvalidateAllReplacementPSOs();
 	void ResetUncapturedReplacementAttempts();
 	void ClearShaderMarkers();

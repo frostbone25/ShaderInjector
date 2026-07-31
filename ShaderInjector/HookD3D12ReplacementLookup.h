@@ -12,6 +12,7 @@
 namespace HookD3D12
 {
 	bool GetPipelineCachedBlobInfo(ID3D12PipelineState* pipelineState, uint64_t& outHash, SIZE_T& outSize, std::vector<uint8_t>* outBytes = nullptr);
+	bool SupportsCachedBlobContentMatching(SIZE_T cachedBlobSize);
 	void ResetCachedBlobContentLookup();
 	bool ReplacementHasCachedBlobHash(const ShaderTarget::ShaderTargetDisk& replacement, uint64_t cachedBlobHash);
 	int FindEnabledShaderTargetByCachedBlob(uint64_t cachedBlobHash);

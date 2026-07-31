@@ -18,8 +18,6 @@ namespace HookD3D12
 		if (!pipelineDescription || !pipelineState)
 			return;
 
-		NotifyPipelineActivity();
-
 		GraphicsPipelineInfo capturedPipeline{};
 		capturedPipeline.pipelineState = pipelineState;
 
@@ -115,7 +113,7 @@ namespace HookD3D12
 			std::lock_guard<std::mutex> lock(gPipelineMutex);
 			RegisterKnownPipelineStateLocked(pipelineState);
 			gGraphicsPipelines.push_back(capturedPipeline);
-			MarkShaderTargetApplyDirty();
+			QueueShaderTargetApplyWork();
 		}
 
 		ShaderAutomaticDiscovery::ProcessCapturedGraphicsPipeline(capturedPipeline);
@@ -125,8 +123,6 @@ namespace HookD3D12
 	{
 		if (!pipelineDescription || !pipelineState)
 			return;
-
-		NotifyPipelineActivity();
 
 		ComputePipelineInfo capturedPipeline{};
 		capturedPipeline.pipelineState = pipelineState;

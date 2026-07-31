@@ -846,7 +846,7 @@ namespace ShaderAutomaticDiscovery
 				return false;
 			}
 
-			HookD3D12::MarkShaderTargetApplyDirty();
+			HookD3D12::QueueShaderTargetApplyWork();
 			MarkShaderTargetCreated(modifiedShaderId);
 			ShaderInjectorGUI::WriteToRuntimeLogSuccess(
 				"ShaderAutomaticDiscovery: created ShaderTarget for " + Hash::FormatHash(queued.key.hash) +
@@ -887,7 +887,7 @@ namespace ShaderAutomaticDiscovery
 						return;
 				}
 
-				HookD3D12::MarkShaderTargetApplyDirty();
+				HookD3D12::QueueShaderTargetApplyWork();
 				return;
 			}
 

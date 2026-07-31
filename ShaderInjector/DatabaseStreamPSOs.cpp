@@ -17,8 +17,6 @@ namespace HookD3D12
 		if (!pipelineStreamDescription || !pipelineStreamDescription->pPipelineStateSubobjectStream || pipelineStreamDescription->SizeInBytes == 0 || !pipelineState)
 			return;
 
-		NotifyPipelineActivity();
-
 		PipelineStateInfo capturedPipeline{};
 		capturedPipeline.pipelineState = pipelineState;
 
@@ -38,7 +36,7 @@ namespace HookD3D12
 			RegisterKnownPipelineStateLocked(pipelineState);
 			gPipelineStates.push_back(capturedPipeline);
 			RebindPipelineStateInfoPointerFields(gPipelineStates.back());
-			MarkShaderTargetApplyDirty();
+			QueueShaderTargetApplyWork();
 		}
 
 		ShaderAutomaticDiscovery::ProcessCapturedStreamPipeline(capturedPipeline);

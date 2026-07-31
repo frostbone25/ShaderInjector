@@ -242,7 +242,7 @@ namespace HookD3D12
 				}
 			}
 
-			MarkShaderTargetApplyDirty();
+			QueueShaderTargetApplyWork();
 			return true;
 		}
 	}
