@@ -150,6 +150,7 @@ namespace HookD3D12
 		SIZE_T cachedBlobSize = 0;
 		std::vector<uint8_t> cachedBlob;
 		bool attemptedReplacement = false;
+		bool retryReplacementOnRootSignatureChange = false;
 		ID3D12PipelineState* replacementPipelineState = nullptr;
 		ID3D12RootSignature* observedGraphicsRootSignature = nullptr;
 		ID3D12RootSignature* observedComputeRootSignature = nullptr;

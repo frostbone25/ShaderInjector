@@ -195,7 +195,10 @@ namespace HookD3D12
 	void ResetUncapturedReplacementAttempts()
 	{
 		for (auto& uncaptured : gUncapturedPipelineStates)
+		{
 			uncaptured.attemptedReplacement = false;
+			uncaptured.retryReplacementOnRootSignatureChange = false;
+		}
 
 		// Shader-target refreshes can change every match. Restart all cursors so existing
 		// captured and uncaptured pipelines are reconsidered incrementally.
@@ -344,6 +347,7 @@ namespace HookD3D12
 			uncaptured.activeShaderTargetType = ShaderTarget::Unknown;
 			uncaptured.activeShaderTargetHash = 0;
 			uncaptured.attemptedReplacement = false;
+			uncaptured.retryReplacementOnRootSignatureChange = false;
 		}
 
 		gPipelineStateOverrides.clear();
@@ -429,6 +433,21 @@ namespace HookD3D12
 		if (uncaptured.replacementPipelineState)
 			return;
 
+		// Reset clears the command-list root state, but nullptr is not a newly
+		// observed root-signature candidate for rebuilding a persisted PSO.
+		if (!rootSignature)
+			return;
+
+		// A cached PSO that did not match any shader target cannot become a match
+		// merely because its command-list root signature changed. Leaving those
+		// attempts settled prevents frequently bound PSOs from starving the
+		// incremental uncaptured-PSO apply cursor.
+		if (uncaptured.attemptedReplacement &&
+			!uncaptured.retryReplacementOnRootSignatureChange)
+		{
+			return;
+		}
+
 		ID3D12RootSignature*& observedRootSignature =
 			computeRootSignature
 			? uncaptured.observedComputeRootSignature
@@ -437,7 +456,9 @@ namespace HookD3D12
 		if (observedRootSignature == rootSignature)
 			return;
 
-		const bool retryingFailedReplacement = uncaptured.attemptedReplacement;
+		const bool retryingFailedReplacement =
+			uncaptured.attemptedReplacement &&
+			uncaptured.retryReplacementOnRootSignatureChange;
 
 		if (rootSignature)
 			rootSignature->AddRef();
@@ -446,19 +467,21 @@ namespace HookD3D12
 			observedRootSignature->Release();
 
 		observedRootSignature = rootSignature;
+
+		if (!retryingFailedReplacement)
+			return;
+
 		uncaptured.attemptedReplacement = false;
+		uncaptured.retryReplacementOnRootSignatureChange = false;
 		gUncapturedShaderTargetApplyCursor =
 			(std::min)(gUncapturedShaderTargetApplyCursor, uncapturedIndex);
 		MarkShaderTargetApplyDirty();
 
-		if (retryingFailedReplacement && rootSignature)
-		{
-			ShaderInjectorGUI::WriteToRuntimeLog(
-				std::string("HookD3D12->UpdateUncapturedPipelineRootSignatureLocked: Retrying uncaptured PSO after observing a new ") +
-				(computeRootSignature ? "compute" : "graphics") +
-				" root signature: pso=" + StringHelper::PointerToString(pipelineState) +
-				" root=" + StringHelper::PointerToString(rootSignature));
-		}
+		ShaderInjectorGUI::WriteToRuntimeLog(
+			std::string("HookD3D12->UpdateUncapturedPipelineRootSignatureLocked: Retrying matched uncaptured PSO after observing a new ") +
+			(computeRootSignature ? "compute" : "graphics") +
+			" root signature: pso=" + StringHelper::PointerToString(pipelineState) +
+			" root=" + StringHelper::PointerToString(rootSignature));
 	}
 
 	static void UpdateCurrentUncapturedPipelineRootSignatureLocked(
@@ -1556,6 +1579,8 @@ namespace HookD3D12
 		if (!uncaptured.pipelineState || !uncaptured.cachedBlobHash)
 			return false;
 
+		uncaptured.retryReplacementOnRootSignatureChange = false;
+
 		int replacementIndex = FindEnabledShaderTargetByCachedBlob(uncaptured.cachedBlobHash);
 		const char* matchMethod = "cached blob hash";
 
@@ -1584,6 +1609,15 @@ namespace HookD3D12
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
 		const uint64_t shaderHash = Hash::ParseHashText(replacement.originalShaderBytecodeHash);
+		const bool hasPersistedStreamTemplate =
+			!replacement.pipelineStreamBlobPath.empty() ||
+			std::any_of(
+				replacement.pipelineTemplates.begin(),
+				replacement.pipelineTemplates.end(),
+				[](const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate)
+				{
+					return !pipelineTemplate.pipelineStreamBlobPath.empty();
+				});
 
 		if (!shaderHash || replacement.shaderType == ShaderTarget::Unknown)
 		{
@@ -1665,6 +1699,7 @@ namespace HookD3D12
 			}
 		}
 		uncaptured.attemptedReplacement = true;
+		uncaptured.retryReplacementOnRootSignatureChange = hasPersistedStreamTemplate;
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->TryApplyUncapturedReplacement: Uncaptured PSO matched replacement cached blob, but no rebuild template is currently available: " + replacement.name);
 		return false;
 	}
