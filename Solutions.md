@@ -86,40 +86,69 @@ I would suggest doing this if you spot artifacts that you may not like brought o
 
 #### Linux Support
 
-*(Courtesy of [smackedwookiee](url=https://www.youtube.com/@SmackedWookiee))*
+*(Courtesy of [smackedwookiee](https://www.youtube.com/@SmackedWookiee))*
 
 **1. Install directx-shader-compiler**
 
-***For Ubuntu:***
-```sudo apt update```
-```sudo apt install directx-shader-compiler```
+**Ubuntu:**
+```bash
+sudo apt update
+sudo apt install directx-shader-compiler
+```
 
-***For Arch-based distros:***
-```sudo pacman -S directx-shader-compiler```
+**Arch:**
+```bash
+sudo pacman -S directx-shader-compiler
+```
 
-***For Fedora***
-```sudo dnf install directx-shader-compiler```
+**Fedora:**
+```bash
+sudo dnf install directx-shader-compiler
+```
 
 **2. Clear the shader cache**
 
-***For Steam Users:***
-Click on the Settings gear
-```Manage > Browse Local Files```
-Go up two levels to steamapps
-Navigate to the following path: ```/compatdata/2909400/pfx/drive_c/users/steamuser/My Documents/My Games/FINAL FANTASY VII REBIRTH/Saved/```
-Delete the ```.ushaderprecache``` files
+**Steam:**
+- Click on the Settings gear
+- Click *Manage → Browse Local Files*
+- Go up two levels to steamapps
+- Navigate to the following path: 
+`compatdata/2909400/pfx/drive_c/users/steamuser/My Documents/My Games/FINAL FANTASY VII REBIRTH/Saved/`
+- Delete the `*.ushaderprecache` files
 
--***For HGL Users (not tested)***
-Click on the game to open the game profile
-Click on the path next to WinePrefix folder
-Navigate to the following path: ```/drive_c/users/%linuxusername%/My Documents/My Games/FINAL FANTASY VII REBRITH/Saved/```
-Delete the ```.ushaderprecache``` files
+**Heroic Games Launcher:**
 
-**3. Add the following launch options for Steam: ```WINEDLLOVERRIDES="dsound=n,b" %command%```**
-or for HGL users (not tested)
-Add the following Variable name to the game settings page:
-Variable name: WINEDLLOVERRIDES
-Value: dsound=n,b
+- Click on the game to open the game profile
+- Mouse over the vertical three dots in the upper-right to view the menu
+- Click 🍷 *Browse Wine Prefix*
+- Navigate to the following path: `drive_c/users/$USER/My Documents/My 
+Games/FINAL FANTASY VII REBRITH/Saved/`
+- Delete the `*.ushaderprecache` files
+
+**3. Add environment variable**
+
+Add the environment variable `WINEDLLOVERRIDES=dsound.dll=n,b` to your 
+game's launch configuration. This instructs Proton to load the version of 
+dsound.dll provided by ShaderInjector, rather than its own internal version.
+
+**Steam:**
+- Click on the Settings gear
+- Click *Properties*, navigate to *General → Launch Options*
+- In the editable text box, enter the following:
+```
+WINEDLLOVERRIDES=dsound.dll=n,b %command%
+```
+
+**Heroic Games Launcher:**
+
+Open the settings for the game and navigate to *Advanced → Environment 
+Variables*. Add the following item:
+
+| Variable Name    | Value          |
+|------------------|----------------|
+| WINEDLLOVERRIDES | dsound.dll=n,b |
+
+Don't forget to click the ➕ button to save your change to the table.
 
 ---
 
