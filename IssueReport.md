@@ -27,3 +27,5 @@ First off how did you install the shader injector? Did you follow the installati
 There are too many unknowns with that inital statement which is a problem. Good issue reports provide very descriptive details about the actions you took, screenshots, and even better if you provide the log files generated in ```ShaderInjector/Logs/ShaderInjector.log```. Details also about your system specs, and game version, operating system, and any mods that are installed are important.
 
 **The more information I have to work with about your issue, the better chances the issue can get resolved.** If you don't provide enough information, then you will be ignored.
+
+**[Make issue reports here on Github, as Github will allow you to attach the necessary files and any other necessary information *(i.e. screenshots)*.](https://github.com/frostbone25/ShaderInjector/issues)**
