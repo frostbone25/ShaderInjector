@@ -124,6 +124,6 @@ Replacement Shaders should persist continously now even if you downgrade your ga
 
 ![step4-done](GithubContent/Install/step4-done.jpg)
 
-I would also like to point out that depending on where you are in the game, not all of the shaders will be loaded or have shader targets created for them at-least during setup *(unless you go to a spot in the game that can collect all of those variants)*. In those situations when you go to a specific area and there is a modified shader that doesn't have a shader target generated for it, it will create one which might introduce a large frame spike/stutter when that happens. However once that passes it should not happen again as the shader target is now created and on subsequent playthroughs the shaders will re-use the data from the shader target easily.
+**I would also like to point out that depending on where you are in the game, not all of the shaders will be loaded or have shader targets created for them at-least during setup** *(unless you go to a spot in the game that can collect all of those variants)*. In those situations when you go to a specific area and there is a modified shader that doesn't have a shader target generated for it, it will create one which might introduce a large frame spike/stutter when that happens. However once that passes it should not happen again as the shader target is now created and on subsequent playthroughs the shaders will re-use the data from the shader target easily.
 
 You shouldn't need to touch the injector again and you can play with everything setup!
