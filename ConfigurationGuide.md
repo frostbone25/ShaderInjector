@@ -13,6 +13,7 @@ Starting with 2.2.0, while most of this guide is still applicable, there is now 
     - [Bloom](#bloom)
 - [Other Configuration Notes](#other-configuration-notes)
     - [Image Adjustments](#image-adjustments)
+    - [Noise Reduction](#noise-reduction)
 
 *NOTE: This was written at the release of 2.0, with newer updates this might become more out of date but the general principles are the same.*
 
@@ -69,14 +70,7 @@ You should see immediate visual changes after compilation completes, with more v
 
 If you do not be sure to check for compilation errors in the runtime logs at the bottom of the ShaderInjector window. If there are that means you have created an error due to improper syntax by not following instructions or you accidentally added/removed a character that the compiler can't resolve. So undo your changes until the shader can compile again, by default all shaders can compile successfully.
 
-#### SSGI / AO Quality Notes
-
-Currently as of 2.0 **```SSGI_BOUNCE_LIGHT``` can be quite noisy.** I plan to improve upon this in the future by introducing dedicated draw passes to filter and downsample the effects for performance/image quality but your kind of limited in terms of how to deal with the noise at the moment. With that said there are some things you can try...
-
-- **Increase ```SSGI_RAY_COUNT```:** This has a direct impact to the quality of the noise *(more samples become more expensive quickly)*
-- **Increase ```SSGI_RAYMARCHING_STEP_COUNT```:** This will improve the quality of the raymarch and reduce noise somewhat but of course at a big cost.
-- **Increase Rendering Resolution:** This will make the impact of the SSGI signifcantly higher because it scales with screen resolution, but more pixels means the noise becomes smaller and the final result appears cleaner.
-- **Update Game's DLSS Preset:** I have noticed while testing on multiple game versions that 1.0.0.5 seems to have an updated DLSS variant that actually led to reduced noise when SSGI was enabled. I would experiment with this as a potential avenue for improving the noise situation. **Presets L and K** reportedly have had the best results for resolving the noise much more cleanly.
+*NOTE: Some of these effects are known to be noisy. This will be improved in future updates as currently I cannot introduce dedicated filtering passes, [but here is the section that you can follow to reduce the noise contribution from those effects.](#noise-reduction)*
 
 ### Auto Exposure
 
@@ -281,3 +275,100 @@ Save changes to the file and tab or open the game back up, and click ```Recompil
 You should see immediate visual changes after compilation completes. 
 
 If you do not be sure to check for compilation errors in the runtime logs at the bottom of the ShaderInjector window. If there are that means you have created an error due to improper syntax by not following instructions or you accidentally added/removed a character that the compiler can't resolve. So undo your changes until the shader can compile again, by default all shaders can compile successfully.
+
+### Noise Reduction
+
+Currently as of 2.0 there are some effects especially with the "maximum quality preset" that are enabled by default that in their current state are quite noisy unfortunately. The reason for this is due to limitations of the injector at the moment, and it's not possible to introduce new draw passes yet where these effects can be properly filtered/optimized. The only "denoising" that is happening is from the game's TAA/DLSS effects that are done later which actually work quite well to reduce the noise, but of course it's not enough. In the meantime there are solutions you can try to reduce the noise in the image but I will show in order of most to least what effects are currently contributing to this look that you can tweak.
+
+#### SSGI_BOUNCE_LIGHT
+
+This is the primary suspect that can introduce noise into the image.
+
+```
+~FINAL FANTASY VII REBIRTH\End\Binaries\Win64\ShaderInjector\ModifiedShaders\Includes\ComputeShaderPass_ReflectionEnvironment.hlsl
+```
+
+Open this file in a text/code editor and you'll find the following fields...
+
+```GLSL
+#define SSGI_BOUNCE_LIGHT
+```
+
+Most of the noise at the moment will come from the SSGI_BOUNCE_LIGHT effect which tries to calculate localized bounce light from direct lights and emissive materials. For the most part this looks ok but it can rear it's ugly head in low lighting situations. Here's what you can do to reduce the noise...
+
+- **Increase ```SSGI_RAY_COUNT```:** This has a direct impact to the quality of the noise *(more samples become more expensive quickly)*
+- **Increase ```SSGI_RAYMARCHING_STEP_COUNT```:** This will improve the quality of the raymarch and reduce noise somewhat but of course at a big cost.
+- **Increase Rendering Resolution:** This will make the impact of the SSGI signifcantly higher because it scales with screen resolution, but more pixels means the noise becomes smaller and the final result appears cleaner.
+- **Update Game's DLSS Preset:** I have noticed while testing on multiple game versions that 1.0.0.5 seems to have an updated DLSS variant that actually led to reduced noise when SSGI was enabled. I would experiment with this as a potential avenue for improving the noise situation. **Presets L and K** reportedly have had the best results for resolving the noise much more cleanly.
+- If none of the above satisfy you enough, you can just simply disable the effect.
+
+#### SSR_ENABLE_ROUGHNESS
+
+This is the second suspect that can introduce noise into the image. 
+
+```
+~FINAL FANTASY VII REBIRTH\End\Binaries\Win64\ShaderInjector\ModifiedShaders\Includes\PixelShaderPass_SSR.hlsl
+```
+
+The SSR received some upgrades that made it higher quality and more physically based. It respect material roughness, and since the fallback cubemap reflections in the game are very inaccurate/sparse/low quality, I elected to also increase the coverage of the SSR. This is because SSR currently is the only effect currently that provides the most accurate/best quality reflection data whenever it's available. The downside with the upgrades done is that it can introduce noise into the image, so here's how you can reduce it.
+
+- **Increase ```SSR_RAY_COUNT```:** This has a direct impact to the quality of the SSR and the reduction of noise. Higher values mean better quality but it can obviously become very expensive.
+- **Increase Rendering Resolution:** This will make the impact of the SSR a little bit more expensive since it scales with screen resolution, but more pixels means the noise becomes smaller and the final result appears cleaner.
+- **Update Game's DLSS Preset:** I have noticed while testing on multiple game versions that 1.0.0.5 seems to have an updated DLSS variant that actually led to reduced noise overall. I would experiment with this as a potential avenue for improving the noise situation. **Presets L and K** reportedly have had the best results for resolving the noise much more cleanly.
+- If none of the above satisfy you enough, I will show you how you can revert the SSR to match the original game behavior which was *(mostly)* noiseless.
+
+To revert the upgrades to SSR and return to original game behavior, within this shader...
+
+```
+~FINAL FANTASY VII REBIRTH\End\Binaries\Win64\ShaderInjector\ModifiedShaders\Includes\PixelShaderPass_SSR.hlsl
+```
+
+Disable the following...
+
+```GLSL
+//enabled
+#define SSR_ENABLE_ROUGHNESS
+
+//disabled
+//#define SSR_ENABLE_ROUGHNESS
+```
+
+Then within this shader...
+
+```
+~FINAL FANTASY VII REBIRTH\End\Binaries\Win64\ShaderInjector\ModifiedShaders\Includes\ComputeShaderPass_ReflectionEnvironment.hlsl
+```
+
+You will find the following property...
+
+```GLSL
+//default
+#define SSR_CONTRIBUTION_MULTIPLIER 100000.0
+
+//original game
+#define SSR_CONTRIBUTION_MULTIPLIER 1.0
+```
+
+Change the contribution value to 1.0 which is game defaults.
+
+Those two changes will effectively revert the SSR into game defaults. This will mean that you will unfortunately lose out on the improved quality reflections but you will have far less noise from reflections.
+
+#### SSGI_AMBIENT_OCCLUSION
+
+This is the last suspect that can introduce noise into the image.
+
+```
+~FINAL FANTASY VII REBIRTH\End\Binaries\Win64\ShaderInjector\ModifiedShaders\Includes\ComputeShaderPass_ReflectionEnvironment.hlsl
+```
+
+This is coming from the SSGI effect itself which has an ambient occlusion component. It's a much higher quality and more accurate ambient occlusion than the original game, and for the most part in my opinion this is still surprisingly clean and the noise is much less visible, but it's not entirely immune to it. It shares many of the infrastructure and parameters as the ```SSGI_BOUNCE_LIGHT``` so much of those still apply.
+
+```GLSL
+#define SSGI_AMBIENT_OCCLUSION
+```
+
+- **Increase ```SSGI_RAY_COUNT```:** This has a direct impact to the quality of the noise *(more samples become more expensive quickly)*
+- **Increase ```SSGI_RAYMARCHING_STEP_COUNT```:** This will improve the quality of the raymarch and reduce noise somewhat but of course at a big cost.
+- **Increase Rendering Resolution:** This will make the impact of the SSGI signifcantly higher because it scales with screen resolution, but more pixels means the noise becomes smaller and the final result appears cleaner.
+- **Update Game's DLSS Preset:** I have noticed while testing on multiple game versions that 1.0.0.5 seems to have an updated DLSS variant that actually led to reduced noise when SSGI was enabled. I would experiment with this as a potential avenue for improving the noise situation. **Presets L and K** reportedly have had the best results for resolving the noise much more cleanly.
+- If none of the above satisfy you enough, you can just simply disable the effect.
