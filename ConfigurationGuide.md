@@ -353,6 +353,8 @@ Change the contribution value to 1.0 which is game defaults.
 
 Those two changes will effectively revert the SSR into game defaults. This will mean that you will unfortunately lose out on the improved quality reflections but you will have far less noise from reflections.
 
+*NOTE: In the future my plans are to replace the current stohastic screen space reflections with [screen space cone traced reflections](https://www.tobias-franke.eu/publications/hermanns14ssct/hermanns14ssct_poster.pdf). This will lead to dramatically reduced reflection noise, and overall improved quality/stability at the cost of BRDF accuracy, but it's good enough.*
+
 #### SSGI_AMBIENT_OCCLUSION
 
 This is the last suspect that can introduce noise into the image.
