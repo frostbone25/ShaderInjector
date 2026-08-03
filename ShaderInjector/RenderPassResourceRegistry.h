@@ -41,7 +41,8 @@ namespace RenderPassResourceRegistry
 	void RegisterShaderResourceView(
 		ID3D12Resource* resource,
 		const D3D12_SHADER_RESOURCE_VIEW_DESC* description,
-		D3D12_CPU_DESCRIPTOR_HANDLE destination);
+		D3D12_CPU_DESCRIPTOR_HANDLE destination,
+		bool trackAllShaderResourceViews);
 	void RegisterUnorderedAccessView(
 		ID3D12Resource* resource,
 		ID3D12Resource* counterResource,

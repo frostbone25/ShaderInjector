@@ -31,6 +31,53 @@ namespace RenderPassExecutor
 			UINT sampleQuality = 0;
 		};
 
+		struct ThreadPipelineLookup
+		{
+			const RenderPass::RenderPassDisk* renderPass = nullptr;
+			ID3D12RootSignature* rootSignature = nullptr;
+			RenderTargetState renderTargets;
+			ID3D12PipelineState* pipelineState = nullptr;
+		};
+
+		thread_local ThreadPipelineLookup gThreadPipelineLookup;
+		thread_local const RenderPass::RenderPassDisk* gEventNameRenderPass = nullptr;
+		thread_local std::wstring gEventName;
+
+		bool RenderTargetStatesEqual(const RenderTargetState& left, const RenderTargetState& right)
+		{
+			if (left.count != right.count || left.sampleCount != right.sampleCount ||
+				left.sampleQuality != right.sampleQuality)
+			{
+				return false;
+			}
+
+			for (UINT renderTargetIndex = 0; renderTargetIndex < left.count; ++renderTargetIndex)
+			{
+				if (left.formats[renderTargetIndex] != right.formats[renderTargetIndex])
+					return false;
+			}
+			return true;
+		}
+
+		void CacheThreadPipelineLookup(
+			const RenderPass::RenderPassDisk& renderPass,
+			ID3D12RootSignature* rootSignature,
+			const RenderTargetState& renderTargets,
+			ID3D12PipelineState* pipelineState)
+		{
+			gThreadPipelineLookup = { &renderPass, rootSignature, renderTargets, pipelineState };
+		}
+
+		const std::wstring& GetRenderPassEventName(const RenderPass::RenderPassDisk& renderPass)
+		{
+			if (gEventNameRenderPass != &renderPass)
+			{
+				gEventNameRenderPass = &renderPass;
+				gEventName = StringHelper::Utf8ToWide("Shader Injector Render Pass: " + renderPass.name);
+			}
+			return gEventName;
+		}
+
 		bool BuildRenderTargetState(
 			const std::vector<RenderPass::ResourceBindingDiagnostic>& outputBindings,
 			RenderTargetState& outState)
@@ -118,11 +165,22 @@ namespace RenderPassExecutor
 			const RenderTargetState& renderTargets,
 			std::string& outError)
 		{
+			if (gThreadPipelineLookup.renderPass == &renderPass &&
+				gThreadPipelineLookup.rootSignature == rootSignature &&
+				gThreadPipelineLookup.pipelineState &&
+				RenderTargetStatesEqual(gThreadPipelineLookup.renderTargets, renderTargets))
+			{
+				return gThreadPipelineLookup.pipelineState;
+			}
+
 			const std::string cacheKey = BuildPipelineCacheKey(renderPass, rootSignature, renderTargets);
 			std::lock_guard<std::mutex> cacheLock(gPipelineCacheMutex);
 			const auto cachedPipelineIt = gPipelineCache.find(cacheKey);
 			if (cachedPipelineIt != gPipelineCache.end())
+			{
+				CacheThreadPipelineLookup(renderPass, rootSignature, renderTargets, cachedPipelineIt->second);
 				return cachedPipelineIt->second;
+			}
 			const auto cachedErrorIt = gPipelineCreationErrors.find(cacheKey);
 			if (cachedErrorIt != gPipelineCreationErrors.end())
 			{
@@ -179,6 +237,7 @@ namespace RenderPassExecutor
 				"Shader Injector Render Pass: " + renderPass.name);
 			pipelineState->SetName(pipelineName.c_str());
 			gPipelineCache.emplace(cacheKey, pipelineState);
+			CacheThreadPipelineLookup(renderPass, rootSignature, renderTargets, pipelineState);
 			ShaderInjectorIO::WriteToLogFile(
 				"RenderPassExecutor->GetOrCreatePipelineState: created fullscreen pipeline for " + renderPass.name);
 			return pipelineState;
@@ -234,8 +293,7 @@ namespace RenderPassExecutor
 		if (!fullscreenPipelineState)
 			return false;
 
-		const std::wstring eventName = StringHelper::Utf8ToWide(
-			"Shader Injector Render Pass: " + renderPass.name);
+		const std::wstring& eventName = GetRenderPassEventName(renderPass);
 		const bool renderDocCaptureActive =
 			Globals::gRenderDocIntegrationEnabled && RenderDocIntegration::IsFrameCapturing();
 		const uint64_t captureRequestSequence = RenderDocIntegration::GetCaptureRequestSequence();
@@ -294,5 +352,8 @@ namespace RenderPassExecutor
 		}
 		gPipelineCache.clear();
 		gPipelineCreationErrors.clear();
+		gThreadPipelineLookup = {};
+		gEventNameRenderPass = nullptr;
+		gEventName.clear();
 	}
 }

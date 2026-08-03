@@ -1,6 +1,7 @@
 #include "DatabaseRenderPasses.h"
 
 #include <algorithm>
+#include <unordered_set>
 #include <utility>
 
 #include "DatabaseModifiedShaders.h"
@@ -229,6 +230,112 @@ namespace DatabaseRenderPasses
 		return FindRenderPassById(renderPassId);
 	}
 
+	std::string ResolveModifiedShaderId(const RenderPass::RenderPassDisk& renderPass)
+	{
+		EnsureRenderPassesLoaded();
+		const RenderPass::RenderPassDisk* currentRenderPass = &renderPass;
+		std::unordered_set<std::string> visitedRenderPassIds;
+		while (currentRenderPass)
+		{
+			if (!visitedRenderPassIds.insert(currentRenderPass->id).second)
+				return {};
+
+			if (currentRenderPass->event.type == RenderPass::EventType::ModifiedShader)
+				return currentRenderPass->event.id;
+
+			if (currentRenderPass->event.id.empty())
+				return {};
+			currentRenderPass = FindRenderPassByIdReadOnly(currentRenderPass->event.id);
+		}
+
+		return {};
+	}
+
+	std::string ResolveRootTiming(const RenderPass::RenderPassDisk& renderPass)
+	{
+		EnsureRenderPassesLoaded();
+		const RenderPass::RenderPassDisk* currentRenderPass = &renderPass;
+		std::unordered_set<std::string> visitedRenderPassIds;
+		while (currentRenderPass)
+		{
+			if (!visitedRenderPassIds.insert(currentRenderPass->id).second)
+				return {};
+			if (currentRenderPass->event.type == RenderPass::EventType::ModifiedShader)
+			{
+				return currentRenderPass->type == RenderPass::RenderPassType::MipChain
+					? RenderPass::timingBefore
+					: currentRenderPass->timing;
+			}
+			if (currentRenderPass->event.id.empty())
+				return {};
+			currentRenderPass = FindRenderPassByIdReadOnly(currentRenderPass->event.id);
+		}
+		return {};
+	}
+
+	const ModifiedShader::PackageDisk* ResolveModifiedShader(const RenderPass::RenderPassDisk& renderPass)
+	{
+		const std::string modifiedShaderId = ResolveModifiedShaderId(renderPass);
+		return modifiedShaderId.empty()
+			? nullptr
+			: DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
+	}
+
+	bool IsEventChainActive(const RenderPass::RenderPassDisk& renderPass)
+	{
+		EnsureRenderPassesLoaded();
+		const bool mipChainPass = renderPass.type == RenderPass::RenderPassType::MipChain;
+		const RenderPass::RenderPassDisk* currentRenderPass = &renderPass;
+		std::unordered_set<std::string> visitedRenderPassIds;
+		while (currentRenderPass)
+		{
+			if (!currentRenderPass->enabled ||
+				!visitedRenderPassIds.insert(currentRenderPass->id).second ||
+				currentRenderPass->event.id.empty())
+			{
+				return false;
+			}
+
+			if (currentRenderPass->event.type == RenderPass::EventType::ModifiedShader)
+			{
+				const bool rootExecutesAfter = currentRenderPass->type != RenderPass::RenderPassType::MipChain &&
+					currentRenderPass->timing == RenderPass::timingAfter;
+				return (!mipChainPass || !rootExecutesAfter) &&
+					DatabaseModifiedShaders::FindModifiedShaderById(currentRenderPass->event.id) != nullptr;
+			}
+			currentRenderPass = FindRenderPassByIdReadOnly(currentRenderPass->event.id);
+		}
+
+		return false;
+	}
+
+	bool CanReferenceRenderPass(const std::string& renderPassId, const std::string& eventRenderPassId)
+	{
+		EnsureRenderPassesLoaded();
+		if (renderPassId.empty() || eventRenderPassId.empty() || renderPassId == eventRenderPassId)
+			return false;
+
+		const RenderPass::RenderPassDisk* currentRenderPass = FindRenderPassByIdReadOnly(eventRenderPassId);
+		std::unordered_set<std::string> visitedRenderPassIds;
+		while (currentRenderPass)
+		{
+			if (currentRenderPass->id == renderPassId ||
+				!visitedRenderPassIds.insert(currentRenderPass->id).second)
+			{
+				return false;
+			}
+
+			if (currentRenderPass->event.type != RenderPass::EventType::RenderPass ||
+				currentRenderPass->event.id.empty())
+			{
+				return true;
+			}
+			currentRenderPass = FindRenderPassByIdReadOnly(currentRenderPass->event.id);
+		}
+
+		return true;
+	}
+
 	bool CreateRenderPass(std::string& outRenderPassId)
 	{
 		EnsureRenderPassesLoaded();
@@ -267,6 +374,17 @@ namespace DatabaseRenderPasses
 		RenderPass::RenderPassDisk* renderPass = FindRenderPassById(renderPassId);
 		if (!renderPass || renderPass->name.empty() || !RenderPass::IsTimingValid(renderPass->timing))
 			return false;
+		if (renderPass->event.type == RenderPass::EventType::RenderPass &&
+			!renderPass->event.id.empty() &&
+			!CanReferenceRenderPass(renderPass->id, renderPass->event.id))
+		{
+			return false;
+		}
+		if (renderPass->type == RenderPass::RenderPassType::MipChain &&
+			ResolveRootTiming(*renderPass) == RenderPass::timingAfter)
+		{
+			return false;
+		}
 
 		if (!MoveRenderPassPackageToCurrentName(*renderPass))
 			return false;
@@ -316,11 +434,10 @@ namespace DatabaseRenderPasses
 			return false;
 		}
 
-		const ModifiedShader::PackageDisk* modifiedShader =
-			DatabaseModifiedShaders::FindModifiedShaderById(renderPass->modifiedShaderId);
+		const ModifiedShader::PackageDisk* modifiedShader = ResolveModifiedShader(*renderPass);
 		if (!modifiedShader)
 		{
-			outError = "Select an available Modified Shader first.";
+			outError = "Select an event that resolves to an available Modified Shader first.";
 			return false;
 		}
 

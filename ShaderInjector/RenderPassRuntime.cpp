@@ -1,6 +1,7 @@
 #include "RenderPassRuntime.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdio>
 #include <iterator>
@@ -32,9 +33,27 @@ namespace RenderPassRuntime
 
 		using ShaderTargetBindingMap = std::unordered_map<ID3D12PipelineState*, ShaderTargetBinding>;
 
+		struct ResolvedEventBinding
+		{
+			bool valid = false;
+			std::string modifiedShaderId;
+			ExecutionBoundary rootBoundary = ExecutionBoundary::Before;
+		};
+
+		struct ModifiedShaderExecutionPlan
+		{
+			std::array<std::vector<const RenderPass::RenderPassDisk*>, 2> executionOrders;
+			std::array<std::vector<const RenderPass::RenderPassDisk*>, 2> mipChainOrders;
+			uint32_t graphicsBoundaryMask = 0;
+			uint32_t computeBoundaryMask = 0;
+		};
+
 		struct RenderPassConfigurationSnapshot
 		{
 			std::vector<RenderPass::RenderPassDisk> renderPasses;
+			std::unordered_map<std::string, size_t> renderPassIndices;
+			std::vector<ResolvedEventBinding> resolvedEvents;
+			std::unordered_map<std::string, ModifiedShaderExecutionPlan> executionPlans;
 		};
 
 		struct DescriptorHeapState
@@ -47,15 +66,43 @@ namespace RenderPassRuntime
 			D3D12_GPU_DESCRIPTOR_HANDLE gpuStart{};
 		};
 
+		enum class RootBindingType : uint8_t
+		{
+			None,
+			DescriptorTable,
+			ConstantBufferView,
+			ShaderResourceView,
+			UnorderedAccessView,
+			Constants
+		};
+
+		struct RootBindingState
+		{
+			RootBindingType type = RootBindingType::None;
+			uint64_t value = 0;
+			std::vector<uint32_t> constants;
+		};
+
 		struct CommandListRenderState
 		{
+			CommandListRenderState()
+			{
+				descriptorHeaps.reserve(2);
+				graphicsRootBindings.reserve(24);
+				computeRootBindings.reserve(24);
+				outputBindings.reserve(D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT + 1);
+				viewports.reserve(D3D12_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE);
+				scissorRectangles.reserve(D3D12_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE);
+			}
+
 			ID3D12PipelineState* pipelineState = nullptr;
 			ID3D12PipelineState* boundPipelineState = nullptr;
 			ID3D12RootSignature* graphicsRootSignature = nullptr;
 			ID3D12RootSignature* computeRootSignature = nullptr;
 			D3D12_PRIMITIVE_TOPOLOGY primitiveTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
 			std::vector<DescriptorHeapState> descriptorHeaps;
-			std::unordered_map<uint64_t, RenderPass::ResourceBindingDiagnostic> rootBindings;
+			std::vector<RootBindingState> graphicsRootBindings;
+			std::vector<RootBindingState> computeRootBindings;
 			std::vector<RenderPass::ResourceBindingDiagnostic> inputBindings;
 			std::vector<RenderPass::ResourceBindingDiagnostic> outputBindings;
 			std::vector<D3D12_VIEWPORT> viewports;
@@ -76,6 +123,7 @@ namespace RenderPassRuntime
 		std::atomic<bool> gHasExecutableRenderPassBinding = false;
 		std::atomic<bool> gHasExecutableMipChainBinding = false;
 		std::atomic<bool> gResourceTrackingRequired = false;
+		std::atomic<uint32_t> gTrackingModeFlags = 0;
 		std::atomic<uint32_t> gGraphicsExecutionBoundaryMask = 0;
 		std::atomic<uint32_t> gComputeExecutionBoundaryMask = 0;
 		std::atomic<uint64_t> gExecutionTrackingGeneration = 1;
@@ -94,18 +142,124 @@ namespace RenderPassRuntime
 		std::unordered_map<std::string, RenderPass::RuntimeDiagnostics> gDiagnosticsByRenderPassId;
 		std::unordered_set<std::string> gPendingResourceSnapshotIds;
 
+		enum TrackingModeFlag : uint32_t
+		{
+			TrackingEnabled = 1u << 0,
+			ResourceTrackingEnabled = 1u << 1,
+			DescriptorRegistryTrackingEnabled = 1u << 2,
+			GraphicsStateTrackingEnabled = 1u << 3
+		};
+
+		void RefreshTrackingModeFlags()
+		{
+			const bool trackingEnabled =
+				gHasEnabledRenderPasses.load(std::memory_order_relaxed) &&
+				gHasExecutableRenderPassBinding.load(std::memory_order_relaxed);
+			const bool resourceTrackingEnabled = trackingEnabled &&
+				gResourceTrackingRequired.load(std::memory_order_relaxed);
+			const bool descriptorRegistryTrackingEnabled = resourceTrackingEnabled ||
+				(trackingEnabled && gHasExecutableMipChainBinding.load(std::memory_order_relaxed));
+
+			uint32_t flags = trackingEnabled ? TrackingEnabled : 0;
+			if (resourceTrackingEnabled)
+				flags |= ResourceTrackingEnabled;
+			if (descriptorRegistryTrackingEnabled)
+				flags |= DescriptorRegistryTrackingEnabled | GraphicsStateTrackingEnabled;
+			gTrackingModeFlags.store(flags, std::memory_order_release);
+		}
+
+		void BuildResolvedEventBindings(RenderPassConfigurationSnapshot& configuration)
+		{
+			configuration.renderPassIndices.clear();
+			configuration.resolvedEvents.assign(configuration.renderPasses.size(), {});
+			for (size_t renderPassIndex = 0; renderPassIndex < configuration.renderPasses.size(); ++renderPassIndex)
+				configuration.renderPassIndices[configuration.renderPasses[renderPassIndex].id] = renderPassIndex;
+
+			enum class ResolutionState : uint8_t
+			{
+				Unvisited,
+				Visiting,
+				Complete,
+			};
+			std::vector<ResolutionState> resolutionStates(
+				configuration.renderPasses.size(),
+				ResolutionState::Unvisited);
+
+			const auto resolveEvent = [&](const auto& resolveEventSelf, size_t renderPassIndex) -> ResolvedEventBinding
+			{
+				if (resolutionStates[renderPassIndex] == ResolutionState::Complete)
+					return configuration.resolvedEvents[renderPassIndex];
+				if (resolutionStates[renderPassIndex] == ResolutionState::Visiting)
+					return {};
+
+				resolutionStates[renderPassIndex] = ResolutionState::Visiting;
+				const RenderPass::RenderPassDisk& renderPass = configuration.renderPasses[renderPassIndex];
+				ResolvedEventBinding resolved{};
+				if (renderPass.enabled && !renderPass.event.id.empty())
+				{
+					if (renderPass.event.type == RenderPass::EventType::ModifiedShader)
+					{
+						resolved.valid = true;
+						resolved.modifiedShaderId = renderPass.event.id;
+						resolved.rootBoundary = renderPass.type == RenderPass::RenderPassType::MipChain ||
+							renderPass.timing != RenderPass::timingAfter
+							? ExecutionBoundary::Before
+							: ExecutionBoundary::After;
+					}
+					else
+					{
+						const auto parentIt = configuration.renderPassIndices.find(renderPass.event.id);
+						if (parentIt != configuration.renderPassIndices.end() && parentIt->second != renderPassIndex)
+							resolved = resolveEventSelf(resolveEventSelf, parentIt->second);
+					}
+				}
+
+				// A mip chain modifies descriptor bindings for the game draw that follows it.
+				// It cannot safely live on a graph rooted after that draw has already executed.
+				if (resolved.valid && renderPass.type == RenderPass::RenderPassType::MipChain &&
+					resolved.rootBoundary == ExecutionBoundary::After)
+				{
+					resolved = {};
+				}
+
+				configuration.resolvedEvents[renderPassIndex] = resolved;
+				resolutionStates[renderPassIndex] = ResolutionState::Complete;
+				return resolved;
+			};
+
+			for (size_t renderPassIndex = 0; renderPassIndex < configuration.renderPasses.size(); ++renderPassIndex)
+				resolveEvent(resolveEvent, renderPassIndex);
+		}
+
+		const ResolvedEventBinding* FindResolvedEventBinding(
+			const RenderPassConfigurationSnapshot& configuration,
+			const RenderPass::RenderPassDisk& renderPass)
+		{
+			const auto renderPassIt = configuration.renderPassIndices.find(renderPass.id);
+			if (renderPassIt == configuration.renderPassIndices.end() ||
+				renderPassIt->second >= configuration.resolvedEvents.size())
+			{
+				return nullptr;
+			}
+
+			const ResolvedEventBinding& resolved = configuration.resolvedEvents[renderPassIt->second];
+			return resolved.valid ? &resolved : nullptr;
+		}
+
 		bool HasLinkedShaderTargetBinding(
 			const RenderPassConfigurationSnapshot& configuration,
 			const ShaderTargetBindingMap& shaderTargetBindings)
 		{
 			for (const RenderPass::RenderPassDisk& renderPass : configuration.renderPasses)
 			{
-				if (!renderPass.enabled || renderPass.modifiedShaderId.empty())
+				const ResolvedEventBinding* resolvedEvent =
+					FindResolvedEventBinding(configuration, renderPass);
+				if (!resolvedEvent)
 					continue;
 
 				for (const auto& shaderTargetBinding : shaderTargetBindings)
 				{
-					if (shaderTargetBinding.second.modifiedShaderId == renderPass.modifiedShaderId)
+					if (shaderTargetBinding.second.modifiedShaderId == resolvedEvent->modifiedShaderId)
 						return true;
 				}
 			}
@@ -119,8 +273,9 @@ namespace RenderPassRuntime
 		{
 			for (const RenderPass::RenderPassDisk& renderPass : configuration.renderPasses)
 			{
-				if (!renderPass.enabled || renderPass.type != RenderPass::RenderPassType::MipChain ||
-					renderPass.modifiedShaderId.empty())
+				const ResolvedEventBinding* resolvedEvent =
+					FindResolvedEventBinding(configuration, renderPass);
+				if (!resolvedEvent || renderPass.type != RenderPass::RenderPassType::MipChain)
 				{
 					continue;
 				}
@@ -128,7 +283,7 @@ namespace RenderPassRuntime
 				for (const auto& shaderTargetBinding : shaderTargetBindings)
 				{
 					if (shaderTargetBinding.second.type != ShaderTarget::ComputeShader &&
-						shaderTargetBinding.second.modifiedShaderId == renderPass.modifiedShaderId)
+						shaderTargetBinding.second.modifiedShaderId == resolvedEvent->modifiedShaderId)
 					{
 						return true;
 					}
@@ -152,11 +307,72 @@ namespace RenderPassRuntime
 			return *gCachedCommandListState;
 		}
 
-		uint64_t RootBindingKey(bool computePipeline, uint32_t bindingKind, UINT rootParameterIndex)
+		std::vector<RootBindingState>& RootBindings(
+			CommandListRenderState& state,
+			bool computePipeline)
 		{
-			return (static_cast<uint64_t>(computePipeline ? 1 : 0) << 63) |
-				(static_cast<uint64_t>(bindingKind) << 32) |
-				rootParameterIndex;
+			return computePipeline ? state.computeRootBindings : state.graphicsRootBindings;
+		}
+
+		const std::vector<RootBindingState>& RootBindings(
+			const CommandListRenderState& state,
+			bool computePipeline)
+		{
+			return computePipeline ? state.computeRootBindings : state.graphicsRootBindings;
+		}
+
+		RootBindingState& RootBindingAt(
+			CommandListRenderState& state,
+			bool computePipeline,
+			UINT rootParameterIndex)
+		{
+			std::vector<RootBindingState>& bindings = RootBindings(state, computePipeline);
+			if (bindings.size() <= rootParameterIndex)
+				bindings.resize(static_cast<size_t>(rootParameterIndex) + 1);
+			return bindings[rootParameterIndex];
+		}
+
+		void ResetRootBindings(std::vector<RootBindingState>& bindings, bool descriptorTablesOnly = false)
+		{
+			for (RootBindingState& binding : bindings)
+			{
+				if (descriptorTablesOnly && binding.type != RootBindingType::DescriptorTable)
+					continue;
+				binding.type = RootBindingType::None;
+				binding.value = 0;
+				binding.constants.clear();
+			}
+		}
+
+		const char* RootBindingTypeName(RootBindingType type)
+		{
+			switch (type)
+			{
+				case RootBindingType::DescriptorTable: return "Descriptor Table";
+				case RootBindingType::ConstantBufferView: return "CBV";
+				case RootBindingType::ShaderResourceView: return "SRV";
+				case RootBindingType::UnorderedAccessView: return "UAV";
+				case RootBindingType::Constants: return "Root Constants";
+				default: return "";
+			}
+		}
+
+		RenderPass::ResourceBindingDiagnostic BuildRootBindingDiagnostic(
+			const RootBindingState& rootBinding,
+			UINT rootParameterIndex,
+			bool computePipeline)
+		{
+			RenderPass::ResourceBindingDiagnostic binding{};
+			binding.pipeline = computePipeline ? "Compute" : "Graphics";
+			binding.bindingType = RootBindingTypeName(rootBinding.type);
+			binding.rootParameterIndex = rootParameterIndex;
+			if (rootBinding.type == RootBindingType::DescriptorTable)
+				binding.gpuDescriptorHandle = rootBinding.value;
+			else if (rootBinding.type == RootBindingType::Constants)
+				binding.rootConstants = rootBinding.constants;
+			else
+				binding.gpuAddress = rootBinding.value;
+			return binding;
 		}
 
 		const char* PipelineName(bool computePipeline)
@@ -184,21 +400,24 @@ namespace RenderPassRuntime
 			}
 		}
 
-		bool ModifiedShaderMatches(
+		bool ResolvedModifiedShaderMatches(
+			const RenderPassConfigurationSnapshot& configuration,
 			const RenderPass::RenderPassDisk& renderPass,
 			const ShaderTargetBinding& shaderTarget)
 		{
-			return !renderPass.modifiedShaderId.empty() &&
-				renderPass.modifiedShaderId == shaderTarget.modifiedShaderId;
+			const ResolvedEventBinding* resolvedEvent =
+				FindResolvedEventBinding(configuration, renderPass);
+			return resolvedEvent && resolvedEvent->modifiedShaderId == shaderTarget.modifiedShaderId;
 		}
 
 		bool HasLinkedShaderTargetBinding(
+			const RenderPassConfigurationSnapshot& configuration,
 			const RenderPass::RenderPassDisk& renderPass,
 			const ShaderTargetBindingMap& shaderTargetBindings)
 		{
 			for (const auto& shaderTargetBinding : shaderTargetBindings)
 			{
-				if (ModifiedShaderMatches(renderPass, shaderTargetBinding.second))
+				if (ResolvedModifiedShaderMatches(configuration, renderPass, shaderTargetBinding.second))
 					return true;
 			}
 			return false;
@@ -212,8 +431,11 @@ namespace RenderPassRuntime
 			gPendingResourceSnapshotIds.clear();
 			for (const RenderPass::RenderPassDisk& renderPass : configuration.renderPasses)
 			{
+				const ResolvedEventBinding* resolvedEvent =
+					FindResolvedEventBinding(configuration, renderPass);
 				if (!renderPass.enabled || !renderPass.trackResourceBindings ||
-					!HasLinkedShaderTargetBinding(renderPass, shaderTargetBindings))
+					!resolvedEvent ||
+					!HasLinkedShaderTargetBinding(configuration, renderPass, shaderTargetBindings))
 				{
 					continue;
 				}
@@ -221,12 +443,13 @@ namespace RenderPassRuntime
 				const auto diagnosticsIt = gDiagnosticsByRenderPassId.find(renderPass.id);
 				const bool currentSnapshotAvailable = diagnosticsIt != gDiagnosticsByRenderPassId.end() &&
 					diagnosticsIt->second.resourceSnapshotCaptured &&
-					diagnosticsIt->second.lastModifiedShaderId == renderPass.modifiedShaderId;
+					diagnosticsIt->second.lastModifiedShaderId == resolvedEvent->modifiedShaderId;
 				if (!currentSnapshotAvailable)
 					gPendingResourceSnapshotIds.insert(renderPass.id);
 			}
 
 			gResourceTrackingRequired.store(!gPendingResourceSnapshotIds.empty(), std::memory_order_release);
+			RefreshTrackingModeFlags();
 		}
 
 		void RefreshExecutionTrackingFlags(
@@ -235,29 +458,17 @@ namespace RenderPassRuntime
 		{
 			uint32_t graphicsBoundaryMask = 0;
 			uint32_t computeBoundaryMask = 0;
-			for (const RenderPass::RenderPassDisk& renderPass : configuration.renderPasses)
+			for (const auto& shaderTargetBinding : shaderTargetBindings)
 			{
-				if (!renderPass.enabled)
+				const auto executionPlanIt =
+					configuration.executionPlans.find(shaderTargetBinding.second.modifiedShaderId);
+				if (executionPlanIt == configuration.executionPlans.end())
 					continue;
 
-				const uint32_t boundaryMask = renderPass.type == RenderPass::RenderPassType::MipChain
-					? 1u
-					: renderPass.timing == RenderPass::timingAfter ? 2u : 1u;
-				for (const auto& shaderTargetBinding : shaderTargetBindings)
-				{
-					if (!ModifiedShaderMatches(renderPass, shaderTargetBinding.second))
-						continue;
-					if (renderPass.type == RenderPass::RenderPassType::MipChain &&
-						shaderTargetBinding.second.type == ShaderTarget::ComputeShader)
-					{
-						continue;
-					}
-
-					if (shaderTargetBinding.second.type == ShaderTarget::ComputeShader)
-						computeBoundaryMask |= boundaryMask;
-					else
-						graphicsBoundaryMask |= boundaryMask;
-				}
+				if (shaderTargetBinding.second.type == ShaderTarget::ComputeShader)
+					computeBoundaryMask |= executionPlanIt->second.computeBoundaryMask;
+				else
+					graphicsBoundaryMask |= executionPlanIt->second.graphicsBoundaryMask;
 			}
 
 			gGraphicsExecutionBoundaryMask.store(graphicsBoundaryMask, std::memory_order_release);
@@ -270,7 +481,7 @@ namespace RenderPassRuntime
 			state.graphicsExecutionBoundaryMask = 0;
 			state.computeExecutionBoundaryMask = 0;
 			state.executionTrackingGeneration =
-				gExecutionTrackingGeneration.load(std::memory_order_acquire);
+				gExecutionTrackingGeneration.load(std::memory_order_relaxed);
 			if (!state.pipelineState)
 				return;
 
@@ -282,22 +493,15 @@ namespace RenderPassRuntime
 
 			const RenderPassConfigurationSnapshot* configuration =
 				gPublishedConfiguration.load(std::memory_order_acquire);
-			uint32_t& boundaryMask = shaderTargetIt->second.type == ShaderTarget::ComputeShader
-				? state.computeExecutionBoundaryMask
-				: state.graphicsExecutionBoundaryMask;
-			for (const RenderPass::RenderPassDisk& renderPass : configuration->renderPasses)
-			{
-				if (!renderPass.enabled || !ModifiedShaderMatches(renderPass, shaderTargetIt->second))
-					continue;
-				if (renderPass.type == RenderPass::RenderPassType::MipChain &&
-					shaderTargetIt->second.type == ShaderTarget::ComputeShader)
-				{
-					continue;
-				}
-				boundaryMask |= renderPass.type == RenderPass::RenderPassType::MipChain
-					? 1u
-					: renderPass.timing == RenderPass::timingAfter ? 2u : 1u;
-			}
+			const auto executionPlanIt =
+				configuration->executionPlans.find(shaderTargetIt->second.modifiedShaderId);
+			if (executionPlanIt == configuration->executionPlans.end())
+				return;
+
+			if (shaderTargetIt->second.type == ShaderTarget::ComputeShader)
+				state.computeExecutionBoundaryMask = executionPlanIt->second.computeBoundaryMask;
+			else
+				state.graphicsExecutionBoundaryMask = executionPlanIt->second.graphicsBoundaryMask;
 		}
 
 		const DescriptorHeapState* ResolveDescriptorTableLocation(
@@ -330,7 +534,8 @@ namespace RenderPassRuntime
 			uint32_t maximumTrackedDescriptors)
 		{
 			std::vector<RenderPass::ResourceBindingDiagnostic> bindings;
-			bindings.reserve(state.descriptorHeaps.size() + state.rootBindings.size());
+			const std::vector<RootBindingState>& rootBindings = RootBindings(state, computePipeline);
+			bindings.reserve(state.descriptorHeaps.size() + rootBindings.size());
 
 			for (const DescriptorHeapState& heap : state.descriptorHeaps)
 			{
@@ -348,13 +553,19 @@ namespace RenderPassRuntime
 			ID3D12RootSignature* rootSignature = computePipeline
 				? state.computeRootSignature
 				: state.graphicsRootSignature;
-			for (const auto& pair : state.rootBindings)
+			for (UINT rootParameterIndex = 0;
+				rootParameterIndex < rootBindings.size();
+				++rootParameterIndex)
 			{
-				if (pair.second.pipeline != expectedPipeline)
+				const RootBindingState& rootBinding = rootBindings[rootParameterIndex];
+				if (rootBinding.type == RootBindingType::None)
 					continue;
 
-				RenderPass::ResourceBindingDiagnostic binding = pair.second;
-				if (binding.bindingType == "Descriptor Table")
+				RenderPass::ResourceBindingDiagnostic binding = BuildRootBindingDiagnostic(
+					rootBinding,
+					rootParameterIndex,
+					computePipeline);
+				if (rootBinding.type == RootBindingType::DescriptorTable)
 				{
 					const DescriptorHeapState* descriptorHeap = ResolveDescriptorTableLocation(state, binding);
 					if (descriptorHeap)
@@ -461,17 +672,19 @@ namespace RenderPassRuntime
 					heap.gpuStart });
 			}
 
-			for (const auto& binding : state.rootBindings)
+			for (UINT rootParameterIndex = 0;
+				rootParameterIndex < state.graphicsRootBindings.size();
+				++rootParameterIndex)
 			{
-				if (binding.second.pipeline == "Graphics")
-					snapshot.rootBindings.push_back(binding.second);
+				const RootBindingState& rootBinding = state.graphicsRootBindings[rootParameterIndex];
+				if (rootBinding.type != RootBindingType::None)
+				{
+					snapshot.rootBindings.push_back(BuildRootBindingDiagnostic(
+						rootBinding,
+						rootParameterIndex,
+						false));
+				}
 			}
-			std::sort(snapshot.rootBindings.begin(), snapshot.rootBindings.end(), [](const auto& left, const auto& right)
-			{
-				if (left.rootParameterIndex != right.rootParameterIndex)
-					return left.rootParameterIndex < right.rootParameterIndex;
-				return left.bindingType < right.bindingType;
-			});
 
 			UINT renderTargetCount = 0;
 			for (const RenderPass::ResourceBindingDiagnostic& binding : state.outputBindings)
@@ -489,12 +702,106 @@ namespace RenderPassRuntime
 			}
 			return snapshot;
 		}
+
+		void AppendRenderPassExecutionOrder(
+			const RenderPassConfigurationSnapshot& configuration,
+			size_t renderPassIndex,
+			std::vector<const RenderPass::RenderPassDisk*>& executionOrder,
+			std::vector<uint8_t>& appendedRenderPasses)
+		{
+			if (renderPassIndex >= configuration.renderPasses.size() || appendedRenderPasses[renderPassIndex])
+				return;
+			const RenderPass::RenderPassDisk& renderPass = configuration.renderPasses[renderPassIndex];
+			if (!FindResolvedEventBinding(configuration, renderPass))
+			{
+				return;
+			}
+			appendedRenderPasses[renderPassIndex] = 1;
+
+			const auto appendChildren = [&](const char* timing)
+			{
+				for (size_t childIndex = 0; childIndex < configuration.renderPasses.size(); ++childIndex)
+				{
+					const RenderPass::RenderPassDisk& child = configuration.renderPasses[childIndex];
+					if (child.enabled && child.event.type == RenderPass::EventType::RenderPass &&
+						child.event.id == renderPass.id && child.timing == timing)
+					{
+						AppendRenderPassExecutionOrder(
+							configuration,
+							childIndex,
+							executionOrder,
+							appendedRenderPasses);
+					}
+				}
+			};
+
+			appendChildren(RenderPass::timingBefore);
+			executionOrder.push_back(&renderPass);
+			appendChildren(RenderPass::timingAfter);
+		}
+
+		void BuildModifiedShaderExecutionPlans(RenderPassConfigurationSnapshot& configuration)
+		{
+			configuration.executionPlans.clear();
+			for (size_t renderPassIndex = 0; renderPassIndex < configuration.renderPasses.size(); ++renderPassIndex)
+			{
+				const RenderPass::RenderPassDisk& renderPass = configuration.renderPasses[renderPassIndex];
+				const ResolvedEventBinding* resolvedEvent =
+					FindResolvedEventBinding(configuration, renderPass);
+				if (!resolvedEvent || renderPass.event.type != RenderPass::EventType::ModifiedShader)
+				{
+					continue;
+				}
+
+				ModifiedShaderExecutionPlan& plan = configuration.executionPlans[resolvedEvent->modifiedShaderId];
+				const size_t boundaryIndex = resolvedEvent->rootBoundary == ExecutionBoundary::After ? 1u : 0u;
+				std::vector<const RenderPass::RenderPassDisk*> rootExecutionOrder;
+				rootExecutionOrder.reserve(configuration.renderPasses.size());
+				std::vector<uint8_t> appendedRenderPasses(configuration.renderPasses.size(), 0);
+				AppendRenderPassExecutionOrder(
+					configuration,
+					renderPassIndex,
+					rootExecutionOrder,
+					appendedRenderPasses);
+				plan.executionOrders[boundaryIndex].insert(
+					plan.executionOrders[boundaryIndex].end(),
+					rootExecutionOrder.begin(),
+					rootExecutionOrder.end());
+				for (const RenderPass::RenderPassDisk* candidate : rootExecutionOrder)
+				{
+					if (candidate && candidate->type == RenderPass::RenderPassType::MipChain)
+						plan.mipChainOrders[boundaryIndex].push_back(candidate);
+				}
+				const uint32_t boundaryMask = boundaryIndex == 1 ? 2u : 1u;
+				plan.graphicsBoundaryMask |= boundaryMask;
+				if (std::any_of(
+					rootExecutionOrder.begin(),
+					rootExecutionOrder.end(),
+					[](const RenderPass::RenderPassDisk* candidate)
+					{
+						return candidate && candidate->type != RenderPass::RenderPassType::MipChain;
+					}))
+				{
+					plan.computeBoundaryMask |= boundaryMask;
+				}
+			}
+		}
+
+		const ModifiedShaderExecutionPlan* FindModifiedShaderExecutionPlan(
+			const RenderPassConfigurationSnapshot& configuration,
+			const ShaderTargetBinding& shaderTarget)
+		{
+			const auto planIt = configuration.executionPlans.find(shaderTarget.modifiedShaderId);
+			return planIt == configuration.executionPlans.end() ? nullptr : &planIt->second;
+		}
 	}
 
 	void PublishRenderPassConfigurations(const std::vector<RenderPass::RenderPassDisk>& renderPasses)
 	{
 		auto snapshot = std::make_unique<RenderPassConfigurationSnapshot>();
 		snapshot->renderPasses = renderPasses;
+		BuildResolvedEventBindings(*snapshot);
+		BuildModifiedShaderExecutionPlans(*snapshot);
 		bool hasEnabledRenderPass = false;
 		bool hasEnabledMipChainPass = false;
 		std::unordered_set<std::string> activeIds;
@@ -502,11 +809,18 @@ namespace RenderPassRuntime
 		for (const RenderPass::RenderPassDisk& renderPass : renderPasses)
 		{
 			activeIds.insert(renderPass.id);
-			if (renderPass.enabled && !renderPass.modifiedShaderId.empty())
+			if (renderPass.enabled && !renderPass.event.id.empty())
 			{
 				hasEnabledRenderPass = true;
 				hasEnabledMipChainPass = hasEnabledMipChainPass ||
 					renderPass.type == RenderPass::RenderPassType::MipChain;
+				if (!FindResolvedEventBinding(*snapshot, renderPass))
+				{
+					ShaderInjectorIO::WriteToLogFileWarning(
+						"RenderPassRuntime->PublishRenderPassConfigurations: unresolved or invalid event chain for " +
+						renderPass.name + " event=" + RenderPass::EventTypeName(renderPass.event.type) +
+						":" + renderPass.event.id);
+				}
 			}
 		}
 
@@ -544,37 +858,34 @@ namespace RenderPassRuntime
 
 	bool HasEnabledRenderPasses()
 	{
-		return gHasEnabledRenderPasses.load(std::memory_order_acquire);
+		return gHasEnabledRenderPasses.load(std::memory_order_relaxed);
 	}
 
 	bool HasEnabledMipChainPasses()
 	{
-		return gHasEnabledMipChainPasses.load(std::memory_order_acquire);
+		return gHasEnabledMipChainPasses.load(std::memory_order_relaxed);
 	}
 
 	bool IsTrackingRequired()
 	{
-		// A configured pass cannot execute until at least one live game PSO has been
-		// resolved to a linked shader target. Avoid observing every startup command and
-		// resource while the injector still has nothing it could legally inject into.
-		return HasEnabledRenderPasses() &&
-			gHasExecutableRenderPassBinding.load(std::memory_order_acquire);
+		return (gTrackingModeFlags.load(std::memory_order_relaxed) & TrackingEnabled) != 0;
 	}
 
 	bool IsResourceTrackingRequired()
 	{
-		return IsTrackingRequired() && gResourceTrackingRequired.load(std::memory_order_acquire);
+		return (gTrackingModeFlags.load(std::memory_order_relaxed) & ResourceTrackingEnabled) != 0;
 	}
 
 	bool IsDescriptorRegistryTrackingRequired()
 	{
-		return IsResourceTrackingRequired() ||
-			(IsTrackingRequired() && gHasExecutableMipChainBinding.load(std::memory_order_acquire));
+		return (gTrackingModeFlags.load(std::memory_order_relaxed) &
+			DescriptorRegistryTrackingEnabled) != 0;
 	}
 
 	bool IsGraphicsStateTrackingRequired()
 	{
-		return IsDescriptorRegistryTrackingRequired();
+		return (gTrackingModeFlags.load(std::memory_order_relaxed) &
+			GraphicsStateTrackingEnabled) != 0;
 	}
 
 	bool HasPendingCommandListSubmissionWork()
@@ -596,20 +907,31 @@ namespace RenderPassRuntime
 		bool computePipeline,
 		ExecutionBoundary boundary)
 	{
-		if (!commandList || !IsExecutionTrackingRequired(computePipeline, boundary))
-			return false;
+		const uint32_t requiredBoundary = boundary == ExecutionBoundary::After ? 2u : 1u;
+		return (GetExecutionBoundaryMask(commandList, computePipeline) & requiredBoundary) != 0;
+	}
+
+	uint32_t GetExecutionBoundaryMask(
+		ID3D12GraphicsCommandList* commandList,
+		bool computePipeline)
+	{
+		if (!commandList)
+			return 0;
+		const uint32_t globalBoundaryMask = computePipeline
+			? gComputeExecutionBoundaryMask.load(std::memory_order_relaxed)
+			: gGraphicsExecutionBoundaryMask.load(std::memory_order_relaxed);
+		if (!globalBoundaryMask)
+			return 0;
 
 		CommandListRenderState& state = GetCommandListState(commandList);
 		const uint64_t currentGeneration =
-			gExecutionTrackingGeneration.load(std::memory_order_acquire);
+			gExecutionTrackingGeneration.load(std::memory_order_relaxed);
 		if (state.executionTrackingGeneration != currentGeneration)
 			RefreshCommandListExecutionBoundaries(state);
 
-		const uint32_t requiredBoundary = boundary == ExecutionBoundary::After ? 2u : 1u;
-		const uint32_t boundaryMask = computePipeline
+		return computePipeline
 			? state.computeExecutionBoundaryMask
 			: state.graphicsExecutionBoundaryMask;
-		return (boundaryMask & requiredBoundary) != 0;
 	}
 
 	void BeginShaderTargetBindingUpdate()
@@ -669,7 +991,8 @@ namespace RenderPassRuntime
 		state.computeRootSignature = nullptr;
 		state.primitiveTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
 		state.descriptorHeaps.clear();
-		state.rootBindings.clear();
+		ResetRootBindings(state.graphicsRootBindings);
+		ResetRootBindings(state.computeRootBindings);
 		state.inputBindings.clear();
 		state.outputBindings.clear();
 		state.viewports.clear();
@@ -689,6 +1012,8 @@ namespace RenderPassRuntime
 			return;
 
 		CommandListRenderState& state = GetCommandListState(commandList);
+		if (state.pipelineState == pipelineState)
+			return;
 		state.pipelineState = pipelineState;
 		state.boundPipelineState = pipelineState;
 		RefreshCommandListExecutionBoundaries(state);
@@ -726,14 +1051,7 @@ namespace RenderPassRuntime
 		currentRootSignature = rootSignature;
 		if (!computePipeline)
 			HookD3D12::EnsureRenderPassRootSignatureRegistered(rootSignature);
-		for (auto bindingIt = state.rootBindings.begin(); bindingIt != state.rootBindings.end();)
-		{
-			const bool bindingIsCompute = (bindingIt->first & (uint64_t{ 1 } << 63)) != 0;
-			if (bindingIsCompute == computePipeline)
-				bindingIt = state.rootBindings.erase(bindingIt);
-			else
-				++bindingIt;
-		}
+		ResetRootBindings(RootBindings(state, computePipeline));
 	}
 
 	void TrackDescriptorHeaps(
@@ -747,13 +1065,8 @@ namespace RenderPassRuntime
 		CommandListRenderState& state = GetCommandListState(commandList);
 		state.descriptorHeaps.clear();
 		state.descriptorHeaps.reserve(descriptorHeapCount);
-		for (auto bindingIt = state.rootBindings.begin(); bindingIt != state.rootBindings.end();)
-		{
-			if (bindingIt->second.bindingType == "Descriptor Table")
-				bindingIt = state.rootBindings.erase(bindingIt);
-			else
-				++bindingIt;
-		}
+		ResetRootBindings(state.graphicsRootBindings, true);
+		ResetRootBindings(state.computeRootBindings, true);
 
 		EnsureDescriptorIncrementSizes(commandList, state);
 
@@ -788,12 +1101,10 @@ namespace RenderPassRuntime
 			return;
 
 		CommandListRenderState& state = GetCommandListState(commandList);
-		RenderPass::ResourceBindingDiagnostic binding{};
-		binding.pipeline = PipelineName(computePipeline);
-		binding.bindingType = "Descriptor Table";
-		binding.rootParameterIndex = rootParameterIndex;
-		binding.gpuDescriptorHandle = descriptorHandle.ptr;
-		state.rootBindings[RootBindingKey(computePipeline, 1, rootParameterIndex)] = std::move(binding);
+		RootBindingState& binding = RootBindingAt(state, computePipeline, rootParameterIndex);
+		binding.type = RootBindingType::DescriptorTable;
+		binding.value = descriptorHandle.ptr;
+		binding.constants.clear();
 	}
 
 	void TrackRootDescriptor(
@@ -806,18 +1117,19 @@ namespace RenderPassRuntime
 		if (!IsTrackingRequired())
 			return;
 
-		uint32_t bindingKind = 2;
+		RootBindingType rootBindingType = RootBindingType::ConstantBufferView;
 		if (bindingType && bindingType[0] == 'S')
-			bindingKind = 3;
+			rootBindingType = RootBindingType::ShaderResourceView;
 		else if (bindingType && bindingType[0] == 'U')
-			bindingKind = 4;
+			rootBindingType = RootBindingType::UnorderedAccessView;
 
-		RenderPass::ResourceBindingDiagnostic binding{};
-		binding.pipeline = PipelineName(computePipeline);
-		binding.bindingType = bindingType ? bindingType : "Root Descriptor";
-		binding.rootParameterIndex = rootParameterIndex;
-		binding.gpuAddress = gpuAddress;
-		GetCommandListState(commandList).rootBindings[RootBindingKey(computePipeline, bindingKind, rootParameterIndex)] = std::move(binding);
+		RootBindingState& binding = RootBindingAt(
+			GetCommandListState(commandList),
+			computePipeline,
+			rootParameterIndex);
+		binding.type = rootBindingType;
+		binding.value = gpuAddress;
+		binding.constants.clear();
 	}
 
 	void TrackRootConstants(
@@ -832,12 +1144,13 @@ namespace RenderPassRuntime
 			return;
 
 		CommandListRenderState& state = GetCommandListState(commandList);
-		RenderPass::ResourceBindingDiagnostic& binding =
-			state.rootBindings[RootBindingKey(computePipeline, 5, rootParameterIndex)];
-		binding.pipeline = PipelineName(computePipeline);
-		binding.bindingType = "Root Constants";
-		binding.rootParameterIndex = rootParameterIndex;
-		binding.destinationOffset = 0;
+		RootBindingState& binding = RootBindingAt(state, computePipeline, rootParameterIndex);
+		if (binding.type != RootBindingType::Constants)
+		{
+			binding.type = RootBindingType::Constants;
+			binding.value = 0;
+			binding.constants.clear();
+		}
 
 		if (!values)
 			return;
@@ -846,14 +1159,14 @@ namespace RenderPassRuntime
 			return;
 		const UINT capturedValueCount = valueCount;
 		const size_t requiredSize = destinationOffset + capturedValueCount;
-		if (binding.rootConstants.size() < requiredSize)
-			binding.rootConstants.resize(requiredSize);
+		if (binding.constants.size() < requiredSize)
+			binding.constants.resize(requiredSize);
 
 		const uint32_t* sourceValues = static_cast<const uint32_t*>(values);
 		std::copy(
 			sourceValues,
 			sourceValues + capturedValueCount,
-			binding.rootConstants.begin() + destinationOffset);
+			binding.constants.begin() + destinationOffset);
 	}
 
 	void TrackIndexBuffer(
@@ -933,32 +1246,40 @@ namespace RenderPassRuntime
 
 		CommandListRenderState& state = GetCommandListState(commandList);
 		EnsureDescriptorIncrementSizes(commandList, state);
-		state.outputBindings.clear();
+		const UINT capturedRenderTargetCount = renderTargetDescriptors ? renderTargetCount : 0;
+		const bool hasDepthStencil = depthStencilDescriptor && depthStencilDescriptor->ptr;
+		state.outputBindings.resize(capturedRenderTargetCount + (hasDepthStencil ? 1u : 0u));
 
 		const UINT renderTargetIncrement = state.descriptorIncrementSizes[D3D12_DESCRIPTOR_HEAP_TYPE_RTV];
-		for (UINT renderTargetIndex = 0;
-			renderTargetDescriptors && renderTargetIndex < renderTargetCount;
-			++renderTargetIndex)
+		for (UINT renderTargetIndex = 0; renderTargetIndex < capturedRenderTargetCount; ++renderTargetIndex)
 		{
 			D3D12_CPU_DESCRIPTOR_HANDLE descriptor = descriptorsAreContiguous
 				? D3D12_CPU_DESCRIPTOR_HANDLE{
 					renderTargetDescriptors[0].ptr + static_cast<SIZE_T>(renderTargetIndex) * renderTargetIncrement }
 				: renderTargetDescriptors[renderTargetIndex];
-			RenderPass::ResourceBindingDiagnostic binding{};
-			binding.pipeline = "Graphics";
-			binding.bindingType = "RTV";
+			RenderPass::ResourceBindingDiagnostic& binding = state.outputBindings[renderTargetIndex];
+			if (binding.bindingType != "RTV")
+			{
+				binding = {};
+				binding.pipeline = "Graphics";
+				binding.bindingType = "RTV";
+			}
 			binding.cpuDescriptorHandle = descriptor.ptr;
 			binding.descriptorIndex = renderTargetIndex;
-			state.outputBindings.push_back(std::move(binding));
 		}
 
-		if (depthStencilDescriptor && depthStencilDescriptor->ptr)
+		if (hasDepthStencil)
 		{
-			RenderPass::ResourceBindingDiagnostic binding{};
-			binding.pipeline = "Graphics";
-			binding.bindingType = "DSV";
+			RenderPass::ResourceBindingDiagnostic& binding =
+				state.outputBindings[capturedRenderTargetCount];
+			if (binding.bindingType != "DSV")
+			{
+				binding = {};
+				binding.pipeline = "Graphics";
+				binding.bindingType = "DSV";
+			}
 			binding.cpuDescriptorHandle = depthStencilDescriptor->ptr;
-			state.outputBindings.push_back(std::move(binding));
+			binding.descriptorIndex = 0;
 		}
 	}
 
@@ -971,9 +1292,10 @@ namespace RenderPassRuntime
 			return;
 
 		CommandListRenderState& state = GetCommandListState(commandList);
-		state.viewports.clear();
 		if (viewports && viewportCount)
 			state.viewports.assign(viewports, viewports + viewportCount);
+		else
+			state.viewports.clear();
 	}
 
 	void TrackScissorRectangles(
@@ -985,9 +1307,10 @@ namespace RenderPassRuntime
 			return;
 
 		CommandListRenderState& state = GetCommandListState(commandList);
-		state.scissorRectangles.clear();
 		if (rectangles && rectangleCount)
 			state.scissorRectangles.assign(rectangles, rectangles + rectangleCount);
+		else
+			state.scissorRectangles.clear();
 	}
 
 	void RecordExecutionBoundary(
@@ -1009,44 +1332,46 @@ namespace RenderPassRuntime
 		if (targetIt == shaderTargetBindings->end())
 			return;
 
-		const char* timing = boundary == ExecutionBoundary::Before ? RenderPass::timingBefore : RenderPass::timingAfter;
 		const RenderPassConfigurationSnapshot* configuration =
 			gPublishedConfiguration.load(std::memory_order_acquire);
-		std::vector<RenderPassMipChain::ExecutionResult> mipChainResults;
-		if (!computePipeline && boundary == ExecutionBoundary::Before)
-		{
-			std::vector<const RenderPass::RenderPassDisk*> matchingMipChains;
-			for (const RenderPass::RenderPassDisk& renderPass : configuration->renderPasses)
-			{
-				if (renderPass.enabled && renderPass.type == RenderPass::RenderPassType::MipChain &&
-					ModifiedShaderMatches(renderPass, targetIt->second))
-				{
-					matchingMipChains.push_back(&renderPass);
-				}
-			}
-			if (!matchingMipChains.empty())
-			{
-				mipChainResults = RenderPassMipChain::PrepareForTargetDraw(
-					matchingMipChains,
-					commandList,
-					BuildMipChainGraphicsState(state));
-			}
-		}
+		const ModifiedShaderExecutionPlan* executionPlan =
+			FindModifiedShaderExecutionPlan(*configuration, targetIt->second);
+		if (!executionPlan)
+			return;
+		const size_t boundaryIndex = boundary == ExecutionBoundary::After ? 1u : 0u;
+		const std::vector<const RenderPass::RenderPassDisk*>& executionOrder =
+			executionPlan->executionOrders[boundaryIndex];
+		if (executionOrder.empty())
+			return;
 
-		for (const RenderPass::RenderPassDisk& renderPass : configuration->renderPasses)
+		std::vector<RenderPassMipChain::ExecutionResult> mipChainResults;
+		bool mipChainsPrepared = false;
+
+		for (const RenderPass::RenderPassDisk* renderPassPointer : executionOrder)
 		{
-			const bool matchesBoundary = renderPass.type == RenderPass::RenderPassType::MipChain
-				? boundary == ExecutionBoundary::Before
-				: renderPass.timing == timing;
-			if (!renderPass.enabled || !matchesBoundary || !ModifiedShaderMatches(renderPass, targetIt->second) ||
+			const RenderPass::RenderPassDisk& renderPass = *renderPassPointer;
+			const ResolvedEventBinding* resolvedEvent =
+				FindResolvedEventBinding(*configuration, renderPass);
+			if (!resolvedEvent ||
 				(renderPass.type == RenderPass::RenderPassType::MipChain && computePipeline))
+			{
 				continue;
+			}
 
 			bool executionAttempted = false;
 			bool executionSucceeded = false;
 			std::string executionError;
 			if (renderPass.type == RenderPass::RenderPassType::MipChain)
 			{
+				if (!mipChainsPrepared)
+				{
+					mipChainResults = RenderPassMipChain::PrepareForTargetDraw(
+						executionPlan->mipChainOrders[boundaryIndex],
+						commandList,
+						BuildMipChainGraphicsState(state));
+					mipChainsPrepared = true;
+				}
+
 				const auto resultIt = std::find_if(mipChainResults.begin(), mipChainResults.end(), [&](const auto& result)
 				{
 					return result.renderPassId == renderPass.id;
@@ -1128,10 +1453,12 @@ namespace RenderPassRuntime
 					diagnostics.lastExecutionError.empty() != executionError.empty();
 				if (firstTrigger || targetChanged || executionStateChanged)
 				{
-					diagnostics.lastTiming = timing;
+					diagnostics.lastTiming = renderPass.timing;
 					diagnostics.lastOperation = operationName ? operationName : "Unknown";
 					diagnostics.lastExecutionError = executionError;
-					diagnostics.lastModifiedShaderId = targetIt->second.modifiedShaderId;
+					diagnostics.lastEventType = RenderPass::EventTypeName(renderPass.event.type);
+					diagnostics.lastEventId = renderPass.event.id;
+					diagnostics.lastModifiedShaderId = resolvedEvent->modifiedShaderId;
 					diagnostics.lastShaderTargetName = targetIt->second.name;
 					char hashText[32]{};
 					sprintf_s(hashText, "%016llX", static_cast<unsigned long long>(targetIt->second.hash));
@@ -1148,6 +1475,7 @@ namespace RenderPassRuntime
 						gResourceTrackingRequired.store(
 							!gPendingResourceSnapshotIds.empty(),
 							std::memory_order_release);
+						RefreshTrackingModeFlags();
 					}
 				}
 				else
@@ -1172,11 +1500,14 @@ namespace RenderPassRuntime
 			if (firstTrigger)
 			{
 				ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
-					"RenderPassRuntime->RecordExecutionBoundary: matched pass=%s type=%s operation=%s timing=%s commandList=%p requestedPSO=%p boundPSO=%p rootSignature=%p outputs=%llu pipelineRTVs=%u format0=%u samples=%u/%u compiled=%u mipSource=t%u,space%u",
+					"RenderPassRuntime->RecordExecutionBoundary: matched pass=%s type=%s event=%s:%s timing=%s rootBoundary=%s operation=%s commandList=%p requestedPSO=%p boundPSO=%p rootSignature=%p outputs=%llu pipelineRTVs=%u format0=%u samples=%u/%u compiled=%u mipSource=t%u,space%u",
 					renderPass.name.c_str(),
 					RenderPass::TypeName(renderPass.type),
+					RenderPass::EventTypeName(renderPass.event.type),
+					renderPass.event.id.c_str(),
+					renderPass.timing.c_str(),
+					boundary == ExecutionBoundary::Before ? RenderPass::timingBefore : RenderPass::timingAfter,
 					operationName ? operationName : "Unknown",
-					timing,
 					commandList,
 					state.pipelineState,
 					state.boundPipelineState,
@@ -1245,12 +1576,13 @@ namespace RenderPassRuntime
 		for (const RenderPass::RenderPassDisk& renderPass : configuration->renderPasses)
 		{
 			if (renderPass.id == renderPassId && renderPass.enabled && renderPass.trackResourceBindings &&
-				HasLinkedShaderTargetBinding(renderPass, *shaderTargetBindings))
+				HasLinkedShaderTargetBinding(*configuration, renderPass, *shaderTargetBindings))
 			{
 				gPendingResourceSnapshotIds.insert(renderPassId);
 				break;
 			}
 		}
 		gResourceTrackingRequired.store(!gPendingResourceSnapshotIds.empty(), std::memory_order_release);
+		RefreshTrackingModeFlags();
 	}
 }

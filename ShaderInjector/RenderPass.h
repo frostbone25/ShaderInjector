@@ -10,7 +10,7 @@
 namespace RenderPass
 {
 	inline constexpr const char* formatName = "ShaderInjector.RenderPass";
-	inline constexpr int currentSchemaVersion = 1;
+	inline constexpr int currentSchemaVersion = 2;
 	inline constexpr const char* timingBefore = "Before";
 	inline constexpr const char* timingAfter = "After";
 
@@ -26,6 +26,29 @@ namespace RenderPass
 		{ RenderPassType::MipChain, "MipChain" },
 	})
 
+	enum class EventType
+	{
+		ModifiedShader,
+		RenderPass,
+	};
+
+	NLOHMANN_JSON_SERIALIZE_ENUM(EventType,
+	{
+		{ EventType::ModifiedShader, "ModifiedShader" },
+		{ EventType::RenderPass, "RenderPass" },
+	})
+
+	struct EventReferenceDisk
+	{
+		EventType type = EventType::ModifiedShader;
+		std::string id;
+
+		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
+			EventReferenceDisk,
+			type,
+			id)
+	};
+
 	struct RenderPassDisk
 	{
 		std::string format = formatName;
@@ -34,7 +57,7 @@ namespace RenderPass
 		std::string name;
 		bool enabled = true;
 		RenderPassType type = RenderPassType::Custom;
-		std::string modifiedShaderId;
+		EventReferenceDisk event;
 		std::string timing = timingBefore;
 		uint32_t sourceTextureShaderRegister = 0;
 		uint32_t sourceTextureRegisterSpace = 0;
@@ -69,7 +92,7 @@ namespace RenderPass
 			name,
 			enabled,
 			type,
-			modifiedShaderId,
+			event,
 			timing,
 			sourceTextureShaderRegister,
 			sourceTextureRegisterSpace,
@@ -131,6 +154,8 @@ namespace RenderPass
 		std::string lastTiming;
 		std::string lastOperation;
 		std::string lastExecutionError;
+		std::string lastEventType;
+		std::string lastEventId;
 		std::string lastModifiedShaderId;
 		std::string lastShaderTargetName;
 		std::string lastShaderTargetHash;
@@ -144,6 +169,7 @@ namespace RenderPass
 	void ResolveShaderPaths(RenderPassDisk& renderPass);
 	bool LoadCompiledShaderBlobs(RenderPassDisk& renderPass);
 	const char* TypeName(RenderPassType type);
+	const char* EventTypeName(EventType type);
 	bool HasShaderTemplate(const RenderPassDisk& renderPass);
 	bool HasCompiledShaders(const RenderPassDisk& renderPass);
 }

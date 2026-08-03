@@ -35,6 +35,9 @@ namespace RenderPassRuntime
 	bool IsGraphicsStateTrackingRequired();
 	bool HasPendingCommandListSubmissionWork();
 	bool IsExecutionTrackingRequired(bool computePipeline, ExecutionBoundary boundary);
+	uint32_t GetExecutionBoundaryMask(
+		ID3D12GraphicsCommandList* commandList,
+		bool computePipeline);
 	bool ShouldRecordExecutionBoundary(
 		ID3D12GraphicsCommandList* commandList,
 		bool computePipeline,

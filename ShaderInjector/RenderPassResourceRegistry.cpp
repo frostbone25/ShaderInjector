@@ -34,10 +34,25 @@ namespace RenderPassResourceRegistry
 			std::vector<RootParameterLayout> parameters;
 		};
 
-		std::shared_mutex gRegistryMutex;
-		std::unordered_map<SIZE_T, RenderPass::ResourceBindingDiagnostic> gDescriptors;
+		std::shared_mutex gDescriptorMutex;
+		std::shared_mutex gResourceMutex;
+		std::shared_mutex gRootSignatureMutex;
+		std::map<SIZE_T, RenderPass::ResourceBindingDiagnostic> gDescriptors;
 		std::map<uint64_t, RenderPass::ResourceBindingDiagnostic> gResourcesByGpuAddress;
 		std::unordered_map<ID3D12RootSignature*, RootSignatureLayout> gRootSignatures;
+
+		struct PendingDescriptorCopy
+		{
+			SIZE_T destination = 0;
+			RenderPass::ResourceBindingDiagnostic binding;
+		};
+
+		struct DescriptorCopySegment
+		{
+			SIZE_T destinationStart = 0;
+			SIZE_T sourceStart = 0;
+			UINT descriptorCount = 0;
+		};
 
 		const char* DescriptorRangeTypeName(D3D12_DESCRIPTOR_RANGE_TYPE type)
 		{
@@ -104,8 +119,20 @@ namespace RenderPassResourceRegistry
 			RenderPass::ResourceBindingDiagnostic binding)
 		{
 			binding.cpuDescriptorHandle = destination.ptr;
-			std::unique_lock<std::shared_mutex> lock(gRegistryMutex);
+			std::unique_lock<std::shared_mutex> lock(gDescriptorMutex);
 			gDescriptors[destination.ptr] = std::move(binding);
+		}
+
+		void EraseDescriptorIfTracked(D3D12_CPU_DESCRIPTOR_HANDLE destination)
+		{
+			{
+				std::shared_lock<std::shared_mutex> lock(gDescriptorMutex);
+				if (gDescriptors.find(destination.ptr) == gDescriptors.end())
+					return;
+			}
+
+			std::unique_lock<std::shared_mutex> lock(gDescriptorMutex);
+			gDescriptors.erase(destination.ptr);
 		}
 
 		void FillShaderResourceViewMetadata(
@@ -177,18 +204,82 @@ namespace RenderPassResourceRegistry
 			}
 		}
 
-		void CopyDescriptorLocked(SIZE_T destination, SIZE_T source)
+		SIZE_T DescriptorRangeEnd(
+			SIZE_T rangeStart,
+			UINT descriptorCount,
+			UINT descriptorIncrementSize)
 		{
-			const auto sourceIt = gDescriptors.find(source);
-			if (sourceIt == gDescriptors.end())
-			{
-				gDescriptors.erase(destination);
-				return;
-			}
+			const SIZE_T maximumValue = (std::numeric_limits<SIZE_T>::max)();
+			if (descriptorCount > (maximumValue - rangeStart) / descriptorIncrementSize)
+				return maximumValue;
+			return rangeStart + static_cast<SIZE_T>(descriptorCount) * descriptorIncrementSize;
+		}
 
-			RenderPass::ResourceBindingDiagnostic copy = sourceIt->second;
-			copy.cpuDescriptorHandle = destination;
-			gDescriptors[destination] = std::move(copy);
+		void QueueTrackedDescriptorCopiesLocked(
+			const DescriptorCopySegment& segment,
+			UINT descriptorIncrementSize,
+			std::vector<PendingDescriptorCopy>& pendingCopies)
+		{
+			if (!segment.descriptorCount)
+				return;
+
+			const SIZE_T sourceEnd = DescriptorRangeEnd(
+				segment.sourceStart,
+				segment.descriptorCount,
+				descriptorIncrementSize);
+			for (auto sourceIt = gDescriptors.lower_bound(segment.sourceStart);
+				sourceIt != gDescriptors.end() && sourceIt->first < sourceEnd;
+				++sourceIt)
+			{
+				const SIZE_T sourceOffset = sourceIt->first - segment.sourceStart;
+				if (sourceOffset % descriptorIncrementSize != 0)
+					continue;
+
+				const SIZE_T descriptorIndex = sourceOffset / descriptorIncrementSize;
+				if (descriptorIndex >= segment.descriptorCount)
+					continue;
+
+				PendingDescriptorCopy copy{};
+				copy.destination = segment.destinationStart + descriptorIndex * descriptorIncrementSize;
+				copy.binding = sourceIt->second;
+				copy.binding.cpuDescriptorHandle = copy.destination;
+				pendingCopies.push_back(std::move(copy));
+			}
+		}
+
+		void EraseTrackedDescriptorRangeLocked(
+			const DescriptorCopySegment& segment,
+			UINT descriptorIncrementSize)
+		{
+			if (!segment.descriptorCount)
+				return;
+			const SIZE_T destinationEnd = DescriptorRangeEnd(
+				segment.destinationStart,
+				segment.descriptorCount,
+				descriptorIncrementSize);
+			auto destinationIt = gDescriptors.lower_bound(segment.destinationStart);
+			while (destinationIt != gDescriptors.end() && destinationIt->first < destinationEnd)
+				destinationIt = gDescriptors.erase(destinationIt);
+		}
+
+		bool HasTrackedDescriptorInDestinationRangeLocked(
+			const DescriptorCopySegment& segment,
+			UINT descriptorIncrementSize)
+		{
+			if (!segment.descriptorCount)
+				return false;
+			const SIZE_T destinationEnd = DescriptorRangeEnd(
+				segment.destinationStart,
+				segment.descriptorCount,
+				descriptorIncrementSize);
+			const auto destinationIt = gDescriptors.lower_bound(segment.destinationStart);
+			return destinationIt != gDescriptors.end() && destinationIt->first < destinationEnd;
+		}
+
+		void ApplyPendingDescriptorCopiesLocked(std::vector<PendingDescriptorCopy>& pendingCopies)
+		{
+			for (PendingDescriptorCopy& copy : pendingCopies)
+				gDescriptors[copy.destination] = std::move(copy.binding);
 		}
 	}
 
@@ -201,7 +292,7 @@ namespace RenderPassResourceRegistry
 			return;
 
 		{
-			std::shared_lock<std::shared_mutex> lock(gRegistryMutex);
+			std::shared_lock<std::shared_mutex> lock(gRootSignatureMutex);
 			if (gRootSignatures.find(rootSignature) != gRootSignatures.end())
 				return;
 		}
@@ -280,7 +371,7 @@ namespace RenderPassResourceRegistry
 		}
 
 		deserializer->Release();
-		std::unique_lock<std::shared_mutex> lock(gRegistryMutex);
+		std::unique_lock<std::shared_mutex> lock(gRootSignatureMutex);
 		gRootSignatures[rootSignature] = std::move(layout);
 	}
 
@@ -294,7 +385,7 @@ namespace RenderPassResourceRegistry
 		if (!resourceMetadata.gpuAddress || !resourceMetadata.bufferSize)
 			return;
 
-		std::unique_lock<std::shared_mutex> lock(gRegistryMutex);
+		std::unique_lock<std::shared_mutex> lock(gResourceMutex);
 		gResourcesByGpuAddress[resourceMetadata.gpuAddress] = std::move(resourceMetadata);
 	}
 
@@ -306,7 +397,7 @@ namespace RenderPassResourceRegistry
 		binding.bindingType = "CBV";
 		if (description)
 		{
-			std::shared_lock<std::shared_mutex> lock(gRegistryMutex);
+			std::shared_lock<std::shared_mutex> lock(gResourceMutex);
 			ResolveGpuVirtualAddressLocked(description->BufferLocation, binding);
 			binding.bindingType = "CBV";
 			binding.gpuAddress = description->BufferLocation;
@@ -318,12 +409,34 @@ namespace RenderPassResourceRegistry
 	void RegisterShaderResourceView(
 		ID3D12Resource* resource,
 		const D3D12_SHADER_RESOURCE_VIEW_DESC* description,
-		D3D12_CPU_DESCRIPTOR_HANDLE destination)
+		D3D12_CPU_DESCRIPTOR_HANDLE destination,
+		bool trackAllShaderResourceViews)
 	{
-		RegisterResource(resource);
 		RenderPass::ResourceBindingDiagnostic binding{};
 		binding.bindingType = "SRV";
 		FillResourceMetadata(resource, binding);
+		if (!trackAllShaderResourceViews)
+		{
+			if (!resource)
+			{
+				EraseDescriptorIfTracked(destination);
+				return;
+			}
+
+			const bool supportedTexture =
+				binding.resourceDimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D &&
+				binding.resourceDepthOrArraySize == 1 &&
+				binding.resourceSampleCount == 1;
+			const bool supportedView = !description ||
+				(description->ViewDimension == D3D12_SRV_DIMENSION_TEXTURE2D &&
+					description->Texture2D.PlaneSlice == 0);
+			if (!supportedTexture || !supportedView)
+			{
+				EraseDescriptorIfTracked(destination);
+				return;
+			}
+		}
+
 		FillShaderResourceViewMetadata(description, binding);
 		StoreDescriptor(destination, std::move(binding));
 	}
@@ -388,7 +501,8 @@ namespace RenderPassResourceRegistry
 		if (!destinationRangeStarts || !sourceRangeStarts || !descriptorIncrementSize)
 			return;
 
-		std::unique_lock<std::shared_mutex> lock(gRegistryMutex);
+		std::vector<DescriptorCopySegment> segments;
+		segments.reserve(destinationRangeCount + sourceRangeCount);
 		UINT destinationRangeIndex = 0;
 		UINT sourceRangeIndex = 0;
 		UINT destinationOffset = 0;
@@ -400,13 +514,14 @@ namespace RenderPassResourceRegistry
 			const UINT copyCount = (std::min)(
 				destinationRangeSize - destinationOffset,
 				sourceRangeSize - sourceOffset);
-			for (UINT descriptorIndex = 0; descriptorIndex < copyCount; ++descriptorIndex)
+			if (copyCount)
 			{
-				CopyDescriptorLocked(
+				segments.push_back({
 					destinationRangeStarts[destinationRangeIndex].ptr +
-						static_cast<SIZE_T>(destinationOffset + descriptorIndex) * descriptorIncrementSize,
+						static_cast<SIZE_T>(destinationOffset) * descriptorIncrementSize,
 					sourceRangeStarts[sourceRangeIndex].ptr +
-						static_cast<SIZE_T>(sourceOffset + descriptorIndex) * descriptorIncrementSize);
+						static_cast<SIZE_T>(sourceOffset) * descriptorIncrementSize,
+					copyCount });
 			}
 
 			destinationOffset += copyCount;
@@ -422,6 +537,28 @@ namespace RenderPassResourceRegistry
 				sourceOffset = 0;
 			}
 		}
+		if (segments.empty())
+			return;
+
+		std::vector<PendingDescriptorCopy> pendingCopies;
+		bool hasTrackedDestination = false;
+		{
+			std::shared_lock<std::shared_mutex> lock(gDescriptorMutex);
+			for (const DescriptorCopySegment& segment : segments)
+			{
+				QueueTrackedDescriptorCopiesLocked(segment, descriptorIncrementSize, pendingCopies);
+				hasTrackedDestination = hasTrackedDestination ||
+					HasTrackedDescriptorInDestinationRangeLocked(segment, descriptorIncrementSize);
+			}
+		}
+
+		if (!pendingCopies.empty() || hasTrackedDestination)
+		{
+			std::unique_lock<std::shared_mutex> lock(gDescriptorMutex);
+			for (const DescriptorCopySegment& segment : segments)
+				EraseTrackedDescriptorRangeLocked(segment, descriptorIncrementSize);
+			ApplyPendingDescriptorCopiesLocked(pendingCopies);
+		}
 	}
 
 	void CopyDescriptorsSimple(
@@ -433,12 +570,24 @@ namespace RenderPassResourceRegistry
 		if (!descriptorIncrementSize)
 			return;
 
-		std::unique_lock<std::shared_mutex> lock(gRegistryMutex);
-		for (UINT descriptorIndex = 0; descriptorIndex < descriptorCount; ++descriptorIndex)
+		const DescriptorCopySegment segment{
+			destinationStart.ptr,
+			sourceStart.ptr,
+			descriptorCount };
+		std::vector<PendingDescriptorCopy> pendingCopies;
+		bool hasTrackedDestination = false;
 		{
-			CopyDescriptorLocked(
-				destinationStart.ptr + static_cast<SIZE_T>(descriptorIndex) * descriptorIncrementSize,
-				sourceStart.ptr + static_cast<SIZE_T>(descriptorIndex) * descriptorIncrementSize);
+			std::shared_lock<std::shared_mutex> lock(gDescriptorMutex);
+			QueueTrackedDescriptorCopiesLocked(segment, descriptorIncrementSize, pendingCopies);
+			hasTrackedDestination =
+				HasTrackedDescriptorInDestinationRangeLocked(segment, descriptorIncrementSize);
+		}
+
+		if (!pendingCopies.empty() || hasTrackedDestination)
+		{
+			std::unique_lock<std::shared_mutex> lock(gDescriptorMutex);
+			EraseTrackedDescriptorRangeLocked(segment, descriptorIncrementSize);
+			ApplyPendingDescriptorCopiesLocked(pendingCopies);
 		}
 	}
 
@@ -446,7 +595,7 @@ namespace RenderPassResourceRegistry
 		D3D12_CPU_DESCRIPTOR_HANDLE descriptor,
 		RenderPass::ResourceBindingDiagnostic& outBinding)
 	{
-		std::shared_lock<std::shared_mutex> lock(gRegistryMutex);
+		std::shared_lock<std::shared_mutex> lock(gDescriptorMutex);
 		const auto descriptorIt = gDescriptors.find(descriptor.ptr);
 		if (descriptorIt == gDescriptors.end())
 			return false;
@@ -460,7 +609,7 @@ namespace RenderPassResourceRegistry
 		D3D12_GPU_VIRTUAL_ADDRESS gpuAddress,
 		RenderPass::ResourceBindingDiagnostic& outBinding)
 	{
-		std::shared_lock<std::shared_mutex> lock(gRegistryMutex);
+		std::shared_lock<std::shared_mutex> lock(gResourceMutex);
 		return ResolveGpuVirtualAddressLocked(gpuAddress, outBinding);
 	}
 
@@ -472,7 +621,7 @@ namespace RenderPassResourceRegistry
 		if (!rootSignature)
 			return;
 
-		std::shared_lock<std::shared_mutex> lock(gRegistryMutex);
+		std::shared_lock<std::shared_mutex> lock(gRootSignatureMutex);
 		const auto rootSignatureIt = gRootSignatures.find(rootSignature);
 		if (rootSignatureIt == gRootSignatures.end() ||
 			rootParameterIndex >= rootSignatureIt->second.parameters.size())
@@ -499,7 +648,8 @@ namespace RenderPassResourceRegistry
 		if (!rootSignature || !tableStart.ptr || !descriptorIncrementSize || !maximumDescriptors)
 			return;
 
-		std::shared_lock<std::shared_mutex> lock(gRegistryMutex);
+		std::shared_lock<std::shared_mutex> rootSignatureLock(gRootSignatureMutex);
+		std::shared_lock<std::shared_mutex> descriptorLock(gDescriptorMutex);
 		const auto rootSignatureIt = gRootSignatures.find(rootSignature);
 		if (rootSignatureIt == gRootSignatures.end() ||
 			rootParameterIndex >= rootSignatureIt->second.parameters.size())
@@ -556,7 +706,7 @@ namespace RenderPassResourceRegistry
 		if (!rootSignature || !maximumUnboundedDescriptors)
 			return false;
 
-		std::shared_lock<std::shared_mutex> lock(gRegistryMutex);
+		std::shared_lock<std::shared_mutex> lock(gRootSignatureMutex);
 		const auto rootSignatureIt = gRootSignatures.find(rootSignature);
 		if (rootSignatureIt == gRootSignatures.end())
 			return false;
@@ -601,7 +751,7 @@ namespace RenderPassResourceRegistry
 		if (!rootSignature || !maximumUnboundedDescriptors)
 			return false;
 
-		std::shared_lock<std::shared_mutex> lock(gRegistryMutex);
+		std::shared_lock<std::shared_mutex> lock(gRootSignatureMutex);
 		const auto rootSignatureIt = gRootSignatures.find(rootSignature);
 		if (rootSignatureIt == gRootSignatures.end())
 			return false;
@@ -667,7 +817,7 @@ namespace RenderPassResourceRegistry
 		if (!rootSignature || !maximumUnboundedDescriptors)
 			return false;
 
-		std::shared_lock<std::shared_mutex> lock(gRegistryMutex);
+		std::shared_lock<std::shared_mutex> lock(gRootSignatureMutex);
 		const auto rootSignatureIt = gRootSignatures.find(rootSignature);
 		if (rootSignatureIt == gRootSignatures.end())
 			return false;

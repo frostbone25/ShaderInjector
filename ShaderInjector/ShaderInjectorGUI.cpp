@@ -1504,7 +1504,8 @@ namespace ShaderInjectorGUI
 			{
 				std::string label = renderPass.name.empty() ? renderPass.id : renderPass.name;
 				const ModifiedShader::PackageDisk* modifiedShader =
-					DatabaseModifiedShaders::FindModifiedShaderById(renderPass.modifiedShaderId);
+					DatabaseRenderPasses::ResolveModifiedShader(renderPass);
+				const bool eventChainActive = DatabaseRenderPasses::IsEventChainActive(renderPass);
 				bool hasResolvedShaderTarget = false;
 				if (modifiedShader)
 				{
@@ -1520,8 +1521,10 @@ namespace ShaderInjectorGUI
 				}
 				if (!renderPass.enabled)
 					label += " (disabled)";
-				else if (renderPass.modifiedShaderId.empty())
-					label += " (shader not set)";
+				else if (renderPass.event.id.empty())
+					label += " (event not set)";
+				else if (!eventChainActive)
+					label += " (event unavailable)";
 				else if (!modifiedShader)
 					label += " (shader missing)";
 				else if (!modifiedShader->enabled)
@@ -1532,7 +1535,7 @@ namespace ShaderInjectorGUI
 				label += "##RenderPass_" + renderPass.id;
 
 				const bool selected = renderPass.id == gSelectedRenderPassId;
-				const bool active = renderPass.enabled && modifiedShader &&
+				const bool active = renderPass.enabled && eventChainActive && modifiedShader &&
 					modifiedShader->enabled && hasResolvedShaderTarget;
 				if (active)
 				{
@@ -1603,7 +1606,7 @@ namespace ShaderInjectorGUI
 					{
 						ApplyDefaultMipSourceBinding(
 							*renderPass,
-							DatabaseModifiedShaders::FindModifiedShaderById(renderPass->modifiedShaderId));
+							DatabaseRenderPasses::ResolveModifiedShader(*renderPass));
 					}
 				}
 			}
@@ -1628,43 +1631,115 @@ namespace ShaderInjectorGUI
 			}
 		}
 
-		const ModifiedShader::PackageDisk* selectedModifiedShader =
-			DatabaseModifiedShaders::FindModifiedShaderById(renderPass->modifiedShaderId);
-		const std::string modifiedShaderPreview = selectedModifiedShader
-			? DatabaseModifiedShaders::DisplayName(*selectedModifiedShader)
-			: renderPass->modifiedShaderId.empty() ? "(none)" : renderPass->modifiedShaderId + " (missing)";
-		ImGui::TextUnformatted("Modified Shader");
+		ImGui::TextUnformatted("Event Type");
 		ImGui::SetNextItemWidth(-FLT_MIN);
-		if (ImGui::BeginCombo("##RenderPassModifiedShader", modifiedShaderPreview.c_str()))
+		if (ImGui::BeginCombo("##RenderPassEventType", RenderPass::EventTypeName(renderPass->event.type)))
 		{
-			if (ImGui::Selectable("(none)", renderPass->modifiedShaderId.empty()))
-				renderPass->modifiedShaderId.clear();
-
-			const std::vector<ModifiedShader::PackageDisk>& modifiedShaders =
-				DatabaseModifiedShaders::GetModifiedShaders();
-			for (size_t modifiedShaderIndex = 0; modifiedShaderIndex < modifiedShaders.size(); ++modifiedShaderIndex)
+			const RenderPass::EventType eventTypes[] = {
+				RenderPass::EventType::ModifiedShader,
+				RenderPass::EventType::RenderPass,
+			};
+			for (RenderPass::EventType eventType : eventTypes)
 			{
-				const ModifiedShader::PackageDisk& modifiedShader = modifiedShaders[modifiedShaderIndex];
-				const bool selected = modifiedShader.id == renderPass->modifiedShaderId;
-				std::string label = DatabaseModifiedShaders::DisplayName(modifiedShader);
-				if (!modifiedShader.enabled)
-					label += " (disabled)";
-				label += "##RenderPassModifiedShader_" + std::to_string(modifiedShaderIndex);
-				if (ImGui::Selectable(label.c_str(), selected))
+				const bool selected = renderPass->event.type == eventType;
+				if (ImGui::Selectable(RenderPass::EventTypeName(eventType), selected) && !selected)
 				{
-					renderPass->modifiedShaderId = modifiedShader.id;
-					if (renderPass->type == RenderPass::RenderPassType::MipChain)
-						ApplyDefaultMipSourceBinding(*renderPass, &modifiedShader);
+					renderPass->event.type = eventType;
+					renderPass->event.id.clear();
 				}
 			}
 			ImGui::EndCombo();
 		}
 
+		std::string eventPreview = "(none)";
+		if (!renderPass->event.id.empty())
+		{
+			if (renderPass->event.type == RenderPass::EventType::ModifiedShader)
+			{
+				const ModifiedShader::PackageDisk* eventModifiedShader =
+					DatabaseModifiedShaders::FindModifiedShaderById(renderPass->event.id);
+				eventPreview = eventModifiedShader
+					? DatabaseModifiedShaders::DisplayName(*eventModifiedShader)
+					: renderPass->event.id + " (missing)";
+			}
+			else
+			{
+				const RenderPass::RenderPassDisk* eventRenderPass =
+					DatabaseRenderPasses::FindRenderPassByIdReadOnly(renderPass->event.id);
+				eventPreview = eventRenderPass
+					? eventRenderPass->name
+					: renderPass->event.id + " (missing)";
+			}
+		}
+
+		ImGui::TextUnformatted("Event");
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		if (ImGui::BeginCombo("##RenderPassEvent", eventPreview.c_str()))
+		{
+			if (ImGui::Selectable("(none)", renderPass->event.id.empty()))
+				renderPass->event.id.clear();
+
+			if (renderPass->event.type == RenderPass::EventType::ModifiedShader)
+			{
+				const std::vector<ModifiedShader::PackageDisk>& modifiedShaders =
+					DatabaseModifiedShaders::GetModifiedShaders();
+				for (size_t modifiedShaderIndex = 0; modifiedShaderIndex < modifiedShaders.size(); ++modifiedShaderIndex)
+				{
+					const ModifiedShader::PackageDisk& modifiedShader = modifiedShaders[modifiedShaderIndex];
+					const bool selected = modifiedShader.id == renderPass->event.id;
+					std::string label = DatabaseModifiedShaders::DisplayName(modifiedShader);
+					if (!modifiedShader.enabled)
+						label += " (disabled)";
+					label += "##RenderPassEventModifiedShader_" + std::to_string(modifiedShaderIndex);
+					if (ImGui::Selectable(label.c_str(), selected))
+					{
+						renderPass->event.id = modifiedShader.id;
+						if (renderPass->type == RenderPass::RenderPassType::MipChain)
+							ApplyDefaultMipSourceBinding(*renderPass, &modifiedShader);
+					}
+				}
+			}
+			else
+			{
+				for (size_t eventRenderPassIndex = 0;
+					eventRenderPassIndex < refreshedRenderPasses.size();
+					++eventRenderPassIndex)
+				{
+					const RenderPass::RenderPassDisk& eventRenderPass =
+						refreshedRenderPasses[eventRenderPassIndex];
+					if (!DatabaseRenderPasses::CanReferenceRenderPass(renderPass->id, eventRenderPass.id))
+						continue;
+
+					const bool selected = eventRenderPass.id == renderPass->event.id;
+					std::string label = eventRenderPass.name + " [" +
+						RenderPass::TypeName(eventRenderPass.type) + "]";
+					if (!eventRenderPass.enabled)
+						label += " (disabled)";
+					label += "##RenderPassEventRenderPass_" + std::to_string(eventRenderPassIndex);
+					if (ImGui::Selectable(label.c_str(), selected))
+					{
+						renderPass->event.id = eventRenderPass.id;
+						if (renderPass->type == RenderPass::RenderPassType::MipChain)
+						{
+							ApplyDefaultMipSourceBinding(
+								*renderPass,
+								DatabaseRenderPasses::ResolveModifiedShader(eventRenderPass));
+						}
+					}
+				}
+			}
+			ImGui::EndCombo();
+		}
+
+		const ModifiedShader::PackageDisk* selectedModifiedShader =
+			DatabaseRenderPasses::ResolveModifiedShader(*renderPass);
 		const bool mipChainPass = renderPass->type == RenderPass::RenderPassType::MipChain;
-		if (mipChainPass)
+		const bool directMipChainEvent = mipChainPass &&
+			renderPass->event.type == RenderPass::EventType::ModifiedShader;
+		if (directMipChainEvent)
 			renderPass->timing = RenderPass::timingBefore;
 		ImGui::TextUnformatted("Timing");
-		ImGui::BeginDisabled(mipChainPass);
+		ImGui::BeginDisabled(directMipChainEvent);
 		ImGui::SetNextItemWidth(-FLT_MIN);
 		if (ImGui::BeginCombo("##RenderPassTiming", renderPass->timing.c_str()))
 		{
@@ -1678,6 +1753,17 @@ namespace ShaderInjectorGUI
 			ImGui::EndCombo();
 		}
 		ImGui::EndDisabled();
+		const std::string resolvedRootTiming = DatabaseRenderPasses::ResolveRootTiming(*renderPass);
+		if (mipChainPass && resolvedRootTiming == RenderPass::timingAfter)
+		{
+			ImGui::TextWrapped(
+				"A MipChain event must resolve to a graph that executes before the Modified Shader draw.");
+		}
+		else if (!renderPass->event.id.empty() && !selectedModifiedShader)
+		{
+			ImGui::TextWrapped(
+				"The selected event chain does not currently resolve to an available Modified Shader.");
+		}
 
 		if (mipChainPass)
 		{
@@ -1790,7 +1876,7 @@ namespace ShaderInjectorGUI
 			}
 		}
 		if (!canCreateShaderTemplate && !hasShaderTemplate)
-			ImGui::TextUnformatted("Select a pixel Modified Shader to create this template.");
+			ImGui::TextUnformatted("Select an event that resolves to a pixel Modified Shader to create this template.");
 
 		if (ImGui::Button("Save##RenderPass"))
 		{
@@ -1837,11 +1923,16 @@ namespace ShaderInjectorGUI
 
 		if (ImGui::TreeNodeEx("Info##RenderPassInfo"))
 		{
+			const std::string resolvedModifiedShaderId =
+				DatabaseRenderPasses::ResolveModifiedShaderId(*renderPass);
 			ImGui::Text("ID: %s", renderPass->id.c_str());
 			ImGui::Text("Type: %s", RenderPass::TypeName(renderPass->type));
 			ImGui::Text("Package: %s", renderPass->packageDirectory.c_str());
 			ImGui::Text("JSON: %s", renderPass->jsonPath.c_str());
-			ImGui::Text("Modified Shader ID: %s", renderPass->modifiedShaderId.empty() ? "(none)" : renderPass->modifiedShaderId.c_str());
+			ImGui::Text("Event Type: %s", RenderPass::EventTypeName(renderPass->event.type));
+			ImGui::Text("Event ID: %s", renderPass->event.id.empty() ? "(none)" : renderPass->event.id.c_str());
+			ImGui::Text("Resolved Modified Shader ID: %s", resolvedModifiedShaderId.empty() ? "(none)" : resolvedModifiedShaderId.c_str());
+			ImGui::Text("Resolved Root Boundary: %s", resolvedRootTiming.empty() ? "(none)" : resolvedRootTiming.c_str());
 			ImGui::Text("Maximum Table Descriptors: %u", renderPass->maximumTrackedDescriptors);
 			if (mipChainPass)
 			{
@@ -1858,20 +1949,20 @@ namespace ShaderInjectorGUI
 				ImGui::Text("Shader Type: %s", StringHelper::ShaderTypeToString(selectedModifiedShader->shaderType).c_str());
 
 			int linkedShaderTargetCount = 0;
-			if (!renderPass->modifiedShaderId.empty())
+			if (!resolvedModifiedShaderId.empty())
 			{
 				for (const ShaderTarget::ShaderTargetDisk& shaderTarget : HookD3D12::gLoadedShaderTargets)
 				{
-					if (shaderTarget.modifiedShaderId == renderPass->modifiedShaderId)
+					if (shaderTarget.modifiedShaderId == resolvedModifiedShaderId)
 						++linkedShaderTargetCount;
 				}
 			}
 			ImGui::Text("Resolved Shader Targets: %d", linkedShaderTargetCount);
-			if (!renderPass->modifiedShaderId.empty())
+			if (!resolvedModifiedShaderId.empty())
 			{
 				for (const ShaderTarget::ShaderTargetDisk& shaderTarget : HookD3D12::gLoadedShaderTargets)
 				{
-					if (shaderTarget.modifiedShaderId != renderPass->modifiedShaderId)
+					if (shaderTarget.modifiedShaderId != resolvedModifiedShaderId)
 						continue;
 					ImGui::BulletText("%s [%s]", shaderTarget.name.c_str(), shaderTarget.originalShaderBytecodeHash.c_str());
 				}
@@ -1885,7 +1976,10 @@ namespace ShaderInjectorGUI
 			ImGui::Text("Triggers: %llu", static_cast<unsigned long long>(diagnostics.triggerCount));
 			ImGui::Text("Executions: %llu", static_cast<unsigned long long>(diagnostics.executionCount));
 			ImGui::Text("Execution Failures: %llu", static_cast<unsigned long long>(diagnostics.executionFailureCount));
-			ImGui::Text("Last Boundary: %s", diagnostics.lastTiming.empty() ? "(none)" : diagnostics.lastTiming.c_str());
+			ImGui::Text("Last Event: %s:%s",
+				diagnostics.lastEventType.empty() ? "(none)" : diagnostics.lastEventType.c_str(),
+				diagnostics.lastEventId.empty() ? "(none)" : diagnostics.lastEventId.c_str());
+			ImGui::Text("Last Event Timing: %s", diagnostics.lastTiming.empty() ? "(none)" : diagnostics.lastTiming.c_str());
 			ImGui::Text("Last Command: %s", diagnostics.lastOperation.empty() ? "(none)" : diagnostics.lastOperation.c_str());
 			ImGui::Text("Modified Shader: %s", diagnostics.lastModifiedShaderId.empty() ? "(none)" : diagnostics.lastModifiedShaderId.c_str());
 			ImGui::Text("Last Target: %s", diagnostics.lastShaderTargetName.empty() ? "(none)" : diagnostics.lastShaderTargetName.c_str());

@@ -17,6 +17,16 @@ namespace RenderPass
 		}
 	}
 
+	const char* EventTypeName(EventType type)
+	{
+		switch (type)
+		{
+			case EventType::RenderPass: return "Render Pass";
+			case EventType::ModifiedShader:
+			default: return "Modified Shader";
+		}
+	}
+
 	bool IsTimingValid(const std::string& timing)
 	{
 		return timing == timingBefore || timing == timingAfter;
@@ -50,7 +60,15 @@ namespace RenderPass
 			if (!ShaderInjectorIO::ReadTextFile(jsonPath, jsonText))
 				return false;
 
-			const nlohmann::ordered_json json = nlohmann::ordered_json::parse(jsonText);
+			nlohmann::ordered_json json = nlohmann::ordered_json::parse(jsonText);
+			if (!json.contains("event"))
+			{
+				EventReferenceDisk legacyEvent{};
+				legacyEvent.type = EventType::ModifiedShader;
+				legacyEvent.id = json.value("modifiedShaderId", std::string());
+				json["event"] = legacyEvent;
+			}
+
 			RenderPassDisk renderPass = json.get<RenderPassDisk>();
 			if (renderPass.format != formatName || renderPass.id.empty())
 				return false;
@@ -60,8 +78,11 @@ namespace RenderPass
 
 			if (!IsTimingValid(renderPass.timing))
 				renderPass.timing = timingBefore;
-			if (renderPass.type == RenderPassType::MipChain)
+			if (renderPass.type == RenderPassType::MipChain &&
+				renderPass.event.type == EventType::ModifiedShader)
+			{
 				renderPass.timing = timingBefore;
+			}
 			renderPass.schemaVersion = currentSchemaVersion;
 
 			renderPass.packageDirectory = ShaderInjectorIO::DirectoryFromPath(jsonPath);

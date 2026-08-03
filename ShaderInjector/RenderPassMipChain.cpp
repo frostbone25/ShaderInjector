@@ -1,6 +1,7 @@
 #include "RenderPassMipChain.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <iterator>
 #include <memory>
@@ -94,6 +95,23 @@ namespace RenderPassMipChain
 		std::unordered_map<ID3D12GraphicsCommandList*, GraphicsStateSnapshot> gPendingRestores;
 		std::unordered_map<ID3D12CommandQueue*, QueueFence> gQueueFences;
 		std::atomic<uint32_t> gRecordedCommandListCount = 0;
+
+		struct ThreadDeviceResourcesLookup
+		{
+			ID3D12Device* device = nullptr;
+			DeviceResources* resources = nullptr;
+		};
+
+		struct ThreadGeneratorPipelineLookup
+		{
+			DeviceResources* deviceResources = nullptr;
+			const RenderPass::RenderPassDisk* renderPass = nullptr;
+			DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+			ID3D12PipelineState* pipelineState = nullptr;
+		};
+
+		thread_local ThreadDeviceResourcesLookup gThreadDeviceResourcesLookup;
+		thread_local ThreadGeneratorPipelineLookup gThreadGeneratorPipelineLookup;
 
 		UINT CalculateMipLevelCount(UINT width, UINT height)
 		{
@@ -309,6 +327,12 @@ namespace RenderPassMipChain
 
 		DeviceResources* GetDeviceResources(ID3D12Device* device, std::string& outError)
 		{
+			if (gThreadDeviceResourcesLookup.device == device &&
+				gThreadDeviceResourcesLookup.resources)
+			{
+				return gThreadDeviceResourcesLookup.resources;
+			}
+
 			std::lock_guard<std::mutex> lock(gDeviceResourcesMutex);
 			auto& resources = gDeviceResources[device];
 			if (!resources)
@@ -318,6 +342,7 @@ namespace RenderPassMipChain
 			}
 			if (!CreateGeneratorRootSignature(*resources, outError))
 				return nullptr;
+			gThreadDeviceResourcesLookup = { device, resources.get() };
 			return resources.get();
 		}
 
@@ -327,6 +352,14 @@ namespace RenderPassMipChain
 			DXGI_FORMAT format,
 			std::string& outError)
 		{
+			if (gThreadGeneratorPipelineLookup.deviceResources == &deviceResources &&
+				gThreadGeneratorPipelineLookup.renderPass == &renderPass &&
+				gThreadGeneratorPipelineLookup.format == format &&
+				gThreadGeneratorPipelineLookup.pipelineState)
+			{
+				return gThreadGeneratorPipelineLookup.pipelineState;
+			}
+
 			const std::string cacheKey = renderPass.id + ':' +
 				std::to_string(renderPass.vertexShaderBlobHash) + ':' +
 				std::to_string(renderPass.fragmentShaderBlobHash) + ':' +
@@ -335,7 +368,11 @@ namespace RenderPassMipChain
 				std::lock_guard<std::mutex> lock(gDeviceResourcesMutex);
 				const auto pipelineIt = deviceResources.pipelines.find(cacheKey);
 				if (pipelineIt != deviceResources.pipelines.end())
+				{
+					gThreadGeneratorPipelineLookup = {
+						&deviceResources, &renderPass, format, pipelineIt->second.Get() };
 					return pipelineIt->second.Get();
+				}
 				const auto errorIt = deviceResources.pipelineErrors.find(cacheKey);
 				if (errorIt != deviceResources.pipelineErrors.end())
 				{
@@ -383,6 +420,8 @@ namespace RenderPassMipChain
 
 			std::lock_guard<std::mutex> lock(gDeviceResourcesMutex);
 			auto [pipelineIt, inserted] = deviceResources.pipelines.emplace(cacheKey, pipeline);
+			gThreadGeneratorPipelineLookup = {
+				&deviceResources, &renderPass, format, pipelineIt->second.Get() };
 			return pipelineIt->second.Get();
 		}
 
@@ -607,15 +646,16 @@ namespace RenderPassMipChain
 				FALSE,
 				gameState.depthStencil.ptr ? &gameState.depthStencil : nullptr);
 
-			std::vector<ID3D12DescriptorHeap*> descriptorHeaps;
+			std::array<ID3D12DescriptorHeap*, D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES> descriptorHeaps{};
+			UINT descriptorHeapCount = 0;
 			for (const DescriptorHeapBinding& heap : gameState.descriptorHeaps)
 			{
-				if (heap.heap)
-					descriptorHeaps.push_back(heap.heap);
+				if (heap.heap && descriptorHeapCount < descriptorHeaps.size())
+					descriptorHeaps[descriptorHeapCount++] = heap.heap;
 			}
 			commandList->SetDescriptorHeaps(
-				static_cast<UINT>(descriptorHeaps.size()),
-				descriptorHeaps.empty() ? nullptr : descriptorHeaps.data());
+				descriptorHeapCount,
+				descriptorHeapCount ? descriptorHeaps.data() : nullptr);
 			RestoreRootArguments(commandList, gameState, true);
 		}
 
@@ -629,7 +669,7 @@ namespace RenderPassMipChain
 			MipTextureResources& resources = *mipPass.resources;
 			if (resources.allSubresourcesShaderReadable)
 			{
-				std::vector<D3D12_RESOURCE_BARRIER> barriers(resources.mipLevelCount);
+				std::array<D3D12_RESOURCE_BARRIER, sizeof(UINT) * 8> barriers{};
 				for (UINT mipLevel = 0; mipLevel < resources.mipLevelCount; ++mipLevel)
 				{
 					D3D12_RESOURCE_BARRIER& barrier = barriers[mipLevel];
@@ -639,7 +679,7 @@ namespace RenderPassMipChain
 					barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 					barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
 				}
-				commandList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+				commandList->ResourceBarrier(resources.mipLevelCount, barriers.data());
 			}
 
 			const UINT sourceIncrement = deviceResources.device->GetDescriptorHandleIncrementSize(
@@ -913,8 +953,8 @@ namespace RenderPassMipChain
 		std::vector<ResolvedMipPass*> successfulPasses;
 		{
 			HookD3D12::ScopedRenderPassInjection injectionScope;
-			const std::wstring eventName = L"Shader Injector Mip Chain";
-			commandList->BeginEvent(0, eventName.c_str(), static_cast<UINT>((eventName.size() + 1) * sizeof(wchar_t)));
+			constexpr wchar_t eventName[] = L"Shader Injector Mip Chain";
+			commandList->BeginEvent(0, eventName, static_cast<UINT>(sizeof(eventName)));
 			for (ResolvedMipPass& mipPass : resolvedPasses)
 			{
 				ExecutionResult& result = results[mipPass.resultIndex];
@@ -986,15 +1026,16 @@ namespace RenderPassMipChain
 		}
 
 		HookD3D12::ScopedRenderPassInjection injectionScope;
-		std::vector<ID3D12DescriptorHeap*> descriptorHeaps;
+		std::array<ID3D12DescriptorHeap*, D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES> descriptorHeaps{};
+		UINT descriptorHeapCount = 0;
 		for (const DescriptorHeapBinding& heap : gameState.descriptorHeaps)
 		{
-			if (heap.heap)
-				descriptorHeaps.push_back(heap.heap);
+			if (heap.heap && descriptorHeapCount < descriptorHeaps.size())
+				descriptorHeaps[descriptorHeapCount++] = heap.heap;
 		}
 		commandList->SetDescriptorHeaps(
-			static_cast<UINT>(descriptorHeaps.size()),
-			descriptorHeaps.empty() ? nullptr : descriptorHeaps.data());
+			descriptorHeapCount,
+			descriptorHeapCount ? descriptorHeaps.data() : nullptr);
 		RestoreRootArguments(commandList, gameState, true);
 	}
 
@@ -1117,5 +1158,7 @@ namespace RenderPassMipChain
 		}
 		std::lock_guard<std::mutex> lock(gDeviceResourcesMutex);
 		gDeviceResources.clear();
+		gThreadDeviceResourcesLookup = {};
+		gThreadGeneratorPipelineLookup = {};
 	}
 }

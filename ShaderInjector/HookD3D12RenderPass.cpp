@@ -22,8 +22,18 @@ namespace HookD3D12
 				const char* operation,
 				ID3D12GraphicsCommandList* commandList)
 			{
-				if (logged.exchange(true, std::memory_order_relaxed))
+				if (logged.load(std::memory_order_relaxed))
 					return;
+
+				bool expected = false;
+				if (!logged.compare_exchange_strong(
+					expected,
+					true,
+					std::memory_order_relaxed,
+					std::memory_order_relaxed))
+				{
+					return;
+				}
 
 				ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
 					"HookD3D12RenderPass->%s: command-list execution hook active commandList=%p type=%u renderPassesEnabled=%u",
@@ -58,26 +68,21 @@ namespace HookD3D12
 		UINT startInstanceLocation)
 	{
 		const bool injectedCall = IsInsideRenderPassInjection();
-		bool recordedBeforeBoundary = false;
+		uint32_t boundaryMask = 0;
 		if (!injectedCall)
 		{
 			LogFirstCommandHookHit(gLoggedDrawInstancedHook, "Hook_DrawInstanced", commandList);
-			recordedBeforeBoundary = Globals::gShaderInjectorEnabled && RenderPassRuntime::ShouldRecordExecutionBoundary(
-				commandList,
-				false,
-				RenderPassRuntime::ExecutionBoundary::Before);
-			if (recordedBeforeBoundary)
+			if (Globals::gShaderInjectorEnabled)
+				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
+			if ((boundaryMask & 1u) != 0)
 				RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "DrawInstanced");
 		}
 
 		Original_DrawInstanced(commandList, vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation);
-		if (recordedBeforeBoundary)
+		if ((boundaryMask & 1u) != 0)
 			RenderPassRuntime::CompleteGraphicsExecutionBoundary(commandList);
 
-		if (Globals::gShaderInjectorEnabled && !injectedCall && RenderPassRuntime::ShouldRecordExecutionBoundary(
-			commandList,
-			false,
-			RenderPassRuntime::ExecutionBoundary::After))
+		if ((boundaryMask & 2u) != 0)
 			RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::After, "DrawInstanced");
 	}
 
@@ -90,26 +95,21 @@ namespace HookD3D12
 		UINT startInstanceLocation)
 	{
 		const bool injectedCall = IsInsideRenderPassInjection();
-		bool recordedBeforeBoundary = false;
+		uint32_t boundaryMask = 0;
 		if (!injectedCall)
 		{
 			LogFirstCommandHookHit(gLoggedDrawIndexedInstancedHook, "Hook_DrawIndexedInstanced", commandList);
-			recordedBeforeBoundary = Globals::gShaderInjectorEnabled && RenderPassRuntime::ShouldRecordExecutionBoundary(
-				commandList,
-				false,
-				RenderPassRuntime::ExecutionBoundary::Before);
-			if (recordedBeforeBoundary)
+			if (Globals::gShaderInjectorEnabled)
+				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
+			if ((boundaryMask & 1u) != 0)
 				RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "DrawIndexedInstanced");
 		}
 
 		Original_DrawIndexedInstanced(commandList, indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation);
-		if (recordedBeforeBoundary)
+		if ((boundaryMask & 1u) != 0)
 			RenderPassRuntime::CompleteGraphicsExecutionBoundary(commandList);
 
-		if (Globals::gShaderInjectorEnabled && !injectedCall && RenderPassRuntime::ShouldRecordExecutionBoundary(
-			commandList,
-			false,
-			RenderPassRuntime::ExecutionBoundary::After))
+		if ((boundaryMask & 2u) != 0)
 			RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::After, "DrawIndexedInstanced");
 	}
 
@@ -120,22 +120,19 @@ namespace HookD3D12
 		UINT threadGroupCountZ)
 	{
 		const bool injectedCall = IsInsideRenderPassInjection();
+		uint32_t boundaryMask = 0;
 		if (!injectedCall)
 		{
 			LogFirstCommandHookHit(gLoggedDispatchHook, "Hook_Dispatch", commandList);
-			if (Globals::gShaderInjectorEnabled && RenderPassRuntime::ShouldRecordExecutionBoundary(
-				commandList,
-				true,
-				RenderPassRuntime::ExecutionBoundary::Before))
+			if (Globals::gShaderInjectorEnabled)
+				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, true);
+			if ((boundaryMask & 1u) != 0)
 				RenderPassRuntime::RecordExecutionBoundary(commandList, true, RenderPassRuntime::ExecutionBoundary::Before, "Dispatch");
 		}
 
 		Original_Dispatch(commandList, threadGroupCountX, threadGroupCountY, threadGroupCountZ);
 
-		if (Globals::gShaderInjectorEnabled && !injectedCall && RenderPassRuntime::ShouldRecordExecutionBoundary(
-			commandList,
-			true,
-			RenderPassRuntime::ExecutionBoundary::After))
+		if ((boundaryMask & 2u) != 0)
 			RenderPassRuntime::RecordExecutionBoundary(commandList, true, RenderPassRuntime::ExecutionBoundary::After, "Dispatch");
 	}
 
@@ -286,15 +283,13 @@ namespace HookD3D12
 		UINT64 countBufferOffset)
 	{
 		const bool injectedCall = IsInsideRenderPassInjection();
-		bool recordedBeforeBoundary = false;
+		uint32_t boundaryMask = 0;
 		if (!injectedCall)
 		{
 			LogFirstCommandHookHit(gLoggedExecuteIndirectHook, "Hook_ExecuteIndirect", commandList);
-			recordedBeforeBoundary = Globals::gShaderInjectorEnabled && RenderPassRuntime::ShouldRecordExecutionBoundary(
-				commandList,
-				false,
-				RenderPassRuntime::ExecutionBoundary::Before);
-			if (recordedBeforeBoundary)
+			if (Globals::gShaderInjectorEnabled)
+				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
+			if ((boundaryMask & 1u) != 0)
 				RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "ExecuteIndirect");
 		}
 
@@ -306,13 +301,10 @@ namespace HookD3D12
 			argumentBufferOffset,
 			countBuffer,
 			countBufferOffset);
-		if (recordedBeforeBoundary)
+		if ((boundaryMask & 1u) != 0)
 			RenderPassRuntime::CompleteGraphicsExecutionBoundary(commandList);
 
-		if (Globals::gShaderInjectorEnabled && !injectedCall && RenderPassRuntime::ShouldRecordExecutionBoundary(
-			commandList,
-			false,
-			RenderPassRuntime::ExecutionBoundary::After))
+		if ((boundaryMask & 2u) != 0)
 			RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::After, "ExecuteIndirect");
 	}
 }
