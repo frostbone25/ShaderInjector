@@ -487,6 +487,11 @@ namespace ShaderInjectorIO
 		return JoinPath(GetShaderInjectorDirectory(), "ShaderTargets");
 	}
 
+	std::string GetRenderPassesDirectory()
+	{
+		return JoinPath(GetShaderInjectorDirectory(), "RenderPasses");
+	}
+
 	std::string GetModifiedShadersDirectory()
 	{
 		return JoinPath(GetShaderInjectorDirectory(), "ModifiedShaders");
@@ -1016,6 +1021,7 @@ namespace ShaderInjectorIO
 		std::string dumpDirectory = GetDumpsDirectory();
 		std::string uncapturedPSODirectory = GetUncapturedPSODirectory();
 		std::string shaderTargetsDirectory = GetShaderTargetsDirectory();
+		std::string renderPassesDirectory = GetRenderPassesDirectory();
 		std::string modifiedShadersDirectory = GetModifiedShadersDirectory();
 		std::string modifiedShadersIncludesDirectory = GetModifiedShadersIncludesDirectory();
 		std::string injectorSettingsPath = GetInjectorSettingsPath();
@@ -1070,6 +1076,12 @@ namespace ShaderInjectorIO
 		{
 			DirectoryCreate(shaderTargetsDirectory);
 			WriteToLogFile("ShaderInjectorIO->Initalize: " + shaderTargetsDirectory + " did not exist! Created anyway.");
+		}
+
+		if (!DirectoryExists(renderPassesDirectory))
+		{
+			DirectoryCreate(renderPassesDirectory);
+			WriteToLogFile("ShaderInjectorIO->Initalize: " + renderPassesDirectory + " did not exist! Created anyway.");
 		}
 
 		if (!DirectoryExists(modifiedShadersDirectory))

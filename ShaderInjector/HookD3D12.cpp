@@ -57,6 +57,10 @@
 #include "HookD3D12ReplacementTemplates.h"
 #include "HookD3D12OverlayStartup.h"
 #include "HookD3D12PipelineRegistry.h"
+#include "HookD3D12RenderPass.h"
+#include "RenderPassRuntime.h"
+#include "RenderPassExecutor.h"
+#include "RenderDocIntegration.h"
 #include "VTableIndex.h"
 #include "StringHelper.h"
 
@@ -397,6 +401,7 @@ namespace HookD3D12
 	void RebuildPipelineStateOverrideMap()
 	{
 		gPipelineStateOverrides.clear();
+		RenderPassRuntime::BeginShaderTargetBindingUpdate();
 
 		for (auto& pipeline : gGraphicsPipelines)
 		{
@@ -409,8 +414,34 @@ namespace HookD3D12
 				continue;
 			}
 
-			if (pipeline.psoWithReplacement && ReplacementStillEnabled(pipeline.activeShaderTargetName, pipeline.activeShaderTargetHash, pipeline.activeShaderTargetType))
+			if (!pipeline.psoWithReplacement)
+				continue;
+
+			const ShaderTarget::ShaderTargetDisk* activeShaderTarget = FindActiveShaderTarget(
+				pipeline.activeShaderTargetName,
+				pipeline.activeShaderTargetHash,
+				pipeline.activeShaderTargetType);
+			if (activeShaderTarget)
+			{
+				RenderPassRuntime::PipelineOutputState outputState{};
+				outputState.renderTargetCount = (std::min)(
+					pipeline.originalDesc.NumRenderTargets,
+					static_cast<UINT>(D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT));
+				for (UINT renderTargetIndex = 0; renderTargetIndex < outputState.renderTargetCount; ++renderTargetIndex)
+					outputState.renderTargetFormats[renderTargetIndex] = pipeline.originalDesc.RTVFormats[renderTargetIndex];
+				outputState.depthStencilFormat = pipeline.originalDesc.DSVFormat;
+				outputState.sampleCount = pipeline.originalDesc.SampleDesc.Count ? pipeline.originalDesc.SampleDesc.Count : 1;
+				outputState.sampleQuality = pipeline.originalDesc.SampleDesc.Quality;
+
 				gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithReplacement;
+				RenderPassRuntime::AddShaderTargetBinding(
+					pipeline.pipelineState,
+					activeShaderTarget->modifiedShaderId,
+					pipeline.activeShaderTargetName,
+					pipeline.activeShaderTargetHash,
+					pipeline.activeShaderTargetType,
+					outputState);
+			}
 		}
 
 		for (auto& pipeline : gPipelineStates)
@@ -425,8 +456,26 @@ namespace HookD3D12
 			if (pipeline.hsDisabled && pipeline.psoWithoutHS) { gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutHS; continue; }
 			if (pipeline.dsDisabled && pipeline.psoWithoutDS) { gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutDS; continue; }
 
-			if (pipeline.psoWithReplacement && ReplacementStillEnabled(pipeline.activeShaderTargetName, pipeline.activeShaderTargetHash, pipeline.activeShaderTargetType))
+			if (!pipeline.psoWithReplacement)
+				continue;
+
+			const ShaderTarget::ShaderTargetDisk* activeShaderTarget = FindActiveShaderTarget(
+				pipeline.activeShaderTargetName,
+				pipeline.activeShaderTargetHash,
+				pipeline.activeShaderTargetType);
+			if (activeShaderTarget)
+			{
+				const RenderPassRuntime::PipelineOutputState outputState =
+					ExtractPipelineOutputState(pipeline);
 				gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithReplacement;
+				RenderPassRuntime::AddShaderTargetBinding(
+					pipeline.pipelineState,
+					activeShaderTarget->modifiedShaderId,
+					pipeline.activeShaderTargetName,
+					pipeline.activeShaderTargetHash,
+					pipeline.activeShaderTargetType,
+					outputState);
+			}
 		}
 
 		for (auto& uncaptured : gUncapturedPipelineStates)
@@ -434,9 +483,23 @@ namespace HookD3D12
 			if (!uncaptured.pipelineState || !uncaptured.replacementPipelineState)
 				continue;
 
-			if (ReplacementStillEnabled(uncaptured.activeShaderTargetName, uncaptured.activeShaderTargetHash, uncaptured.activeShaderTargetType))
+			const ShaderTarget::ShaderTargetDisk* activeShaderTarget = FindActiveShaderTarget(
+				uncaptured.activeShaderTargetName,
+				uncaptured.activeShaderTargetHash,
+				uncaptured.activeShaderTargetType);
+			if (activeShaderTarget)
+			{
 				gPipelineStateOverrides[uncaptured.pipelineState] = uncaptured.replacementPipelineState;
+				RenderPassRuntime::AddShaderTargetBinding(
+					uncaptured.pipelineState,
+					activeShaderTarget->modifiedShaderId,
+					uncaptured.activeShaderTargetName,
+					uncaptured.activeShaderTargetHash,
+					uncaptured.activeShaderTargetType);
+			}
 		}
+
+		RenderPassRuntime::CommitShaderTargetBindingUpdate();
 
 		auto publishedOverrides = std::make_unique<const PipelineStateOverrideMap>(gPipelineStateOverrides);
 		const PipelineStateOverrideMap* publishedOverridePointer = publishedOverrides.get();
@@ -565,6 +628,15 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Hook_SetGraphicsRootSignature(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSignature)
 	{
+		if (IsInsideRenderPassInjection())
+		{
+			Original_SetGraphicsRootSignature(cmdList, rootSignature);
+			return;
+		}
+
+		if (Globals::gShaderInjectorEnabled)
+			RenderPassRuntime::TrackRootSignature(cmdList, false, rootSignature);
+
 		CommandListPipelineState& commandListState = GetCommandListPipelineState(cmdList);
 		commandListState.graphicsRootSignature.store(rootSignature, std::memory_order_release);
 		ID3D12PipelineState* currentPipelineState =
@@ -587,6 +659,15 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Hook_SetComputeRootSignature(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSignature)
 	{
+		if (IsInsideRenderPassInjection())
+		{
+			Original_SetComputeRootSignature(cmdList, rootSignature);
+			return;
+		}
+
+		if (Globals::gShaderInjectorEnabled)
+			RenderPassRuntime::TrackRootSignature(cmdList, true, rootSignature);
+
 		CommandListPipelineState& commandListState = GetCommandListPipelineState(cmdList);
 		commandListState.computeRootSignature.store(rootSignature, std::memory_order_release);
 		ID3D12PipelineState* currentPipelineState =
@@ -665,6 +746,12 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Hook_SetPipelineState(ID3D12GraphicsCommandList* cmdList, ID3D12PipelineState* pso)
 	{
+		if (IsInsideRenderPassInjection())
+		{
+			Original_SetPipelineState(cmdList, pso);
+			return;
+		}
+
 		if (!Globals::gShaderInjectorEnabled)
 		{
 			Original_SetPipelineState(cmdList, pso);
@@ -672,6 +759,7 @@ namespace HookD3D12
 		}
 
 		ID3D12PipelineState* boundPipelineState = pso;
+		RenderPassRuntime::TrackPipelineState(cmdList, pso);
 		CommandListPipelineState& commandListState = GetCommandListPipelineState(cmdList);
 		commandListState.pipelineState.store(pso, std::memory_order_release);
 		ID3D12RootSignature* observedGraphicsRootSignature =
@@ -681,6 +769,7 @@ namespace HookD3D12
 
 		if (TryResolvePublishedPipelineState(pso, boundPipelineState))
 		{
+			RenderPassRuntime::TrackBoundPipelineState(cmdList, boundPipelineState);
 			Original_SetPipelineState(cmdList, boundPipelineState);
 			return;
 		}
@@ -722,6 +811,7 @@ namespace HookD3D12
 		// Never call into the game's command list while holding the injector's
 		// pipeline database mutex. This keeps parallel command recording moving
 		// while replacements are being published.
+		RenderPassRuntime::TrackBoundPipelineState(cmdList, boundPipelineState);
 		Original_SetPipelineState(cmdList, boundPipelineState);
 	}
 
@@ -731,6 +821,20 @@ namespace HookD3D12
 
 	HRESULT STDMETHODCALLTYPE Hook_ResetGraphicsCommandList(ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* allocator, ID3D12PipelineState* initialState)
 	{
+		const bool trackRenderPassState = RenderPassRuntime::IsTrackingRequired();
+		const bool retireRecordedRenderPassWork =
+			RenderPassRuntime::HasPendingCommandListSubmissionWork();
+		if (trackRenderPassState)
+			RenderPassRuntime::ResetCommandList(cmdList, initialState);
+
+		const auto resetCommandList = [&](ID3D12PipelineState* pipelineState)
+		{
+			const HRESULT result = Original_ResetGraphicsCommandList(cmdList, allocator, pipelineState);
+			if (trackRenderPassState || retireRecordedRenderPassWork)
+				RenderPassRuntime::CompleteCommandListReset(cmdList, SUCCEEDED(result));
+			return result;
+		};
+
 		if (!Globals::gShaderInjectorEnabled)
 		{
 			CommandListPipelineState& commandListState = GetCommandListPipelineState(cmdList);
@@ -738,7 +842,7 @@ namespace HookD3D12
 			commandListState.computeRootSignature.store(nullptr, std::memory_order_release);
 			commandListState.pipelineState.store(nullptr, std::memory_order_release);
 
-			return Original_ResetGraphicsCommandList(cmdList, allocator, initialState);
+			return resetCommandList(initialState);
 		}
 
 		ID3D12PipelineState* boundState = initialState;
@@ -749,7 +853,10 @@ namespace HookD3D12
 		commandListState.pipelineState.store(initialState, std::memory_order_release);
 
 		if (TryResolvePublishedPipelineState(initialState, boundState))
-			return Original_ResetGraphicsCommandList(cmdList, allocator, boundState);
+		{
+			RenderPassRuntime::TrackBoundPipelineState(cmdList, boundState);
+			return resetCommandList(boundState);
+		}
 
 		{
 			std::lock_guard<std::mutex> lock(gPipelineMutex);
@@ -785,7 +892,8 @@ namespace HookD3D12
 				boundState = overrideIt->second;
 		}
 
-		return Original_ResetGraphicsCommandList(cmdList, allocator, boundState);
+		RenderPassRuntime::TrackBoundPipelineState(cmdList, boundState);
+		return resetCommandList(boundState);
 	}
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE COMPUTE PIPELINE STATE |||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -822,6 +930,9 @@ namespace HookD3D12
 	//not really what I want but going to keep around because it's good to have just in case, but most of the game rendering is actually through CreatePipelineState
 	HRESULT STDMETHODCALLTYPE Hook_CreateGraphicsPipelineState(ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC* desc, REFIID riid, void** ppPipelineState)
 	{
+		if (IsInsideRenderPassInjection())
+			return Original_CreateGraphicsPipelineState(device, desc, riid, ppPipelineState);
+
 		// ImGui creates its own graphics PSO immediately before the first overlay submission.
 		// Do not let that internal work extend the game's pipeline-activity startup gate.
 		ScopedPipelineActivity pipelineActivity(!gInsideOverlayResourceCreation);
@@ -1927,6 +2038,13 @@ namespace HookD3D12
 		gRuntimeReady.store(ready, std::memory_order_release);
 	}
 
+	ID3D12Device* GetCapturedDevice()
+	{
+		// The injector owns this reference for the lifetime of the active D3D12 hook.
+		// Callers must treat the returned pointer as borrowed.
+		return gDevice;
+	}
+
 	static bool ComObjectsAreSame(IUnknown* firstObject, IUnknown* secondObject)
 	{
 		if (!firstObject || !secondObject)
@@ -2905,6 +3023,8 @@ namespace HookD3D12
 		}
 
 		InstallCommandListHooks();
+		InstallDeferredRenderPassHooks(gDevice);
+		RenderDocIntegration::PollCaptureStatus();
 
 
 		if (!Globals::gShowShaderInjectorGUI || gOverlayRenderingDisabled)
@@ -3174,6 +3294,8 @@ namespace HookD3D12
 	void STDMETHODCALLTYPE Hook_ExecuteCommandListsD3D12(ID3D12CommandQueue* _this, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists)
 	{
 		Original_ExecuteCommandListsD3D12(_this, NumCommandLists, ppCommandLists);
+		if (RenderPassRuntime::HasPendingCommandListSubmissionWork())
+			RenderPassRuntime::NotifyCommandListsSubmitted(_this, NumCommandLists, ppCommandLists);
 		RememberDirectCommandQueue(_this);
 	}
 
@@ -3428,6 +3550,7 @@ namespace HookD3D12
 			gSwapChainCommandQueueBindings.clear();
 		}
 
+		RenderPassExecutor::ReleaseResources();
 		ReleaseRootSignatureCache();
 
 		for (UncapturedPipelineStateInfo& uncaptured : gUncapturedPipelineStates)

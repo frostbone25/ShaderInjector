@@ -24,5 +24,8 @@ namespace HookD3D12
 	bool GraphicsPipelineMatchesReplacementTemplate(const GraphicsPipelineInfo& pipeline, const ShaderTarget::ShaderTargetDisk& replacement);
 	bool StreamPipelineMatchesReplacementTemplate(const PipelineStateInfo& pipeline, const ShaderTarget::ShaderTargetDisk& replacement);
 	D3D12_PIPELINE_STATE_SUBOBJECT_TYPE SubobjectTypeForShaderType(ShaderTarget::ShaderType shaderType);
-	bool ReplacementStillEnabled(const std::string& replacementName, uint64_t shaderHash, ShaderTarget::ShaderType shaderType);
+	const ShaderTarget::ShaderTargetDisk* FindActiveShaderTarget(
+		const std::string& shaderTargetName,
+		uint64_t shaderHash,
+		ShaderTarget::ShaderType shaderType);
 }

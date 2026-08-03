@@ -165,6 +165,7 @@
   <ItemGroup>
     <ClInclude Include="FPSCounter.h" />
     <ClInclude Include="DatabaseShaderTargets.h" />
+	<ClInclude Include="DatabaseRenderPasses.h" />
     <ClInclude Include="DatabaseModifiedShaders.h" />
     <ClInclude Include="DatabaseShaderConfigurations.h" />
     <ClInclude Include="DatabaseGraphicsPSOs.h" />
@@ -175,6 +176,8 @@
     <ClInclude Include="HookD3D12PipelineUtils.h" />
     <ClInclude Include="HookD3D12ReplacementLookup.h" />
     <ClInclude Include="HookD3D12ReplacementTemplates.h" />
+	<ClInclude Include="HookD3D12RenderPass.h" />
+	<ClInclude Include="HookD3D12Resources.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_dx12.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_win32.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\imconfig.h" />
@@ -190,6 +193,12 @@
     <ClInclude Include="dsound_proxy.h" />
     <ClInclude Include="Keycodes.h" />
     <ClInclude Include="ProcessRunner.h" />
+	<ClInclude Include="RenderPass.h" />
+	<ClInclude Include="RenderPassExecutor.h" />
+	<ClInclude Include="RenderPassMipChain.h" />
+	<ClInclude Include="RenderPassRuntime.h" />
+	<ClInclude Include="RenderPassResourceRegistry.h" />
+	<ClInclude Include="RenderPassShaders.h" />
 	<ClInclude Include="ShaderInjectorVersion.h" />
     <ClInclude Include="ShaderInjectorGUITooltips.h" />
     <ClInclude Include="ShaderInjectorIO.h" />
@@ -206,6 +215,7 @@
   <ItemGroup>
     <ClCompile Include="FPSCounter.cpp" />
     <ClCompile Include="DatabaseShaderTargets.cpp" />
+	<ClCompile Include="DatabaseRenderPasses.cpp" />
     <ClCompile Include="DatabaseModifiedShaders.cpp" />
     <ClCompile Include="DatabaseShaderConfigurations.cpp" />
     <ClCompile Include="DatabaseGraphicsPSOs.cpp" />
@@ -220,6 +230,8 @@
     <ClCompile Include="HookD3D12PipelineUtils.cpp" />
     <ClCompile Include="HookD3D12ReplacementLookup.cpp" />
     <ClCompile Include="HookD3D12ReplacementTemplates.cpp" />
+	<ClCompile Include="HookD3D12RenderPass.cpp" />
+	<ClCompile Include="HookD3D12Resources.cpp" />
     <ClCompile Include="HookD3D12RootSignature.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_dx12.cpp" />
@@ -233,6 +245,12 @@
     <ClCompile Include="HookInput.cpp" />
     <ClCompile Include="dsound_proxy.cpp" />
     <ClCompile Include="Keycodes.cpp" />
+	<ClCompile Include="RenderPass.cpp" />
+	<ClCompile Include="RenderPassExecutor.cpp" />
+	<ClCompile Include="RenderPassMipChain.cpp" />
+	<ClCompile Include="RenderPassRuntime.cpp" />
+	<ClCompile Include="RenderPassResourceRegistry.cpp" />
+	<ClCompile Include="RenderPassShaders.cpp" />
     <ClCompile Include="ProcessRunner.cpp" />
     <ClCompile Include="RenderDocIntegration.cpp" />
     <ClCompile Include="ShaderAnalyzer.cpp" />

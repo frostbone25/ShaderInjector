@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <mutex>
 #include <vector>
 
@@ -39,6 +40,10 @@ namespace RenderDocIntegration
 		int gApiMajorVersion = 0;
 		int gApiMinorVersion = 0;
 		int gApiPatchVersion = 0;
+		std::atomic<uint64_t> gCaptureRequestSequence = 0;
+		bool gCaptureRequestPending = false;
+		bool gCaptureStartedForPendingRequest = false;
+		uint32_t gCaptureCountBeforePendingRequest = 0;
 
 		const std::array<RENDERDOC_Version, 7> supportedApiVersions =
 		{
@@ -291,12 +296,52 @@ namespace RenderDocIntegration
 		if (gRenderDocApi->IsFrameCapturing() != 0)
 			return CaptureRequestResult::AlreadyCapturing;
 
-		if (d3d12Device && windowHandle)
-			gRenderDocApi->SetActiveWindow(d3d12Device, windowHandle);
+		// RenderDoc owns the API root handles used by its capture layer. A raw device
+		// pointer borrowed from a swap chain is not guaranteed to be the same registered
+		// handle when RenderDoc, Proton, OptiScaler, or another wrapper is present. The
+		// RenderDoc overlay has already selected the active game API/window pair, so keep
+		// that proven selection instead of overriding it with an injector-side pointer.
+		(void)d3d12Device;
+		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+			"RenderDocIntegration->RequestFrameCapture: using RenderDoc active target window=%p",
+			windowHandle));
 
+		gCaptureCountBeforePendingRequest = gRenderDocApi->GetNumCaptures();
+		gCaptureRequestPending = true;
+		gCaptureStartedForPendingRequest = false;
+		gCaptureRequestSequence.fetch_add(1, std::memory_order_release);
 		gRenderDocApi->TriggerCapture();
-
 		return CaptureRequestResult::Queued;
+	}
+
+	void PollCaptureStatus()
+	{
+		std::lock_guard<std::mutex> lock(gRenderDocMutex);
+		if (!gCaptureRequestPending || !gRenderDocApi)
+			return;
+
+		const bool captureActive = gRenderDocApi->IsFrameCapturing() != 0;
+		if (captureActive && !gCaptureStartedForPendingRequest)
+		{
+			gCaptureStartedForPendingRequest = true;
+			ShaderInjectorIO::WriteToLogFileSuccess(
+				"RenderDocIntegration->PollCaptureStatus: requested frame capture is active");
+		}
+
+		const uint32_t captureCount = gRenderDocApi->GetNumCaptures();
+		if (captureCount <= gCaptureCountBeforePendingRequest)
+			return;
+
+		gCaptureRequestPending = false;
+		ShaderInjectorIO::WriteToLogFileSuccess(StringHelper::Format(
+			"RenderDocIntegration->PollCaptureStatus: capture completed count=%u passObservedActive=%u",
+			captureCount,
+			gCaptureStartedForPendingRequest ? 1u : 0u));
+	}
+
+	uint64_t GetCaptureRequestSequence()
+	{
+		return gCaptureRequestSequence.load(std::memory_order_acquire);
 	}
 
 	ReplayUiRequestResult ConnectReplayUi()

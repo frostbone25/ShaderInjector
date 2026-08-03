@@ -484,13 +484,17 @@ namespace HookD3D12
 		return discoveredReplacementIndex;
 	}
 
-	bool ReplacementStillEnabled(const std::string& replacementName, uint64_t shaderHash, ShaderTarget::ShaderType shaderType)
+	const ShaderTarget::ShaderTargetDisk* FindActiveShaderTarget(
+		const std::string& shaderTargetName,
+		uint64_t shaderHash,
+		ShaderTarget::ShaderType shaderType)
 	{
 		const int replacementIndex = FindEnabledShaderTarget(shaderHash, shaderType);
 
 		if (replacementIndex < 0)
-			return false;
+			return nullptr;
 
-		return gLoadedShaderTargets[replacementIndex].name == replacementName;
+		const ShaderTarget::ShaderTargetDisk& shaderTarget = gLoadedShaderTargets[replacementIndex];
+		return shaderTarget.name == shaderTargetName ? &shaderTarget : nullptr;
 	}
 }

@@ -11,6 +11,11 @@
 //custom
 #include "ShaderTarget.h"
 
+namespace RenderPassRuntime
+{
+	struct PipelineOutputState;
+}
+
 namespace HookD3D12
 {
 	struct GraphicsPipelineInfo;
@@ -67,6 +72,7 @@ namespace HookD3D12
 	void FillInputAndStreamOutputSignatures(ShaderTarget::ShaderTargetDisk& replacement, const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputElements, const std::vector<D3D12_SO_DECLARATION_ENTRY>& soDeclarations, const std::vector<UINT>& soStrides);
 	void FillGraphicsReplacementPortableState(ShaderTarget::ShaderTargetDisk& replacement, const GraphicsPipelineInfo& pipeline);
 	void FillStreamReplacementPortableStateFromBlob(ShaderTarget::ShaderTargetDisk& replacement, const PipelineStateInfo& pipeline);
+	RenderPassRuntime::PipelineOutputState ExtractPipelineOutputState(const PipelineStateInfo& pipeline);
 
 	ShaderTarget::ShaderPipelineStreamMetadataDisk BuildPipelineStreamMetadata(const PipelineStateInfo& pipeline);
 

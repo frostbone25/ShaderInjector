@@ -1,6 +1,7 @@
 //HookD3D12PipelineUtils.cpp
 #include "HookD3D12PipelineUtils.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <sstream>
 #include <dxgi1_6.h>
@@ -10,6 +11,7 @@
 #include "ShaderInjectorIO.h"
 #include "ShaderInjectorGUI.h"
 #include "HookD3D12.h"
+#include "RenderPassRuntime.h"
 
 namespace HookD3D12
 {
@@ -260,6 +262,67 @@ namespace HookD3D12
 
 			ptr += subobjectSize;
 		}
+	}
+
+	RenderPassRuntime::PipelineOutputState ExtractPipelineOutputState(const PipelineStateInfo& pipeline)
+	{
+		RenderPassRuntime::PipelineOutputState outputState{};
+		const uint8_t* streamPosition = pipeline.streamBlob.empty() ? nullptr : pipeline.streamBlob.data();
+		const uint8_t* streamEnd = streamPosition ? streamPosition + pipeline.streamBlob.size() : nullptr;
+
+		while (streamPosition && streamPosition < streamEnd)
+		{
+			if (streamPosition + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE) > streamEnd)
+				break;
+
+			const auto type = *reinterpret_cast<const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(streamPosition);
+			const UINT typeIndex = static_cast<UINT>(type);
+			if (typeIndex >= ARRAYSIZE(kSubobjectSizes) || kSubobjectSizes[typeIndex] == 0)
+				break;
+
+			const size_t subobjectSize = kSubobjectSizes[typeIndex];
+			if (streamPosition + subobjectSize > streamEnd)
+				break;
+
+			switch (type)
+			{
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS:
+				{
+					const auto* subobject = reinterpret_cast<const PSOSubobject<
+						D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS,
+						D3D12_RT_FORMAT_ARRAY>*>(streamPosition);
+					outputState.renderTargetCount = (std::min)(
+						subobject->payload.NumRenderTargets,
+						static_cast<UINT>(D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT));
+					for (UINT index = 0; index < outputState.renderTargetCount; ++index)
+						outputState.renderTargetFormats[index] = subobject->payload.RTFormats[index];
+					break;
+				}
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT:
+				{
+					const auto* subobject = reinterpret_cast<const PSOSubobject<
+						D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT,
+						DXGI_FORMAT>*>(streamPosition);
+					outputState.depthStencilFormat = subobject->payload;
+					break;
+				}
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC:
+				{
+					const auto* subobject = reinterpret_cast<const PSOSubobject<
+						D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC,
+						DXGI_SAMPLE_DESC>*>(streamPosition);
+					outputState.sampleCount = subobject->payload.Count ? subobject->payload.Count : 1;
+					outputState.sampleQuality = subobject->payload.Quality;
+					break;
+				}
+				default:
+					break;
+			}
+
+			streamPosition += subobjectSize;
+		}
+
+		return outputState;
 	}
 
 	ShaderTarget::ShaderPipelineStreamMetadataDisk BuildPipelineStreamMetadata(const PipelineStateInfo& pipeline)

@@ -30,6 +30,9 @@
     <ClInclude Include="DatabaseShaderTargets.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+	<ClInclude Include="DatabaseRenderPasses.h">
+	  <Filter>Header Files</Filter>
+	</ClInclude>
 	<ClInclude Include="DatabaseModifiedShaders.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -60,6 +63,12 @@
     <ClInclude Include="HookD3D12ReplacementTemplates.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+	<ClInclude Include="HookD3D12RenderPass.h">
+	  <Filter>Header Files</Filter>
+	</ClInclude>
+	<ClInclude Include="HookD3D12Resources.h">
+	  <Filter>Header Files</Filter>
+	</ClInclude>
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\imgui_internal.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -100,6 +109,24 @@
 	  <Filter>Header Files</Filter>
 	</ClInclude>
 	<ClInclude Include="ProcessRunner.h">
+	  <Filter>Header Files</Filter>
+	</ClInclude>
+	<ClInclude Include="RenderPass.h">
+	  <Filter>Header Files</Filter>
+	</ClInclude>
+	<ClInclude Include="RenderPassExecutor.h">
+	  <Filter>Header Files</Filter>
+	</ClInclude>
+	<ClInclude Include="RenderPassMipChain.h">
+	  <Filter>Header Files</Filter>
+	</ClInclude>
+	<ClInclude Include="RenderPassRuntime.h">
+	  <Filter>Header Files</Filter>
+	</ClInclude>
+	<ClInclude Include="RenderPassResourceRegistry.h">
+	  <Filter>Header Files</Filter>
+	</ClInclude>
+	<ClInclude Include="RenderPassShaders.h">
 	  <Filter>Header Files</Filter>
 	</ClInclude>
 	<ClInclude Include="ShaderAnalysis.h">
@@ -161,6 +188,9 @@
     <ClCompile Include="DatabaseShaderTargets.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+	<ClCompile Include="DatabaseRenderPasses.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
 	<ClCompile Include="DatabaseModifiedShaders.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -206,6 +236,12 @@
     <ClCompile Include="HookD3D12ReplacementTemplates.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+	<ClCompile Include="HookD3D12RenderPass.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12Resources.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
     <ClCompile Include="HookD3D12RootSignature.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -240,6 +276,24 @@
       <Filter>Source Files</Filter>
     </ClCompile>
 	<ClCompile Include="ProcessRunner.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
+	<ClCompile Include="RenderPass.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
+	<ClCompile Include="RenderPassExecutor.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
+	<ClCompile Include="RenderPassMipChain.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
+	<ClCompile Include="RenderPassRuntime.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
+	<ClCompile Include="RenderPassResourceRegistry.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
+	<ClCompile Include="RenderPassShaders.cpp">
 	  <Filter>Source Files</Filter>
 	</ClCompile>
 	<ClCompile Include="ShaderAnalyzer.cpp">

@@ -11,6 +11,7 @@ namespace RenderDocIntegration
 		Disabled,
 		Unavailable,
 		AlreadyCapturing,
+		TargetUnavailable,
 	};
 
 	enum class ReplayUiRequestResult
@@ -30,6 +31,8 @@ namespace RenderDocIntegration
 	bool IsTargetControlConnected();
 	bool WasLoadedByInjector();
 	CaptureRequestResult RequestFrameCapture(void* d3d12Device, void* windowHandle);
+	void PollCaptureStatus();
+	uint64_t GetCaptureRequestSequence();
 	ReplayUiRequestResult ConnectReplayUi();
 
 	std::string GetStatusText();

@@ -60,6 +60,7 @@ namespace ShaderInjectorIO
 	std::string GetToolPathDXC();
 	std::string GetToolPathDXCompiler();
 	std::string GetShaderTargetsDirectory();
+	std::string GetRenderPassesDirectory();
 	std::string GetModifiedShadersDirectory();
 	std::string GetModifiedShadersIncludesDirectory();
 	std::string GetShaderConfigurationsPath();

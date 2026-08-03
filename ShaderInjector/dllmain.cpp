@@ -12,6 +12,7 @@
 #include "ShaderInjectorIO.h"
 #include "StringHelper.h"
 #include "DatabaseModifiedShaders.h"
+#include "DatabaseRenderPasses.h"
 #include "RenderDocIntegration.h"
 #include "ShaderInjectorVersion.h"
 #include "SystemInfoLogger.h"
@@ -66,6 +67,9 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 
 	//collect modified shaders stored in "ShaderInjector/ModifiedShaders"
 	DatabaseModifiedShaders::RefreshModifiedShaders();
+
+	//collect custom render-pass timing and resource-tracking definitions
+	DatabaseRenderPasses::RefreshRenderPasses();
 
 	//IMPORTANT NOTE 2: We are able to create and run this thread, so this does execute and work!
 	//NOTE 1: keep this comment around for sanity check please!

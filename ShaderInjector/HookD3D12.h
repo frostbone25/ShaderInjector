@@ -14,10 +14,13 @@ namespace HookD3D12
 {
 	bool InstallD3D12CreateDeviceHook(HMODULE d3d12Module);
 	void InstallPipelineHooksForDevice(ID3D12Device* device);
+	void InstallRenderPassResourceHooksForDevice(ID3D12Device* device);
 	void InstallCommandListHooksForCommandList(ID3D12GraphicsCommandList* commandList);
+	void InstallDeferredRenderPassHooks(ID3D12Device* device);
 	bool InstallSwapChainCompatibility(IDXGISwapChain3* swapChain, const char* compatibilitySource);
 	void RegisterSwapChainCommandQueue(IDXGISwapChain3* swapChain, IUnknown* creationDevice);
 	void SetRuntimeReady(bool ready);
+	ID3D12Device* GetCapturedDevice();
 
 	enum class PixelShaderSelectionStyle
 	{
@@ -226,6 +229,7 @@ namespace HookD3D12
 	void CaptureComputePipelineState(const D3D12_COMPUTE_PIPELINE_STATE_DESC* pipelineDescription, ID3D12PipelineState* pipelineState, bool shouldRegisterAsKnownPipeline);
 	void CapturePipelineStateStream(const D3D12_PIPELINE_STATE_STREAM_DESC* pipelineStreamDescription, ID3D12PipelineState* pipelineState);
 	bool GetRootSignatureBlob(ID3D12RootSignature* rootSignature, std::vector<uint8_t>& outBlob, uint64_t& outHash);
+	void EnsureRenderPassRootSignatureRegistered(ID3D12RootSignature* rootSignature);
 	ID3D12RootSignature* GetOrCreatePersistedRootSignature(const ShaderTarget::ShaderTargetDisk& replacement, ID3D12Device* device);
 	void ReleaseRootSignatureCache();
 	void RefreshLoadedShaderTargets();

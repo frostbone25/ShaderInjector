@@ -54,6 +54,9 @@ namespace ShaderInjectorGUI
 	void UI_ShaderTargetPSOList(const ShaderTarget::ShaderTargetDisk& replacement);
 	int CountReplacementPSOs(const ShaderTarget::ShaderTargetDisk& replacement);
 
+	//===================== render passes =====================
+	void UI_RenderPasses();
+
 	template<typename PipelineT>
 	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderTarget::ShaderTargetDisk& replacement);
 

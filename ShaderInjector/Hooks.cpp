@@ -34,6 +34,7 @@ namespace Hooks
 	static LPVOID gResizeBuffersTarget = nullptr;
 	static LPVOID gExecuteCommandListsTarget = nullptr;
 	static bool gOptiScalerCompatibilityEnabled = false;
+	static bool gObjectLocalSwapChainHooksEnabled = false;
 
 	using FunctionCreateSwapChain = HRESULT(STDMETHODCALLTYPE*)(
 		IDXGIFactory* factory,
@@ -65,13 +66,15 @@ namespace Hooks
 		// device argument. Preserve that exact association for overlay work.
 		HookD3D12::RegisterSwapChainCommandQueue(swapChain3.Get(), creationDevice);
 
-		if (!gOptiScalerCompatibilityEnabled)
+		if (!gObjectLocalSwapChainHooksEnabled)
 			return;
 
-		if (HookD3D12::InstallSwapChainCompatibility(swapChain3.Get(), "OptiScaler"))
+		const char* compatibilitySource = gOptiScalerCompatibilityEnabled ? "OptiScaler" : "RenderDoc";
+		if (HookD3D12::InstallSwapChainCompatibility(swapChain3.Get(), compatibilitySource))
 		{
 			ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
-				"Hooks->CaptureCreatedSwapChain: captured OptiScaler swapChain=%p",
+				"Hooks->CaptureCreatedSwapChain: captured %s swapChain=%p",
+				compatibilitySource,
 				swapChain3.Get()));
 		}
 	}
@@ -132,6 +135,9 @@ namespace Hooks
 		const std::string optiScalerSettingsPath =
 			ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetGameDirectory(), "OptiScaler.ini");
 		gOptiScalerCompatibilityEnabled = ShaderInjectorIO::FileExists(optiScalerSettingsPath);
+		const bool renderDocCaptureLayerLoaded = GetModuleHandleW(L"renderdoc.dll") != nullptr;
+		gObjectLocalSwapChainHooksEnabled =
+			gOptiScalerCompatibilityEnabled || renderDocCaptureLayerLoaded;
 
 		Microsoft::WRL::ComPtr<IDXGIFactory2> factory;
 		HRESULT factoryResult = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
@@ -182,9 +188,21 @@ namespace Hooks
 				MH_StatusToString(enableLegacyStatus)));
 		}
 
-		ShaderInjectorIO::WriteToLogFile(gOptiScalerCompatibilityEnabled
-			? "Hooks->PrepareSwapChainCapture: enabled exact command-queue capture and OptiScaler object-local swap-chain hooks"
-			: "Hooks->PrepareSwapChainCapture: enabled exact swap-chain command-queue capture");
+		if (gOptiScalerCompatibilityEnabled)
+		{
+			ShaderInjectorIO::WriteToLogFile(
+				"Hooks->PrepareSwapChainCapture: enabled exact command-queue capture and OptiScaler object-local swap-chain hooks");
+		}
+		else if (renderDocCaptureLayerLoaded)
+		{
+			ShaderInjectorIO::WriteToLogFile(
+				"Hooks->PrepareSwapChainCapture: enabled exact command-queue capture and RenderDoc object-local swap-chain hooks");
+		}
+		else
+		{
+			ShaderInjectorIO::WriteToLogFile(
+				"Hooks->PrepareSwapChainCapture: enabled exact swap-chain command-queue capture");
+		}
 		return true;
 	}
 
@@ -311,13 +329,13 @@ namespace Hooks
 		gDummyCommandList->Close();
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateCommandList Success!");
 
-		if (gOptiScalerCompatibilityEnabled)
+		if (gObjectLocalSwapChainHooksEnabled)
 		{
-			// OptiScaler owns the frame-generation swap chain and detours its
-			// process-wide Present implementation. Creating a discovery swap chain
-			// is unnecessary because the real object is captured by the factory hook.
+			// Wrapper layers own the live swap chain and may expose a different
+			// Present/ResizeBuffers chain than a temporary discovery object. The real
+			// object is captured by the factory hook and receives a private vtable.
 			ShaderInjectorGUI::WriteToRuntimeLog(
-				"Hooks->CreateDeviceAndSwapChain: OptiScaler compatibility active; skipping dummy swap chain");
+				"Hooks->CreateDeviceAndSwapChain: object-local swap-chain hooks active; skipping dummy swap chain");
 			return S_OK;
 		}
 
@@ -408,7 +426,7 @@ namespace Hooks
 
 		MH_STATUS minHookStatus;
 
-		if (!gOptiScalerCompatibilityEnabled)
+		if (!gObjectLocalSwapChainHooksEnabled)
 		{
 			auto swapChainVTable = *reinterpret_cast<void***>(gDummySwapChain.Get());
 
