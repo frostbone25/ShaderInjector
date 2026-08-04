@@ -18,6 +18,8 @@
 
 namespace ShaderInjectorGUI
 {
+	const float indentSpace = 16.0f;
+
 	using DrawMenuFn = void(*)();
 
 	struct MainWindowContext
@@ -36,6 +38,19 @@ namespace ShaderInjectorGUI
 	void UI_ShaderInjectorMenu();
 
 	//===================== modified shaders =====================
+	struct ModifiedShaderBatchRecompileResult
+	{
+		int selectedPackageCount = 0;
+		int skippedInactivePackageCount = 0;
+		int compiledPackageCount = 0;
+		int failedPackageCount = 0;
+		int linkedShaderTargetCount = 0;
+		int reloadedShaderTargetCount = 0;
+		int skippedInactiveShaderTargetCount = 0;
+	};
+
+	ModifiedShaderBatchRecompileResult RecompileModifiedShaders(bool includeInactivePackages);
+
 	void UI_ModifiedShaders();
 
 	//===================== shader configuration =====================

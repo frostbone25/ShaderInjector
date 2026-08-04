@@ -23,7 +23,7 @@
 #include "ShaderTemplates.h"
 #include "Globals.h"
 #include "ProcessRunner.h"
-#include "ShaderInjectorGUI.h"
+#include "GUI/ShaderInjectorGUI.h"
 #include "StringHelper.h"
 
 namespace ShaderInjectorIO

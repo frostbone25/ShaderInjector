@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -650,16 +651,19 @@ namespace RenderPassRuntime
 			return bindings;
 		}
 
-		RenderPassMipChain::GraphicsStateSnapshot BuildMipChainGraphicsState(
-			const CommandListRenderState& state)
+		void BuildMipChainGraphicsState(
+			const CommandListRenderState& state,
+			RenderPassMipChain::GraphicsStateSnapshot& snapshot)
 		{
-			RenderPassMipChain::GraphicsStateSnapshot snapshot{};
 			snapshot.rootSignature = state.graphicsRootSignature;
 			snapshot.pipelineState = state.boundPipelineState;
 			snapshot.primitiveTopology = state.primitiveTopology;
-			snapshot.viewports = state.viewports;
-			snapshot.scissorRectangles = state.scissorRectangles;
+			snapshot.viewports.assign(state.viewports.begin(), state.viewports.end());
+			snapshot.scissorRectangles.assign(
+				state.scissorRectangles.begin(),
+				state.scissorRectangles.end());
 
+			snapshot.descriptorHeaps.clear();
 			snapshot.descriptorHeaps.reserve(state.descriptorHeaps.size());
 			for (const DescriptorHeapState& heap : state.descriptorHeaps)
 			{
@@ -672,6 +676,7 @@ namespace RenderPassRuntime
 					heap.gpuStart });
 			}
 
+			snapshot.rootBindings.clear();
 			for (UINT rootParameterIndex = 0;
 				rootParameterIndex < state.graphicsRootBindings.size();
 				++rootParameterIndex)
@@ -692,7 +697,8 @@ namespace RenderPassRuntime
 				if (binding.bindingType == "RTV" && binding.descriptorIndex != UINT32_MAX)
 					renderTargetCount = (std::max)(renderTargetCount, binding.descriptorIndex + 1);
 			}
-			snapshot.renderTargets.resize(renderTargetCount);
+			snapshot.renderTargets.assign(renderTargetCount, {});
+			snapshot.depthStencil = {};
 			for (const RenderPass::ResourceBindingDiagnostic& binding : state.outputBindings)
 			{
 				if (binding.bindingType == "RTV" && binding.descriptorIndex < snapshot.renderTargets.size())
@@ -700,7 +706,6 @@ namespace RenderPassRuntime
 				else if (binding.bindingType == "DSV")
 					snapshot.depthStencil.ptr = binding.cpuDescriptorHandle;
 			}
-			return snapshot;
 		}
 
 		void AppendRenderPassExecutionOrder(
@@ -1021,16 +1026,24 @@ namespace RenderPassRuntime
 
 	void TrackBoundPipelineState(ID3D12GraphicsCommandList* commandList, ID3D12PipelineState* pipelineState)
 	{
-		if (IsTrackingRequired())
-			GetCommandListState(commandList).boundPipelineState = pipelineState;
+		if (!IsTrackingRequired())
+			return;
+
+		CommandListRenderState& state = GetCommandListState(commandList);
+		if (state.boundPipelineState != pipelineState)
+			state.boundPipelineState = pipelineState;
 	}
 
 	void TrackPrimitiveTopology(
 		ID3D12GraphicsCommandList* commandList,
 		D3D12_PRIMITIVE_TOPOLOGY primitiveTopology)
 	{
-		if (IsTrackingRequired())
-			GetCommandListState(commandList).primitiveTopology = primitiveTopology;
+		if (!IsTrackingRequired())
+			return;
+
+		CommandListRenderState& state = GetCommandListState(commandList);
+		if (state.primitiveTopology != primitiveTopology)
+			state.primitiveTopology = primitiveTopology;
 	}
 
 	void TrackRootSignature(
@@ -1063,6 +1076,15 @@ namespace RenderPassRuntime
 			return;
 
 		CommandListRenderState& state = GetCommandListState(commandList);
+		bool heapsUnchanged = state.descriptorHeaps.size() == descriptorHeapCount;
+		for (UINT heapIndex = 0; heapsUnchanged && heapIndex < descriptorHeapCount; ++heapIndex)
+		{
+			heapsUnchanged = descriptorHeaps &&
+				state.descriptorHeaps[heapIndex].heap == descriptorHeaps[heapIndex];
+		}
+		if (heapsUnchanged)
+			return;
+
 		state.descriptorHeaps.clear();
 		state.descriptorHeaps.reserve(descriptorHeapCount);
 		ResetRootBindings(state.graphicsRootBindings, true);
@@ -1102,6 +1124,8 @@ namespace RenderPassRuntime
 
 		CommandListRenderState& state = GetCommandListState(commandList);
 		RootBindingState& binding = RootBindingAt(state, computePipeline, rootParameterIndex);
+		if (binding.type == RootBindingType::DescriptorTable && binding.value == descriptorHandle.ptr)
+			return;
 		binding.type = RootBindingType::DescriptorTable;
 		binding.value = descriptorHandle.ptr;
 		binding.constants.clear();
@@ -1127,6 +1151,8 @@ namespace RenderPassRuntime
 			GetCommandListState(commandList),
 			computePipeline,
 			rootParameterIndex);
+		if (binding.type == rootBindingType && binding.value == gpuAddress)
+			return;
 		binding.type = rootBindingType;
 		binding.value = gpuAddress;
 		binding.constants.clear();
@@ -1159,10 +1185,18 @@ namespace RenderPassRuntime
 			return;
 		const UINT capturedValueCount = valueCount;
 		const size_t requiredSize = destinationOffset + capturedValueCount;
+		const uint32_t* sourceValues = static_cast<const uint32_t*>(values);
+		if (binding.constants.size() >= requiredSize &&
+			std::equal(
+				sourceValues,
+				sourceValues + capturedValueCount,
+				binding.constants.begin() + destinationOffset))
+		{
+			return;
+		}
 		if (binding.constants.size() < requiredSize)
 			binding.constants.resize(requiredSize);
 
-		const uint32_t* sourceValues = static_cast<const uint32_t*>(values);
 		std::copy(
 			sourceValues,
 			sourceValues + capturedValueCount,
@@ -1248,9 +1282,35 @@ namespace RenderPassRuntime
 		EnsureDescriptorIncrementSizes(commandList, state);
 		const UINT capturedRenderTargetCount = renderTargetDescriptors ? renderTargetCount : 0;
 		const bool hasDepthStencil = depthStencilDescriptor && depthStencilDescriptor->ptr;
+		const size_t expectedBindingCount =
+			static_cast<size_t>(capturedRenderTargetCount) + (hasDepthStencil ? 1u : 0u);
+		bool outputsUnchanged = state.outputBindings.size() == expectedBindingCount;
+		const UINT renderTargetIncrement = state.descriptorIncrementSizes[D3D12_DESCRIPTOR_HEAP_TYPE_RTV];
+		for (UINT renderTargetIndex = 0;
+			outputsUnchanged && renderTargetIndex < capturedRenderTargetCount;
+			++renderTargetIndex)
+		{
+			const D3D12_CPU_DESCRIPTOR_HANDLE descriptor = descriptorsAreContiguous
+				? D3D12_CPU_DESCRIPTOR_HANDLE{
+					renderTargetDescriptors[0].ptr +
+					static_cast<SIZE_T>(renderTargetIndex) * renderTargetIncrement }
+				: renderTargetDescriptors[renderTargetIndex];
+			const RenderPass::ResourceBindingDiagnostic& binding = state.outputBindings[renderTargetIndex];
+			outputsUnchanged = binding.bindingType == "RTV" &&
+				binding.cpuDescriptorHandle == descriptor.ptr &&
+				binding.descriptorIndex == renderTargetIndex;
+		}
+		if (outputsUnchanged && hasDepthStencil)
+		{
+			const RenderPass::ResourceBindingDiagnostic& binding = state.outputBindings.back();
+			outputsUnchanged = binding.bindingType == "DSV" &&
+				binding.cpuDescriptorHandle == depthStencilDescriptor->ptr;
+		}
+		if (outputsUnchanged)
+			return;
+
 		state.outputBindings.resize(capturedRenderTargetCount + (hasDepthStencil ? 1u : 0u));
 
-		const UINT renderTargetIncrement = state.descriptorIncrementSizes[D3D12_DESCRIPTOR_HEAP_TYPE_RTV];
 		for (UINT renderTargetIndex = 0; renderTargetIndex < capturedRenderTargetCount; ++renderTargetIndex)
 		{
 			D3D12_CPU_DESCRIPTOR_HANDLE descriptor = descriptorsAreContiguous
@@ -1292,6 +1352,14 @@ namespace RenderPassRuntime
 			return;
 
 		CommandListRenderState& state = GetCommandListState(commandList);
+		if (viewports && viewportCount == state.viewports.size() &&
+			(viewportCount == 0 || std::memcmp(
+				viewports,
+				state.viewports.data(),
+				static_cast<size_t>(viewportCount) * sizeof(D3D12_VIEWPORT)) == 0))
+		{
+			return;
+		}
 		if (viewports && viewportCount)
 			state.viewports.assign(viewports, viewports + viewportCount);
 		else
@@ -1307,6 +1375,14 @@ namespace RenderPassRuntime
 			return;
 
 		CommandListRenderState& state = GetCommandListState(commandList);
+		if (rectangles && rectangleCount == state.scissorRectangles.size() &&
+			(rectangleCount == 0 || std::memcmp(
+				rectangles,
+				state.scissorRectangles.data(),
+				static_cast<size_t>(rectangleCount) * sizeof(D3D12_RECT)) == 0))
+		{
+			return;
+		}
 		if (rectangles && rectangleCount)
 			state.scissorRectangles.assign(rectangles, rectangles + rectangleCount);
 		else
@@ -1346,6 +1422,7 @@ namespace RenderPassRuntime
 
 		std::vector<RenderPassMipChain::ExecutionResult> mipChainResults;
 		bool mipChainsPrepared = false;
+		thread_local RenderPassMipChain::GraphicsStateSnapshot mipChainGraphicsState;
 
 		for (const RenderPass::RenderPassDisk* renderPassPointer : executionOrder)
 		{
@@ -1365,10 +1442,11 @@ namespace RenderPassRuntime
 			{
 				if (!mipChainsPrepared)
 				{
+					BuildMipChainGraphicsState(state, mipChainGraphicsState);
 					mipChainResults = RenderPassMipChain::PrepareForTargetDraw(
 						executionPlan->mipChainOrders[boundaryIndex],
 						commandList,
-						BuildMipChainGraphicsState(state));
+						mipChainGraphicsState);
 					mipChainsPrepared = true;
 				}
 

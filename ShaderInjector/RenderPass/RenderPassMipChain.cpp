@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -24,10 +25,19 @@ namespace RenderPassMipChain
 	{
 		struct DeviceResources
 		{
+			DeviceResources()
+			{
+				for (std::atomic<int8_t>& support : mipGeneratorFormatSupport)
+					support.store(-1, std::memory_order_relaxed);
+			}
+
 			ComPtr<ID3D12Device> device;
 			ComPtr<ID3D12RootSignature> rootSignature;
 			std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> pipelines;
 			std::unordered_map<std::string, std::string> pipelineErrors;
+			std::array<std::atomic<int8_t>, 256> mipGeneratorFormatSupport;
+			UINT shaderResourceDescriptorIncrement = 0;
+			UINT renderTargetDescriptorIncrement = 0;
 		};
 
 		struct MipTextureResources
@@ -39,12 +49,25 @@ namespace RenderPassMipChain
 			UINT height = 0;
 			UINT mipLevelCount = 0;
 			DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+			UINT shader4ComponentMapping = 0;
+			D3D12_CPU_DESCRIPTOR_HANDLE fullMipChainDescriptor{};
+			bool fullMipChainDescriptorInitialized = false;
 			bool allSubresourcesShaderReadable = false;
 		};
 
 		struct ExecutionSlot
 		{
-			std::vector<MipTextureResources> mipTextures;
+			struct RecordedTextureState
+			{
+				MipTextureResources* resources = nullptr;
+				bool allSubresourcesShaderReadable = false;
+			};
+
+			// A slot can execute different pass groups over its lifetime. Keep each
+			// pass's resources under a stable identity so changing execution order
+			// never turns into texture and descriptor-heap recreation.
+			std::unordered_map<std::string, MipTextureResources> mipTexturesByRenderPassId;
+			std::vector<RecordedTextureState> recordedTextureStates;
 			ComPtr<ID3D12DescriptorHeap> nativeDescriptorHeap;
 			UINT nativeDescriptorCapacity = 0;
 			ComPtr<ID3D12Fence> retirementFence;
@@ -58,6 +81,8 @@ namespace RenderPassMipChain
 		{
 			std::vector<std::unique_ptr<ExecutionSlot>> slots;
 			std::vector<ExecutionSlot*> recordedSlots;
+			GraphicsStateSnapshot pendingRestore;
+			bool hasPendingRestore = false;
 		};
 
 		struct QueueFence
@@ -92,7 +117,6 @@ namespace RenderPassMipChain
 
 		std::mutex gExecutionPoolMutex;
 		std::unordered_map<ID3D12GraphicsCommandList*, CommandListPool> gCommandListPools;
-		std::unordered_map<ID3D12GraphicsCommandList*, GraphicsStateSnapshot> gPendingRestores;
 		std::unordered_map<ID3D12CommandQueue*, QueueFence> gQueueFences;
 		std::atomic<uint32_t> gRecordedCommandListCount = 0;
 
@@ -339,6 +363,10 @@ namespace RenderPassMipChain
 			{
 				resources = std::make_unique<DeviceResources>();
 				resources->device = device;
+				resources->shaderResourceDescriptorIncrement =
+					device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+				resources->renderTargetDescriptorIncrement =
+					device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 			}
 			if (!CreateGeneratorRootSignature(*resources, outError))
 				return nullptr;
@@ -454,6 +482,7 @@ namespace RenderPassMipChain
 
 			selected->recorded = true;
 			selected->submitted = false;
+			selected->recordedTextureStates.clear();
 			if (pool.recordedSlots.empty())
 				gRecordedCommandListCount.fetch_add(1, std::memory_order_release);
 			pool.recordedSlots.push_back(selected);
@@ -461,11 +490,12 @@ namespace RenderPassMipChain
 		}
 
 		bool EnsureMipTextureResources(
-			ID3D12Device* device,
+			DeviceResources& deviceResources,
 			const ResolvedMipPass& mipPass,
 			MipTextureResources& resources,
 			std::string& outError)
 		{
+			ID3D12Device* device = deviceResources.device.Get();
 			const D3D12_RESOURCE_DESC sourceDescription = mipPass.sourceResource->GetDesc();
 			const UINT mostDetailedMip = mipPass.sourceMetadata.descriptorMostDetailedMip;
 			if (mostDetailedMip >= sourceDescription.MipLevels || mostDetailedMip >= 64)
@@ -483,11 +513,34 @@ namespace RenderPassMipChain
 				return false;
 			}
 
-			D3D12_FEATURE_DATA_FORMAT_SUPPORT formatSupport{ format };
-			if (FAILED(device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &formatSupport, sizeof(formatSupport))) ||
-				(formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_TEXTURE2D) == 0 ||
-				(formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE) == 0 ||
-				(formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_RENDER_TARGET) == 0)
+			bool formatSupported = false;
+			const UINT formatIndex = static_cast<UINT>(format);
+			int8_t cachedFormatSupport = formatIndex < deviceResources.mipGeneratorFormatSupport.size()
+				? deviceResources.mipGeneratorFormatSupport[formatIndex].load(std::memory_order_acquire)
+				: -1;
+			if (cachedFormatSupport >= 0)
+			{
+				formatSupported = cachedFormatSupport != 0;
+			}
+			else
+			{
+				D3D12_FEATURE_DATA_FORMAT_SUPPORT formatSupport{ format };
+				formatSupported =
+					SUCCEEDED(device->CheckFeatureSupport(
+						D3D12_FEATURE_FORMAT_SUPPORT,
+						&formatSupport,
+						sizeof(formatSupport))) &&
+					(formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_TEXTURE2D) != 0 &&
+					(formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE) != 0 &&
+					(formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_RENDER_TARGET) != 0;
+				if (formatIndex < deviceResources.mipGeneratorFormatSupport.size())
+				{
+					deviceResources.mipGeneratorFormatSupport[formatIndex].store(
+						formatSupported ? 1 : 0,
+						std::memory_order_release);
+				}
+			}
+			if (!formatSupported)
 			{
 				outError = "The selected source SRV format cannot be sampled and rendered on this device.";
 				return false;
@@ -537,7 +590,9 @@ namespace RenderPassMipChain
 
 				D3D12_DESCRIPTOR_HEAP_DESC sourceHeapDescription{};
 				sourceHeapDescription.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-				sourceHeapDescription.NumDescriptors = mipLevelCount;
+				// The final descriptor is an immutable view of the complete generated
+				// chain. Build it once and copy it into the game's cloned table later.
+				sourceHeapDescription.NumDescriptors = mipLevelCount + 1;
 				sourceHeapDescription.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 				result = device->CreateDescriptorHeap(&sourceHeapDescription, IID_PPV_ARGS(&resources.sourceHeap));
 				if (FAILED(result) || !resources.sourceHeap)
@@ -558,7 +613,7 @@ namespace RenderPassMipChain
 					return false;
 				}
 
-				const UINT renderTargetIncrement = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+				const UINT renderTargetIncrement = deviceResources.renderTargetDescriptorIncrement;
 				D3D12_CPU_DESCRIPTOR_HANDLE renderTarget = resources.renderTargetHeap->GetCPUDescriptorHandleForHeapStart();
 				for (UINT mipLevel = 0; mipLevel < mipLevelCount; ++mipLevel)
 				{
@@ -569,27 +624,51 @@ namespace RenderPassMipChain
 					device->CreateRenderTargetView(resources.texture.Get(), &view, renderTarget);
 					renderTarget.ptr += renderTargetIncrement;
 				}
+
+				const UINT sourceIncrement = deviceResources.shaderResourceDescriptorIncrement;
+				D3D12_CPU_DESCRIPTOR_HANDLE sourceDescriptor =
+					resources.sourceHeap->GetCPUDescriptorHandleForHeapStart();
+				for (UINT destinationMip = 1; destinationMip < mipLevelCount; ++destinationMip)
+				{
+					sourceDescriptor.ptr += sourceIncrement;
+					D3D12_SHADER_RESOURCE_VIEW_DESC sourceView{};
+					sourceView.Format = format;
+					sourceView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+					sourceView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+					sourceView.Texture2D.MostDetailedMip = destinationMip - 1;
+					sourceView.Texture2D.MipLevels = 1;
+					device->CreateShaderResourceView(resources.texture.Get(), &sourceView, sourceDescriptor);
+				}
+
+				resources.fullMipChainDescriptor = {
+					resources.sourceHeap->GetCPUDescriptorHandleForHeapStart().ptr +
+					static_cast<SIZE_T>(mipLevelCount) * sourceIncrement };
 				resources.texture->SetName(L"Shader Injector Generated Mip Chain");
 			}
 
-			const UINT sourceIncrement = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+			if (!resources.fullMipChainDescriptorInitialized ||
+				resources.shader4ComponentMapping != mipPass.sourceMetadata.descriptorShader4ComponentMapping)
+			{
+				D3D12_SHADER_RESOURCE_VIEW_DESC fullMipChainView{};
+				fullMipChainView.Format = format;
+				fullMipChainView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+				fullMipChainView.Shader4ComponentMapping = mipPass.sourceMetadata.descriptorShader4ComponentMapping;
+				fullMipChainView.Texture2D.MostDetailedMip = 0;
+				fullMipChainView.Texture2D.MipLevels = mipLevelCount;
+				device->CreateShaderResourceView(
+					resources.texture.Get(),
+					&fullMipChainView,
+					resources.fullMipChainDescriptor);
+				resources.shader4ComponentMapping = mipPass.sourceMetadata.descriptorShader4ComponentMapping;
+				resources.fullMipChainDescriptorInitialized = true;
+			}
+
 			D3D12_CPU_DESCRIPTOR_HANDLE sourceDescriptor = resources.sourceHeap->GetCPUDescriptorHandleForHeapStart();
 			device->CopyDescriptorsSimple(
 				1,
 				sourceDescriptor,
 				mipPass.sourceDescriptor,
 				D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-			for (UINT destinationMip = 1; destinationMip < mipLevelCount; ++destinationMip)
-			{
-				sourceDescriptor.ptr += sourceIncrement;
-				D3D12_SHADER_RESOURCE_VIEW_DESC sourceView{};
-				sourceView.Format = format;
-				sourceView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-				sourceView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-				sourceView.Texture2D.MostDetailedMip = destinationMip - 1;
-				sourceView.Texture2D.MipLevels = 1;
-				device->CreateShaderResourceView(resources.texture.Get(), &sourceView, sourceDescriptor);
-			}
 			return true;
 		}
 
@@ -682,10 +761,8 @@ namespace RenderPassMipChain
 				commandList->ResourceBarrier(resources.mipLevelCount, barriers.data());
 			}
 
-			const UINT sourceIncrement = deviceResources.device->GetDescriptorHandleIncrementSize(
-				D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-			const UINT renderTargetIncrement = deviceResources.device->GetDescriptorHandleIncrementSize(
-				D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+			const UINT sourceIncrement = deviceResources.shaderResourceDescriptorIncrement;
+			const UINT renderTargetIncrement = deviceResources.renderTargetDescriptorIncrement;
 			D3D12_GPU_DESCRIPTOR_HANDLE source = resources.sourceHeap->GetGPUDescriptorHandleForHeapStart();
 			D3D12_CPU_DESCRIPTOR_HANDLE renderTarget = resources.renderTargetHeap->GetCPUDescriptorHandleForHeapStart();
 			ID3D12DescriptorHeap* sourceHeap = resources.sourceHeap.Get();
@@ -741,7 +818,8 @@ namespace RenderPassMipChain
 			const std::vector<ResolvedMipPass*>& successfulPasses,
 			std::string& outError)
 		{
-			std::vector<RenderPassResourceRegistry::DescriptorTableLayout> layouts;
+			thread_local std::vector<RenderPassResourceRegistry::DescriptorTableLayout> layouts;
+			layouts.clear();
 			UINT maximumDescriptors = 1;
 			for (const ResolvedMipPass* mipPass : successfulPasses)
 				maximumDescriptors = (std::max)(maximumDescriptors, mipPass->renderPass->maximumTrackedDescriptors);
@@ -754,7 +832,8 @@ namespace RenderPassMipChain
 				return false;
 			}
 
-			std::vector<ActiveDescriptorTable> activeTables;
+			thread_local std::vector<ActiveDescriptorTable> activeTables;
+			activeTables.clear();
 			UINT nativeDescriptorCount = 0;
 			for (const RenderPass::ResourceBindingDiagnostic& binding : gameState.rootBindings)
 			{
@@ -855,19 +934,12 @@ namespace RenderPassMipChain
 					return false;
 				}
 
-				D3D12_SHADER_RESOURCE_VIEW_DESC replacementView{};
-				replacementView.Format = mipPass->resources->format;
-				replacementView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-				replacementView.Shader4ComponentMapping = mipPass->sourceMetadata.descriptorShader4ComponentMapping;
-				replacementView.Texture2D.MostDetailedMip = 0;
-				replacementView.Texture2D.MipLevels = mipPass->resources->mipLevelCount;
-				replacementView.Texture2D.PlaneSlice = 0;
-				replacementView.Texture2D.ResourceMinLODClamp = 0.0f;
 				const UINT descriptorOffset = tableIt->customHeapOffset + mipPass->bindingLocation.tableOffset;
-				device->CreateShaderResourceView(
-					mipPass->resources->texture.Get(),
-					&replacementView,
-					{ customCpuStart.ptr + static_cast<SIZE_T>(descriptorOffset) * increment });
+				device->CopyDescriptorsSimple(
+					1,
+					{ customCpuStart.ptr + static_cast<SIZE_T>(descriptorOffset) * increment },
+					mipPass->resources->fullMipChainDescriptor,
+					D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 			}
 
 			ID3D12DescriptorHeap* samplerHeap = nullptr;
@@ -940,7 +1012,6 @@ namespace RenderPassMipChain
 			return results;
 
 		ExecutionSlot* slot = AcquireExecutionSlot(commandList);
-		slot->mipTextures.resize(renderPasses.size());
 		std::string deviceError;
 		DeviceResources* deviceResources = GetDeviceResources(device.Get(), deviceError);
 		if (!deviceResources)
@@ -958,8 +1029,8 @@ namespace RenderPassMipChain
 			for (ResolvedMipPass& mipPass : resolvedPasses)
 			{
 				ExecutionResult& result = results[mipPass.resultIndex];
-				mipPass.resources = &slot->mipTextures[mipPass.resultIndex];
-				if (!EnsureMipTextureResources(device.Get(), mipPass, *mipPass.resources, result.error))
+				mipPass.resources = &slot->mipTexturesByRenderPassId[mipPass.renderPass->id];
+				if (!EnsureMipTextureResources(*deviceResources, mipPass, *mipPass.resources, result.error))
 					continue;
 
 				ID3D12PipelineState* pipeline = GetGeneratorPipeline(
@@ -967,7 +1038,12 @@ namespace RenderPassMipChain
 					*mipPass.renderPass,
 					mipPass.resources->format,
 					result.error);
-				if (!pipeline || !RecordMipGeneration(
+				if (!pipeline)
+					continue;
+				slot->recordedTextureStates.push_back({
+					mipPass.resources,
+					mipPass.resources->allSubresourcesShaderReadable });
+				if (!RecordMipGeneration(
 					mipPass,
 					commandList,
 					*deviceResources,
@@ -1008,27 +1084,29 @@ namespace RenderPassMipChain
 		if (!successfulPasses.empty())
 		{
 			std::lock_guard<std::mutex> lock(gExecutionPoolMutex);
-			gPendingRestores[commandList] = gameState;
+			CommandListPool& pool = gCommandListPools[commandList];
+			pool.pendingRestore = gameState;
+			pool.hasPendingRestore = true;
 		}
 		return results;
 	}
 
 	void RestoreAfterTargetDraw(ID3D12GraphicsCommandList* commandList)
 	{
-		GraphicsStateSnapshot gameState;
+		GraphicsStateSnapshot* gameState = nullptr;
 		{
 			std::lock_guard<std::mutex> lock(gExecutionPoolMutex);
-			const auto restoreIt = gPendingRestores.find(commandList);
-			if (restoreIt == gPendingRestores.end())
+			const auto poolIt = gCommandListPools.find(commandList);
+			if (poolIt == gCommandListPools.end() || !poolIt->second.hasPendingRestore)
 				return;
-			gameState = std::move(restoreIt->second);
-			gPendingRestores.erase(restoreIt);
+			poolIt->second.hasPendingRestore = false;
+			gameState = &poolIt->second.pendingRestore;
 		}
 
 		HookD3D12::ScopedRenderPassInjection injectionScope;
 		std::array<ID3D12DescriptorHeap*, D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES> descriptorHeaps{};
 		UINT descriptorHeapCount = 0;
-		for (const DescriptorHeapBinding& heap : gameState.descriptorHeaps)
+		for (const DescriptorHeapBinding& heap : gameState->descriptorHeaps)
 		{
 			if (heap.heap && descriptorHeapCount < descriptorHeaps.size())
 				descriptorHeaps[descriptorHeapCount++] = heap.heap;
@@ -1036,7 +1114,7 @@ namespace RenderPassMipChain
 		commandList->SetDescriptorHeaps(
 			descriptorHeapCount,
 			descriptorHeapCount ? descriptorHeaps.data() : nullptr);
-		RestoreRootArguments(commandList, gameState, true);
+		RestoreRootArguments(commandList, *gameState, true);
 	}
 
 	bool HasRecordedCommandListWork()
@@ -1052,10 +1130,10 @@ namespace RenderPassMipChain
 		if (!commandList || !HasRecordedCommandListWork())
 			return;
 		std::lock_guard<std::mutex> lock(gExecutionPoolMutex);
-		gPendingRestores.erase(commandList);
 		const auto poolIt = gCommandListPools.find(commandList);
 		if (poolIt == gCommandListPools.end())
 			return;
+		poolIt->second.hasPendingRestore = false;
 
 		for (ExecutionSlot* slot : poolIt->second.recordedSlots)
 		{
@@ -1063,10 +1141,18 @@ namespace RenderPassMipChain
 				continue;
 			if (!slot->submitted)
 			{
-				slot->mipTextures.clear();
-				slot->nativeDescriptorHeap.Reset();
-				slot->nativeDescriptorCapacity = 0;
+				for (const ExecutionSlot::RecordedTextureState& recordedState : slot->recordedTextureStates)
+				{
+					if (recordedState.resources)
+					{
+						recordedState.resources->allSubresourcesShaderReadable =
+							recordedState.allSubresourcesShaderReadable;
+					}
+				}
 			}
+			// A discarded recording never reached the GPU, so its slot is already
+			// safe to reuse. Keep its allocations warm for the next recording.
+			slot->recordedTextureStates.clear();
 			slot->recorded = false;
 		}
 		if (!poolIt->second.recordedSlots.empty())
@@ -1151,7 +1237,6 @@ namespace RenderPassMipChain
 	{
 		{
 			std::lock_guard<std::mutex> lock(gExecutionPoolMutex);
-			gPendingRestores.clear();
 			gCommandListPools.clear();
 			gQueueFences.clear();
 			gRecordedCommandListCount.store(0, std::memory_order_release);

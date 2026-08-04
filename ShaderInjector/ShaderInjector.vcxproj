@@ -70,6 +70,11 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Database;$(ProjectDir)GUI;$(ProjectDir)HookD3D12;$(ProjectDir)RenderDoc;$(ProjectDir)RenderPass;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <TargetName>dsound</TargetName>
     <IncludePath>$(IncludePath)</IncludePath>
@@ -157,27 +162,22 @@
       <ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile>
       <AdditionalOptions>/CETCOMPAT /HIGHENTROPYVA /RELEASE /PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions>
     </Link>
-	<PostBuildEvent>
-	  <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)Build\FinalizeRelease.ps1" -TargetPath "$(TargetPath)"</Command>
-	  <Message>Finalizing Shader Injector release artifact</Message>
-	</PostBuildEvent>
+    <PostBuildEvent>
+      <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)Build\FinalizeRelease.ps1" -TargetPath "$(TargetPath)"</Command>
+      <Message>Finalizing Shader Injector release artifact</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Database\DatabaseGraphicsPSOs.h" />
+    <ClInclude Include="Database\DatabaseModifiedShaders.h" />
+    <ClInclude Include="Database\DatabaseRenderPasses.h" />
+    <ClInclude Include="Database\DatabaseShaderConfigurations.h" />
+    <ClInclude Include="Database\DatabaseShaderTargets.h" />
+    <ClInclude Include="Database\DatabaseStreamPSOs.h" />
     <ClInclude Include="FPSCounter.h" />
-    <ClInclude Include="DatabaseShaderTargets.h" />
-	<ClInclude Include="DatabaseRenderPasses.h" />
-    <ClInclude Include="DatabaseModifiedShaders.h" />
-    <ClInclude Include="DatabaseShaderConfigurations.h" />
-    <ClInclude Include="DatabaseGraphicsPSOs.h" />
+    <ClInclude Include="GUI\ShaderInjectorGUI.h" />
+    <ClInclude Include="GUI\ShaderInjectorGUITooltips.h" />
     <ClInclude Include="Hash.h" />
-    <ClInclude Include="HookD3D12.h" />
-    <ClInclude Include="HookD3D12OverlayStartup.h" />
-    <ClInclude Include="HookD3D12PipelineRegistry.h" />
-    <ClInclude Include="HookD3D12PipelineUtils.h" />
-    <ClInclude Include="HookD3D12ReplacementLookup.h" />
-    <ClInclude Include="HookD3D12ReplacementTemplates.h" />
-	<ClInclude Include="HookD3D12RenderPass.h" />
-	<ClInclude Include="HookD3D12Resources.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_dx12.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_win32.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\imconfig.h" />
@@ -187,52 +187,53 @@
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\imstb_textedit.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\imstb_truetype.h" />
     <ClInclude Include="Globals.h" />
+    <ClInclude Include="HookD3D12\HookD3D12.h" />
+    <ClInclude Include="HookD3D12\HookD3D12OverlayStartup.h" />
+    <ClInclude Include="HookD3D12\HookD3D12PipelineRegistry.h" />
+    <ClInclude Include="HookD3D12\HookD3D12PipelineUtils.h" />
+    <ClInclude Include="HookD3D12\HookD3D12RenderPass.h" />
+    <ClInclude Include="HookD3D12\HookD3D12ReplacementLookup.h" />
+    <ClInclude Include="HookD3D12\HookD3D12ReplacementTemplates.h" />
+    <ClInclude Include="HookD3D12\HookD3D12Resources.h" />
     <ClInclude Include="Hooks.h" />
     <ClInclude Include="HookInput.h" />
     <ClInclude Include="JsonHelper.h" />
     <ClInclude Include="dsound_proxy.h" />
     <ClInclude Include="Keycodes.h" />
     <ClInclude Include="ProcessRunner.h" />
-	<ClInclude Include="RenderPass.h" />
-	<ClInclude Include="RenderPassExecutor.h" />
-	<ClInclude Include="RenderPassMipChain.h" />
-	<ClInclude Include="RenderPassRuntime.h" />
-	<ClInclude Include="RenderPassResourceRegistry.h" />
-	<ClInclude Include="RenderPassShaders.h" />
-	<ClInclude Include="ShaderInjectorVersion.h" />
-    <ClInclude Include="ShaderInjectorGUITooltips.h" />
+    <ClInclude Include="RenderDoc\RenderDocIntegration.h" />
+    <ClInclude Include="RenderPass\RenderPass.h" />
+    <ClInclude Include="RenderPass\RenderPassExecutor.h" />
+    <ClInclude Include="RenderPass\RenderPassMipChain.h" />
+    <ClInclude Include="RenderPass\RenderPassResourceRegistry.h" />
+    <ClInclude Include="RenderPass\RenderPassRuntime.h" />
+    <ClInclude Include="RenderPass\RenderPassShaders.h" />
+    <ClInclude Include="ShaderInjectorVersion.h" />
     <ClInclude Include="ShaderInjectorIO.h" />
-    <ClInclude Include="ShaderInjectorSettings.h" />
     <ClInclude Include="ShaderConfiguration.h" />
-    <ClInclude Include="DatabaseStreamPSOs.h" />
     <ClInclude Include="ShaderTarget.h" />
     <ClInclude Include="ShaderTemplates.h" />
-    <ClInclude Include="ShaderInjectorGUI.h" />
     <ClInclude Include="StringHelper.h" />
     <ClInclude Include="SystemInfoLogger.h" />
     <ClInclude Include="VTableIndex.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Database\DatabaseGraphicsPSOs.cpp" />
+    <ClCompile Include="Database\DatabaseModifiedShaders.cpp" />
+    <ClCompile Include="Database\DatabaseRenderPasses.cpp" />
+    <ClCompile Include="Database\DatabaseShaderConfigurations.cpp" />
+    <ClCompile Include="Database\DatabaseShaderTargets.cpp" />
+    <ClCompile Include="Database\DatabaseStreamPSOs.cpp" />
     <ClCompile Include="FPSCounter.cpp" />
-    <ClCompile Include="DatabaseShaderTargets.cpp" />
-	<ClCompile Include="DatabaseRenderPasses.cpp" />
-    <ClCompile Include="DatabaseModifiedShaders.cpp" />
-    <ClCompile Include="DatabaseShaderConfigurations.cpp" />
-    <ClCompile Include="DatabaseGraphicsPSOs.cpp" />
+    <ClCompile Include="GUI\ShaderInjectorGUI.cpp" />
+    <ClCompile Include="GUI\ShaderInjectorGUI_ApplyStyle.cpp" />
+    <ClCompile Include="GUI\ShaderInjectorGUI_DeveloperSettings.cpp" />
+    <ClCompile Include="GUI\ShaderInjectorGUI_ModifiedShaders.cpp" />
+    <ClCompile Include="GUI\ShaderInjectorGUI_RenderPasses.cpp" />
+    <ClCompile Include="GUI\ShaderInjectorGUI_RuntimeLogs.cpp" />
+    <ClCompile Include="GUI\ShaderInjectorGUI_ShaderConfiguration.cpp" />
+    <ClCompile Include="GUI\ShaderInjectorGUI_ShaderTargets.cpp" />
     <ClCompile Include="Hash.cpp" />
-    <ClCompile Include="HookD3D12.cpp" />
-    <ClCompile Include="HookD3D12Install.cpp" />
-    <ClCompile Include="HookD3D12OverlayStartup.cpp" />
-    <ClCompile Include="HookD3D12PipelineRegistry.cpp" />
-    <ClCompile Include="HookD3D12Originals.cpp" />
-    <ClCompile Include="HookD3D12PipelineLibrary.cpp" />
-    <ClCompile Include="HookD3D12ReplacementCreation.cpp" />
-    <ClCompile Include="HookD3D12PipelineUtils.cpp" />
-    <ClCompile Include="HookD3D12ReplacementLookup.cpp" />
-    <ClCompile Include="HookD3D12ReplacementTemplates.cpp" />
-	<ClCompile Include="HookD3D12RenderPass.cpp" />
-	<ClCompile Include="HookD3D12Resources.cpp" />
-    <ClCompile Include="HookD3D12RootSignature.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_dx12.cpp" />
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_win32.cpp" />
@@ -241,18 +242,31 @@
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\imgui_tables.cpp" />
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\imgui_widgets.cpp" />
     <ClCompile Include="Globals.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12Install.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12Originals.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12OverlayStartup.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12PipelineLibrary.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12PipelineRegistry.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12PipelineUtils.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12RenderPass.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12ReplacementCreation.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12ReplacementLookup.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12ReplacementTemplates.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12Resources.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12RootSignature.cpp" />
     <ClCompile Include="Hooks.cpp" />
     <ClCompile Include="HookInput.cpp" />
     <ClCompile Include="dsound_proxy.cpp" />
     <ClCompile Include="Keycodes.cpp" />
-	<ClCompile Include="RenderPass.cpp" />
-	<ClCompile Include="RenderPassExecutor.cpp" />
-	<ClCompile Include="RenderPassMipChain.cpp" />
-	<ClCompile Include="RenderPassRuntime.cpp" />
-	<ClCompile Include="RenderPassResourceRegistry.cpp" />
-	<ClCompile Include="RenderPassShaders.cpp" />
+    <ClCompile Include="RenderDoc\RenderDocIntegration.cpp" />
     <ClCompile Include="ProcessRunner.cpp" />
-    <ClCompile Include="RenderDocIntegration.cpp" />
+    <ClCompile Include="RenderPass\RenderPass.cpp" />
+    <ClCompile Include="RenderPass\RenderPassExecutor.cpp" />
+    <ClCompile Include="RenderPass\RenderPassMipChain.cpp" />
+    <ClCompile Include="RenderPass\RenderPassResourceRegistry.cpp" />
+    <ClCompile Include="RenderPass\RenderPassRuntime.cpp" />
+    <ClCompile Include="RenderPass\RenderPassShaders.cpp" />
     <ClCompile Include="ShaderAnalyzer.cpp" />
     <ClCompile Include="ShaderAnalysis.cpp" />
     <ClCompile Include="ShaderDiscovery.cpp" />
@@ -261,11 +275,9 @@
     <ClCompile Include="ModifiedShader.cpp" />
     <ClCompile Include="ModifiedShaderCreation.cpp" />
     <ClCompile Include="ShaderInjectorIO.cpp" />
-    <ClCompile Include="DatabaseStreamPSOs.cpp" />
     <ClCompile Include="ShaderTarget.cpp" />
     <ClCompile Include="ShaderTargetSimilarity.cpp" />
     <ClCompile Include="ShaderTemplates.cpp" />
-    <ClCompile Include="ShaderInjectorGUI.cpp" />
     <ClCompile Include="StringHelper.cpp" />
     <ClCompile Include="SystemInfoLogger.cpp" />
   </ItemGroup>

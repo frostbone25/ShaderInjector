@@ -22,53 +22,26 @@
     <Filter Include="Resources">
       <UniqueIdentifier>{988c4187-eb58-42d9-8d5b-1980a18497b4}</UniqueIdentifier>
     </Filter>
+    <Filter Include="HookD3D12">
+      <UniqueIdentifier>{fa2f2729-9f9a-4521-9c96-254df584e783}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Database">
+      <UniqueIdentifier>{9300037b-c2ee-45ec-b087-72b538b736c1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="GUI">
+      <UniqueIdentifier>{94385295-16c8-40e7-8c47-1a659bef959d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="RenderDoc">
+      <UniqueIdentifier>{3c7c7dfe-a91a-446e-99a9-5307cb42be22}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="RenderPass">
+      <UniqueIdentifier>{f505d4fd-aaf2-4a84-b145-25570e067cbd}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="PreCompiledHeader.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="DatabaseShaderTargets.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-	<ClInclude Include="DatabaseRenderPasses.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="DatabaseModifiedShaders.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-	<ClInclude Include="DatabaseShaderConfigurations.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="DatabaseGraphicsPSOs.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="dsound_proxy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="HookD3D12.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12OverlayStartup.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12PipelineRegistry.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12PipelineUtils.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12ReplacementLookup.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12ReplacementTemplates.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-	<ClInclude Include="HookD3D12RenderPass.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="HookD3D12Resources.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\imgui_internal.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -105,51 +78,12 @@
     <ClInclude Include="ShaderInjectorIO.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-	<ClInclude Include="ShaderInjectorVersion.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="ProcessRunner.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="RenderPass.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="RenderPassExecutor.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="RenderPassMipChain.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="RenderPassRuntime.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="RenderPassResourceRegistry.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="RenderPassShaders.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="ShaderAnalysis.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="ShaderAnalyzer.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="ShaderDiscovery.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="ShaderAutomaticDiscovery.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="ModifiedShader.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="ModifiedShaderCreation.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
-	<ClInclude Include="SimilarityScore.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
+    <ClInclude Include="ShaderInjectorVersion.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ProcessRunner.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="JsonHelper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -159,90 +93,102 @@
     <ClInclude Include="ShaderTemplates.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ShaderInjectorSettings.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="ShaderConfiguration.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="DatabaseStreamPSOs.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ShaderInjectorGUI.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SystemInfoLogger.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="RenderDocIntegration.h">
+    <ClInclude Include="FPSCounter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ExternalDependencies\renderdoc\include\renderdoc_app.h">
+    <ClInclude Include="Hash.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Keycodes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="StringHelper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VTableIndex.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Database\DatabaseGraphicsPSOs.h">
+      <Filter>Database</Filter>
+    </ClInclude>
+    <ClInclude Include="Database\DatabaseModifiedShaders.h">
+      <Filter>Database</Filter>
+    </ClInclude>
+    <ClInclude Include="Database\DatabaseRenderPasses.h">
+      <Filter>Database</Filter>
+    </ClInclude>
+    <ClInclude Include="Database\DatabaseShaderConfigurations.h">
+      <Filter>Database</Filter>
+    </ClInclude>
+    <ClInclude Include="Database\DatabaseShaderTargets.h">
+      <Filter>Database</Filter>
+    </ClInclude>
+    <ClInclude Include="Database\DatabaseStreamPSOs.h">
+      <Filter>Database</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\HookD3D12.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\HookD3D12OverlayStartup.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\HookD3D12PipelineRegistry.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\HookD3D12PipelineUtils.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\HookD3D12RenderPass.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\HookD3D12ReplacementLookup.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\HookD3D12ReplacementTemplates.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\HookD3D12Resources.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="GUI\ShaderInjectorGUI.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="GUI\ShaderInjectorGUITooltips.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderDoc\RenderDocIntegration.h">
+      <Filter>RenderDoc</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderPass\RenderPass.h">
+      <Filter>RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderPass\RenderPassExecutor.h">
+      <Filter>RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderPass\RenderPassMipChain.h">
+      <Filter>RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderPass\RenderPassResourceRegistry.h">
+      <Filter>RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderPass\RenderPassRuntime.h">
+      <Filter>RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderPass\RenderPassShaders.h">
+      <Filter>RenderPass</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="DatabaseShaderTargets.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-	<ClCompile Include="DatabaseRenderPasses.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="DatabaseModifiedShaders.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-	<ClCompile Include="DatabaseShaderConfigurations.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="DatabaseGraphicsPSOs.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="PreCompiledHeader.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="dsound_proxy.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12Install.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12OverlayStartup.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12PipelineRegistry.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12Originals.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12PipelineLibrary.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12ReplacementCreation.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12PipelineUtils.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12ReplacementLookup.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12ReplacementTemplates.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-	<ClCompile Include="HookD3D12RenderPass.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12Resources.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-    <ClCompile Include="HookD3D12RootSignature.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\imgui.cpp">
@@ -275,49 +221,28 @@
     <ClCompile Include="ShaderInjectorIO.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-	<ClCompile Include="ProcessRunner.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="RenderPass.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="RenderPassExecutor.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="RenderPassMipChain.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="RenderPassRuntime.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="RenderPassResourceRegistry.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="RenderPassShaders.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="ShaderAnalyzer.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="ShaderAnalysis.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="ShaderDiscovery.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="ShaderConfiguration.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="ShaderAutomaticDiscovery.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="ModifiedShader.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-	<ClCompile Include="ModifiedShaderCreation.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-    <ClCompile Include="DatabaseStreamPSOs.cpp">
+    <ClCompile Include="ProcessRunner.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderAnalyzer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderAnalysis.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderDiscovery.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderAutomaticDiscovery.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ModifiedShader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ModifiedShaderCreation.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ShaderTemplates.cpp">
@@ -326,17 +251,104 @@
     <ClCompile Include="ShaderTarget.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-	<ClCompile Include="ShaderTargetSimilarity.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
-    <ClCompile Include="ShaderInjectorGUI.cpp">
+    <ClCompile Include="ShaderTargetSimilarity.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="SystemInfoLogger.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="RenderDocIntegration.cpp">
+    <ClCompile Include="FPSCounter.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Hash.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Keycodes.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="StringHelper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Database\DatabaseGraphicsPSOs.cpp">
+      <Filter>Database</Filter>
+    </ClCompile>
+    <ClCompile Include="Database\DatabaseModifiedShaders.cpp">
+      <Filter>Database</Filter>
+    </ClCompile>
+    <ClCompile Include="Database\DatabaseRenderPasses.cpp">
+      <Filter>Database</Filter>
+    </ClCompile>
+    <ClCompile Include="Database\DatabaseShaderConfigurations.cpp">
+      <Filter>Database</Filter>
+    </ClCompile>
+    <ClCompile Include="Database\DatabaseShaderTargets.cpp">
+      <Filter>Database</Filter>
+    </ClCompile>
+    <ClCompile Include="Database\DatabaseStreamPSOs.cpp">
+      <Filter>Database</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12Install.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12Originals.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12OverlayStartup.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12PipelineLibrary.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12PipelineRegistry.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12PipelineUtils.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12RenderPass.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12ReplacementCreation.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12ReplacementLookup.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12ReplacementTemplates.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12Resources.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12RootSignature.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="GUI\ShaderInjectorGUI.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderDoc\RenderDocIntegration.cpp">
+      <Filter>RenderDoc</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderPass\RenderPass.cpp">
+      <Filter>RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderPass\RenderPassExecutor.cpp">
+      <Filter>RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderPass\RenderPassMipChain.cpp">
+      <Filter>RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderPass\RenderPassResourceRegistry.cpp">
+      <Filter>RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderPass\RenderPassRuntime.cpp">
+      <Filter>RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderPass\RenderPassShaders.cpp">
+      <Filter>RenderPass</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

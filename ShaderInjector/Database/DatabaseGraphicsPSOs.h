@@ -1,7 +1,7 @@
 #pragma once
 
 //custom
-#include "HookD3D12.h"
+#include "HookD3D12/HookD3D12.h"
 
 namespace HookD3D12
 {
