@@ -249,6 +249,60 @@
 //(NOTE: only one tonemap can be active at a time)
 // #define TONEMAP_TONY_MC_MAP_FACE
 
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - HDR OUTPUT ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - HDR OUTPUT ||||||||||||||||||||||||||||||||||
+//|||||||||||||||||||||||||||||||||| CONFIGURATION - HDR OUTPUT ||||||||||||||||||||||||||||||||||
+//These only apply to the HDR variants of this pass (GameVersion*_PostProcessFinalHDR*). In SDR they are simply unused.
+//
+//The game runs completely separate shaders for the final pass in HDR, all writing BT.2020 PQ (HDR10) instead of sRGB.
+//There are four permutations, each selected by the package that includes this file:
+// POSTPROCESS_FINAL_HDR_GAMEPLAY_SIMPLE - normal gameplay. one UI layer, only BT709PQToBT2020PQLUT, no composition
+//                                         context (game shader CBA9C01BD1B69ABF). Identified from a RenderDoc capture;
+//                                         this is the one that actually draws the world, so it is the one that matters most.
+// POSTPROCESS_FINAL_HDR                  - menus. three UI composite layers, no BT2020PQTosRGBLUT (game shader 3966BB6523888928)
+// POSTPROCESS_FINAL_HDR_GAMEPLAY        - gameplay. one UI layer, both LUTs, same resource layout as SDR (game shader 6ACF39BD7FB286B8)
+// POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER - gameplay. three UI layers, both LUTs (game shader AFD51D036C4730AD)
+//The middle two also read HDRCompositionContext/HDRCompositionContextColor from the constant buffer - see the
+//HDR OUTPUT section below for what those do. Everything above this point - auto exposure, bloom, vignette
+//and all the ADJUSTMENT_* controls - applies to SDR and HDR alike.
+
+//(HDR) how bright the UI/subtitles are, in nits.
+//The game hard-codes this to 250 with no constant buffer input, which is why HDR UI brightness isn't adjustable in-game.
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 250.0
+//[CONFIG RANGE]: [80, 1000]
+#define HDR_UI_NITS 250.0
+
+//(HDR) how hard the scene is dimmed behind translucent UI so text stays readable.
+//The game uses 40. Higher dims bright backgrounds more aggressively, 0 disables it and lets the scene through at full brightness.
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 40.0
+//[CONFIG RANGE]: [0, 200]
+#define HDR_UI_READABILITY_DIM 40.0
+
+//(HDR) overall output brightness multiplier applied in absolute luminance, after the game's HDR grade.
+//1.0 is the untouched game image. Use ADJUSTMENT_BRIGHTNESS_EV above for scene-only changes that leave the UI alone.
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
+//[CONFIG RANGE]: [0.1, 4]
+#define HDR_OUTPUT_SCALE 1.0
+
+//internal helpers derived from the three variant selectors above, never set these by hand
+#if defined(POSTPROCESS_FINAL_HDR) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_SIMPLE)
+	//[NO CONFIG]
+	#define POSTPROCESS_FINAL_HDR_ANY
+#endif
+
+#if defined(POSTPROCESS_FINAL_HDR) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER)
+	//[NO CONFIG]
+	#define POSTPROCESS_FINAL_HDR_UI_3LAYER
+#endif
+
+#if defined(POSTPROCESS_FINAL_HDR_GAMEPLAY) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER)
+	//[NO CONFIG]
+	#define POSTPROCESS_FINAL_HDR_COMPOSITION
+#endif
+
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -264,8 +318,25 @@ Texture2D<float4> ColorTexture : register(t1);
 Texture2D<float4> GlareTexture : register(t2);
 Texture2D<float4> CompositeSDRTexture : register(t3);
 
-Texture3D<float4> BT709PQToBT2020PQLUT : register(t4);
-Texture3D<float4> BT2020PQTosRGBLUT : register(t5);
+#if defined(POSTPROCESS_FINAL_HDR)
+	//the HDR menu pass composites three UI layers and has no HDR->SDR LUT
+	Texture2D<float4> CompositeSDRBackgroundTexture : register(t4);
+	Texture2D<float4> CompositeSDRForegroundTexture : register(t5);
+	Texture3D<float4> BT709PQToBT2020PQLUT : register(t6);
+#elif defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER)
+	//the three layer HDR gameplay pass keeps the HDR->SDR LUT (used for the composition backdrop, see HDR OUTPUT below)
+	Texture2D<float4> CompositeSDRBackgroundTexture : register(t4);
+	Texture2D<float4> CompositeSDRForegroundTexture : register(t5);
+	Texture3D<float4> BT709PQToBT2020PQLUT : register(t6);
+	Texture3D<float4> BT2020PQTosRGBLUT : register(t7);
+#elif defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_SIMPLE)
+	//the plain gameplay pass: one UI layer and one LUT. No HDR->SDR LUT because it has no composition backdrop.
+	Texture3D<float4> BT709PQToBT2020PQLUT : register(t4);
+#else
+	//SDR and the single layer HDR gameplay pass share this exact layout
+	Texture3D<float4> BT709PQToBT2020PQLUT : register(t4);
+	Texture3D<float4> BT2020PQTosRGBLUT : register(t5);
+#endif
 
 //|||||||||||||||||||||||||||||||||| CONSTANT BUFFERS ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONSTANT BUFFERS ||||||||||||||||||||||||||||||||||
@@ -638,9 +709,17 @@ cbuffer View : register(b1)
 
 struct PixelInput
 {
+#if defined(POSTPROCESS_FINAL_HDR_ANY)
+	//matches the interpolation modes in the game's HDR passes exactly. Identical results either way on a
+	//fullscreen pass (every vertex is at w = 1), but there is no reason to differ from the shaders we replace.
+    noperspective float2 ScreenUV           : TEXCOORD0; //Present in the signature; unused here?
+    noperspective float4 VignetteRayContext : TEXCOORD1;
+    noperspective float4 Position           : SV_Position;
+#else
     float2 ScreenUV           : TEXCOORD0; //Present in the signature; unused here?
     float4 VignetteRayContext : TEXCOORD1;
     float4 Position           : SV_Position;
+#endif
 };
 
 struct PixelOutput
@@ -876,15 +955,26 @@ float3 Linear100NitsToPQ(float3 linearColor)
 
 //NOTE: it appears that the game's tonemapping is baked into the LUTs
 //NOTE 2: this was checked later but it looks like the game is using ACES 1... pretty standard for UE
+//the game's HDR grade. this is the intermediate of the SDR chain below - the second LUT is the HDR->SDR display map,
+//so stopping here is exactly the image the game sends to an HDR display.
+float3 SampleGameGradeBT2020PQ(float3 linearSceneColor)
+{
+    const float lutScale = 31.0f / 32.0f;
+    const float lutBias  = 0.5f / 32.0f;
+    float3 bt709PQ = Linear100NitsToPQ(linearSceneColor);
+    return BT709PQToBT2020PQLUT.SampleLevel(View_SharedBilinearClampedSampler, bt709PQ * lutScale + lutBias, 0.0f).rgb;
+}
+
+#if !defined(POSTPROCESS_FINAL_HDR_ANY)
 float3 SampleColorConversionLUTs(float3 linearSceneColor)
 {
     // Both LUTs are 32^3; map [0,1] to texel centers [0.5 / 32, 31.5 / 32].
     const float lutScale = 31.0f / 32.0f;
     const float lutBias  = 0.5f / 32.0f;
-    float3 bt709PQ = Linear100NitsToPQ(linearSceneColor);
-    float3 bt2020PQ = BT709PQToBT2020PQLUT.SampleLevel(View_SharedBilinearClampedSampler, bt709PQ * lutScale + lutBias, 0.0f).rgb;
+    float3 bt2020PQ = SampleGameGradeBT2020PQ(linearSceneColor);
     return BT2020PQTosRGBLUT.SampleLevel(View_SharedBilinearClampedSampler, bt2020PQ * lutScale + lutBias, 0.0f).rgb;
 }
+#endif
 
 //||||||||||||||||||||||||||||||| PRESERVING ORIGINAL COLOR GRADE |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| PRESERVING ORIGINAL COLOR GRADE |||||||||||||||||||||||||||||||
@@ -952,6 +1042,7 @@ float3 ApplyTonemap_AcesFitted_Inv(float3 color)
 //[NO CONFIG]
 #define ORIGINAL_GAME_ACES_EXPOSURE 2.0
 
+#if !defined(POSTPROCESS_FINAL_HDR_ANY)
 float3 SampleGameFinalLinear(float3 linearSceneColor)
 {
     float3 encodedSRGB = SampleColorConversionLUTs(linearSceneColor);
@@ -965,10 +1056,11 @@ float3 SampleGradedNoTonemapNoSRGB(float3 linearSceneColor)
     //invert the ACES fitted curve from the game's final display-linear result.
     float3 untonemapped = ApplyTonemap_AcesFitted_Inv(gameFinalLinear);
 
-    //ACES fitted match used sceneColor *= 2.0, so inverse gives us that exposed domain. 
+    //ACES fitted match used sceneColor *= 2.0, so inverse gives us that exposed domain.
 	//divide it back down to raw scene scale.
     return untonemapped / ORIGINAL_GAME_ACES_EXPOSURE;
 }
+#endif //!POSTPROCESS_FINAL_HDR_ANY
 
 //||||||||||||||||||||||||||||||| DITHER |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| DITHER |||||||||||||||||||||||||||||||
@@ -1059,6 +1151,200 @@ float3 ApplyQuadSharpen(float3 centerColor, float2 pixelPosition)
 }
 #endif
 
+//||||||||||||||||||||||||||||||| HDR OUTPUT |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| HDR OUTPUT |||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||| HDR OUTPUT |||||||||||||||||||||||||||||||
+//Reconstructed from the game's own HDR final passes (game version 1.0.0.5):
+// 3966BB6523888928 (menus, POSTPROCESS_FINAL_HDR)
+// 6ACF39BD7FB286B8 (gameplay, one UI layer, POSTPROCESS_FINAL_HDR_GAMEPLAY)
+// AFD51D036C4730AD (gameplay, three UI layers, POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER)
+//They work in absolute luminance (nits) rather than the 0-1 framebuffer scale the SDR path uses,
+//and write BT.2020 PQ for a 10 bit HDR10 swapchain.
+//
+//All three share the same skeleton, decoded from the DXIL:
+//  sceneNormalized = PQToLinear( BT709PQToBT2020PQLUT[ Linear100NitsToPQ(sceneColor) ] )  // 0..1 of 10000 nits
+//  sceneNits       = sceneNormalized * 10000
+//  UI: premultiplied "over" composite (one layer, or back to front Background(t4) -> Main(t3) -> Foreground(t5))
+//  uiGamma22 = saturate(pow(LinearToSRGB(uiLinear), 2.2))       // deliberate encode/decode mismatch, see below
+//  uiNits    = Rec709ToRec2020(uiGamma22) * 250
+//  readability = 1 / (1 + 40 * sceneNormalized)
+//  out = PQ( uiNits + sceneNits * uiAlpha * lerp(readability, 1, uiAlpha^2) ), triangular dither of 1/1023
+//
+//The gameplay passes additionally support what we call the "composition backdrop" here: driven purely by
+//HDRCompositionContext (.x * .y = intensity, .z = radial width) and HDRCompositionContextColor (tint), the game
+//can blend the area behind the UI away from the live HDR scene toward an SDR display mapped, luminance only,
+//tinted copy of it, in a vignette shape (strongest at the screen edges). With the context values at zero it
+//vanishes entirely. The menu pass reads neither of those constants and hard-codes UI paper white instead.
+
+#if defined(POSTPROCESS_FINAL_HDR_ANY)
+
+//[NO CONFIG]
+#define PQ_MAX_NITS 10000.0f
+
+//PQ -> normalized linear [0,1], where 1.0 is PQ_MAX_NITS. The game keeps the normalized value around
+//because it needs it for the readability term below, so we return it rather than nits.
+float3 PQToLinearNormalized(float3 pq)
+{
+    const float m1 = 0.1593017578125f;
+    const float m2 = 78.84375f;
+    const float c1 = 0.8359375f;
+    const float c2 = 18.8515625f;
+    const float c3 = 18.6875f;
+
+    float3 p = pow(saturate(pq), 1.0f / m2);
+    return pow(max((p - c1) / max(c2 - c3 * p, 1.0e-6f), 0.0f), 1.0f / m1);
+}
+
+float3 LinearNitsToPQ(float3 nits)
+{
+    const float m1 = 0.1593017578125f;
+    const float m2 = 78.84375f;
+    const float c1 = 0.8359375f;
+    const float c2 = 18.8515625f;
+    const float c3 = 18.6875f;
+
+    float3 normalized = saturate(nits * (1.0f / PQ_MAX_NITS));
+    float3 np = pow(normalized, m1);
+    return saturate(pow(max((c1 + c2 * np) / (1.0f + c3 * np), 0.0f), m2));
+}
+
+//10 bit version of ApplyOutputDither. Same triangular blue noise, sized for a 1023 step signal
+//instead of 255, with the same guard keeping the very ends of the range clean.
+float3 ApplyOutputDither10Bit(float3 encodedColor, float uniformNoise)
+{
+    float dither = TriangularBlueNoise(uniformNoise) * (1.0f / 1023.0f);
+
+    float3 finalDither = float3(0, 0, 0);
+
+    if (abs(encodedColor.r * 2.0f - 1.0f) < (1022.0f / 1024.0f))
+        finalDither.r = dither;
+
+    if (abs(encodedColor.g * 2.0f - 1.0f) < (1022.0f / 1024.0f))
+        finalDither.g = dither;
+
+    if (abs(encodedColor.b * 2.0f - 1.0f) < (1022.0f / 1024.0f))
+        finalDither.b = dither;
+
+    return saturate(encodedColor + finalDither);
+}
+
+#if defined(POSTPROCESS_FINAL_HDR_COMPOSITION)
+
+//(gameplay passes only) the SDR display mapped backdrop described above: take the scene's luminance, tint it with
+//HDRCompositionContextColor (normalized by the tint's own luminance so brightness is preserved), then run it through
+//the game's BT2020PQ->sRGB LUT - the exact HDR to SDR display mapping the SDR pass uses - and decode back to linear.
+float3 SampleSDRCompositionBackdrop(float3 sceneNits)
+{
+    const float lutScale = 31.0f / 32.0f;
+    const float lutBias  = 0.5f / 32.0f;
+
+    //the game uses Rec709 luminance weights here even though the values are BT.2020 at this point - keep the quirk
+    float sceneLuminance = LuminanceRec709(sceneNits);
+
+    float3 tint = max(HDRCompositionContextColor.rgb, 1.0e-4f.xxx);
+    float3 backdropNits = sceneLuminance * (tint / LuminanceRec709(tint));
+
+    float3 backdropPQ = LinearNitsToPQ(backdropNits);
+    float3 backdropSRGB = BT2020PQTosRGBLUT.SampleLevel(View_SharedBilinearClampedSampler, backdropPQ * lutScale + lutBias, 0.0f).rgb;
+
+    return SRGBToLinear(backdropSRGB);
+}
+
+//(gameplay passes only) how much of the backdrop replaces the live scene behind the UI at this pixel.
+//Exactly the vignette falloff formula, but fed from the w component of the ray context with its own
+//width control (HDRCompositionContext.z). 0 at the screen centre, ramping up toward the edges,
+//scaled by the game's two intensity values. All zero unless the game is driving the effect.
+float ComputeHDRCompositionBlend(float4 vignetteRayContext)
+{
+    float normalizedDepth = vignetteRayContext.w / max(0.001f, HDRCompositionContext.z);
+    float depthSquared = normalizedDepth * normalizedDepth;
+    float rayLengthSquared = max(1.0e-5f, dot(float3(vignetteRayContext.xy, normalizedDepth), float3(vignetteRayContext.xy, normalizedDepth)));
+    float radialFactor = depthSquared / rayLengthSquared;
+    float radialFourthPower = saturate(radialFactor * radialFactor);
+
+    return (1.0f - radialFourthPower) * HDRCompositionContext.x * HDRCompositionContext.y;
+}
+
+#endif //POSTPROCESS_FINAL_HDR_COMPOSITION
+
+float3 ComposeHDROutput(float3 sceneColor, float2 compositeUV, float2 pixelPosition, float4 vignetteRayContext)
+{
+    //|||| SCENE ||||
+    //the game's own HDR grade, decoded from PQ back to linear light
+    float3 sceneNormalized = PQToLinearNormalized(SampleGameGradeBT2020PQ(sceneColor));
+    float3 sceneNits = sceneNormalized * PQ_MAX_NITS;
+
+    #if defined(POSTPROCESS_FINAL_HDR_COMPOSITION)
+        float compositionBlend = ComputeHDRCompositionBlend(vignetteRayContext);
+        float3 compositionBackdrop = SampleSDRCompositionBackdrop(sceneNits);
+    #endif
+
+    //|||| UI ||||
+    #if defined(POSTPROCESS_FINAL_HDR_UI_3LAYER)
+        //three premultiplied layers composited back to front: background, then the main surface, then foreground
+        float4 uiBackground = CompositeSDRBackgroundTexture.SampleLevel(View_SharedBilinearClampedSampler, compositeUV, 0.0f);
+        float4 uiMain       = CompositeSDRTexture.SampleLevel(View_SharedBilinearClampedSampler, compositeUV, 0.0f);
+        float4 uiForeground = CompositeSDRForegroundTexture.SampleLevel(View_SharedBilinearClampedSampler, compositeUV, 0.0f);
+
+        float3 uiLinear = uiBackground.rgb;
+        float uiAlpha = uiBackground.a;
+
+        #if defined(POSTPROCESS_FINAL_HDR_COMPOSITION)
+            //the backdrop slots in behind the background layer: it joins the UI stack while the live scene's
+            //share of the final image (uiAlpha) shrinks by the same amount
+            uiLinear += uiBackground.a * compositionBackdrop * compositionBlend;
+            uiAlpha *= 1.0f - compositionBlend;
+        #endif
+
+        uiLinear = uiMain.a * uiLinear + uiMain.rgb;
+        uiLinear = uiForeground.a * uiLinear + uiForeground.rgb;
+
+        //alpha here is how much of what's behind survives, so the layers multiply
+        uiAlpha *= uiMain.a * uiForeground.a;
+    #else
+        //single UI layer
+        float4 uiMain = CompositeSDRTexture.SampleLevel(View_SharedBilinearClampedSampler, compositeUV, 0.0f);
+
+        #if defined(POSTPROCESS_FINAL_HDR_COMPOSITION)
+            //same backdrop treatment as the three layer path
+            float3 uiLinear = uiMain.rgb + uiMain.a * compositionBackdrop * compositionBlend;
+            float uiAlpha = uiMain.a * (1.0f - compositionBlend);
+        #else
+            //the plain gameplay pass has no backdrop at all, so the UI is just itself
+            float3 uiLinear = uiMain.rgb;
+            float uiAlpha = uiMain.a;
+        #endif
+    #endif
+
+    //the game encodes the UI to sRGB then decodes it with a straight 2.2 gamma. That mismatch is deliberate -
+    //it is what an sRGB image looks like on a 2.2 gamma display - so keep it or the UI shifts against SDR.
+    float3 uiGamma22 = saturate(pow(max(LinearToSRGB(uiLinear), 0.0f.xxx), 2.2f));
+    float3 uiNits = Rec709ToRec2020(uiGamma22) * HDR_UI_NITS;
+
+    #if defined(SHARPEN_ENABLE)
+        sceneNits = max(ApplyQuadSharpen(sceneNits, pixelPosition), 0.0f.xxx);
+    #endif
+
+    //|||| COMBINE ||||
+    //Behind translucent UI the scene is pushed down so text stays readable, and the brighter the scene the harder
+    //it is pushed. With no UI (uiAlpha == 1) this collapses to 1.0 and the scene passes through untouched.
+    float3 readability = rcp(1.0f + HDR_UI_READABILITY_DIM * sceneNormalized);
+    float3 sceneAttenuation = lerp(readability, 1.0f.xxx, uiAlpha * uiAlpha);
+    float3 scenePart = sceneNits * uiAlpha * sceneAttenuation;
+
+    float3 compositedNits = (uiNits + scenePart) * HDR_OUTPUT_SCALE;
+
+    //|||| ENCODE ||||
+    float3 encodedOutput = LinearNitsToPQ(compositedNits);
+
+    uint3 noiseAddress = uint3((uint2)pixelPosition & 127u, (uint)View_StateFrameIndex & 63u);
+    float blueNoise = View_SpatiotemporalBlueNoiseVolumeTexture.Load(int4(noiseAddress, 0)).r;
+
+    return ApplyOutputDither10Bit(encodedOutput, blueNoise);
+}
+
+#endif //POSTPROCESS_FINAL_HDR_ANY
+
 //||||||||||||||||||||||||||||||| DEBUG |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| DEBUG |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| DEBUG |||||||||||||||||||||||||||||||
@@ -1137,7 +1423,15 @@ PixelOutput main(PixelInput input)
 	//|||||||||||||||||||||||||||||||||||||||||||| APPLY TONEMAPPING ||||||||||||||||||||||||||||||||||||||||||||
 	//tonemapping! this is about taking our wide color/brightness range image and compressing it down into SDR/HDR for display
 
-	#if defined(TONEMAP_NONE) 
+#if defined(POSTPROCESS_FINAL_HDR_ANY)
+
+	//HDR keeps the game's own grade and does its own UI composite and PQ encode - see ComposeHDROutput above.
+	//The SDR tonemap selection does not apply here; every one of those curves maps to [0,1] and has no headroom to give.
+	output.Color = float4(ComposeHDROutput(sceneColor, compositeUV, input.Position.xy, input.VignetteRayContext), 0.0f);
+
+#else
+
+	#if defined(TONEMAP_NONE)
 		#if defined(TONEMAP_PRESERVE_COLOR_GRADE)
 			float3 tonemapOutput = SampleGradedNoTonemapNoSRGB(sceneColor);
 		#else
@@ -1281,6 +1575,8 @@ PixelOutput main(PixelInput input)
     uint3 noiseAddress = uint3((uint2)input.Position.xy & 127u, (uint)View_StateFrameIndex & 63u);
     float blueNoise = View_SpatiotemporalBlueNoiseVolumeTexture.Load(int4(noiseAddress, 0)).r;
     output.Color = float4(ApplyOutputDither(encodedOutput, blueNoise), 0.0f);
+
+#endif //POSTPROCESS_FINAL_HDR_ANY
 
     return output;
 }
