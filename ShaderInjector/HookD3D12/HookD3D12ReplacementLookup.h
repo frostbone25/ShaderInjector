@@ -7,7 +7,7 @@
 
 //custom
 #include "HookD3D12.h"
-#include "ShaderTarget.h"
+#include "ShaderTarget/ShaderTarget.h"
 
 namespace HookD3D12
 {

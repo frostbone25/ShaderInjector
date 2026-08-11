@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <string>
 
-#include "ShaderConfiguration.h"
+#include "ShaderConfiguration/ShaderConfiguration.h"
 
 namespace DatabaseShaderConfigurations
 {

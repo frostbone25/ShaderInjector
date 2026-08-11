@@ -10,12 +10,12 @@
 
 //custom
 #include "ShaderInjectorGUI.h"
-#include "SystemInfoLogger.h"
+#include "IO/SystemInfoLogger.h"
 #include "VTableIndex.h"
 #include "HookD3D12RenderPass.h"
 #include "HookD3D12Resources.h"
 #include "RenderPassRuntime.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
 namespace HookD3D12

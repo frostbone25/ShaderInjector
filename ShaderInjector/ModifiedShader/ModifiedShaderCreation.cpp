@@ -1,10 +1,10 @@
-#include "ModifiedShaderCreation.h"
+#include "ModifiedShader/ModifiedShaderCreation.h"
 
-#include "Database/DatabaseModifiedShaders.h"
+#include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "Hash.h"
-#include "ModifiedShader.h"
+#include "ModifiedShader/ModifiedShader.h"
 #include "ShaderAnalyzer.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "ShaderTemplates.h"
 #include "StringHelper.h"
 

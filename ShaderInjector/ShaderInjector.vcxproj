@@ -169,10 +169,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Database\DatabaseGraphicsPSOs.h" />
-    <ClInclude Include="Database\DatabaseModifiedShaders.h" />
-    <ClInclude Include="Database\DatabaseRenderPasses.h" />
-    <ClInclude Include="Database\DatabaseShaderConfigurations.h" />
-    <ClInclude Include="Database\DatabaseShaderTargets.h" />
     <ClInclude Include="Database\DatabaseStreamPSOs.h" />
     <ClInclude Include="FPSCounter.h" />
     <ClInclude Include="GUI\ShaderInjectorGUI.h" />
@@ -197,32 +193,34 @@
     <ClInclude Include="HookD3D12\HookD3D12Resources.h" />
     <ClInclude Include="Hooks.h" />
     <ClInclude Include="HookInput.h" />
+    <ClInclude Include="IO\ProcessRunner.h" />
+    <ClInclude Include="IO\ShaderInjectorIO.h" />
+    <ClInclude Include="IO\SystemInfoLogger.h" />
     <ClInclude Include="JsonHelper.h" />
     <ClInclude Include="dsound_proxy.h" />
     <ClInclude Include="Keycodes.h" />
-    <ClInclude Include="ProcessRunner.h" />
+    <ClInclude Include="ModifiedShader\DatabaseModifiedShaders.h" />
+    <ClInclude Include="ModifiedShader\ModifiedShader.h" />
+    <ClInclude Include="ModifiedShader\ModifiedShaderCreation.h" />
     <ClInclude Include="RenderDoc\RenderDocIntegration.h" />
+    <ClInclude Include="RenderPass\DatabaseRenderPasses.h" />
     <ClInclude Include="RenderPass\RenderPass.h" />
     <ClInclude Include="RenderPass\RenderPassExecutor.h" />
     <ClInclude Include="RenderPass\RenderPassMipChain.h" />
     <ClInclude Include="RenderPass\RenderPassResourceRegistry.h" />
     <ClInclude Include="RenderPass\RenderPassRuntime.h" />
     <ClInclude Include="RenderPass\RenderPassShaders.h" />
+    <ClInclude Include="ShaderConfiguration\DatabaseShaderConfigurations.h" />
+    <ClInclude Include="ShaderConfiguration\ShaderConfiguration.h" />
     <ClInclude Include="ShaderInjectorVersion.h" />
-    <ClInclude Include="ShaderInjectorIO.h" />
-    <ClInclude Include="ShaderConfiguration.h" />
-    <ClInclude Include="ShaderTarget.h" />
+    <ClInclude Include="ShaderTarget\DatabaseShaderTargets.h" />
+    <ClInclude Include="ShaderTarget\ShaderTarget.h" />
     <ClInclude Include="ShaderTemplates.h" />
     <ClInclude Include="StringHelper.h" />
-    <ClInclude Include="SystemInfoLogger.h" />
     <ClInclude Include="VTableIndex.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Database\DatabaseGraphicsPSOs.cpp" />
-    <ClCompile Include="Database\DatabaseModifiedShaders.cpp" />
-    <ClCompile Include="Database\DatabaseRenderPasses.cpp" />
-    <ClCompile Include="Database\DatabaseShaderConfigurations.cpp" />
-    <ClCompile Include="Database\DatabaseShaderTargets.cpp" />
     <ClCompile Include="Database\DatabaseStreamPSOs.cpp" />
     <ClCompile Include="FPSCounter.cpp" />
     <ClCompile Include="GUI\ShaderInjectorGUI.cpp" />
@@ -258,9 +256,15 @@
     <ClCompile Include="Hooks.cpp" />
     <ClCompile Include="HookInput.cpp" />
     <ClCompile Include="dsound_proxy.cpp" />
+    <ClCompile Include="IO\ProcessRunner.cpp" />
+    <ClCompile Include="IO\ShaderInjectorIO.cpp" />
+    <ClCompile Include="IO\SystemInfoLogger.cpp" />
     <ClCompile Include="Keycodes.cpp" />
+    <ClCompile Include="ModifiedShader\DatabaseModifiedShaders.cpp" />
+    <ClCompile Include="ModifiedShader\ModifiedShader.cpp" />
+    <ClCompile Include="ModifiedShader\ModifiedShaderCreation.cpp" />
     <ClCompile Include="RenderDoc\RenderDocIntegration.cpp" />
-    <ClCompile Include="ProcessRunner.cpp" />
+    <ClCompile Include="RenderPass\DatabaseRenderPasses.cpp" />
     <ClCompile Include="RenderPass\RenderPass.cpp" />
     <ClCompile Include="RenderPass\RenderPassExecutor.cpp" />
     <ClCompile Include="RenderPass\RenderPassMipChain.cpp" />
@@ -269,17 +273,15 @@
     <ClCompile Include="RenderPass\RenderPassShaders.cpp" />
     <ClCompile Include="ShaderAnalyzer.cpp" />
     <ClCompile Include="ShaderAnalysis.cpp" />
+    <ClCompile Include="ShaderConfiguration\DatabaseShaderConfigurations.cpp" />
+    <ClCompile Include="ShaderConfiguration\ShaderConfiguration.cpp" />
     <ClCompile Include="ShaderDiscovery.cpp" />
-    <ClCompile Include="ShaderConfiguration.cpp" />
     <ClCompile Include="ShaderAutomaticDiscovery.cpp" />
-    <ClCompile Include="ModifiedShader.cpp" />
-    <ClCompile Include="ModifiedShaderCreation.cpp" />
-    <ClCompile Include="ShaderInjectorIO.cpp" />
-    <ClCompile Include="ShaderTarget.cpp" />
-    <ClCompile Include="ShaderTargetSimilarity.cpp" />
+    <ClCompile Include="ShaderTarget\DatabaseShaderTargets.cpp" />
+    <ClCompile Include="ShaderTarget\ShaderTarget.cpp" />
+    <ClCompile Include="ShaderTarget\ShaderTargetSimilarity.cpp" />
     <ClCompile Include="ShaderTemplates.cpp" />
     <ClCompile Include="StringHelper.cpp" />
-    <ClCompile Include="SystemInfoLogger.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ShaderInjector.rc" />

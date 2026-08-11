@@ -15,15 +15,15 @@
 #include <unordered_set>
 #include <wrl/client.h>
 
-#include "DatabaseModifiedShaders.h"
-#include "DatabaseShaderTargets.h"
+#include "ModifiedShader/DatabaseModifiedShaders.h"
+#include "ShaderTarget/DatabaseShaderTargets.h"
 #include "Globals.h"
 #include "Hash.h"
 #include "HookD3D12.h"
 #include "HookD3D12PipelineUtils.h"
 #include "ShaderAnalysis.h"
 #include "ShaderDiscovery.h"
-#include "ShaderInjectorGUI.h"
+#include "GUI/ShaderInjectorGUI.h"
 #include "StringHelper.h"
 
 namespace ShaderAutomaticDiscovery

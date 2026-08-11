@@ -11,7 +11,7 @@
 //custom
 #include "Hash.h"
 #include "ShaderInjectorGUI.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "RenderPassResourceRegistry.h"
 #include "RenderPassRuntime.h"
 

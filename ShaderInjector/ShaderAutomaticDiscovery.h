@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "ShaderTarget.h"
-#include "ModifiedShader.h"
+#include "ShaderTarget/ShaderTarget.h"
+#include "ModifiedShader/ModifiedShader.h"
 
 namespace HookD3D12
 {

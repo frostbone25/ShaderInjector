@@ -6,13 +6,13 @@
 
 //custom
 #include "DatabaseShaderTargets.h"
-#include "DatabaseModifiedShaders.h"
+#include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "Globals.h"
 #include "HookD3D12ReplacementTemplates.h"
 #include "HookD3D12ReplacementLookup.h"
 #include "ShaderDiscovery.h"
-#include "ShaderInjectorGUI.h"
-#include "ShaderInjectorIO.h"
+#include "GUI/ShaderInjectorGUI.h"
+#include "IO/ShaderInjectorIO.h"
 #include "ShaderTarget.h"
 
 namespace HookD3D12

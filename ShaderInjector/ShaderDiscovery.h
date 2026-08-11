@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "ShaderTarget.h"
-#include "ModifiedShader.h"
+#include "ShaderTarget/ShaderTarget.h"
+#include "ModifiedShader/ModifiedShader.h"
 
 #ifndef SHADER_INJECTOR_DISCOVERY_MINIMUM_SIMILARITY_SCORE
 #define SHADER_INJECTOR_DISCOVERY_MINIMUM_SIMILARITY_SCORE 0.90

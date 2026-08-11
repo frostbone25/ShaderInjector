@@ -11,10 +11,10 @@
 
 //custom
 #include "HookD3D12.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "Hash.h"
 #include "Globals.h"
-#include "ShaderTarget.h"
+#include "ShaderTarget/ShaderTarget.h"
 
 namespace ShaderInjectorGUI
 {

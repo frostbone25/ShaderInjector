@@ -8,7 +8,7 @@
 #include "HookD3D12PipelineUtils.h"
 #include "HookD3D12ReplacementLookup.h"
 #include "ShaderInjectorGUI.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
 namespace HookD3D12

@@ -6,7 +6,7 @@
 
 #include "JsonHelper.h"
 #include "ShaderAnalysis.h"
-#include "ShaderTarget.h"
+#include "ShaderTarget/ShaderTarget.h"
 
 namespace ModifiedShader
 {

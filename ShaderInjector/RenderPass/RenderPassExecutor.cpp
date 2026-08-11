@@ -1,4 +1,4 @@
-#include "RenderPassExecutor.h"
+#include "RenderPass/RenderPassExecutor.h"
 
 #include <algorithm>
 #include <atomic>
@@ -7,10 +7,10 @@
 
 #include "HookD3D12.h"
 #include "HookD3D12RenderPass.h"
-#include "RenderPassMipChain.h"
+#include "RenderPass/RenderPassMipChain.h"
 #include "Globals.h"
-#include "RenderDocIntegration.h"
-#include "ShaderInjectorIO.h"
+#include "RenderDoc/RenderDocIntegration.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
 namespace RenderPassExecutor

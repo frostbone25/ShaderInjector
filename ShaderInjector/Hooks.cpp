@@ -13,7 +13,7 @@
 #include "dsound_proxy.h"
 #include "Globals.h"
 #include "HookD3D12.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "ShaderInjectorGUI.h"
 #include "StringHelper.h"
 #include "VTableIndex.h"
@@ -59,6 +59,7 @@ namespace Hooks
 			return;
 
 		Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain3;
+
 		if (FAILED(swapChain->QueryInterface(IID_PPV_ARGS(&swapChain3))))
 			return;
 
@@ -70,12 +71,10 @@ namespace Hooks
 			return;
 
 		const char* compatibilitySource = gOptiScalerCompatibilityEnabled ? "OptiScaler" : "RenderDoc";
+
 		if (HookD3D12::InstallSwapChainCompatibility(swapChain3.Get(), compatibilitySource))
 		{
-			ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
-				"Hooks->CaptureCreatedSwapChain: captured %s swapChain=%p",
-				compatibilitySource,
-				swapChain3.Get()));
+			ShaderInjectorIO::WriteToLogFile(StringHelper::Format("Hooks->CaptureCreatedSwapChain: captured %s swapChain=%p", compatibilitySource, swapChain3.Get()));
 		}
 	}
 
@@ -85,14 +84,10 @@ namespace Hooks
 		DXGI_SWAP_CHAIN_DESC* description,
 		IDXGISwapChain** swapChain)
 	{
-		HRESULT result = gOriginalCreateSwapChain
-			? gOriginalCreateSwapChain(factory, device, description, swapChain)
-			: E_POINTER;
+		HRESULT result = gOriginalCreateSwapChain ? gOriginalCreateSwapChain(factory, device, description, swapChain) : E_POINTER;
 
-		const bool hasExplicitSize = description &&
-			description->BufferDesc.Width != 0 && description->BufferDesc.Height != 0;
-		const bool isOverlaySizedSwapChain = hasExplicitSize &&
-			(description->BufferDesc.Width < 100 || description->BufferDesc.Height < 100);
+		const bool hasExplicitSize = description && description->BufferDesc.Width != 0 && description->BufferDesc.Height != 0;
+		const bool isOverlaySizedSwapChain = hasExplicitSize && (description->BufferDesc.Width < 100 || description->BufferDesc.Height < 100);
 
 		if (SUCCEEDED(result) && swapChain && *swapChain && !isOverlaySizedSwapChain)
 			CaptureCreatedSwapChain(device, *swapChain);
@@ -109,20 +104,10 @@ namespace Hooks
 		IDXGIOutput* restrictToOutput,
 		IDXGISwapChain1** swapChain)
 	{
-		HRESULT result = gOriginalCreateSwapChainForHwnd
-			? gOriginalCreateSwapChainForHwnd(
-				factory,
-				device,
-				window,
-				description,
-				fullscreenDescription,
-				restrictToOutput,
-				swapChain)
-			: E_POINTER;
+		HRESULT result = gOriginalCreateSwapChainForHwnd ? gOriginalCreateSwapChainForHwnd(factory, device, window, description, fullscreenDescription, restrictToOutput, swapChain) : E_POINTER;
 
 		const bool hasExplicitSize = description && description->Width != 0 && description->Height != 0;
-		const bool isOverlaySizedSwapChain = hasExplicitSize &&
-			(description->Width < 100 || description->Height < 100);
+		const bool isOverlaySizedSwapChain = hasExplicitSize && (description->Width < 100 || description->Height < 100);
 
 		if (SUCCEEDED(result) && swapChain && *swapChain && !isOverlaySizedSwapChain)
 			CaptureCreatedSwapChain(device, *swapChain);
@@ -132,20 +117,17 @@ namespace Hooks
 
 	bool PrepareSwapChainCapture()
 	{
-		const std::string optiScalerSettingsPath =
-			ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetGameDirectory(), "OptiScaler.ini");
+		const std::string optiScalerSettingsPath = ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetGameDirectory(), "OptiScaler.ini");
 		gOptiScalerCompatibilityEnabled = ShaderInjectorIO::FileExists(optiScalerSettingsPath);
 		const bool renderDocCaptureLayerLoaded = GetModuleHandleW(L"renderdoc.dll") != nullptr;
-		gObjectLocalSwapChainHooksEnabled =
-			gOptiScalerCompatibilityEnabled || renderDocCaptureLayerLoaded;
+		gObjectLocalSwapChainHooksEnabled = gOptiScalerCompatibilityEnabled || renderDocCaptureLayerLoaded;
 
 		Microsoft::WRL::ComPtr<IDXGIFactory2> factory;
 		HRESULT factoryResult = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
+
 		if (FAILED(factoryResult) || !factory)
 		{
-			ShaderInjectorIO::WriteToLogFileError(
-				"Hooks->PrepareSwapChainCapture: failed to create DXGI factory: " +
-				StringHelper::FormatHRESULT(factoryResult));
+			ShaderInjectorIO::WriteToLogFileError("Hooks->PrepareSwapChainCapture: failed to create DXGI factory: " + StringHelper::FormatHRESULT(factoryResult));
 			return false;
 		}
 
@@ -153,55 +135,36 @@ namespace Hooks
 		void* createSwapChainTarget = factoryVTable[VTableIndex::indexCreateSwapChain];
 		void* createSwapChainForHwndTarget = factoryVTable[VTableIndex::indexCreateSwapChainForHwnd];
 
-		MH_STATUS createHwndStatus = MH_CreateHook(
-			createSwapChainForHwndTarget,
-			reinterpret_cast<void*>(&Hook_CreateSwapChainForHwnd),
-			reinterpret_cast<void**>(&gOriginalCreateSwapChainForHwnd));
-		MH_STATUS enableHwndStatus = createHwndStatus == MH_OK
-			? MH_EnableHook(createSwapChainForHwndTarget)
-			: createHwndStatus;
+		MH_STATUS createHwndStatus = MH_CreateHook(createSwapChainForHwndTarget, reinterpret_cast<void*>(&Hook_CreateSwapChainForHwnd), reinterpret_cast<void**>(&gOriginalCreateSwapChainForHwnd));
+		MH_STATUS enableHwndStatus = createHwndStatus == MH_OK ? MH_EnableHook(createSwapChainForHwndTarget) : createHwndStatus;
 
 		if (createHwndStatus != MH_OK || (enableHwndStatus != MH_OK && enableHwndStatus != MH_ERROR_ENABLED))
 		{
-			ShaderInjectorIO::WriteToLogFileError(StringHelper::Format(
-				"Hooks->PrepareSwapChainCapture: CreateSwapChainForHwnd hook failed create=%s enable=%s",
-				MH_StatusToString(createHwndStatus),
-				MH_StatusToString(enableHwndStatus)));
+			ShaderInjectorIO::WriteToLogFileError(StringHelper::Format("Hooks->PrepareSwapChainCapture: CreateSwapChainForHwnd hook failed create=%s enable=%s", MH_StatusToString(createHwndStatus), MH_StatusToString(enableHwndStatus)));
 			return false;
 		}
 
-		MH_STATUS createLegacyStatus = MH_CreateHook(
-			createSwapChainTarget,
-			reinterpret_cast<void*>(&Hook_CreateSwapChain),
-			reinterpret_cast<void**>(&gOriginalCreateSwapChain));
-		MH_STATUS enableLegacyStatus = createLegacyStatus == MH_OK
-			? MH_EnableHook(createSwapChainTarget)
-			: createLegacyStatus;
+		MH_STATUS createLegacyStatus = MH_CreateHook(createSwapChainTarget, reinterpret_cast<void*>(&Hook_CreateSwapChain), reinterpret_cast<void**>(&gOriginalCreateSwapChain));
+		MH_STATUS enableLegacyStatus = createLegacyStatus == MH_OK ? MH_EnableHook(createSwapChainTarget) : createLegacyStatus;
 
 		if (createLegacyStatus != MH_OK || (enableLegacyStatus != MH_OK && enableLegacyStatus != MH_ERROR_ENABLED))
 		{
 			// Rebirth uses CreateSwapChainForHwnd. Keep the capture path active
 			// when only the legacy fallback could not be installed.
-			ShaderInjectorIO::WriteToLogFileWarning(StringHelper::Format(
-				"Hooks->PrepareSwapChainCapture: legacy CreateSwapChain hook unavailable create=%s enable=%s",
-				MH_StatusToString(createLegacyStatus),
-				MH_StatusToString(enableLegacyStatus)));
+			ShaderInjectorIO::WriteToLogFileWarning(StringHelper::Format("Hooks->PrepareSwapChainCapture: legacy CreateSwapChain hook unavailable create=%s enable=%s", MH_StatusToString(createLegacyStatus), MH_StatusToString(enableLegacyStatus)));
 		}
 
 		if (gOptiScalerCompatibilityEnabled)
 		{
-			ShaderInjectorIO::WriteToLogFile(
-				"Hooks->PrepareSwapChainCapture: enabled exact command-queue capture and OptiScaler object-local swap-chain hooks");
+			ShaderInjectorIO::WriteToLogFile("Hooks->PrepareSwapChainCapture: enabled exact command-queue capture and OptiScaler object-local swap-chain hooks");
 		}
 		else if (renderDocCaptureLayerLoaded)
 		{
-			ShaderInjectorIO::WriteToLogFile(
-				"Hooks->PrepareSwapChainCapture: enabled exact command-queue capture and RenderDoc object-local swap-chain hooks");
+			ShaderInjectorIO::WriteToLogFile("Hooks->PrepareSwapChainCapture: enabled exact command-queue capture and RenderDoc object-local swap-chain hooks");
 		}
 		else
 		{
-			ShaderInjectorIO::WriteToLogFile(
-				"Hooks->PrepareSwapChainCapture: enabled exact swap-chain command-queue capture");
+			ShaderInjectorIO::WriteToLogFile("Hooks->PrepareSwapChainCapture: enabled exact swap-chain command-queue capture");
 		}
 		return true;
 	}
@@ -334,8 +297,7 @@ namespace Hooks
 			// Wrapper layers own the live swap chain and may expose a different
 			// Present/ResizeBuffers chain than a temporary discovery object. The real
 			// object is captured by the factory hook and receives a private vtable.
-			ShaderInjectorGUI::WriteToRuntimeLog(
-				"Hooks->CreateDeviceAndSwapChain: object-local swap-chain hooks active; skipping dummy swap chain");
+			ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: object-local swap-chain hooks active; skipping dummy swap chain");
 			return S_OK;
 		}
 

@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 
 namespace DatabaseShaderConfigurations
 {

@@ -5,7 +5,7 @@
 #include <string>
 #include <unordered_set>
 
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "ShaderDiscovery.h"
 #include "ShaderAutomaticDiscovery.h"
 #include "StringHelper.h"

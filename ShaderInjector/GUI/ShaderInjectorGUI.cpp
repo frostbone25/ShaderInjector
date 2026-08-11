@@ -14,18 +14,18 @@
 
 //custom
 #include "HookD3D12.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "Hash.h"
 #include "Globals.h"
-#include "DatabaseModifiedShaders.h"
-#include "DatabaseRenderPasses.h"
-#include "DatabaseShaderConfigurations.h"
-#include "ModifiedShaderCreation.h"
-#include "RenderDocIntegration.h"
-#include "RenderPassRuntime.h"
+#include "ModifiedShader/DatabaseModifiedShaders.h"
+#include "RenderPass/DatabaseRenderPasses.h"
+#include "ShaderConfiguration/DatabaseShaderConfigurations.h"
+#include "ModifiedShader/ModifiedShaderCreation.h"
+#include "RenderDoc/RenderDocIntegration.h"
+#include "RenderPass/RenderPassRuntime.h"
 #include "ShaderAutomaticDiscovery.h"
 #include "StringHelper.h"
-#include "ShaderInjectorGUITooltips.h"
+#include "GUI/ShaderInjectorGUITooltips.h"
 #include "Keycodes.h"
 #include "ShaderInjectorVersion.h"
 
@@ -45,6 +45,7 @@ namespace ShaderInjectorGUI
 			return;
 
 		ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse;
+
 		ImGui::SetNextWindowSize(ImVec2(600, 600), ImGuiCond_FirstUseEver);
 		ImGui::SetNextWindowPos(ImVec2(25, 25), ImGuiCond_FirstUseEver);
 
@@ -70,27 +71,14 @@ namespace ShaderInjectorGUI
 
 			ImGui::SetNextItemWidth(140.0f * Globals::gShaderInjectorGUIScale);
 
-			if (ImGui::DragFloat(
-				"Menu Scale",
-				&Globals::gShaderInjectorGUIScale,
-				0.05f,
-				0.5f,
-				4.0f,
-				"%.2fx",
-				ImGuiSliderFlags_AlwaysClamp))
-			{
+			if (ImGui::DragFloat("Menu Scale", &Globals::gShaderInjectorGUIScale, 0.05f, 0.5f, 4.0f, "%.2fx", ImGuiSliderFlags_AlwaysClamp))
 				Globals::gShaderInjectorGUIScale = (std::clamp)(Globals::gShaderInjectorGUIScale, 0.5f, 4.0f);
-			}
 
 			if (ImGui::IsItemDeactivatedAfterEdit() && !ShaderInjectorIO::WriteInjectorMenuScale(Globals::gShaderInjectorGUIScale))
-			{
 				WriteToRuntimeLogError("Could not save MenuScale to ShaderInjector.ini.");
-			}
 
 			if (ImGui::Button("Edit Injector Settings", ImVec2(-FLT_MIN, 0)) && !ShaderInjectorIO::OpenFile( ShaderInjectorIO::GetInjectorSettingsPath()))
-			{
 				WriteToRuntimeLogError("Could not open ShaderInjector.ini.");
-			}
 
 			ImGui::Spacing();
 
@@ -100,7 +88,9 @@ namespace ShaderInjectorGUI
 
 			//log section
 			ImGui::BeginGroup();
+
 			ImGui::SeparatorText("Log");
+
 			if (ImGui::TreeNodeEx("Runtime Log"))
 			{
 				if (ImGui::Button("Clear Log"))
@@ -114,8 +104,10 @@ namespace ShaderInjectorGUI
 
 				ImGui::TreePop();
 			}
+
 			ImGui::EndGroup();
-		} //window end
+		} 
+		//window end
 
 		ImGui::End();
 	}

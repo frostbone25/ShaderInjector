@@ -1,4 +1,4 @@
-#include "RenderPassShaders.h"
+#include "RenderPass/RenderPassShaders.h"
 
 #include <algorithm>
 #include <cctype>
@@ -7,7 +7,7 @@
 
 #include <d3d12shader.h>
 
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 
 namespace RenderPassShaders
 {

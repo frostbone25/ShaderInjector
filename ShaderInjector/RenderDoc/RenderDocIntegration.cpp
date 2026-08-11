@@ -1,4 +1,4 @@
-#include "RenderDocIntegration.h"
+#include "RenderDoc/RenderDocIntegration.h"
 
 #include <windows.h>
 
@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "Globals.h"
-#include "ProcessRunner.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ProcessRunner.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 #include "renderdoc_app.h"
 

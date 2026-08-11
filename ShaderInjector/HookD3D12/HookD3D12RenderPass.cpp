@@ -3,8 +3,8 @@
 #include <atomic>
 
 #include "Globals.h"
-#include "RenderPassRuntime.h"
-#include "ShaderInjectorIO.h"
+#include "RenderPass/RenderPassRuntime.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
 namespace HookD3D12

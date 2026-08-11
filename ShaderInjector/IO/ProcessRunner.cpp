@@ -20,7 +20,9 @@ namespace ProcessRunner
 {
 	namespace
 	{
+
 #if defined(_WIN32)
+
 		std::wstring QuoteWindowsArgument(const std::wstring& argument)
 		{
 			std::wstring quoted = L"\"";
@@ -53,6 +55,7 @@ namespace ProcessRunner
 		}
 
 #endif
+
 	}
 
 	ProcessResult Run(
@@ -171,6 +174,7 @@ namespace ProcessRunner
 			if (!standardOutputPath.empty())
 			{
 				const int outputDescriptor = open(standardOutputPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
 				if (outputDescriptor < 0)
 					_exit(126);
 
@@ -242,10 +246,12 @@ namespace ProcessRunner
 		const char* value = std::getenv(variableName.c_str());
 		return value ? value : "";
 #endif
+
 	}
 
 	std::string GetCurrentExecutablePath()
 	{
+
 #if defined(_WIN32)
 		std::vector<wchar_t> pathBuffer(1024, L'\0');
 
@@ -266,10 +272,12 @@ namespace ProcessRunner
 		const ssize_t pathLength = readlink("/proc/self/exe", pathBuffer.data(), PATH_MAX);
 		return pathLength > 0 ? std::string(pathBuffer.data(), static_cast<size_t>(pathLength)) : std::string();
 #endif
+
 	}
 
 	std::string GetLoadedModulePath(const std::string& moduleName)
 	{
+
 #if defined(_WIN32)
 		const std::wstring wideModuleName = StringHelper::Utf8ToWide(moduleName, false);
 		HMODULE module = wideModuleName.empty() ? nullptr : GetModuleHandleW(wideModuleName.c_str());
@@ -287,6 +295,7 @@ namespace ProcessRunner
 		(void)moduleName;
 		return {};
 #endif
+
 	}
 
 }

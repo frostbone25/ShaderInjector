@@ -6,10 +6,10 @@
 
 //custom
 #include "Hash.h"
-#include "DatabaseShaderTargets.h"
+#include "ShaderTarget/DatabaseShaderTargets.h"
 #include "HookD3D12ReplacementTemplates.h"
 #include "ShaderDiscovery.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 
 namespace HookD3D12
 {

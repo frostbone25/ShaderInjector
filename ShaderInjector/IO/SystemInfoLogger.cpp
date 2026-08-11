@@ -16,8 +16,8 @@
 #include <vector>
 
 //custom
-#include "ProcessRunner.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ProcessRunner.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
 #pragma comment(lib, "Version.lib")

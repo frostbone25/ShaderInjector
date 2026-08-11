@@ -4,10 +4,10 @@
 #include <unordered_set>
 #include <utility>
 
-#include "DatabaseModifiedShaders.h"
-#include "RenderPassRuntime.h"
-#include "RenderPassShaders.h"
-#include "ShaderInjectorIO.h"
+#include "ModifiedShader/DatabaseModifiedShaders.h"
+#include "RenderPass/RenderPassRuntime.h"
+#include "RenderPass/RenderPassShaders.h"
+#include "IO/ShaderInjectorIO.h"
 
 namespace DatabaseRenderPasses
 {

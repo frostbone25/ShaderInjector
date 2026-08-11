@@ -1,4 +1,4 @@
-#include "ShaderConfiguration.h"
+#include "ShaderConfiguration/ShaderConfiguration.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -13,7 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
 namespace ShaderConfiguration

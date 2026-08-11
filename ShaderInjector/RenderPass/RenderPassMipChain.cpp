@@ -1,4 +1,4 @@
-#include "RenderPassMipChain.h"
+#include "RenderPass/RenderPassMipChain.h"
 
 #include <algorithm>
 #include <array>
@@ -13,8 +13,8 @@
 #include <wrl/client.h>
 
 #include "HookD3D12RenderPass.h"
-#include "RenderPassResourceRegistry.h"
-#include "ShaderInjectorIO.h"
+#include "RenderPass/RenderPassResourceRegistry.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
 namespace RenderPassMipChain

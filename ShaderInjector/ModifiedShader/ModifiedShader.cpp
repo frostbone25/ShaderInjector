@@ -4,7 +4,7 @@
 #include <unordered_set>
 
 #include "Hash.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "SimilarityScore.h"
 
 namespace ModifiedShader
@@ -33,9 +33,7 @@ namespace ModifiedShader
 
 		bool AnalysesHaveSameStrictIdentity(const ShaderAnalysis::ShaderAnalysisDisk& left, const ShaderAnalysis::ShaderAnalysisDisk& right)
 		{
-			return left.succeeded && right.succeeded &&
-				!left.crossVersionIdentityHash.empty() &&
-				left.crossVersionIdentityHash == right.crossVersionIdentityHash;
+			return left.succeeded && right.succeeded && !left.crossVersionIdentityHash.empty() && left.crossVersionIdentityHash == right.crossVersionIdentityHash;
 		}
 	}
 

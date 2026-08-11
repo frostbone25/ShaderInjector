@@ -1,4 +1,4 @@
-#include "RenderPassRuntime.h"
+#include "RenderPass/RenderPassRuntime.h"
 
 #include <algorithm>
 #include <array>
@@ -13,10 +13,10 @@
 #include <utility>
 
 #include "HookD3D12.h"
-#include "RenderPassResourceRegistry.h"
-#include "RenderPassExecutor.h"
-#include "RenderPassMipChain.h"
-#include "ShaderInjectorIO.h"
+#include "RenderPass/RenderPassResourceRegistry.h"
+#include "RenderPass/RenderPassExecutor.h"
+#include "RenderPass/RenderPassMipChain.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
 namespace RenderPassRuntime

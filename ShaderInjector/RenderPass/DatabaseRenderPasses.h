@@ -3,8 +3,8 @@
 #include <string>
 #include <vector>
 
-#include "ModifiedShader.h"
-#include "RenderPass.h"
+#include "ModifiedShader/ModifiedShader.h"
+#include "RenderPass/RenderPass.h"
 
 namespace DatabaseRenderPasses
 {

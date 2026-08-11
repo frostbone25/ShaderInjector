@@ -14,7 +14,7 @@
 #include <wrl/client.h>
 
 #include "Hash.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
 namespace ShaderAnalyzer

@@ -9,13 +9,13 @@
 #include "HookD3D12.h"
 #include "Hooks.h"
 #include "dsound_proxy.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
-#include "DatabaseModifiedShaders.h"
-#include "DatabaseRenderPasses.h"
-#include "RenderDocIntegration.h"
+#include "ModifiedShader/DatabaseModifiedShaders.h"
+#include "RenderPass/DatabaseRenderPasses.h"
+#include "RenderDoc/RenderDocIntegration.h"
 #include "ShaderInjectorVersion.h"
-#include "SystemInfoLogger.h"
+#include "IO/SystemInfoLogger.h"
 
 //||||||||||||||||||||||||||||||| ON ATTACH |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| ON ATTACH |||||||||||||||||||||||||||||||
@@ -31,9 +31,7 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	//Read settings before initializing the optional RenderDoc bridge. Unless AutoAttach is
 	//explicitly enabled, initialization only detects an already injected RenderDoc module.
 	ShaderInjectorIO::RotateLogFiles();
-	ShaderInjectorIO::WriteToLogFile(
-		"dllmain->OnAttachDLL: Shader Injector version " +
-		std::string(SHADER_INJECTOR_VERSION_STRING));
+	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: Shader Injector version " + std::string(SHADER_INJECTOR_VERSION_STRING));
 	ShaderInjectorIO::ReadInjectorSettings();
 	RenderDocIntegration::Initialize();
 

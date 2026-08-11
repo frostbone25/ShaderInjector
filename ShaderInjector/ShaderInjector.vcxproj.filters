@@ -37,6 +37,18 @@
     <Filter Include="RenderPass">
       <UniqueIdentifier>{f505d4fd-aaf2-4a84-b145-25570e067cbd}</UniqueIdentifier>
     </Filter>
+    <Filter Include="IO">
+      <UniqueIdentifier>{6e42df63-7acf-42ed-9b30-047d0246d8db}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ShaderTarget">
+      <UniqueIdentifier>{60bbf43e-10f1-4daf-8410-0bce36a6cc7b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ModifiedShader">
+      <UniqueIdentifier>{cfa58046-e381-464f-bf65-419474fe0b8b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ShaderConfiguration">
+      <UniqueIdentifier>{7804e50d-561f-48d6-a3e2-09af47e8da1f}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dsound_proxy.h">
@@ -75,28 +87,13 @@
     <ClInclude Include="HookInput.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ShaderInjectorIO.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="ShaderInjectorVersion.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ProcessRunner.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="JsonHelper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ShaderTarget.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="ShaderTemplates.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ShaderConfiguration.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="SystemInfoLogger.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="FPSCounter.h">
@@ -115,18 +112,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Database\DatabaseGraphicsPSOs.h">
-      <Filter>Database</Filter>
-    </ClInclude>
-    <ClInclude Include="Database\DatabaseModifiedShaders.h">
-      <Filter>Database</Filter>
-    </ClInclude>
-    <ClInclude Include="Database\DatabaseRenderPasses.h">
-      <Filter>Database</Filter>
-    </ClInclude>
-    <ClInclude Include="Database\DatabaseShaderConfigurations.h">
-      <Filter>Database</Filter>
-    </ClInclude>
-    <ClInclude Include="Database\DatabaseShaderTargets.h">
       <Filter>Database</Filter>
     </ClInclude>
     <ClInclude Include="Database\DatabaseStreamPSOs.h">
@@ -183,6 +168,39 @@
     <ClInclude Include="RenderPass\RenderPassShaders.h">
       <Filter>RenderPass</Filter>
     </ClInclude>
+    <ClInclude Include="IO\ProcessRunner.h">
+      <Filter>IO</Filter>
+    </ClInclude>
+    <ClInclude Include="IO\ShaderInjectorIO.h">
+      <Filter>IO</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ShaderConfiguration.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\DatabaseShaderConfigurations.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderPass\DatabaseRenderPasses.h">
+      <Filter>RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="IO\SystemInfoLogger.h">
+      <Filter>IO</Filter>
+    </ClInclude>
+    <ClInclude Include="ModifiedShader\DatabaseModifiedShaders.h">
+      <Filter>ModifiedShader</Filter>
+    </ClInclude>
+    <ClInclude Include="ModifiedShader\ModifiedShader.h">
+      <Filter>ModifiedShader</Filter>
+    </ClInclude>
+    <ClInclude Include="ModifiedShader\ModifiedShaderCreation.h">
+      <Filter>ModifiedShader</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderTarget\DatabaseShaderTargets.h">
+      <Filter>ShaderTarget</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderTarget\ShaderTarget.h">
+      <Filter>ShaderTarget</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -218,12 +236,6 @@
     <ClCompile Include="HookInput.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ShaderInjectorIO.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ProcessRunner.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="ShaderAnalyzer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -233,28 +245,10 @@
     <ClCompile Include="ShaderDiscovery.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ShaderConfiguration.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="ShaderAutomaticDiscovery.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ModifiedShader.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ModifiedShaderCreation.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="ShaderTemplates.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ShaderTarget.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ShaderTargetSimilarity.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="SystemInfoLogger.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="FPSCounter.cpp">
@@ -270,18 +264,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Database\DatabaseGraphicsPSOs.cpp">
-      <Filter>Database</Filter>
-    </ClCompile>
-    <ClCompile Include="Database\DatabaseModifiedShaders.cpp">
-      <Filter>Database</Filter>
-    </ClCompile>
-    <ClCompile Include="Database\DatabaseRenderPasses.cpp">
-      <Filter>Database</Filter>
-    </ClCompile>
-    <ClCompile Include="Database\DatabaseShaderConfigurations.cpp">
-      <Filter>Database</Filter>
-    </ClCompile>
-    <ClCompile Include="Database\DatabaseShaderTargets.cpp">
       <Filter>Database</Filter>
     </ClCompile>
     <ClCompile Include="Database\DatabaseStreamPSOs.cpp">
@@ -349,6 +331,63 @@
     </ClCompile>
     <ClCompile Include="RenderPass\RenderPassShaders.cpp">
       <Filter>RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="GUI\ShaderInjectorGUI_ApplyStyle.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="GUI\ShaderInjectorGUI_DeveloperSettings.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="GUI\ShaderInjectorGUI_ModifiedShaders.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="GUI\ShaderInjectorGUI_RenderPasses.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="GUI\ShaderInjectorGUI_RuntimeLogs.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="GUI\ShaderInjectorGUI_ShaderConfiguration.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="GUI\ShaderInjectorGUI_ShaderTargets.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="IO\ProcessRunner.cpp">
+      <Filter>IO</Filter>
+    </ClCompile>
+    <ClCompile Include="IO\ShaderInjectorIO.cpp">
+      <Filter>IO</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\ShaderConfiguration.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\DatabaseShaderConfigurations.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderPass\DatabaseRenderPasses.cpp">
+      <Filter>RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="IO\SystemInfoLogger.cpp">
+      <Filter>IO</Filter>
+    </ClCompile>
+    <ClCompile Include="ModifiedShader\DatabaseModifiedShaders.cpp">
+      <Filter>ModifiedShader</Filter>
+    </ClCompile>
+    <ClCompile Include="ModifiedShader\ModifiedShader.cpp">
+      <Filter>ModifiedShader</Filter>
+    </ClCompile>
+    <ClCompile Include="ModifiedShader\ModifiedShaderCreation.cpp">
+      <Filter>ModifiedShader</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderTarget\DatabaseShaderTargets.cpp">
+      <Filter>ShaderTarget</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderTarget\ShaderTarget.cpp">
+      <Filter>ShaderTarget</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderTarget\ShaderTargetSimilarity.cpp">
+      <Filter>ShaderTarget</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

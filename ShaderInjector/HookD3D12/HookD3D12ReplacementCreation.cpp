@@ -5,16 +5,16 @@
 #include <vector>
 
 //custom
-#include "DatabaseModifiedShaders.h"
+#include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "HookD3D12.h"
 #include "HookD3D12PipelineUtils.h"
 #include "HookD3D12ReplacementLookup.h"
 #include "HookD3D12ReplacementTemplates.h"
 #include "Hash.h"
-#include "ShaderInjectorGUI.h"
-#include "ShaderInjectorIO.h"
+#include "GUI/ShaderInjectorGUI.h"
+#include "IO/ShaderInjectorIO.h"
 #include "ShaderAnalyzer.h"
-#include "ShaderTarget.h"
+#include "ShaderTarget/ShaderTarget.h"
 #include "StringHelper.h"
 
 namespace HookD3D12

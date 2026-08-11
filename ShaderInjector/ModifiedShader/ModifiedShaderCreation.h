@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 
-#include "ShaderTarget.h"
+#include "ShaderTarget/ShaderTarget.h"
 
 namespace ModifiedShaderCreation
 {

@@ -1,9 +1,9 @@
-#include "RenderPass.h"
+#include "RenderPass/RenderPass.h"
 
 #include <utility>
 
 #include "Hash.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 
 namespace RenderPass
 {

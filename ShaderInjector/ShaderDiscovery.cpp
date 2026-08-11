@@ -11,7 +11,7 @@
 #include "Globals.h"
 #include "ShaderAnalyzer.h"
 #include "ShaderInjectorGUI.h"
-#include "ShaderInjectorIO.h"
+#include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
 namespace ShaderDiscovery

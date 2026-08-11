@@ -1,8 +1,8 @@
 #pragma once
 
 //custom
-#include "ShaderInjectorIO.h"
-#include "ShaderTarget.h"
+#include "IO/ShaderInjectorIO.h"
+#include "ShaderTarget/ShaderTarget.h"
 
 namespace ShaderTemplates
 {

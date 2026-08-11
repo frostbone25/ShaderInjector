@@ -6,8 +6,8 @@
 
 #include <d3d12.h>
 
-#include "RenderPass.h"
-#include "ShaderTarget.h"
+#include "RenderPass/RenderPass.h"
+#include "ShaderTarget/ShaderTarget.h"
 
 namespace RenderPassRuntime
 {
