@@ -8,6 +8,8 @@
 #include "HookD3D12.h"
 #include "HookD3D12RenderPass.h"
 #include "RenderPass/RenderPassMipChain.h"
+#include "RenderPass/RenderPassReplacement.h"
+#include "ShaderResource/ShaderResourceRuntime.h"
 #include "Globals.h"
 #include "RenderDoc/RenderDocIntegration.h"
 #include "IO/ShaderInjectorIO.h"
@@ -344,6 +346,8 @@ namespace RenderPassExecutor
 	void ReleaseResources()
 	{
 		RenderPassMipChain::ReleaseResources();
+		RenderPassReplacement::ReleaseResources();
+		ShaderResourceRuntime::ReleaseResources();
 		std::lock_guard<std::mutex> cacheLock(gPipelineCacheMutex);
 		for (auto& cachedPipeline : gPipelineCache)
 		{

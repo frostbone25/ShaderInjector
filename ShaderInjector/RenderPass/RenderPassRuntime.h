@@ -113,6 +113,7 @@ namespace RenderPassRuntime
 		ExecutionBoundary boundary,
 		const char* operationName);
 	void CompleteGraphicsExecutionBoundary(ID3D12GraphicsCommandList* commandList);
+	void CompleteComputeExecutionBoundary(ID3D12GraphicsCommandList* commandList);
 	void NotifyCommandListsSubmitted(
 		ID3D12CommandQueue* commandQueue,
 		UINT commandListCount,

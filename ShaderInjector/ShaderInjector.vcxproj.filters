@@ -168,6 +168,18 @@
     <ClInclude Include="RenderPass\RenderPassShaders.h">
       <Filter>RenderPass</Filter>
     </ClInclude>
+    <ClInclude Include="RenderPass\RenderPassReplacement.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderResource\DatabaseShaderResources.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderResource\ShaderResource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderResource\ShaderResourceRuntime.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="IO\ProcessRunner.h">
       <Filter>IO</Filter>
     </ClInclude>
@@ -331,6 +343,15 @@
     </ClCompile>
     <ClCompile Include="RenderPass\RenderPassShaders.cpp">
       <Filter>RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderPass\RenderPassReplacement.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderResource\DatabaseShaderResources.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderResource\ShaderResourceRuntime.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="GUI\ShaderInjectorGUI_ApplyStyle.cpp">
       <Filter>GUI</Filter>

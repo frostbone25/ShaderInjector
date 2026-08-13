@@ -23,6 +23,7 @@
 #include "ModifiedShader/ModifiedShaderCreation.h"
 #include "RenderDoc/RenderDocIntegration.h"
 #include "RenderPass/RenderPassRuntime.h"
+#include "ShaderResource/DatabaseShaderResources.h"
 #include "ShaderAutomaticDiscovery.h"
 #include "StringHelper.h"
 #include "GUI/ShaderInjectorGUITooltips.h"
@@ -117,6 +118,7 @@ namespace ShaderInjectorGUI
 		ImGui::Spacing();
 		DatabaseRenderPasses::EnsureRenderPassesLoaded();
 		DatabaseModifiedShaders::EnsureModifiedShadersLoaded();
+		DatabaseShaderResources::EnsureShaderResourcesLoaded();
 
 		if (!HookD3D12::gLoadedShaderTargetsOnce)
 			HookD3D12::RefreshLoadedShaderTargets();
@@ -140,6 +142,12 @@ namespace ShaderInjectorGUI
 		if (ImGui::Button("Open Folder##RenderPasses") && !ShaderInjectorIO::OpenDirectory(ShaderInjectorIO::GetRenderPassesDirectory()))
 		{
 			WriteToRuntimeLogError("Could not open the Render Passes folder.");
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Shader Resources"))
+		{
+			ShaderInjectorIO::OpenDirectory(ShaderInjectorIO::GetShaderResourcesDirectory());
 		}
 
 		ImGui::SameLine();
@@ -265,6 +273,8 @@ namespace ShaderInjectorGUI
 			const RenderPass::RenderPassType typeOptions[] = {
 				RenderPass::RenderPassType::Custom,
 				RenderPass::RenderPassType::MipChain,
+				RenderPass::RenderPassType::ReplacementPixelShader,
+				RenderPass::RenderPassType::ReplacementComputeShader,
 			};
 
 			for (RenderPass::RenderPassType typeOption : typeOptions)
@@ -294,6 +304,95 @@ namespace ShaderInjectorGUI
 
 			ImGui::EndCombo();
 		}
+
+		ImGui::SeparatorText("Shader Resources");
+		if (ImGui::Button("Refresh DDS Resources"))
+			DatabaseShaderResources::RefreshShaderResources();
+		ImGui::SameLine();
+		if (ImGui::Button("Open Resources Folder"))
+			ShaderInjectorIO::OpenDirectory(ShaderInjectorIO::GetShaderResourcesDirectory());
+		ImGui::SameLine();
+		const std::vector<ShaderResource::TextureDisk>& shaderResources =
+			DatabaseShaderResources::GetShaderResources();
+		ImGui::BeginDisabled(shaderResources.empty());
+		if (ImGui::Button("Add Resource"))
+		{
+			const auto availableIt = std::find_if(shaderResources.begin(), shaderResources.end(), [&](const auto& resource)
+			{
+				return std::none_of(renderPass->shaderResources.begin(), renderPass->shaderResources.end(), [&](const auto& reference)
+				{
+					return reference.resourceId == resource.id;
+				});
+			});
+			if (availableIt != shaderResources.end())
+			{
+				RenderPass::ShaderResourceReferenceDisk reference{};
+				reference.resourceId = availableIt->id;
+				reference.hlslName = availableIt->name;
+				uint32_t nextRegister = 0;
+				for (const auto& existing : renderPass->shaderResources)
+					nextRegister = (std::max)(nextRegister, existing.shaderRegister + 1);
+				reference.shaderRegister = nextRegister;
+				renderPass->shaderResources.push_back(std::move(reference));
+			}
+		}
+		ImGui::EndDisabled();
+
+		for (size_t resourceIndex = 0; resourceIndex < renderPass->shaderResources.size();)
+		{
+			RenderPass::ShaderResourceReferenceDisk& reference = renderPass->shaderResources[resourceIndex];
+			ImGui::PushID(static_cast<int>(resourceIndex));
+			const ShaderResource::TextureDisk* selectedResource =
+				DatabaseShaderResources::FindShaderResourceById(reference.resourceId);
+			const std::string preview = selectedResource ? selectedResource->id : reference.resourceId + " (missing)";
+			bool removeResource = false;
+			if (ImGui::TreeNodeEx("Resource", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth,
+				"t%u, space%u: %s", reference.shaderRegister, reference.registerSpace, preview.c_str()))
+			{
+				ImGui::TextUnformatted("DDS Texture");
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				if (ImGui::BeginCombo("##DDSResource", preview.c_str()))
+				{
+					for (const ShaderResource::TextureDisk& resource : shaderResources)
+					{
+						const bool selected = resource.id == reference.resourceId;
+						if (ImGui::Selectable(resource.id.c_str(), selected))
+						{
+							reference.resourceId = resource.id;
+							if (reference.hlslName.empty())
+								reference.hlslName = resource.name;
+						}
+					}
+					ImGui::EndCombo();
+				}
+				char hlslName[128]{};
+				strncpy_s(hlslName, reference.hlslName.c_str(), _TRUNCATE);
+				ImGui::TextUnformatted("HLSL Texture Name");
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				if (ImGui::InputText("##HLSLName", hlslName, sizeof(hlslName)))
+					reference.hlslName = hlslName;
+				int shaderRegister = static_cast<int>(reference.shaderRegister);
+				int registerSpace = static_cast<int>(reference.registerSpace);
+				ImGui::TextUnformatted("Texture Register (t)");
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				if (ImGui::DragInt("##TextureRegister", &shaderRegister, 1.0f, 0, 4095))
+					reference.shaderRegister = static_cast<uint32_t>((std::max)(0, shaderRegister));
+				ImGui::TextUnformatted("Register Space");
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				if (ImGui::DragInt("##TextureRegisterSpace", &registerSpace, 1.0f, 0, 4095))
+					reference.registerSpace = static_cast<uint32_t>((std::max)(0, registerSpace));
+				if (ImGui::Button("Remove Resource"))
+					removeResource = true;
+				ImGui::TreePop();
+			}
+			ImGui::PopID();
+			if (removeResource)
+				renderPass->shaderResources.erase(renderPass->shaderResources.begin() + resourceIndex);
+			else
+				++resourceIndex;
+		}
+		if (shaderResources.empty())
+			ImGui::TextUnformatted("Drop .dds files into ShaderInjector/ShaderResources, then refresh.");
 
 		ImGui::TextUnformatted("Track Resource Bindings");
 		ImGui::Checkbox("##RenderPassTrackResourceBindings", &renderPass->trackResourceBindings);
@@ -419,13 +518,14 @@ namespace ShaderInjectorGUI
 
 		const ModifiedShader::PackageDisk* selectedModifiedShader = DatabaseRenderPasses::ResolveModifiedShader(*renderPass);
 		const bool mipChainPass = renderPass->type == RenderPass::RenderPassType::MipChain;
+		const bool replacementPass = RenderPass::IsReplacementPass(renderPass->type);
 		const bool directMipChainEvent = mipChainPass && renderPass->event.type == RenderPass::EventType::ModifiedShader;
 
-		if (directMipChainEvent)
+		if (directMipChainEvent || replacementPass)
 			renderPass->timing = RenderPass::timingBefore;
 
 		ImGui::TextUnformatted("Timing");
-		ImGui::BeginDisabled(directMipChainEvent);
+		ImGui::BeginDisabled(directMipChainEvent || replacementPass);
 		ImGui::SetNextItemWidth(-FLT_MIN);
 
 		if (ImGui::BeginCombo("##RenderPassTiming", renderPass->timing.c_str()))
@@ -534,19 +634,29 @@ namespace ShaderInjectorGUI
 				renderPass->sourceTextureRegisterSpace = static_cast<uint32_t>((std::max)(0, registerSpace));
 		}
 
-		ImGui::SeparatorText(mipChainPass ? "Mip Chain Shader" : "Fullscreen Fragment Shader");
+		const bool replacementPixelPass = renderPass->type == RenderPass::RenderPassType::ReplacementPixelShader;
+		const bool replacementComputePass = renderPass->type == RenderPass::RenderPassType::ReplacementComputeShader;
+		ImGui::SeparatorText(replacementComputePass ? "Replacement Compute Shader" :
+			(replacementPixelPass ? "Replacement Pixel Shader" :
+			(mipChainPass ? "Mip Chain Shader" : "Fullscreen Fragment Shader")));
 		const bool hasShaderTemplate = RenderPass::HasShaderTemplate(*renderPass);
 		const bool hasCompiledShaders = RenderPass::HasCompiledShaders(*renderPass);
 		ImGui::Text("Source: %s", hasShaderTemplate ? "Ready" : "Not created");
 		ImGui::Text("Compiled: %s", hasCompiledShaders ? "Ready" : "Not loaded");
-		const bool canCreateShaderTemplate = selectedModifiedShader && selectedModifiedShader->shaderType == ShaderTarget::PixelShader;
+		const bool canCreateShaderTemplate = selectedModifiedShader &&
+			(replacementComputePass
+				? selectedModifiedShader->shaderType == ShaderTarget::ComputeShader
+				: selectedModifiedShader->shaderType == ShaderTarget::PixelShader);
 
 		if (!hasShaderTemplate)
 		{
 			ImGui::BeginDisabled(!canCreateShaderTemplate);
-			if (ImGui::Button(mipChainPass
-				? "Create Mip Chain Shader Template"
-				: "Create Render Pass Fragment Shader Template"))
+			const char* createTemplateLabel = replacementComputePass
+				? "Create Replacement Compute Shader Template"
+				: (replacementPixelPass
+					? "Create Replacement Pixel Shader Template"
+					: (mipChainPass ? "Create Mip Chain Shader Template" : "Create Render Pass Fragment Shader Template"));
+			if (ImGui::Button(createTemplateLabel))
 			{
 				std::string error;
 
@@ -579,7 +689,9 @@ namespace ShaderInjectorGUI
 		}
 
 		if (!canCreateShaderTemplate && !hasShaderTemplate)
-			ImGui::TextUnformatted("Select an event that resolves to a pixel Modified Shader to create this template.");
+			ImGui::TextUnformatted(replacementComputePass
+				? "Select an event that resolves to a compute Modified Shader to create this template."
+				: "Select an event that resolves to a pixel Modified Shader to create this template.");
 
 		if (ImGui::Button("Save##RenderPass"))
 		{

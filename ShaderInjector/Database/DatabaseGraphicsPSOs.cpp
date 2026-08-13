@@ -131,7 +131,17 @@ namespace HookD3D12
 		{
 			capturedPipeline.csHash = Hash::HashMemory(pipelineDescription->CS.pShaderBytecode, pipelineDescription->CS.BytecodeLength);
 			capturedPipeline.csSize = pipelineDescription->CS.BytecodeLength;
+			capturedPipeline.csBytecode.assign(
+				static_cast<const uint8_t*>(pipelineDescription->CS.pShaderBytecode),
+				static_cast<const uint8_t*>(pipelineDescription->CS.pShaderBytecode) + pipelineDescription->CS.BytecodeLength);
 		}
+		capturedPipeline.originalDesc = *pipelineDescription;
+		capturedPipeline.originalDesc.CS = {
+			capturedPipeline.csBytecode.empty() ? nullptr : capturedPipeline.csBytecode.data(),
+			capturedPipeline.csBytecode.size() };
+		capturedPipeline.originalDesc.CachedPSO = {};
+		if (capturedPipeline.originalDesc.pRootSignature)
+			capturedPipeline.originalDesc.pRootSignature->AddRef();
 
 		std::lock_guard<std::mutex> lock(gPipelineMutex);
 

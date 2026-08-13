@@ -13,9 +13,12 @@
 #include <utility>
 
 #include "HookD3D12.h"
+#include "HookD3D12/HookD3D12RenderPass.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
 #include "RenderPass/RenderPassExecutor.h"
 #include "RenderPass/RenderPassMipChain.h"
+#include "RenderPass/RenderPassReplacement.h"
+#include "ShaderResource/ShaderResourceRuntime.h"
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
@@ -113,6 +116,7 @@ namespace RenderPassRuntime
 			uint32_t graphicsExecutionBoundaryMask = 0;
 			uint32_t computeExecutionBoundaryMask = 0;
 			uint64_t executionTrackingGeneration = 0;
+			bool replacementPassActive = false;
 		};
 
 		const RenderPassConfigurationSnapshot gEmptyConfigurationSnapshot;
@@ -123,6 +127,8 @@ namespace RenderPassRuntime
 		std::atomic<bool> gHasEnabledMipChainPasses = false;
 		std::atomic<bool> gHasExecutableRenderPassBinding = false;
 		std::atomic<bool> gHasExecutableMipChainBinding = false;
+		std::atomic<bool> gHasShaderResourcePasses = false;
+		std::atomic<bool> gHasReplacementPasses = false;
 		std::atomic<bool> gResourceTrackingRequired = false;
 		std::atomic<uint32_t> gTrackingModeFlags = 0;
 		std::atomic<uint32_t> gGraphicsExecutionBoundaryMask = 0;
@@ -157,8 +163,10 @@ namespace RenderPassRuntime
 				gHasEnabledRenderPasses.load(std::memory_order_relaxed) &&
 				gHasExecutableRenderPassBinding.load(std::memory_order_relaxed);
 			const bool resourceTrackingEnabled = trackingEnabled &&
-				gResourceTrackingRequired.load(std::memory_order_relaxed);
+				(gResourceTrackingRequired.load(std::memory_order_relaxed) ||
+				gHasShaderResourcePasses.load(std::memory_order_relaxed));
 			const bool descriptorRegistryTrackingEnabled = resourceTrackingEnabled ||
+				(trackingEnabled && gHasShaderResourcePasses.load(std::memory_order_relaxed)) ||
 				(trackingEnabled && gHasExecutableMipChainBinding.load(std::memory_order_relaxed));
 
 			uint32_t flags = trackingEnabled ? TrackingEnabled : 0;
@@ -166,6 +174,8 @@ namespace RenderPassRuntime
 				flags |= ResourceTrackingEnabled;
 			if (descriptorRegistryTrackingEnabled)
 				flags |= DescriptorRegistryTrackingEnabled | GraphicsStateTrackingEnabled;
+			else if (trackingEnabled && gHasReplacementPasses.load(std::memory_order_relaxed))
+				flags |= GraphicsStateTrackingEnabled;
 			gTrackingModeFlags.store(flags, std::memory_order_release);
 		}
 
@@ -708,6 +718,23 @@ namespace RenderPassRuntime
 			}
 		}
 
+		void BuildShaderResourceState(
+			const CommandListRenderState& state,
+			bool computePipeline,
+			RenderPassMipChain::GraphicsStateSnapshot& snapshot)
+		{
+			BuildMipChainGraphicsState(state, snapshot);
+			snapshot.rootSignature = computePipeline ? state.computeRootSignature : state.graphicsRootSignature;
+			snapshot.rootBindings.clear();
+			const std::vector<RootBindingState>& rootBindings = RootBindings(state, computePipeline);
+			for (UINT rootParameterIndex = 0; rootParameterIndex < rootBindings.size(); ++rootParameterIndex)
+			{
+				if (rootBindings[rootParameterIndex].type != RootBindingType::None)
+					snapshot.rootBindings.push_back(BuildRootBindingDiagnostic(
+						rootBindings[rootParameterIndex], rootParameterIndex, computePipeline));
+			}
+		}
+
 		void AppendRenderPassExecutionOrder(
 			const RenderPassConfigurationSnapshot& configuration,
 			size_t renderPassIndex,
@@ -790,6 +817,19 @@ namespace RenderPassRuntime
 					plan.computeBoundaryMask |= boundaryMask;
 				}
 			}
+
+			// Replacement passes must be the last injected operation before the game's
+			// draw or dispatch so another fullscreen pass cannot restore the normal PSO over them.
+			for (auto& planEntry : configuration.executionPlans)
+			{
+				for (auto& executionOrder : planEntry.second.executionOrders)
+				{
+					std::stable_partition(executionOrder.begin(), executionOrder.end(), [](const auto* renderPass)
+					{
+						return renderPass && !RenderPass::IsReplacementPass(renderPass->type);
+					});
+				}
+			}
 		}
 
 		const ModifiedShaderExecutionPlan* FindModifiedShaderExecutionPlan(
@@ -809,6 +849,8 @@ namespace RenderPassRuntime
 		BuildModifiedShaderExecutionPlans(*snapshot);
 		bool hasEnabledRenderPass = false;
 		bool hasEnabledMipChainPass = false;
+		bool hasShaderResourcePass = false;
+		bool hasReplacementPass = false;
 		std::unordered_set<std::string> activeIds;
 
 		for (const RenderPass::RenderPassDisk& renderPass : renderPasses)
@@ -819,6 +861,8 @@ namespace RenderPassRuntime
 				hasEnabledRenderPass = true;
 				hasEnabledMipChainPass = hasEnabledMipChainPass ||
 					renderPass.type == RenderPass::RenderPassType::MipChain;
+				hasShaderResourcePass = hasShaderResourcePass || !renderPass.shaderResources.empty();
+				hasReplacementPass = hasReplacementPass || RenderPass::IsReplacementPass(renderPass.type);
 				if (!FindResolvedEventBinding(*snapshot, renderPass))
 				{
 					ShaderInjectorIO::WriteToLogFileWarning(
@@ -838,6 +882,8 @@ namespace RenderPassRuntime
 		gPublishedConfiguration.store(snapshotPointer, std::memory_order_release);
 		gHasEnabledRenderPasses.store(hasEnabledRenderPass, std::memory_order_release);
 		gHasEnabledMipChainPasses.store(hasEnabledMipChainPass, std::memory_order_release);
+		gHasShaderResourcePasses.store(hasShaderResourcePass, std::memory_order_release);
+		gHasReplacementPasses.store(hasReplacementPass, std::memory_order_release);
 		const ShaderTargetBindingMap* shaderTargetBindings =
 			gPublishedShaderTargetBindings.load(std::memory_order_acquire);
 		gHasExecutableRenderPassBinding.store(
@@ -1008,7 +1054,10 @@ namespace RenderPassRuntime
 	void CompleteCommandListReset(ID3D12GraphicsCommandList* commandList, bool resetSucceeded)
 	{
 		if (resetSucceeded)
+		{
 			RenderPassMipChain::ResetCommandListRecording(commandList);
+			ShaderResourceRuntime::ResetCommandList(commandList);
+		}
 	}
 
 	void TrackPipelineState(ID3D12GraphicsCommandList* commandList, ID3D12PipelineState* pipelineState)
@@ -1423,6 +1472,7 @@ namespace RenderPassRuntime
 		std::vector<RenderPassMipChain::ExecutionResult> mipChainResults;
 		bool mipChainsPrepared = false;
 		thread_local RenderPassMipChain::GraphicsStateSnapshot mipChainGraphicsState;
+		thread_local RenderPassMipChain::GraphicsStateSnapshot shaderResourceState;
 
 		for (const RenderPass::RenderPassDisk* renderPassPointer : executionOrder)
 		{
@@ -1461,6 +1511,42 @@ namespace RenderPassRuntime
 					executionError = resultIt->error;
 				}
 			}
+			else if (RenderPass::IsReplacementPass(renderPass.type) &&
+				RenderPass::HasCompiledShaders(renderPass) &&
+				((computePipeline && renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader) ||
+				(!computePipeline && renderPass.type == RenderPass::RenderPassType::ReplacementPixelShader)))
+			{
+				executionAttempted = true;
+				if (state.replacementPassActive)
+				{
+					HookD3D12::ScopedRenderPassInjection injectionScope;
+					commandList->SetPipelineState(state.boundPipelineState);
+					ShaderResourceRuntime::RestoreResources(commandList);
+					state.replacementPassActive = false;
+				}
+				BuildShaderResourceState(state, computePipeline, shaderResourceState);
+				if (!ShaderResourceRuntime::BindResources(
+					renderPass, commandList, shaderResourceState, computePipeline, executionError))
+				{
+					executionSucceeded = false;
+				}
+				else
+				{
+					ID3D12PipelineState* replacementPipeline =
+						RenderPassReplacement::GetOrCreatePipeline(renderPass, state.pipelineState, executionError);
+					if (replacementPipeline)
+					{
+						HookD3D12::ScopedRenderPassInjection injectionScope;
+						commandList->SetPipelineState(replacementPipeline);
+						state.replacementPassActive = true;
+						executionSucceeded = true;
+					}
+					else
+					{
+						ShaderResourceRuntime::RestoreResources(commandList);
+					}
+				}
+			}
 			else if (!computePipeline && RenderPass::HasCompiledShaders(renderPass))
 			{
 				std::vector<RenderPass::ResourceBindingDiagnostic> effectiveOutputBindings = state.outputBindings;
@@ -1496,7 +1582,15 @@ namespace RenderPassRuntime
 				}
 
 				executionAttempted = true;
-				executionSucceeded = RenderPassExecutor::ExecuteFullscreenTriangle(
+				BuildShaderResourceState(state, false, shaderResourceState);
+				if (!ShaderResourceRuntime::BindResources(
+					renderPass, commandList, shaderResourceState, false, executionError))
+				{
+					executionSucceeded = false;
+				}
+				else
+				{
+					executionSucceeded = RenderPassExecutor::ExecuteFullscreenTriangle(
 					renderPass,
 					commandList,
 					state.graphicsRootSignature,
@@ -1504,6 +1598,8 @@ namespace RenderPassRuntime
 					state.primitiveTopology,
 					effectiveOutputBindings,
 					executionError);
+					ShaderResourceRuntime::RestoreResources(commandList);
+				}
 			}
 
 			bool firstTrigger = false;
@@ -1619,7 +1715,26 @@ namespace RenderPassRuntime
 
 	void CompleteGraphicsExecutionBoundary(ID3D12GraphicsCommandList* commandList)
 	{
+		CommandListRenderState& state = GetCommandListState(commandList);
+		if (state.replacementPassActive)
+		{
+			HookD3D12::ScopedRenderPassInjection injectionScope;
+			commandList->SetPipelineState(state.boundPipelineState);
+			ShaderResourceRuntime::RestoreResources(commandList);
+			state.replacementPassActive = false;
+		}
 		RenderPassMipChain::RestoreAfterTargetDraw(commandList);
+	}
+
+	void CompleteComputeExecutionBoundary(ID3D12GraphicsCommandList* commandList)
+	{
+		CommandListRenderState& state = GetCommandListState(commandList);
+		if (!state.replacementPassActive)
+			return;
+		HookD3D12::ScopedRenderPassInjection injectionScope;
+		commandList->SetPipelineState(state.boundPipelineState);
+		ShaderResourceRuntime::RestoreResources(commandList);
+		state.replacementPassActive = false;
 	}
 
 	void NotifyCommandListsSubmitted(

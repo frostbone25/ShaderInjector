@@ -21,6 +21,10 @@ namespace RenderPassShaders
 		constexpr const char* mipChainFragmentSourceFile = "MipChainDownsample.hlsl";
 		constexpr const char* mipChainVertexBlobFile = "MipChainVS.blob";
 		constexpr const char* mipChainFragmentBlobFile = "MipChainDownsample.blob";
+		constexpr const char* replacementPixelSourceFile = "ReplacementPixelShader.hlsl";
+		constexpr const char* replacementPixelBlobFile = "ReplacementPixelShader.blob";
+		constexpr const char* replacementComputeSourceFile = "ReplacementComputeShader.hlsl";
+		constexpr const char* replacementComputeBlobFile = "ReplacementComputeShader.blob";
 
 		const char* fullscreenTriangleVertexShader = R"(// Procedural fullscreen triangle. No vertex buffer is required.
 struct FullscreenVertexOutput
@@ -238,7 +242,76 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 				<< " : " << RegisterText(registerType, resource) << ";\n\n";
 		}
 
-		std::string BuildFragmentShaderSource(const ModifiedShader::PackageDisk& modifiedShader)
+		void AppendInjectedResourceDeclarations(
+			std::ostringstream& source,
+			const RenderPass::RenderPassDisk& renderPass,
+			std::unordered_set<std::string>& usedIdentifiers)
+		{
+			if (renderPass.shaderResources.empty())
+				return;
+			source << "// Injector-owned DDS textures configured on this Render Pass.\n";
+			for (const RenderPass::ShaderResourceReferenceDisk& resource : renderPass.shaderResources)
+			{
+				const std::string fallback = "Texture_" + std::to_string(resource.shaderRegister);
+				std::string identifier = SanitizeIdentifier(resource.hlslName, fallback);
+				const std::string baseIdentifier = identifier;
+				for (uint32_t suffix = 2; !usedIdentifiers.insert(identifier).second; ++suffix)
+					identifier = baseIdentifier + "_" + std::to_string(suffix);
+				source << "Texture2D<float4> " << identifier << " : register(t"
+					<< resource.shaderRegister << ", space" << resource.registerSpace << ");\n";
+			}
+			source << '\n';
+		}
+
+		bool IsInjectedTextureBinding(
+			const RenderPass::RenderPassDisk& renderPass,
+			const ShaderAnalysis::ResourceBindingDisk& resource)
+		{
+			if (resource.type != D3D_SIT_TEXTURE)
+				return false;
+			return std::any_of(renderPass.shaderResources.begin(), renderPass.shaderResources.end(), [&](const auto& injected)
+			{
+				return injected.shaderRegister == resource.bindPoint &&
+					injected.registerSpace == resource.registerSpace;
+			});
+		}
+
+		std::string SignatureValueType(const ShaderAnalysis::SignatureParameterDisk& parameter)
+		{
+			const char* scalarType = "float";
+			if (parameter.componentType == D3D_REGISTER_COMPONENT_UINT32)
+				scalarType = "uint";
+			else if (parameter.componentType == D3D_REGISTER_COMPONENT_SINT32)
+				scalarType = "int";
+			uint32_t componentCount = 0;
+			for (uint32_t mask = parameter.mask & 0xfu; mask; mask >>= 1)
+				componentCount += mask & 1u;
+			return componentCount > 1 ? std::string(scalarType) + std::to_string(componentCount) : scalarType;
+		}
+
+		void AppendSignatureStruct(
+			std::ostringstream& source,
+			const char* structName,
+			const std::vector<ShaderAnalysis::SignatureParameterDisk>& parameters)
+		{
+			source << "struct " << structName << "\n{\n";
+			for (size_t index = 0; index < parameters.size(); ++index)
+			{
+				const auto& parameter = parameters[index];
+				const std::string semantic = parameter.semanticName.empty() ? "TEXCOORD" : parameter.semanticName;
+				source << "\t" << SignatureValueType(parameter) << " value" << index << " : "
+					<< semantic;
+				if (parameter.semanticIndex)
+					source << parameter.semanticIndex;
+				source << ";\n";
+			}
+			source << "};\n\n";
+		}
+
+		std::string BuildFragmentShaderSource(
+			const RenderPass::RenderPassDisk& renderPass,
+			const ModifiedShader::PackageDisk& modifiedShader,
+			bool replacementPixelShader)
 		{
 			std::ostringstream source;
 			source << "// Fullscreen fragment shader for Modified Shader: "
@@ -247,11 +320,32 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 				<< "// Reflected declarations use raw cbuffer storage where original HLSL types are unavailable.\n\n";
 
 			const ShaderAnalysis::ShaderAnalysisDisk* analysis = SelectReflectionAnalysis(modifiedShader);
+			std::unordered_set<std::string> usedIdentifiers;
 			if (analysis)
 			{
-				std::unordered_set<std::string> usedIdentifiers;
 				for (const ShaderAnalysis::ResourceBindingDisk& resource : analysis->resourceBindings)
-					AppendResourceDeclaration(source, *analysis, resource, usedIdentifiers);
+					if (!IsInjectedTextureBinding(renderPass, resource))
+						AppendResourceDeclaration(source, *analysis, resource, usedIdentifiers);
+			}
+			AppendInjectedResourceDeclarations(source, renderPass, usedIdentifiers);
+			if (replacementPixelShader)
+			{
+				if (analysis && !analysis->inputParameters.empty() && !analysis->outputParameters.empty())
+				{
+					AppendSignatureStruct(source, "ReplacementPixelInput", analysis->inputParameters);
+					AppendSignatureStruct(source, "ReplacementPixelOutput", analysis->outputParameters);
+					source << "ReplacementPixelOutput main(ReplacementPixelInput input)\n{\n"
+						<< "\tReplacementPixelOutput output = (ReplacementPixelOutput)0;\n"
+						<< "\t// Implement the replacement pixel shader while retaining this reflected signature.\n"
+						<< "\treturn output;\n}\n";
+				}
+				else
+				{
+					source << "// Reflection was unavailable. Update this signature to match the original pixel shader.\n"
+						<< "float4 main(float4 position : SV_Position) : SV_Target0\n{\n"
+						<< "\treturn float4(1.0, 0.0, 1.0, 1.0);\n}\n";
+				}
+				return source.str();
 			}
 			else
 			{
@@ -275,6 +369,31 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			return source.str();
 		}
 
+		std::string BuildComputeShaderSource(
+			const RenderPass::RenderPassDisk& renderPass,
+			const ModifiedShader::PackageDisk& modifiedShader)
+		{
+			std::ostringstream source;
+			source << "// Replacement compute shader for Modified Shader: "
+				<< (modifiedShader.name.empty() ? modifiedShader.id : modifiedShader.name) << "\n\n";
+			std::unordered_set<std::string> usedIdentifiers;
+			const ShaderAnalysis::ShaderAnalysisDisk* analysis = SelectReflectionAnalysis(modifiedShader);
+			if (analysis)
+			{
+				for (const ShaderAnalysis::ResourceBindingDisk& resource : analysis->resourceBindings)
+					if (!IsInjectedTextureBinding(renderPass, resource))
+						AppendResourceDeclaration(source, *analysis, resource, usedIdentifiers);
+			}
+			AppendInjectedResourceDeclarations(source, renderPass, usedIdentifiers);
+			const uint32_t threadCountX = analysis ? (std::max)(1u, analysis->executionProperties.threadGroupSizeX) : 8u;
+			const uint32_t threadCountY = analysis ? (std::max)(1u, analysis->executionProperties.threadGroupSizeY) : 8u;
+			const uint32_t threadCountZ = analysis ? (std::max)(1u, analysis->executionProperties.threadGroupSizeZ) : 1u;
+			source << "[numthreads(" << threadCountX << ", " << threadCountY << ", " << threadCountZ
+				<< ")]\nvoid main(uint3 dispatchThreadId : SV_DispatchThreadID)\n{\n"
+				<< "\t// Implement the replacement compute workload here.\n}\n";
+			return source.str();
+		}
+
 		std::string VertexProfileFromPixelProfile(const std::string& pixelProfile)
 		{
 			if (pixelProfile.rfind("ps_", 0) == 0)
@@ -289,7 +408,14 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		std::string& outError)
 	{
 		outError.clear();
-		if (modifiedShader.shaderType != ShaderTarget::PixelShader)
+		const bool computeReplacement = renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader;
+		const bool pixelReplacement = renderPass.type == RenderPass::RenderPassType::ReplacementPixelShader;
+		if (computeReplacement && modifiedShader.shaderType != ShaderTarget::ComputeShader)
+		{
+			outError = "Replacement Compute Shader passes require a compute Modified Shader.";
+			return false;
+		}
+		if (!computeReplacement && modifiedShader.shaderType != ShaderTarget::PixelShader)
 		{
 			outError = "Fullscreen fragment Render Passes require a pixel Modified Shader.";
 			return false;
@@ -301,19 +427,23 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		}
 
 		const bool mipChain = renderPass.type == RenderPass::RenderPassType::MipChain;
-		renderPass.vertexShaderSourceFile = mipChain ? mipChainVertexSourceFile : vertexSourceFile;
-		renderPass.fragmentShaderSourceFile = mipChain ? mipChainFragmentSourceFile : fragmentSourceFile;
-		renderPass.vertexShaderCompiledBlobFile = mipChain ? mipChainVertexBlobFile : vertexBlobFile;
-		renderPass.fragmentShaderCompiledBlobFile = mipChain ? mipChainFragmentBlobFile : fragmentBlobFile;
-		renderPass.fragmentShaderProfile = modifiedShader.shaderProfile.empty()
-			? "ps_6_6"
-			: modifiedShader.shaderProfile;
+		renderPass.vertexShaderSourceFile = computeReplacement || pixelReplacement ? std::string() :
+			(mipChain ? mipChainVertexSourceFile : vertexSourceFile);
+		renderPass.fragmentShaderSourceFile = computeReplacement ? replacementComputeSourceFile :
+			(pixelReplacement ? replacementPixelSourceFile : (mipChain ? mipChainFragmentSourceFile : fragmentSourceFile));
+		renderPass.vertexShaderCompiledBlobFile = computeReplacement || pixelReplacement ? std::string() :
+			(mipChain ? mipChainVertexBlobFile : vertexBlobFile);
+		renderPass.fragmentShaderCompiledBlobFile = computeReplacement ? replacementComputeBlobFile :
+			(pixelReplacement ? replacementPixelBlobFile : (mipChain ? mipChainFragmentBlobFile : fragmentBlobFile));
+		renderPass.fragmentShaderProfile = computeReplacement
+			? (modifiedShader.shaderProfile.empty() ? "cs_6_6" : modifiedShader.shaderProfile)
+			: (modifiedShader.shaderProfile.empty() ? "ps_6_6" : modifiedShader.shaderProfile);
 		renderPass.vertexShaderProfile = VertexProfileFromPixelProfile(renderPass.fragmentShaderProfile);
 		renderPass.vertexShaderEntryPoint = "main";
 		renderPass.fragmentShaderEntryPoint = "main";
 		RenderPass::ResolveShaderPaths(renderPass);
 
-		if (!ShaderInjectorIO::WriteTextFileIfMissing(
+		if (!renderPass.vertexShaderSourcePath.empty() && !ShaderInjectorIO::WriteTextFileIfMissing(
 			renderPass.vertexShaderSourcePath,
 			fullscreenTriangleVertexShader))
 		{
@@ -322,7 +452,8 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		}
 		if (!ShaderInjectorIO::WriteTextFileIfMissing(
 			renderPass.fragmentShaderSourcePath,
-			mipChain ? mipChainFragmentShader : BuildFragmentShaderSource(modifiedShader)))
+			computeReplacement ? BuildComputeShaderSource(renderPass, modifiedShader) :
+			(mipChain ? mipChainFragmentShader : BuildFragmentShaderSource(renderPass, modifiedShader, pixelReplacement))))
 		{
 			outError = "Could not create the fragment shader source.";
 			return false;
@@ -342,7 +473,7 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		}
 
 		std::string vertexBlobPath = renderPass.vertexShaderCompiledBlobPath;
-		if (!ShaderInjectorIO::CompileSourceToDXILBlob(
+		if (!vertexBlobPath.empty() && !ShaderInjectorIO::CompileSourceToDXILBlob(
 			renderPass.vertexShaderSourcePath,
 			renderPass.vertexShaderProfile,
 			renderPass.vertexShaderEntryPoint,

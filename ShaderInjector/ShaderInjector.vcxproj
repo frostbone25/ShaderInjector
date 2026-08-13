@@ -72,7 +72,7 @@
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Database;$(ProjectDir)GUI;$(ProjectDir)HookD3D12;$(ProjectDir)RenderDoc;$(ProjectDir)RenderPass;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Database;$(ProjectDir)GUI;$(ProjectDir)HookD3D12;$(ProjectDir)RenderDoc;$(ProjectDir)RenderPass;$(ProjectDir)ShaderResource;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -210,6 +210,10 @@
     <ClInclude Include="RenderPass\RenderPassResourceRegistry.h" />
     <ClInclude Include="RenderPass\RenderPassRuntime.h" />
     <ClInclude Include="RenderPass\RenderPassShaders.h" />
+    <ClInclude Include="RenderPass\RenderPassReplacement.h" />
+    <ClInclude Include="ShaderResource\DatabaseShaderResources.h" />
+    <ClInclude Include="ShaderResource\ShaderResource.h" />
+    <ClInclude Include="ShaderResource\ShaderResourceRuntime.h" />
     <ClInclude Include="ShaderConfiguration\DatabaseShaderConfigurations.h" />
     <ClInclude Include="ShaderConfiguration\ShaderConfiguration.h" />
     <ClInclude Include="ShaderInjectorVersion.h" />
@@ -271,6 +275,9 @@
     <ClCompile Include="RenderPass\RenderPassResourceRegistry.cpp" />
     <ClCompile Include="RenderPass\RenderPassRuntime.cpp" />
     <ClCompile Include="RenderPass\RenderPassShaders.cpp" />
+    <ClCompile Include="RenderPass\RenderPassReplacement.cpp" />
+    <ClCompile Include="ShaderResource\DatabaseShaderResources.cpp" />
+    <ClCompile Include="ShaderResource\ShaderResourceRuntime.cpp" />
     <ClCompile Include="ShaderAnalyzer.cpp" />
     <ClCompile Include="ShaderAnalysis.cpp" />
     <ClCompile Include="ShaderConfiguration\DatabaseShaderConfigurations.cpp" />

@@ -21,6 +21,11 @@ namespace HookD3D12
 	void RegisterSwapChainCommandQueue(IDXGISwapChain3* swapChain, IUnknown* creationDevice);
 	void SetRuntimeReady(bool ready);
 	ID3D12Device* GetCapturedDevice();
+	HRESULT CreatePipelineStateInternal(
+		ID3D12Device2* device,
+		const D3D12_PIPELINE_STATE_STREAM_DESC* description,
+		REFIID interfaceId,
+		void** pipelineState);
 
 	enum class PixelShaderSelectionStyle
 	{
@@ -176,6 +181,8 @@ namespace HookD3D12
 
 		uint64_t csHash = 0;
 		SIZE_T csSize = 0;
+		std::vector<uint8_t> csBytecode;
+		D3D12_COMPUTE_PIPELINE_STATE_DESC originalDesc = {};
 	};
 
 	struct RootSignatureInfo
@@ -195,6 +202,7 @@ namespace HookD3D12
 	extern std::vector<PSOPendingRebuild> gPendingRebuilds;
 	extern std::mutex gPipelineMutex;
 	extern std::vector<GraphicsPipelineInfo> gGraphicsPipelines;
+	extern std::vector<ComputePipelineInfo> gComputePipelines;
 	extern D3D12PipelineInfo gPipelineInfo;
 	extern std::vector<PipelineStateInfo> gPipelineStates;
 	extern std::vector<ShaderTarget::ShaderTargetDisk> gLoadedShaderTargets;

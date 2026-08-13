@@ -12,6 +12,8 @@ namespace RenderPass
 		switch (type)
 		{
 			case RenderPassType::MipChain: return "MipChain";
+			case RenderPassType::ReplacementPixelShader: return "Replacement Pixel Shader";
+			case RenderPassType::ReplacementComputeShader: return "Replacement Compute Shader";
 			case RenderPassType::Custom:
 			default: return "Custom";
 		}
@@ -83,6 +85,8 @@ namespace RenderPass
 			{
 				renderPass.timing = timingBefore;
 			}
+			if (IsReplacementPass(renderPass.type))
+				renderPass.timing = timingBefore;
 			renderPass.schemaVersion = currentSchemaVersion;
 
 			renderPass.packageDirectory = ShaderInjectorIO::DirectoryFromPath(jsonPath);
@@ -120,13 +124,14 @@ namespace RenderPass
 		renderPass.fragmentShaderBlob.clear();
 		renderPass.vertexShaderBlobHash = 0;
 		renderPass.fragmentShaderBlobHash = 0;
-		if (renderPass.vertexShaderCompiledBlobPath.empty() ||
+		const bool replacementPass = IsReplacementPass(renderPass.type);
+		if ((!replacementPass && renderPass.vertexShaderCompiledBlobPath.empty()) ||
 			renderPass.fragmentShaderCompiledBlobPath.empty())
 		{
 			return false;
 		}
 
-		const bool vertexLoaded = ShaderInjectorIO::LoadDXILBlobFromDisk(
+		const bool vertexLoaded = replacementPass || ShaderInjectorIO::LoadDXILBlobFromDisk(
 			renderPass.vertexShaderCompiledBlobPath,
 			renderPass.vertexShaderBlob);
 		const bool fragmentLoaded = ShaderInjectorIO::LoadDXILBlobFromDisk(
@@ -135,7 +140,7 @@ namespace RenderPass
 		if (!vertexLoaded || !fragmentLoaded || !HasCompiledShaders(renderPass))
 			return false;
 
-		renderPass.vertexShaderBlobHash = Hash::HashMemory(
+		renderPass.vertexShaderBlobHash = renderPass.vertexShaderBlob.empty() ? 0 : Hash::HashMemory(
 			renderPass.vertexShaderBlob.data(),
 			renderPass.vertexShaderBlob.size());
 		renderPass.fragmentShaderBlobHash = Hash::HashMemory(
@@ -146,6 +151,16 @@ namespace RenderPass
 
 	bool HasShaderTemplate(const RenderPassDisk& renderPass)
 	{
+		if (renderPass.type == RenderPassType::ReplacementComputeShader)
+		{
+			return !renderPass.fragmentShaderSourcePath.empty() &&
+				ShaderInjectorIO::FileExists(renderPass.fragmentShaderSourcePath);
+		}
+		if (renderPass.type == RenderPassType::ReplacementPixelShader)
+		{
+			return !renderPass.fragmentShaderSourcePath.empty() &&
+				ShaderInjectorIO::FileExists(renderPass.fragmentShaderSourcePath);
+		}
 		return !renderPass.vertexShaderSourcePath.empty() &&
 			!renderPass.fragmentShaderSourcePath.empty() &&
 			ShaderInjectorIO::FileExists(renderPass.vertexShaderSourcePath) &&
@@ -154,6 +169,14 @@ namespace RenderPass
 
 	bool HasCompiledShaders(const RenderPassDisk& renderPass)
 	{
+		if (IsReplacementPass(renderPass.type))
+			return !renderPass.fragmentShaderBlob.empty();
 		return !renderPass.vertexShaderBlob.empty() && !renderPass.fragmentShaderBlob.empty();
+	}
+
+	bool IsReplacementPass(RenderPassType type)
+	{
+		return type == RenderPassType::ReplacementPixelShader ||
+			type == RenderPassType::ReplacementComputeShader;
 	}
 }

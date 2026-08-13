@@ -385,6 +385,18 @@ namespace DatabaseRenderPasses
 		{
 			return false;
 		}
+		if (RenderPass::IsReplacementPass(renderPass->type))
+			renderPass->timing = RenderPass::timingBefore;
+		std::unordered_set<std::string> resourceBindings;
+		for (const RenderPass::ShaderResourceReferenceDisk& resource : renderPass->shaderResources)
+		{
+			if (resource.resourceId.empty() || resource.hlslName.empty())
+				return false;
+			const std::string bindingKey = std::to_string(resource.shaderRegister) + ':' +
+				std::to_string(resource.registerSpace);
+			if (!resourceBindings.insert(bindingKey).second)
+				return false;
+		}
 
 		if (!MoveRenderPassPackageToCurrentName(*renderPass))
 			return false;

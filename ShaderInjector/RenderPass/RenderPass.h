@@ -10,7 +10,7 @@
 namespace RenderPass
 {
 	inline constexpr const char* formatName = "ShaderInjector.RenderPass";
-	inline constexpr int currentSchemaVersion = 2;
+	inline constexpr int currentSchemaVersion = 3;
 	inline constexpr const char* timingBefore = "Before";
 	inline constexpr const char* timingAfter = "After";
 
@@ -18,13 +18,32 @@ namespace RenderPass
 	{
 		Custom,
 		MipChain,
+		ReplacementPixelShader,
+		ReplacementComputeShader,
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(RenderPassType,
 	{
 		{ RenderPassType::Custom, "Custom" },
 		{ RenderPassType::MipChain, "MipChain" },
+		{ RenderPassType::ReplacementPixelShader, "ReplacementPixelShader" },
+		{ RenderPassType::ReplacementComputeShader, "ReplacementComputeShader" },
 	})
+
+	struct ShaderResourceReferenceDisk
+	{
+		std::string resourceId;
+		std::string hlslName;
+		uint32_t shaderRegister = 0;
+		uint32_t registerSpace = 0;
+
+		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
+			ShaderResourceReferenceDisk,
+			resourceId,
+			hlslName,
+			shaderRegister,
+			registerSpace)
+	};
 
 	enum class EventType
 	{
@@ -63,6 +82,7 @@ namespace RenderPass
 		uint32_t sourceTextureRegisterSpace = 0;
 		bool trackResourceBindings = true;
 		uint32_t maximumTrackedDescriptors = 64;
+		std::vector<ShaderResourceReferenceDisk> shaderResources;
 		std::string vertexShaderSourceFile;
 		std::string fragmentShaderSourceFile;
 		std::string vertexShaderCompiledBlobFile;
@@ -98,6 +118,7 @@ namespace RenderPass
 			sourceTextureRegisterSpace,
 			trackResourceBindings,
 			maximumTrackedDescriptors,
+			shaderResources,
 			vertexShaderSourceFile,
 			fragmentShaderSourceFile,
 			vertexShaderCompiledBlobFile,
@@ -172,4 +193,5 @@ namespace RenderPass
 	const char* EventTypeName(EventType type);
 	bool HasShaderTemplate(const RenderPassDisk& renderPass);
 	bool HasCompiledShaders(const RenderPassDisk& renderPass);
+	bool IsReplacementPass(RenderPassType type);
 }
