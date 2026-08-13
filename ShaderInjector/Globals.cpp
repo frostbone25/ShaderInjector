@@ -29,6 +29,7 @@ namespace Globals
 	bool gShaderInjectorEnabled = true;
 	bool gRenderDocIntegrationEnabled = false;
 	bool gRenderDocAutoAttachEnabled = false;
+	bool gPerformanceTelemetryEnabled = false;
 
 	float gShaderInjectorGUIScale = 1.0f;
 

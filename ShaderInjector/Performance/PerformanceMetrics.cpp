@@ -11,6 +11,7 @@
 
 #include <Windows.h>
 
+#include "Globals.h"
 #include "IO/ShaderInjectorIO.h"
 
 namespace PerformanceMetrics
@@ -249,6 +250,8 @@ namespace PerformanceMetrics
 
 	void Increment(Counter counter, uint64_t amount)
 	{
+		if (!Globals::gPerformanceTelemetryEnabled)
+			return;
 		CurrentThreadMetrics().counters[static_cast<size_t>(counter)].fetch_add(
 			amount,
 			std::memory_order_relaxed);
@@ -256,6 +259,8 @@ namespace PerformanceMetrics
 
 	ScopedTimer::ScopedTimer(Timing timing, uint32_t sampleEvery)
 	{
+		if (!Globals::gPerformanceTelemetryEnabled)
+			return;
 		TimingAccumulator& accumulator =
 			CurrentThreadMetrics().timings[static_cast<size_t>(timing)];
 		accumulator_ = &accumulator;
@@ -279,6 +284,8 @@ namespace PerformanceMetrics
 
 	bool RecordPresentAndMaybeLog()
 	{
+		if (!Globals::gPerformanceTelemetryEnabled)
+			return false;
 		Increment(Counter::Present);
 		static std::atomic<uint64_t> lastReportTicks = 0;
 		static std::mutex reportMutex;

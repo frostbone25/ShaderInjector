@@ -888,6 +888,7 @@ namespace ShaderInjectorIO
 			double shaderInjectorGUIScale = ReadIniValueOrDefault(injectorSettingsINI, "InjectorSettings", "MenuScale", static_cast<double>(Globals::gShaderInjectorGUIScale));
 			bool renderDocIntegrationEnabled = ReadIniValueOrDefault(injectorSettingsINI, "RenderDoc", "Enabled", Globals::gRenderDocIntegrationEnabled);
 			bool renderDocAutoAttachEnabled = ReadIniValueOrDefault(injectorSettingsINI, "RenderDoc", "AutoAttach", Globals::gRenderDocAutoAttachEnabled);
+			bool performanceTelemetryEnabled = ReadIniValueOrDefault(injectorSettingsINI, "Logging", "PerformanceTelemetry", Globals::gPerformanceTelemetryEnabled);
 			int shaderDiscoveryMode = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "Mode", static_cast<int>(Globals::gShaderDiscoveryMode));
 			int shaderDiscoveryWorkerThreads = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "WorkerThreads", Globals::gShaderDiscoveryWorkerThreads);
 			int shaderDiscoveryWorkerThreadPriority = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "WorkerThreadPriority", Globals::gShaderDiscoveryWorkerThreadPriority);
@@ -904,6 +905,7 @@ namespace ShaderInjectorIO
 			Globals::gShaderInjectorGUIScale = static_cast<float>((std::clamp)(shaderInjectorGUIScale, 0.5, 4.0));
 			Globals::gRenderDocIntegrationEnabled = renderDocIntegrationEnabled;
 			Globals::gRenderDocAutoAttachEnabled = renderDocAutoAttachEnabled;
+			Globals::gPerformanceTelemetryEnabled = performanceTelemetryEnabled;
 			Globals::gShaderDiscoveryMode = static_cast<Globals::ShaderDiscoveryMode>((std::clamp)(shaderDiscoveryMode, 0, 1));
 			Globals::gShaderDiscoveryWorkerThreads = (std::clamp)(shaderDiscoveryWorkerThreads, 0, 64);
 			Globals::gShaderDiscoveryWorkerThreadPriority = (std::clamp)(shaderDiscoveryWorkerThreadPriority, THREAD_PRIORITY_LOWEST, THREAD_PRIORITY_HIGHEST);
@@ -917,6 +919,7 @@ namespace ShaderInjectorIO
 				"ShaderInjectorIO->ReadInjectorSettings: parsed injector settings"
 				" renderDocEnabled=" + std::to_string(Globals::gRenderDocIntegrationEnabled) +
 				" renderDocAutoAttach=" + std::to_string(Globals::gRenderDocAutoAttachEnabled) +
+				" performanceTelemetry=" + std::to_string(Globals::gPerformanceTelemetryEnabled) +
 				" discoveryMode=" + std::to_string(static_cast<int>(Globals::gShaderDiscoveryMode)) +
 				" discoveryWorkerThreads=" + std::to_string(Globals::gShaderDiscoveryWorkerThreads) +
 				" discoveryWorkerThreadPriority=" + std::to_string(Globals::gShaderDiscoveryWorkerThreadPriority) +
@@ -953,6 +956,7 @@ namespace ShaderInjectorIO
 		injectorSettingsINI["InjectorSettings"]["MenuScale"] = static_cast<double>(Globals::gShaderInjectorGUIScale);
 		injectorSettingsINI["RenderDoc"]["Enabled"] = Globals::gRenderDocIntegrationEnabled;
 		injectorSettingsINI["RenderDoc"]["AutoAttach"] = Globals::gRenderDocAutoAttachEnabled;
+		injectorSettingsINI["Logging"]["PerformanceTelemetry"] = Globals::gPerformanceTelemetryEnabled;
 		injectorSettingsINI["ShaderDiscovery"]["Mode"] = static_cast<int>(Globals::gShaderDiscoveryMode);
 		injectorSettingsINI["ShaderDiscovery"]["WorkerThreads"] = Globals::gShaderDiscoveryWorkerThreads;
 		injectorSettingsINI["ShaderDiscovery"]["WorkerThreadPriority"] = Globals::gShaderDiscoveryWorkerThreadPriority;

@@ -14,6 +14,7 @@
 
 #include "HookD3D12.h"
 #include "HookD3D12/HookD3D12RenderPass.h"
+#include "Globals.h"
 #include "Performance/PerformanceMetrics.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
 #include "RenderPass/RenderPassExecutor.h"
@@ -1906,14 +1907,19 @@ namespace RenderPassRuntime
 
 	void LogPerformanceSnapshot()
 	{
+		if (!Globals::gPerformanceTelemetryEnabled)
+			return;
+
 		const RenderPassResourceRegistry::RegistryStatistics registryStatistics =
 			RenderPassResourceRegistry::GetStatistics();
 		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
-			"RenderPassResourceRegistry->Performance: descriptors=%llu descriptorHeaps=%llu heapDescriptors=%llu fallbackDescriptors=%llu bufferResources=%llu rootSignatures=%llu",
+			"RenderPassResourceRegistry->Performance: descriptors=%llu descriptorHeaps=%llu retiredDescriptorHeaps=%llu heapDescriptors=%llu fallbackDescriptors=%llu metadataRecords=%llu bufferResources=%llu rootSignatures=%llu",
 			static_cast<unsigned long long>(registryStatistics.descriptorCount),
 			static_cast<unsigned long long>(registryStatistics.descriptorHeapCount),
+			static_cast<unsigned long long>(registryStatistics.retiredDescriptorHeapCount),
 			static_cast<unsigned long long>(registryStatistics.heapDescriptorCount),
 			static_cast<unsigned long long>(registryStatistics.fallbackDescriptorCount),
+			static_cast<unsigned long long>(registryStatistics.descriptorMetadataCount),
 			static_cast<unsigned long long>(registryStatistics.bufferResourceCount),
 			static_cast<unsigned long long>(registryStatistics.rootSignatureCount)));
 

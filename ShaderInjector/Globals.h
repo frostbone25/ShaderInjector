@@ -29,6 +29,9 @@ namespace Globals
 	extern bool gShaderInjectorEnabled;
 	extern bool gRenderDocIntegrationEnabled;
 	extern bool gRenderDocAutoAttachEnabled;
+	// High-frequency counters and five-second performance reports. Disabled by
+	// default unless explicitly requested for profiling.
+	extern bool gPerformanceTelemetryEnabled;
 
 	// Overlay scale. The overlay is drawn inside the game's swapchain at a fixed pixel size, so it
 	// does not follow Windows display scaling and gets harder to read as display resolution rises.
