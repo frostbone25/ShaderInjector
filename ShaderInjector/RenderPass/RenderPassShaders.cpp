@@ -8,6 +8,7 @@
 #include <d3d12shader.h>
 
 #include "IO/ShaderInjectorIO.h"
+#include "ShaderResource/DatabaseShaderResources.h"
 
 namespace RenderPassShaders
 {
@@ -257,7 +258,12 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 				const std::string baseIdentifier = identifier;
 				for (uint32_t suffix = 2; !usedIdentifiers.insert(identifier).second; ++suffix)
 					identifier = baseIdentifier + "_" + std::to_string(suffix);
-				source << "Texture2D<float4> " << identifier << " : register(t"
+				const ShaderResource::TextureDisk* texture =
+					DatabaseShaderResources::FindShaderResourceById(resource.resourceId);
+				const ShaderResource::TextureDimension dimension = texture
+					? texture->dimension
+					: ShaderResource::TextureDimension::Unknown;
+				source << ShaderResource::TextureHlslTypeName(dimension) << ' ' << identifier << " : register(t"
 					<< resource.shaderRegister << ", space" << resource.registerSpace << ");\n";
 			}
 			source << '\n';

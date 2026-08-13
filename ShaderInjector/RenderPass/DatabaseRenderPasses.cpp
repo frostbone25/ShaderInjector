@@ -369,6 +369,28 @@ namespace DatabaseRenderPasses
 		return true;
 	}
 
+	bool SetRenderPassEnabled(const std::string& renderPassId, bool enabled)
+	{
+		RenderPass::RenderPassDisk* renderPass = FindRenderPassById(renderPassId);
+		if (!renderPass)
+			return false;
+		if (renderPass->enabled == enabled)
+			return true;
+
+		const bool previousEnabled = renderPass->enabled;
+		renderPass->enabled = enabled;
+		if (!RenderPass::WriteJson(*renderPass))
+		{
+			renderPass->enabled = previousEnabled;
+			return false;
+		}
+
+		// Runtime plans are immutable snapshots. Publish immediately so disabling a
+		// pass takes effect without requiring the separate Save action.
+		PublishRuntimeConfiguration();
+		return true;
+	}
+
 	bool SaveRenderPass(const std::string& renderPassId)
 	{
 		RenderPass::RenderPassDisk* renderPass = FindRenderPassById(renderPassId);

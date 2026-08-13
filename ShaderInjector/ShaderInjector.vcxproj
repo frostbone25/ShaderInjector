@@ -214,6 +214,7 @@
     <ClInclude Include="RenderPass\RenderPassReplacement.h" />
     <ClInclude Include="ShaderResource\DatabaseShaderResources.h" />
     <ClInclude Include="ShaderResource\ShaderResource.h" />
+    <ClInclude Include="ShaderResource\ShaderResourceDDS.h" />
     <ClInclude Include="ShaderResource\ShaderResourceRuntime.h" />
     <ClInclude Include="ShaderConfiguration\DatabaseShaderConfigurations.h" />
     <ClInclude Include="ShaderConfiguration\ShaderConfiguration.h" />
@@ -280,6 +281,7 @@
     <ClCompile Include="RenderPass\RenderPassShaders.cpp" />
     <ClCompile Include="RenderPass\RenderPassReplacement.cpp" />
     <ClCompile Include="ShaderResource\DatabaseShaderResources.cpp" />
+    <ClCompile Include="ShaderResource\ShaderResourceDDS.cpp" />
     <ClCompile Include="ShaderResource\ShaderResourceRuntime.cpp" />
     <ClCompile Include="ShaderAnalyzer.cpp" />
     <ClCompile Include="ShaderAnalysis.cpp" />

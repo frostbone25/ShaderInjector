@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include "IO/ShaderInjectorIO.h"
+#include "ShaderResource/ShaderResourceDDS.h"
 
 namespace DatabaseShaderResources
 {
@@ -39,6 +40,24 @@ namespace DatabaseShaderResources
 			resource.name = path.stem().u8string();
 			resource.fileName = path.filename().u8string();
 			resource.filePath = texturePath;
+
+			ShaderResourceDDS::Metadata metadata{};
+			if (ShaderResourceDDS::ReadMetadata(texturePath, metadata, resource.validationError))
+			{
+				resource.dimension = metadata.dimension;
+				resource.width = metadata.width;
+				resource.height = metadata.height;
+				resource.depth = metadata.depth;
+				resource.arraySize = metadata.arraySize;
+				resource.mipLevels = metadata.mipLevels;
+				resource.format = static_cast<uint32_t>(metadata.format);
+			}
+			else
+			{
+				ShaderInjectorIO::WriteToLogFileWarning(
+					"DatabaseShaderResources->RefreshShaderResources: invalid DDS resource=" +
+					resource.id + " error=" + resource.validationError);
+			}
 			gShaderResources.push_back(std::move(resource));
 		}
 

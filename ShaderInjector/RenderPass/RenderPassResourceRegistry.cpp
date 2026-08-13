@@ -32,6 +32,7 @@ namespace RenderPassResourceRegistry
 		struct RootParameterLayout
 		{
 			D3D12_ROOT_PARAMETER_TYPE type = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+			D3D12_SHADER_VISIBILITY shaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 			UINT shaderRegister = UINT32_MAX;
 			UINT registerSpace = UINT32_MAX;
 			std::vector<DescriptorRangeLayout> ranges;
@@ -1148,6 +1149,7 @@ namespace RenderPassResourceRegistry
 				{
 					const D3D12_ROOT_PARAMETER& parameter = description->Desc_1_0.pParameters[parameterIndex];
 					parameterLayout.type = parameter.ParameterType;
+					parameterLayout.shaderVisibility = parameter.ShaderVisibility;
 					if (parameter.ParameterType == D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE)
 					{
 						UINT appendedOffset = 0;
@@ -1172,6 +1174,7 @@ namespace RenderPassResourceRegistry
 				{
 					const D3D12_ROOT_PARAMETER1& parameter = description->Desc_1_1.pParameters[parameterIndex];
 					parameterLayout.type = parameter.ParameterType;
+					parameterLayout.shaderVisibility = parameter.ShaderVisibility;
 					if (parameter.ParameterType == D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE)
 					{
 						UINT appendedOffset = 0;
@@ -1502,6 +1505,25 @@ namespace RenderPassResourceRegistry
 		return true;
 	}
 
+	UINT CountContiguousDescriptors(
+		D3D12_CPU_DESCRIPTOR_HANDLE firstDescriptor,
+		UINT descriptorIncrementSize,
+		UINT maximumDescriptors)
+	{
+		if (!firstDescriptor.ptr || !descriptorIncrementSize || !maximumDescriptors)
+			return 0;
+
+		UINT descriptorCount = 0;
+		for (; descriptorCount < maximumDescriptors; ++descriptorCount)
+		{
+			const SIZE_T descriptor = firstDescriptor.ptr +
+				static_cast<SIZE_T>(descriptorCount) * descriptorIncrementSize;
+			if (!ReadDescriptorRecord(descriptor))
+				break;
+		}
+		return descriptorCount;
+	}
+
 	bool ResolveGpuVirtualAddress(
 		D3D12_GPU_VIRTUAL_ADDRESS gpuAddress,
 		RenderPass::ResourceBindingDiagnostic& outBinding)
@@ -1653,6 +1675,7 @@ namespace RenderPassResourceRegistry
 
 			DescriptorTableLayout table{};
 			table.rootParameterIndex = parameterIndex;
+			table.shaderVisibility = parameter.shaderVisibility;
 			table.heapType = parameter.ranges.front().type == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER
 				? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER
 				: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -1677,9 +1700,36 @@ namespace RenderPassResourceRegistry
 		UINT shaderRegister,
 		UINT registerSpace,
 		UINT maximumUnboundedDescriptors,
+		D3D12_SHADER_VISIBILITY shaderVisibility,
 		DescriptorBindingLocation& outLocation)
 	{
 		outLocation = {};
+		std::vector<DescriptorBindingLocation> locations;
+		if (!GetDescriptorBindingCandidates(
+			rootSignature,
+			rangeType,
+			shaderRegister,
+			registerSpace,
+			maximumUnboundedDescriptors,
+			shaderVisibility,
+			locations))
+		{
+			return false;
+		}
+		outLocation = locations.front();
+		return true;
+	}
+
+	bool GetDescriptorBindingCandidates(
+		ID3D12RootSignature* rootSignature,
+		D3D12_DESCRIPTOR_RANGE_TYPE rangeType,
+		UINT shaderRegister,
+		UINT registerSpace,
+		UINT maximumUnboundedDescriptors,
+		D3D12_SHADER_VISIBILITY shaderVisibility,
+		std::vector<DescriptorBindingLocation>& outLocations)
+	{
+		outLocations.clear();
 		if (!rootSignature || !maximumUnboundedDescriptors)
 			return false;
 
@@ -1693,7 +1743,10 @@ namespace RenderPassResourceRegistry
 			++parameterIndex)
 		{
 			const RootParameterLayout& parameter = rootSignatureIt->second.parameters[parameterIndex];
-			if (parameter.type != D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE)
+			const bool exactVisibility = parameter.shaderVisibility == shaderVisibility;
+			const bool allStagesVisibility = parameter.shaderVisibility == D3D12_SHADER_VISIBILITY_ALL;
+			if (parameter.type != D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE ||
+				(!exactVisibility && !allStagesVisibility))
 				continue;
 
 			UINT tableDescriptorCount = 0;
@@ -1723,19 +1776,40 @@ namespace RenderPassResourceRegistry
 				if (registerOffset >= availableCount)
 					continue;
 
-				outLocation.rootParameterIndex = parameterIndex;
-				outLocation.tableOffset = range.tableOffset + registerOffset;
-				outLocation.shaderRegister = shaderRegister;
-				outLocation.registerSpace = registerSpace;
-				outLocation.heapType = rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER
+				if (range.tableOffset > UINT_MAX - registerOffset)
+					continue;
+
+				DescriptorBindingLocation location{};
+				location.rootParameterIndex = parameterIndex;
+				location.tableOffset = range.tableOffset + registerOffset;
+				location.shaderRegister = shaderRegister;
+				location.registerSpace = registerSpace;
+				location.heapType = rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER
 					? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER
 					: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-				outLocation.descriptorCount = tableDescriptorCount;
-				outLocation.tableContainsUnboundedRange = tableContainsUnboundedRange;
-				return true;
+				location.shaderVisibility = parameter.shaderVisibility;
+				location.descriptorCount = tableDescriptorCount;
+				location.tableContainsUnboundedRange = tableContainsUnboundedRange;
+				outLocations.push_back(location);
 			}
 		}
-		return false;
+
+		// Prefer stage-specific tables, but retain ALL-visible alternatives. Different
+		// PSO variants can legally activate a different compatible root parameter.
+		std::stable_sort(outLocations.begin(), outLocations.end(), [&](const auto& left, const auto& right)
+		{
+			const bool leftExact = left.shaderVisibility == shaderVisibility;
+			const bool rightExact = right.shaderVisibility == shaderVisibility;
+			return leftExact && !rightExact;
+		});
+		outLocations.erase(
+			std::unique(outLocations.begin(), outLocations.end(), [](const auto& left, const auto& right)
+			{
+				return left.rootParameterIndex == right.rootParameterIndex &&
+					left.tableOffset == right.tableOffset;
+			}),
+			outLocations.end());
+		return !outLocations.empty();
 	}
 
 	bool FindUniqueDescriptorBindingByShaderRegister(
@@ -1743,6 +1817,7 @@ namespace RenderPassResourceRegistry
 		D3D12_DESCRIPTOR_RANGE_TYPE rangeType,
 		UINT shaderRegister,
 		UINT maximumUnboundedDescriptors,
+		D3D12_SHADER_VISIBILITY shaderVisibility,
 		DescriptorBindingLocation& outLocation)
 	{
 		outLocation = {};
@@ -1755,12 +1830,20 @@ namespace RenderPassResourceRegistry
 			return false;
 
 		bool foundMatch = false;
+		bool ambiguousMatch = false;
+		int bestVisibilityRank = -1;
 		for (UINT parameterIndex = 0;
 			parameterIndex < rootSignatureIt->second.parameters.size();
 			++parameterIndex)
 		{
 			const RootParameterLayout& parameter = rootSignatureIt->second.parameters[parameterIndex];
-			if (parameter.type != D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE)
+			const bool exactVisibility = parameter.shaderVisibility == shaderVisibility;
+			const bool allStagesVisibility = parameter.shaderVisibility == D3D12_SHADER_VISIBILITY_ALL;
+			if (parameter.type != D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE ||
+				(!exactVisibility && !allStagesVisibility))
+				continue;
+			const int visibilityRank = exactVisibility ? 2 : 1;
+			if (visibilityRank < bestVisibilityRank)
 				continue;
 
 			UINT tableDescriptorCount = 0;
@@ -1789,10 +1872,18 @@ namespace RenderPassResourceRegistry
 
 				// A register repeated in multiple spaces is ambiguous. The caller must
 				// require an explicit space instead of risking the wrong game resource.
+				if (visibilityRank > bestVisibilityRank)
+				{
+					foundMatch = false;
+					ambiguousMatch = false;
+					outLocation = {};
+					bestVisibilityRank = visibilityRank;
+				}
 				if (foundMatch)
 				{
+					ambiguousMatch = true;
 					outLocation = {};
-					return false;
+					continue;
 				}
 
 				foundMatch = true;
@@ -1803,11 +1894,12 @@ namespace RenderPassResourceRegistry
 				outLocation.heapType = rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER
 					? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER
 					: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+				outLocation.shaderVisibility = parameter.shaderVisibility;
 				outLocation.descriptorCount = tableDescriptorCount;
 				outLocation.tableContainsUnboundedRange = tableContainsUnboundedRange;
 			}
 		}
 
-		return foundMatch;
+		return foundMatch && !ambiguousMatch;
 	}
 }

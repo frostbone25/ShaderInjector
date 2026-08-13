@@ -14,6 +14,7 @@
 
 #include "HookD3D12.h"
 #include "HookD3D12/HookD3D12RenderPass.h"
+#include "GUI/ShaderInjectorGUI.h"
 #include "Globals.h"
 #include "Performance/PerformanceMetrics.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
@@ -161,6 +162,7 @@ namespace RenderPassRuntime
 		thread_local CommandListRenderState* gCachedCommandListState = nullptr;
 		thread_local RenderPassMipChain::GraphicsStateSnapshot gMipChainGraphicsState;
 		thread_local RenderPassMipChain::GraphicsStateSnapshot gShaderResourceState;
+		thread_local RenderPassMipChain::GraphicsStateSnapshot gOppositeShaderResourceState;
 		thread_local ID3D12GraphicsCommandList* gPendingMipRestoreCommandList = nullptr;
 		thread_local bool gPendingMipRestore = false;
 
@@ -192,7 +194,8 @@ namespace RenderPassRuntime
 			// discovery resolves a pass. Preserve that provenance from pass load time;
 			// command-list state tracking still waits for an executable target binding.
 			const bool descriptorRegistryTrackingEnabled = resourceTrackingEnabled ||
-				gHasEnabledMipChainPasses.load(std::memory_order_relaxed);
+				gHasEnabledMipChainPasses.load(std::memory_order_relaxed) ||
+				gHasShaderResourcePasses.load(std::memory_order_relaxed);
 			const bool graphicsStateTrackingEnabled = trackingEnabled &&
 				(resourceTrackingEnabled ||
 				gHasExecutableMipChainBinding.load(std::memory_order_relaxed) ||
@@ -1047,7 +1050,8 @@ namespace RenderPassRuntime
 
 	bool HasPendingCommandListSubmissionWork()
 	{
-		return RenderPassMipChain::HasRecordedCommandListWork();
+		return RenderPassMipChain::HasRecordedCommandListWork() ||
+			ShaderResourceRuntime::HasRecordedCommandListWork();
 	}
 
 	bool IsExecutionTrackingRequired(bool computePipeline, ExecutionBoundary boundary)
@@ -1662,8 +1666,22 @@ namespace RenderPassRuntime
 					state.replacementPassActive = false;
 				}
 				BuildShaderResourceState(state, computePipeline, gShaderResourceState);
-				if (!ShaderResourceRuntime::BindResources(
-					renderPass, commandList, gShaderResourceState, computePipeline, executionError))
+				BuildShaderResourceState(state, !computePipeline, gOppositeShaderResourceState);
+				bool shaderResourcesBound = false;
+				{
+					// Descriptor heaps and root tables installed by an injected pass are
+					// temporary. Keep the hook-side game-state mirror on the bindings that
+					// were active before this pass so later render passes restore correctly.
+					HookD3D12::ScopedRenderPassInjection injectionScope;
+					shaderResourcesBound = ShaderResourceRuntime::BindResources(
+						renderPass,
+						commandList,
+						gShaderResourceState,
+						gOppositeShaderResourceState,
+						computePipeline,
+						executionError);
+				}
+				if (!shaderResourcesBound)
 				{
 					executionSucceeded = false;
 				}
@@ -1685,6 +1703,7 @@ namespace RenderPassRuntime
 					}
 					else
 					{
+						HookD3D12::ScopedRenderPassInjection injectionScope;
 						ShaderResourceRuntime::RestoreResources(commandList);
 					}
 				}
@@ -1727,8 +1746,19 @@ namespace RenderPassRuntime
 
 				executionAttempted = true;
 				BuildShaderResourceState(state, false, gShaderResourceState);
-				if (!ShaderResourceRuntime::BindResources(
-					renderPass, commandList, gShaderResourceState, false, executionError))
+				BuildShaderResourceState(state, true, gOppositeShaderResourceState);
+				bool shaderResourcesBound = false;
+				{
+					HookD3D12::ScopedRenderPassInjection injectionScope;
+					shaderResourcesBound = ShaderResourceRuntime::BindResources(
+						renderPass,
+						commandList,
+						gShaderResourceState,
+						gOppositeShaderResourceState,
+						false,
+						executionError);
+				}
+				if (!shaderResourcesBound)
 				{
 					executionSucceeded = false;
 				}
@@ -1748,7 +1778,10 @@ namespace RenderPassRuntime
 					}
 					if (executionSucceeded)
 						PerformanceMetrics::Increment(PerformanceMetrics::Counter::CustomPassSucceeded);
-					ShaderResourceRuntime::RestoreResources(commandList);
+					{
+						HookD3D12::ScopedRenderPassInjection injectionScope;
+						ShaderResourceRuntime::RestoreResources(commandList);
+					}
 				}
 			}
 
@@ -1852,7 +1885,7 @@ namespace RenderPassRuntime
 			}
 			else if (firstFailedExecution)
 			{
-				ShaderInjectorIO::WriteToLogFileError(
+				ShaderInjectorGUI::WriteToRuntimeLogError(
 					"RenderPassRuntime->RecordExecutionBoundary: first fullscreen execution failed for " +
 					renderPass.name + " via " + (operationName ? operationName : "Unknown") +
 					" error=" + executionError);
@@ -1900,6 +1933,10 @@ namespace RenderPassRuntime
 			PerformanceMetrics::Timing::RetireMipSubmissions,
 			16);
 		RenderPassMipChain::NotifyCommandListsSubmitted(
+			commandQueue,
+			commandListCount,
+			commandLists);
+		ShaderResourceRuntime::NotifyCommandListsSubmitted(
 			commandQueue,
 			commandListCount,
 			commandLists);

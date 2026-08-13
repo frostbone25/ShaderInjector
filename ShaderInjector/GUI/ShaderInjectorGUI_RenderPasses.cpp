@@ -259,7 +259,12 @@ namespace ShaderInjectorGUI
 		ImGui::SetNextItemWidth(-FLT_MIN);
 		ImGui::InputText("##RenderPassName", gRenderPassNameBuffer, sizeof(gRenderPassNameBuffer));
 		ImGui::TextUnformatted("Enabled");
-		ImGui::Checkbox("##RenderPassEnabled", &renderPass->enabled);
+		bool renderPassEnabled = renderPass->enabled;
+		if (ImGui::Checkbox("##RenderPassEnabled", &renderPassEnabled) &&
+			!DatabaseRenderPasses::SetRenderPassEnabled(renderPass->id, renderPassEnabled))
+		{
+			WriteToRuntimeLogError("Could not update Render Pass enabled state: " + renderPass->name);
+		}
 
 		ImGui::TextUnformatted("Type");
 		ImGui::SetNextItemWidth(-FLT_MIN);
@@ -366,7 +371,8 @@ namespace ShaderInjectorGUI
 				std::string label = "t" + std::to_string(reference.shaderRegister) +
 					", space" + std::to_string(reference.registerSpace) + ": " +
 					(reference.hlslName.empty() ? "Texture" : reference.hlslName) + " -> " +
-					(resource ? resource->id : reference.resourceId + " (missing)") +
+					(resource ? resource->id + " [" + ShaderResource::TextureDimensionName(resource->dimension) + "]" :
+						reference.resourceId + " (missing)") +
 					"##RenderPassResource" + std::to_string(resourceIndex);
 				if (ImGui::Selectable(label.c_str(), gSelectedRenderPassResourceIndex == resourceIndex))
 					gSelectedRenderPassResourceIndex = resourceIndex;
@@ -380,7 +386,9 @@ namespace ShaderInjectorGUI
 				renderPass->shaderResources[gSelectedRenderPassResourceIndex];
 			const ShaderResource::TextureDisk* selectedResource =
 				DatabaseShaderResources::FindShaderResourceById(reference.resourceId);
-			const std::string preview = selectedResource ? selectedResource->id : reference.resourceId + " (missing)";
+			const std::string preview = selectedResource
+				? selectedResource->id + " [" + ShaderResource::TextureDimensionName(selectedResource->dimension) + "]"
+				: reference.resourceId + " (missing)";
 
 			ImGui::PushID("SelectedRenderPassShaderResource");
 			ImGui::TextUnformatted("DDS Texture");
@@ -390,7 +398,11 @@ namespace ShaderInjectorGUI
 				for (const ShaderResource::TextureDisk& resource : shaderResources)
 				{
 					const bool selected = resource.id == reference.resourceId;
-					if (ImGui::Selectable(resource.id.c_str(), selected))
+					std::string resourceLabel = resource.id + " [" +
+						ShaderResource::TextureDimensionName(resource.dimension) + "]";
+					if (!resource.validationError.empty())
+						resourceLabel += " (invalid)";
+					if (ImGui::Selectable(resourceLabel.c_str(), selected))
 					{
 						reference.resourceId = resource.id;
 						if (reference.hlslName.empty())
@@ -398,6 +410,13 @@ namespace ShaderInjectorGUI
 					}
 				}
 				ImGui::EndCombo();
+			}
+			if (selectedResource)
+			{
+				if (!selectedResource->validationError.empty())
+					ImGui::TextWrapped("DDS Error: %s", selectedResource->validationError.c_str());
+				else
+					ImGui::Text("Resource Type: %s", ShaderResource::TextureDimensionName(selectedResource->dimension));
 			}
 
 			char hlslName[128]{};

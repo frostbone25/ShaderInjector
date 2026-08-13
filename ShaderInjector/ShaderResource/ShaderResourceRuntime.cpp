@@ -1,22 +1,25 @@
 #include "ShaderResource/ShaderResourceRuntime.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <wrl/client.h>
 
 #include "HookD3D12/HookD3D12RenderPass.h"
+#include "IO/ShaderInjectorIO.h"
 #include "Performance/PerformanceMetrics.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
 #include "ShaderResource/DatabaseShaderResources.h"
+#include "ShaderResource/ShaderResourceDDS.h"
 #include "StringHelper.h"
 
 using Microsoft::WRL::ComPtr;
@@ -25,48 +28,11 @@ namespace ShaderResourceRuntime
 {
 	namespace
 	{
-		constexpr uint32_t ddsMagic = 0x20534444;
-		constexpr uint32_t fourCcFlag = 0x4;
-		constexpr uint32_t rgbFlag = 0x40;
-		constexpr uint32_t FourCc(char a, char b, char c, char d)
-		{
-			return static_cast<uint8_t>(a) | (static_cast<uint32_t>(static_cast<uint8_t>(b)) << 8) |
-				(static_cast<uint32_t>(static_cast<uint8_t>(c)) << 16) |
-				(static_cast<uint32_t>(static_cast<uint8_t>(d)) << 24);
-		}
-		constexpr uint32_t fourCcDx10 = FourCc('D', 'X', '1', '0');
-		constexpr uint32_t fourCcDxt1 = FourCc('D', 'X', 'T', '1');
-		constexpr uint32_t fourCcDxt3 = FourCc('D', 'X', 'T', '3');
-		constexpr uint32_t fourCcDxt5 = FourCc('D', 'X', 'T', '5');
-		constexpr uint32_t fourCcAti1 = FourCc('A', 'T', 'I', '1');
-		constexpr uint32_t fourCcAti2 = FourCc('A', 'T', 'I', '2');
-
-#pragma pack(push, 1)
-		struct DdsPixelFormat
-		{
-			uint32_t size, flags, fourCC, rgbBitCount, rMask, gMask, bMask, aMask;
-		};
-		struct DdsHeader
-		{
-			uint32_t size, flags, height, width, pitchOrLinearSize, depth, mipMapCount;
-			uint32_t reserved1[11];
-			DdsPixelFormat pixelFormat;
-			uint32_t caps, caps2, caps3, caps4, reserved2;
-		};
-		struct DdsHeaderDx10
-		{
-			DXGI_FORMAT format;
-			uint32_t resourceDimension, miscFlag, arraySize, miscFlags2;
-		};
-#pragma pack(pop)
-
-		struct DdsImage
-		{
-			DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
-			uint32_t width = 0, height = 0, mipLevels = 1, arraySize = 1;
-			bool cube = false;
-			std::vector<uint8_t> pixels;
-		};
+		// Resource diagnostics intentionally inspect a small prefix, while an injected
+		// shader can legally index much farther into an unbounded range. Expand cloned
+		// tables through descriptors that the registry observed the game initialize.
+		constexpr UINT MaximumAutoPreservedUnboundedDescriptors = 4096;
+		constexpr UINT DefaultDescriptorPageCapacity = 8192;
 
 		struct TextureGpu
 		{
@@ -81,6 +47,7 @@ namespace ShaderResourceRuntime
 		{
 			UINT rootParameterIndex = UINT32_MAX;
 			D3D12_GPU_DESCRIPTOR_HANDLE descriptorHandle{};
+			bool computePipeline = false;
 		};
 
 		struct ActiveTable
@@ -93,28 +60,71 @@ namespace ShaderResourceRuntime
 			D3D12_CPU_DESCRIPTOR_HANDLE originalCpu{};
 		};
 
+		struct UnboundedDescriptorSpan
+		{
+			SIZE_T cpuStart = 0;
+			UINT descriptorIncrementSize = 0;
+			UINT scannedDescriptorCount = 0;
+			UINT contiguousDescriptorCount = 0;
+		};
+
+		struct DescriptorHeapPage
+		{
+			ComPtr<ID3D12DescriptorHeap> heap;
+			UINT capacity = 0;
+			UINT usedDescriptors = 0;
+		};
+
+		struct DescriptorExecutionSlot
+		{
+			std::vector<DescriptorHeapPage> pages;
+			ComPtr<ID3D12Fence> retirementFence;
+			UINT64 retirementFenceValue = 0;
+			bool recorded = false;
+			bool submitted = false;
+			bool retirementBlocked = false;
+		};
+
+		struct DescriptorAllocation
+		{
+			ID3D12DescriptorHeap* heap = nullptr;
+			D3D12_CPU_DESCRIPTOR_HANDLE cpuStart{};
+			D3D12_GPU_DESCRIPTOR_HANDLE gpuStart{};
+		};
+
 		struct CommandListSlot
 		{
 			ComPtr<ID3D12Device> device;
-			ComPtr<ID3D12DescriptorHeap> heap;
-			UINT capacity = 0;
 			UINT descriptorIncrementSize = 0;
 			ID3D12RootSignature* cachedRootSignature = nullptr;
 			uint32_t cachedMaximumTrackedDescriptors = 0;
 			std::vector<RenderPassResourceRegistry::DescriptorTableLayout> layouts;
 			std::vector<ActiveTable> activeTables;
-			std::unordered_map<uint64_t, RenderPassResourceRegistry::DescriptorBindingLocation> bindingLocations;
+			std::unordered_map<uint64_t, std::vector<RenderPassResourceRegistry::DescriptorBindingLocation>> graphicsBindingLocations;
+			std::unordered_map<uint64_t, std::vector<RenderPassResourceRegistry::DescriptorBindingLocation>> computeBindingLocations;
 			std::unordered_map<std::string, TextureGpu*> resolvedTextures;
 			std::vector<ID3D12DescriptorHeap*> restoreHeaps;
 			std::vector<RootTableRestore> restoreRootTables;
-			bool computePipeline = false;
+			std::vector<std::unique_ptr<DescriptorExecutionSlot>> executionSlots;
+			std::vector<DescriptorExecutionSlot*> recordedExecutionSlots;
+			DescriptorExecutionSlot* currentExecutionSlot = nullptr;
+			std::array<UnboundedDescriptorSpan, 16> unboundedDescriptorSpans{};
+			size_t nextUnboundedDescriptorSpan = 0;
 			bool pendingRestore = false;
+		};
+
+		struct QueueFence
+		{
+			ComPtr<ID3D12Fence> fence;
+			UINT64 nextValue = 0;
 		};
 
 		std::mutex gTextureMutex;
 		std::unordered_map<ID3D12Device*, std::unordered_map<std::string, std::unique_ptr<TextureGpu>>> gTextures;
 		std::mutex gCommandListSlotMutex;
 		std::unordered_map<ID3D12GraphicsCommandList*, std::unique_ptr<CommandListSlot>> gCommandListSlots;
+		std::unordered_map<ID3D12CommandQueue*, QueueFence> gQueueFences;
+		std::atomic<uint32_t> gRecordedCommandListCount = 0;
 		thread_local ID3D12GraphicsCommandList* gCachedCommandList = nullptr;
 		thread_local CommandListSlot* gCachedCommandListSlot = nullptr;
 
@@ -146,128 +156,153 @@ namespace ShaderResourceRuntime
 			return gCachedCommandListSlot;
 		}
 
-		DXGI_FORMAT LegacyFormat(const DdsPixelFormat& format)
+		bool IsExecutionSlotReusable(const DescriptorExecutionSlot& slot)
 		{
-			if (format.flags & fourCcFlag)
-			{
-				switch (format.fourCC)
-				{
-					case fourCcDxt1: return DXGI_FORMAT_BC1_UNORM;
-					case fourCcDxt3: return DXGI_FORMAT_BC2_UNORM;
-					case fourCcDxt5: return DXGI_FORMAT_BC3_UNORM;
-					case fourCcAti1: return DXGI_FORMAT_BC4_UNORM;
-					case fourCcAti2: return DXGI_FORMAT_BC5_UNORM;
-				}
-			}
-			if ((format.flags & rgbFlag) && format.rgbBitCount == 32)
-			{
-				if (format.rMask == 0x000000ff && format.gMask == 0x0000ff00 && format.bMask == 0x00ff0000)
-					return DXGI_FORMAT_R8G8B8A8_UNORM;
-				if (format.rMask == 0x00ff0000 && format.gMask == 0x0000ff00 && format.bMask == 0x000000ff)
-					return DXGI_FORMAT_B8G8R8A8_UNORM;
-			}
-			return DXGI_FORMAT_UNKNOWN;
+			if (slot.recorded || slot.retirementBlocked)
+				return false;
+			return !slot.retirementFence ||
+				slot.retirementFence->GetCompletedValue() >= slot.retirementFenceValue;
 		}
 
-		bool LoadDds(const std::string& path, DdsImage& outImage, std::string& outError)
+		DescriptorExecutionSlot* AcquireExecutionSlotLocked(CommandListSlot& commandListSlot)
 		{
-			std::ifstream file(std::filesystem::u8path(path), std::ios::binary);
-			if (!file)
+			if (commandListSlot.currentExecutionSlot &&
+				commandListSlot.currentExecutionSlot->recorded)
 			{
-				outError = "Could not open DDS file: " + path;
-				return false;
+				return commandListSlot.currentExecutionSlot;
 			}
-			uint32_t magic = 0;
-			DdsHeader header{};
-			file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
-			file.read(reinterpret_cast<char*>(&header), sizeof(header));
-			if (!file || magic != ddsMagic || header.size != 124 || header.pixelFormat.size != 32)
+
+			DescriptorExecutionSlot* selectedSlot = nullptr;
+			for (const std::unique_ptr<DescriptorExecutionSlot>& slot : commandListSlot.executionSlots)
 			{
-				outError = "DDS header is invalid: " + path;
+				if (IsExecutionSlotReusable(*slot))
+				{
+					selectedSlot = slot.get();
+					break;
+				}
+			}
+			if (!selectedSlot)
+			{
+				commandListSlot.executionSlots.push_back(std::make_unique<DescriptorExecutionSlot>());
+				selectedSlot = commandListSlot.executionSlots.back().get();
+			}
+
+			for (DescriptorHeapPage& page : selectedSlot->pages)
+				page.usedDescriptors = 0;
+			selectedSlot->recorded = true;
+			selectedSlot->submitted = false;
+			if (commandListSlot.recordedExecutionSlots.empty())
+				gRecordedCommandListCount.fetch_add(1, std::memory_order_release);
+			commandListSlot.recordedExecutionSlots.push_back(selectedSlot);
+			commandListSlot.currentExecutionSlot = selectedSlot;
+			return selectedSlot;
+		}
+
+		bool AcquireDescriptorAllocation(
+			CommandListSlot& commandListSlot,
+			ID3D12Device* device,
+			UINT descriptorCount,
+			DescriptorAllocation& outAllocation,
+			std::string& outError)
+		{
+			outAllocation = {};
+			if (!device || !descriptorCount)
+			{
+				outError = "Shader-resource descriptor allocation is empty.";
 				return false;
 			}
 
-			outImage = {};
-			outImage.width = header.width;
-			outImage.height = header.height;
-			outImage.mipLevels = (std::max)(1u, header.mipMapCount);
-			if (header.pixelFormat.fourCC == fourCcDx10)
+			std::lock_guard<std::mutex> lock(gCommandListSlotMutex);
+			DescriptorExecutionSlot* executionSlot = AcquireExecutionSlotLocked(commandListSlot);
+			DescriptorHeapPage* selectedPage = nullptr;
+			for (DescriptorHeapPage& page : executionSlot->pages)
 			{
-				DdsHeaderDx10 dx10{};
-				file.read(reinterpret_cast<char*>(&dx10), sizeof(dx10));
-				if (!file || dx10.resourceDimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || !dx10.arraySize)
+				if (page.capacity - page.usedDescriptors >= descriptorCount)
 				{
-					outError = "Only Texture2D DDS resources are supported.";
+					selectedPage = &page;
+					break;
+				}
+			}
+
+			if (!selectedPage)
+			{
+				D3D12_DESCRIPTOR_HEAP_DESC heapDescription{};
+				heapDescription.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+				heapDescription.NumDescriptors = (std::max)(descriptorCount, DefaultDescriptorPageCapacity);
+				heapDescription.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+				DescriptorHeapPage page{};
+				const HRESULT result = device->CreateDescriptorHeap(
+					&heapDescription,
+					IID_PPV_ARGS(&page.heap));
+				if (FAILED(result) || !page.heap)
+				{
+					outError = "Shader-resource descriptor heap creation failed with " +
+						StringHelper::FormatHRESULT(result);
 					return false;
 				}
-				outImage.format = dx10.format;
-				outImage.arraySize = dx10.arraySize;
-				outImage.cube = (dx10.miscFlag & 0x4u) != 0;
+				page.capacity = heapDescription.NumDescriptors;
+				executionSlot->pages.push_back(std::move(page));
+				selectedPage = &executionSlot->pages.back();
 			}
-			else
-			{
-				outImage.format = LegacyFormat(header.pixelFormat);
-				outImage.arraySize = (header.caps2 & 0x00000200u) ? 6u : 1u;
-				outImage.cube = outImage.arraySize == 6;
-			}
-			if (!outImage.width || !outImage.height || outImage.format == DXGI_FORMAT_UNKNOWN)
-			{
-				outError = "DDS format or dimensions are unsupported.";
-				return false;
-			}
-			outImage.pixels.assign(std::istreambuf_iterator<char>(file), {});
-			if (outImage.pixels.empty())
-			{
-				outError = "DDS contains no image data.";
-				return false;
-			}
+
+			const UINT rangeOffset = selectedPage->usedDescriptors;
+			selectedPage->usedDescriptors += descriptorCount;
+			const UINT increment = commandListSlot.descriptorIncrementSize;
+			outAllocation.heap = selectedPage->heap.Get();
+			outAllocation.cpuStart = selectedPage->heap->GetCPUDescriptorHandleForHeapStart();
+			outAllocation.cpuStart.ptr += static_cast<SIZE_T>(rangeOffset) * increment;
+			outAllocation.gpuStart = selectedPage->heap->GetGPUDescriptorHandleForHeapStart();
+			outAllocation.gpuStart.ptr += static_cast<UINT64>(rangeOffset) * increment;
 			return true;
 		}
 
-		void SurfaceInfo(DXGI_FORMAT format, UINT width, UINT height, UINT64& rowBytes, UINT& rows, UINT64& bytes)
+		UINT CountPreservedUnboundedDescriptors(
+			CommandListSlot& slot,
+			D3D12_CPU_DESCRIPTOR_HANDLE tableStart,
+			UINT descriptorIncrementSize,
+			UINT availableDescriptorCount,
+			UINT configuredDescriptorCount)
 		{
-			UINT blockBytes = 0;
-			switch (format)
+			const UINT scanLimit = (std::min)(
+				availableDescriptorCount,
+				(std::max)(configuredDescriptorCount, MaximumAutoPreservedUnboundedDescriptors));
+			for (const UnboundedDescriptorSpan& cachedSpan : slot.unboundedDescriptorSpans)
 			{
-				case DXGI_FORMAT_BC1_UNORM: case DXGI_FORMAT_BC1_UNORM_SRGB:
-				case DXGI_FORMAT_BC4_UNORM: case DXGI_FORMAT_BC4_SNORM: blockBytes = 8; break;
-				case DXGI_FORMAT_BC2_UNORM: case DXGI_FORMAT_BC2_UNORM_SRGB:
-				case DXGI_FORMAT_BC3_UNORM: case DXGI_FORMAT_BC3_UNORM_SRGB:
-				case DXGI_FORMAT_BC5_UNORM: case DXGI_FORMAT_BC5_SNORM:
-				case DXGI_FORMAT_BC6H_UF16: case DXGI_FORMAT_BC6H_SF16:
-				case DXGI_FORMAT_BC7_UNORM: case DXGI_FORMAT_BC7_UNORM_SRGB: blockBytes = 16; break;
+				if (cachedSpan.cpuStart != tableStart.ptr ||
+					cachedSpan.descriptorIncrementSize != descriptorIncrementSize)
+				{
+					continue;
+				}
+
+				const bool completeSpan =
+					cachedSpan.contiguousDescriptorCount < cachedSpan.scannedDescriptorCount;
+				if (completeSpan || cachedSpan.scannedDescriptorCount >= scanLimit)
+				{
+					return (std::min)(
+						availableDescriptorCount,
+						(std::max)(configuredDescriptorCount, cachedSpan.contiguousDescriptorCount));
+				}
 			}
-			if (blockBytes)
+
+			const UINT contiguousDescriptorCount =
+				RenderPassResourceRegistry::CountContiguousDescriptors(
+					tableStart,
+					descriptorIncrementSize,
+					scanLimit);
+			if (contiguousDescriptorCount)
 			{
-				const UINT blocksWide = (std::max)(1u, (width + 3) / 4);
-				rows = (std::max)(1u, (height + 3) / 4);
-				rowBytes = static_cast<UINT64>(blocksWide) * blockBytes;
-				bytes = rowBytes * rows;
-				return;
+				slot.unboundedDescriptorSpans[slot.nextUnboundedDescriptorSpan] = {
+					tableStart.ptr,
+					descriptorIncrementSize,
+					scanLimit,
+					contiguousDescriptorCount };
+				slot.nextUnboundedDescriptorSpan =
+					(slot.nextUnboundedDescriptorSpan + 1) % slot.unboundedDescriptorSpans.size();
 			}
-			UINT bitsPerPixel = 32;
-			switch (format)
-			{
-				case DXGI_FORMAT_R8_UNORM: case DXGI_FORMAT_A8_UNORM: bitsPerPixel = 8; break;
-				case DXGI_FORMAT_R8G8_UNORM: case DXGI_FORMAT_R16_FLOAT: bitsPerPixel = 16; break;
-				case DXGI_FORMAT_R32G32_FLOAT:
-				case DXGI_FORMAT_R32G32_UINT:
-				case DXGI_FORMAT_R32G32_SINT:
-				case DXGI_FORMAT_R16G16B16A16_FLOAT:
-				case DXGI_FORMAT_R16G16B16A16_UNORM:
-				case DXGI_FORMAT_R16G16B16A16_UINT:
-				case DXGI_FORMAT_R16G16B16A16_SNORM:
-				case DXGI_FORMAT_R16G16B16A16_SINT: bitsPerPixel = 64; break;
-				case DXGI_FORMAT_R32G32B32_FLOAT:
-				case DXGI_FORMAT_R32G32B32_UINT:
-				case DXGI_FORMAT_R32G32B32_SINT: bitsPerPixel = 96; break;
-				case DXGI_FORMAT_R32G32B32A32_FLOAT:
-				case DXGI_FORMAT_R32G32B32A32_UINT:
-				case DXGI_FORMAT_R32G32B32A32_SINT: bitsPerPixel = 128; break;
-			}
-			rowBytes = (static_cast<UINT64>(width) * bitsPerPixel + 7) / 8;
-			rows = height;
-			bytes = rowBytes * rows;
+
+			return (std::min)(
+				availableDescriptorCount,
+				(std::max)(configuredDescriptorCount, contiguousDescriptorCount));
 		}
 
 		TextureGpu* GetOrCreateTexture(
@@ -276,6 +311,12 @@ namespace ShaderResourceRuntime
 			const ShaderResource::TextureDisk& disk,
 			std::string& outError)
 		{
+			if (!disk.validationError.empty())
+			{
+				outError = "DDS resource is invalid: " + disk.id + ". " + disk.validationError;
+				return nullptr;
+			}
+
 			std::lock_guard<std::mutex> lock(gTextureMutex);
 			auto& cachedEntry = gTextures[device][disk.id];
 			if (!cachedEntry)
@@ -284,124 +325,233 @@ namespace ShaderResourceRuntime
 			if (cached.texture)
 				return &cached;
 
-			DdsImage image{};
-			if (!LoadDds(disk.filePath, image, outError))
+			ShaderResourceDDS::Image image{};
+			if (!ShaderResourceDDS::Load(disk.filePath, image, outError))
 				return nullptr;
+			const ShaderResourceDDS::Metadata& metadata = image.metadata;
+			const bool texture3D = metadata.dimension == ShaderResource::TextureDimension::Texture3D;
+
+			D3D12_FEATURE_DATA_FORMAT_INFO formatInformation{};
+			formatInformation.Format = metadata.format;
+			if (FAILED(device->CheckFeatureSupport(
+				D3D12_FEATURE_FORMAT_INFO,
+				&formatInformation,
+				sizeof(formatInformation))) ||
+				formatInformation.PlaneCount != 1)
+			{
+				outError = "DDS format is unsupported or uses multiple planes: " +
+					std::to_string(static_cast<uint32_t>(metadata.format));
+				return nullptr;
+			}
+
 			D3D12_RESOURCE_DESC description{};
-			description.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-			description.Width = image.width;
-			description.Height = image.height;
-			description.DepthOrArraySize = static_cast<UINT16>(image.arraySize);
-			description.MipLevels = static_cast<UINT16>(image.mipLevels);
-			description.Format = image.format;
+			description.Dimension = texture3D
+				? D3D12_RESOURCE_DIMENSION_TEXTURE3D
+				: D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+			description.Width = metadata.width;
+			description.Height = metadata.height;
+			description.DepthOrArraySize = static_cast<UINT16>(texture3D ? metadata.depth : metadata.arraySize);
+			description.MipLevels = static_cast<UINT16>(metadata.mipLevels);
+			description.Format = metadata.format;
 			description.SampleDesc.Count = 1;
 			description.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-		D3D12_HEAP_PROPERTIES defaultHeap{ D3D12_HEAP_TYPE_DEFAULT };
-		HRESULT result = device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE, &description,
-			D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&cached.texture));
-		if (FAILED(result))
-		{
-			outError = "DDS texture creation failed with " + StringHelper::FormatHRESULT(result);
-			return nullptr;
-		}
 
-		const UINT subresourceCount = image.arraySize * image.mipLevels;
-		std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> layouts(subresourceCount);
-		std::vector<UINT> rowCounts(subresourceCount);
-		std::vector<UINT64> rowSizes(subresourceCount);
-		UINT64 uploadSize = 0;
-		device->GetCopyableFootprints(&description, 0, subresourceCount, 0, layouts.data(), rowCounts.data(), rowSizes.data(), &uploadSize);
-		D3D12_RESOURCE_DESC uploadDescription{};
-		uploadDescription.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-		uploadDescription.Width = uploadSize;
-		uploadDescription.Height = 1;
-		uploadDescription.DepthOrArraySize = 1;
-		uploadDescription.MipLevels = 1;
-		uploadDescription.SampleDesc.Count = 1;
-		uploadDescription.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-		D3D12_HEAP_PROPERTIES uploadHeap{ D3D12_HEAP_TYPE_UPLOAD };
-		result = device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE, &uploadDescription,
-			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&cached.upload));
-		if (FAILED(result))
-		{
-			outError = "DDS upload buffer creation failed with " + StringHelper::FormatHRESULT(result);
-			cached = {};
-			return nullptr;
-		}
-
-		uint8_t* mapped = nullptr;
-		result = cached.upload->Map(0, nullptr, reinterpret_cast<void**>(&mapped));
-		if (FAILED(result) || !mapped)
-		{
-			outError = "DDS upload buffer mapping failed with " + StringHelper::FormatHRESULT(result);
-			cached = {};
-			return nullptr;
-		}
-		size_t sourceOffset = 0;
-		for (UINT arrayIndex = 0, subresource = 0; arrayIndex < image.arraySize; ++arrayIndex)
-		{
-			UINT width = image.width, height = image.height;
-			for (UINT mip = 0; mip < image.mipLevels; ++mip, ++subresource)
+			D3D12_HEAP_PROPERTIES defaultHeap{ D3D12_HEAP_TYPE_DEFAULT };
+			HRESULT result = device->CreateCommittedResource(
+				&defaultHeap,
+				D3D12_HEAP_FLAG_NONE,
+				&description,
+				D3D12_RESOURCE_STATE_COPY_DEST,
+				nullptr,
+				IID_PPV_ARGS(&cached.texture));
+			if (FAILED(result))
 			{
-				UINT64 sourceRowBytes = 0, sourceBytes = 0;
-				UINT sourceRows = 0;
-				SurfaceInfo(image.format, width, height, sourceRowBytes, sourceRows, sourceBytes);
-				if (sourceOffset + sourceBytes > image.pixels.size())
+				outError = "DDS texture creation failed with " + StringHelper::FormatHRESULT(result);
+				return nullptr;
+			}
+
+			const uint64_t subresourceCount64 = static_cast<uint64_t>(metadata.mipLevels) *
+				(texture3D ? 1ull : metadata.arraySize);
+			if (!subresourceCount64 || subresourceCount64 > (std::numeric_limits<UINT>::max)())
+			{
+				outError = "DDS subresource count is invalid.";
+				cached = {};
+				return nullptr;
+			}
+			const UINT subresourceCount = static_cast<UINT>(subresourceCount64);
+			std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> layouts(subresourceCount);
+			std::vector<UINT> rowCounts(subresourceCount);
+			std::vector<UINT64> rowSizes(subresourceCount);
+			UINT64 uploadSize = 0;
+			device->GetCopyableFootprints(
+				&description,
+				0,
+				subresourceCount,
+				0,
+				layouts.data(),
+				rowCounts.data(),
+				rowSizes.data(),
+				&uploadSize);
+			if (!uploadSize || uploadSize == (std::numeric_limits<UINT64>::max)())
+			{
+				outError = "D3D12 could not calculate DDS upload footprints.";
+				cached = {};
+				return nullptr;
+			}
+
+			D3D12_RESOURCE_DESC uploadDescription{};
+			uploadDescription.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+			uploadDescription.Width = uploadSize;
+			uploadDescription.Height = 1;
+			uploadDescription.DepthOrArraySize = 1;
+			uploadDescription.MipLevels = 1;
+			uploadDescription.SampleDesc.Count = 1;
+			uploadDescription.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+			D3D12_HEAP_PROPERTIES uploadHeap{ D3D12_HEAP_TYPE_UPLOAD };
+			result = device->CreateCommittedResource(
+				&uploadHeap,
+				D3D12_HEAP_FLAG_NONE,
+				&uploadDescription,
+				D3D12_RESOURCE_STATE_GENERIC_READ,
+				nullptr,
+				IID_PPV_ARGS(&cached.upload));
+			if (FAILED(result))
+			{
+				outError = "DDS upload buffer creation failed with " + StringHelper::FormatHRESULT(result);
+				cached = {};
+				return nullptr;
+			}
+
+			uint8_t* mapped = nullptr;
+			result = cached.upload->Map(0, nullptr, reinterpret_cast<void**>(&mapped));
+			if (FAILED(result) || !mapped)
+			{
+				outError = "DDS upload buffer mapping failed with " + StringHelper::FormatHRESULT(result);
+				cached = {};
+				return nullptr;
+			}
+
+			size_t sourceOffset = 0;
+			for (UINT subresource = 0; subresource < subresourceCount; ++subresource)
+			{
+				const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& layout = layouts[subresource];
+				const UINT64 sourceRowBytes64 = rowSizes[subresource];
+				const UINT sourceRows = rowCounts[subresource];
+				const UINT sourceDepth = layout.Footprint.Depth;
+				if (!sourceRowBytes64 || sourceRowBytes64 > layout.Footprint.RowPitch ||
+					sourceRowBytes64 > (std::numeric_limits<size_t>::max)())
 				{
 					cached.upload->Unmap(0, nullptr);
-					outError = "DDS subresource data is truncated.";
+					outError = "DDS row layout is unsupported.";
 					cached = {};
 					return nullptr;
 				}
-				for (UINT row = 0; row < sourceRows; ++row)
-					memcpy(mapped + layouts[subresource].Offset + static_cast<SIZE_T>(row) * layouts[subresource].Footprint.RowPitch,
-						image.pixels.data() + sourceOffset + static_cast<SIZE_T>(row) * sourceRowBytes,
-						static_cast<size_t>(sourceRowBytes));
-				sourceOffset += static_cast<size_t>(sourceBytes);
-				width = (std::max)(1u, width >> 1);
-				height = (std::max)(1u, height >> 1);
-			}
-		}
-		cached.upload->Unmap(0, nullptr);
-		for (UINT subresource = 0; subresource < subresourceCount; ++subresource)
-		{
-			D3D12_TEXTURE_COPY_LOCATION destination{ cached.texture.Get(), D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX };
-			destination.SubresourceIndex = subresource;
-			D3D12_TEXTURE_COPY_LOCATION source{ cached.upload.Get(), D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT };
-			source.PlacedFootprint = layouts[subresource];
-			commandList->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
-		}
-		D3D12_RESOURCE_BARRIER barrier{};
-		barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-		barrier.Transition.pResource = cached.texture.Get();
-		barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-		barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-		commandList->ResourceBarrier(1, &barrier);
-		cached.view.Format = image.format;
-		cached.view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-			if (image.cube)
-			{
-				cached.view.ViewDimension = image.arraySize > 6 ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY : D3D12_SRV_DIMENSION_TEXTURECUBE;
-				if (image.arraySize > 6)
+
+				const size_t sourceRowBytes = static_cast<size_t>(sourceRowBytes64);
+				if (sourceRows > 0 && sourceRowBytes > (std::numeric_limits<size_t>::max)() / sourceRows)
 				{
-					cached.view.TextureCubeArray.MipLevels = image.mipLevels;
-					cached.view.TextureCubeArray.NumCubes = image.arraySize / 6;
+					cached.upload->Unmap(0, nullptr);
+					outError = "DDS slice size overflows the host address space.";
+					cached = {};
+					return nullptr;
 				}
-				else
-					cached.view.TextureCube.MipLevels = image.mipLevels;
-		}
-		else if (image.arraySize > 1)
-		{
-			cached.view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-			cached.view.Texture2DArray.MipLevels = image.mipLevels;
-			cached.view.Texture2DArray.ArraySize = image.arraySize;
-		}
-		else
-		{
-			cached.view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-			cached.view.Texture2D.MipLevels = image.mipLevels;
-		}
+				const size_t sourceSliceBytes = sourceRowBytes * sourceRows;
+				if (sourceDepth > 0 && sourceSliceBytes > (std::numeric_limits<size_t>::max)() / sourceDepth)
+				{
+					cached.upload->Unmap(0, nullptr);
+					outError = "DDS subresource size overflows the host address space.";
+					cached = {};
+					return nullptr;
+				}
+				const size_t sourceSubresourceBytes = sourceSliceBytes * sourceDepth;
+				if (sourceOffset > image.pixels.size() ||
+					sourceSubresourceBytes > image.pixels.size() - sourceOffset)
+				{
+					cached.upload->Unmap(0, nullptr);
+					outError = "DDS subresource data is truncated at subresource " +
+						std::to_string(subresource) + ".";
+					cached = {};
+					return nullptr;
+				}
+
+				const size_t destinationSlicePitch =
+					static_cast<size_t>(layout.Footprint.RowPitch) * sourceRows;
+				for (UINT depthSlice = 0; depthSlice < sourceDepth; ++depthSlice)
+				{
+					for (UINT row = 0; row < sourceRows; ++row)
+					{
+						const size_t destinationOffset = static_cast<size_t>(layout.Offset) +
+							static_cast<size_t>(depthSlice) * destinationSlicePitch +
+							static_cast<size_t>(row) * layout.Footprint.RowPitch;
+						const size_t rowSourceOffset = sourceOffset +
+							static_cast<size_t>(depthSlice) * sourceSliceBytes +
+							static_cast<size_t>(row) * sourceRowBytes;
+						std::memcpy(
+							mapped + destinationOffset,
+							image.pixels.data() + rowSourceOffset,
+							sourceRowBytes);
+					}
+				}
+				sourceOffset += sourceSubresourceBytes;
+			}
+			cached.upload->Unmap(0, nullptr);
+
+			for (UINT subresource = 0; subresource < subresourceCount; ++subresource)
+			{
+				D3D12_TEXTURE_COPY_LOCATION destination{};
+				destination.pResource = cached.texture.Get();
+				destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+				destination.SubresourceIndex = subresource;
+				D3D12_TEXTURE_COPY_LOCATION source{};
+				source.pResource = cached.upload.Get();
+				source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+				source.PlacedFootprint = layouts[subresource];
+				commandList->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+			}
+
+			D3D12_RESOURCE_BARRIER barrier{};
+			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barrier.Transition.pResource = cached.texture.Get();
+			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+			commandList->ResourceBarrier(1, &barrier);
+
+			cached.view = {};
+			cached.view.Format = metadata.format;
+			cached.view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			switch (metadata.dimension)
+			{
+				case ShaderResource::TextureDimension::Texture2DArray:
+					cached.view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+					cached.view.Texture2DArray.MipLevels = metadata.mipLevels;
+					cached.view.Texture2DArray.ArraySize = metadata.arraySize;
+					break;
+				case ShaderResource::TextureDimension::TextureCube:
+					cached.view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+					cached.view.TextureCube.MipLevels = metadata.mipLevels;
+					break;
+				case ShaderResource::TextureDimension::TextureCubeArray:
+					cached.view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+					cached.view.TextureCubeArray.MipLevels = metadata.mipLevels;
+					cached.view.TextureCubeArray.NumCubes = metadata.arraySize / 6u;
+					break;
+				case ShaderResource::TextureDimension::Texture3D:
+					cached.view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+					cached.view.Texture3D.MipLevels = metadata.mipLevels;
+					break;
+				case ShaderResource::TextureDimension::Texture2D:
+					cached.view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+					cached.view.Texture2D.MipLevels = metadata.mipLevels;
+					break;
+				case ShaderResource::TextureDimension::Unknown:
+				default:
+					outError = "DDS texture dimension is unsupported.";
+					cached = {};
+					return nullptr;
+			}
+
 			D3D12_DESCRIPTOR_HEAP_DESC srvHeapDescription{};
 			srvHeapDescription.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 			srvHeapDescription.NumDescriptors = 1;
@@ -417,6 +567,14 @@ namespace ShaderResourceRuntime
 				&cached.view,
 				cached.srvHeap->GetCPUDescriptorHandleForHeapStart());
 			cached.uploadRecorded = true;
+			ShaderInjectorIO::WriteToLogFileSuccess(
+				"ShaderResourceRuntime->GetOrCreateTexture: loaded resource=" + disk.id +
+				" dimension=" + ShaderResource::TextureDimensionName(metadata.dimension) +
+				" extent=" + std::to_string(metadata.width) + "x" +
+				std::to_string(metadata.height) + "x" + std::to_string(metadata.depth) +
+				" arraySize=" + std::to_string(metadata.arraySize) +
+				" mipLevels=" + std::to_string(metadata.mipLevels) +
+				" format=" + std::to_string(static_cast<uint32_t>(metadata.format)));
 			return &cached;
 		}
 
@@ -440,7 +598,7 @@ namespace ShaderResourceRuntime
 		{
 			for (const RootTableRestore& binding : slot.restoreRootTables)
 			{
-				if (slot.computePipeline)
+				if (binding.computePipeline)
 					commandList->SetComputeRootDescriptorTable(binding.rootParameterIndex, binding.descriptorHandle);
 				else
 					commandList->SetGraphicsRootDescriptorTable(binding.rootParameterIndex, binding.descriptorHandle);
@@ -452,6 +610,7 @@ namespace ShaderResourceRuntime
 		const RenderPass::RenderPassDisk& renderPass,
 		ID3D12GraphicsCommandList* commandList,
 		const RenderPassMipChain::GraphicsStateSnapshot& gameState,
+		const RenderPassMipChain::GraphicsStateSnapshot& oppositePipelineState,
 		bool computePipeline,
 		std::string& outError)
 	{
@@ -479,7 +638,8 @@ namespace ShaderResourceRuntime
 			slot.cachedRootSignature = gameState.rootSignature;
 			slot.cachedMaximumTrackedDescriptors = renderPass.maximumTrackedDescriptors;
 			slot.layouts.clear();
-			slot.bindingLocations.clear();
+			slot.graphicsBindingLocations.clear();
+			slot.computeBindingLocations.clear();
 			if (!RenderPassResourceRegistry::GetDescriptorTableLayouts(
 				gameState.rootSignature,
 				renderPass.maximumTrackedDescriptors,
@@ -506,18 +666,49 @@ namespace ShaderResourceRuntime
 			if (!sourceHeap)
 				continue;
 			const UINT64 byteOffset = binding.value - sourceHeap->gpuStart.ptr;
-			const UINT64 requiredBytes = static_cast<UINT64>(layoutIt->descriptorCount) * sourceHeap->descriptorIncrementSize;
 			const UINT64 heapBytes = static_cast<UINT64>(sourceHeap->descriptorCount) * sourceHeap->descriptorIncrementSize;
-			if (byteOffset + requiredBytes > heapBytes)
+			if (byteOffset >= heapBytes)
 				continue;
+
+			UINT descriptorCount = layoutIt->descriptorCount;
+			if (layoutIt->containsUnboundedRange &&
+				layoutIt->heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+			{
+				const UINT64 availableDescriptorCount64 =
+					(heapBytes - byteOffset) / sourceHeap->descriptorIncrementSize;
+				const UINT availableDescriptorCount = static_cast<UINT>((std::min)(
+					availableDescriptorCount64,
+					static_cast<UINT64>(UINT_MAX)));
+				descriptorCount = CountPreservedUnboundedDescriptors(
+					slot,
+					{ sourceHeap->cpuStart.ptr + byteOffset },
+					sourceHeap->descriptorIncrementSize,
+					availableDescriptorCount,
+					descriptorCount);
+			}
+			else
+			{
+				const UINT64 requiredBytes =
+					static_cast<UINT64>(descriptorCount) * sourceHeap->descriptorIncrementSize;
+				if (requiredBytes > heapBytes - byteOffset)
+					continue;
+			}
+			if (!descriptorCount)
+				continue;
+
 			ActiveTable table{};
 			table.rootParameterIndex = binding.rootParameterIndex;
 			table.heapType = layoutIt->heapType;
-			table.descriptorCount = layoutIt->descriptorCount;
+			table.descriptorCount = descriptorCount;
 			table.originalGpu = { binding.value };
 			table.originalCpu = { sourceHeap->cpuStart.ptr + byteOffset };
 			if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
 			{
+				if (table.descriptorCount > UINT_MAX - totalDescriptors)
+				{
+					outError = "Shader-resource descriptor-table clone exceeds D3D12 limits.";
+					return false;
+				}
 				table.customOffset = totalDescriptors;
 				totalDescriptors += table.descriptorCount;
 			}
@@ -525,30 +716,25 @@ namespace ShaderResourceRuntime
 		}
 		if (!totalDescriptors)
 		{
-			outError = "No bounded CBV/SRV/UAV descriptor table is active.";
+			outError = "No CBV/SRV/UAV descriptor table is active.";
 			return false;
 		}
 
-		if (!slot.heap || slot.capacity < totalDescriptors)
-		{
-			D3D12_DESCRIPTOR_HEAP_DESC heapDescription{};
-			heapDescription.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-			heapDescription.NumDescriptors = totalDescriptors;
-			heapDescription.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-			slot.heap.Reset();
-			const HRESULT result = device->CreateDescriptorHeap(&heapDescription, IID_PPV_ARGS(&slot.heap));
-			if (FAILED(result))
-			{
-				outError = "Shader-resource descriptor heap creation failed with " + StringHelper::FormatHRESULT(result);
-				return false;
-			}
-			slot.capacity = totalDescriptors;
-		}
 		if (!slot.descriptorIncrementSize)
 			slot.descriptorIncrementSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		DescriptorAllocation descriptorAllocation{};
+		if (!AcquireDescriptorAllocation(
+			slot,
+			device,
+			totalDescriptors,
+			descriptorAllocation,
+			outError))
+		{
+			return false;
+		}
 		const UINT increment = slot.descriptorIncrementSize;
-		const D3D12_CPU_DESCRIPTOR_HANDLE cpuStart = slot.heap->GetCPUDescriptorHandleForHeapStart();
-		const D3D12_GPU_DESCRIPTOR_HANDLE gpuStart = slot.heap->GetGPUDescriptorHandleForHeapStart();
+		const D3D12_CPU_DESCRIPTOR_HANDLE cpuStart = descriptorAllocation.cpuStart;
+		const D3D12_GPU_DESCRIPTOR_HANDLE gpuStart = descriptorAllocation.gpuStart;
 		for (const ActiveTable& table : slot.activeTables)
 		{
 			if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
@@ -567,28 +753,50 @@ namespace ShaderResourceRuntime
 			}
 			const uint64_t bindingKey =
 				(static_cast<uint64_t>(reference.registerSpace) << 32) | reference.shaderRegister;
-			auto locationIt = slot.bindingLocations.find(bindingKey);
-			if (locationIt == slot.bindingLocations.end())
+			auto& bindingLocations = computePipeline
+				? slot.computeBindingLocations
+				: slot.graphicsBindingLocations;
+			auto locationIt = bindingLocations.find(bindingKey);
+			if (locationIt == bindingLocations.end())
 			{
-				RenderPassResourceRegistry::DescriptorBindingLocation location{};
-				if (!RenderPassResourceRegistry::FindDescriptorBinding(gameState.rootSignature,
-					D3D12_DESCRIPTOR_RANGE_TYPE_SRV, reference.shaderRegister, reference.registerSpace,
-					renderPass.maximumTrackedDescriptors, location))
+				std::vector<RenderPassResourceRegistry::DescriptorBindingLocation> locations;
+				if (!RenderPassResourceRegistry::GetDescriptorBindingCandidates(
+					gameState.rootSignature,
+					D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+					reference.shaderRegister,
+					reference.registerSpace,
+					renderPass.maximumTrackedDescriptors,
+					computePipeline ? D3D12_SHADER_VISIBILITY_ALL : D3D12_SHADER_VISIBILITY_PIXEL,
+					locations))
 				{
 					outError = "No SRV root binding exists for t" + std::to_string(reference.shaderRegister) +
 						", space" + std::to_string(reference.registerSpace) + ".";
 					return false;
 				}
-				locationIt = slot.bindingLocations.emplace(bindingKey, location).first;
+				locationIt = bindingLocations.emplace(bindingKey, std::move(locations)).first;
 			}
-			const auto& location = locationIt->second;
-			const auto tableIt = std::find_if(slot.activeTables.begin(), slot.activeTables.end(), [&](const auto& table)
+
+			const RenderPassResourceRegistry::DescriptorBindingLocation* location = nullptr;
+			const ActiveTable* activeTable = nullptr;
+			for (const auto& candidate : locationIt->second)
 			{
-				return table.rootParameterIndex == location.rootParameterIndex;
-			});
-			if (tableIt == slot.activeTables.end() || location.tableOffset >= tableIt->descriptorCount)
+				const auto tableIt = std::find_if(slot.activeTables.begin(), slot.activeTables.end(), [&](const auto& table)
+				{
+					return table.rootParameterIndex == candidate.rootParameterIndex &&
+						candidate.tableOffset < table.descriptorCount;
+				});
+				if (tableIt != slot.activeTables.end())
+				{
+					location = &candidate;
+					activeTable = &*tableIt;
+					break;
+				}
+			}
+			if (!location || !activeTable)
 			{
-				outError = "The configured SRV table is not active on this draw or dispatch.";
+				outError = "No compatible active SRV table exists for t" +
+					std::to_string(reference.shaderRegister) + ", space" +
+					std::to_string(reference.registerSpace) + " on this draw or dispatch.";
 				return false;
 			}
 			TextureGpu* texture = nullptr;
@@ -603,7 +811,7 @@ namespace ShaderResourceRuntime
 			}
 			if (!texture)
 				return false;
-			const UINT descriptorOffset = tableIt->customOffset + location.tableOffset;
+			const UINT descriptorOffset = activeTable->customOffset + location->tableOffset;
 			device->CopyDescriptorsSimple(
 				1,
 				{ cpuStart.ptr + static_cast<SIZE_T>(descriptorOffset) * increment },
@@ -614,7 +822,7 @@ namespace ShaderResourceRuntime
 		ID3D12DescriptorHeap* samplerHeap = nullptr;
 		for (const auto& heap : gameState.descriptorHeaps)
 			if (heap.type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER) samplerHeap = heap.heap;
-		ID3D12DescriptorHeap* heaps[] = { slot.heap.Get(), samplerHeap };
+		ID3D12DescriptorHeap* heaps[] = { descriptorAllocation.heap, samplerHeap };
 		commandList->SetDescriptorHeaps(samplerHeap ? 2u : 1u, heaps);
 		for (const ActiveTable& table : slot.activeTables)
 		{
@@ -633,14 +841,21 @@ namespace ShaderResourceRuntime
 				slot.restoreHeaps.push_back(heap.heap);
 		}
 		slot.restoreRootTables.clear();
-		for (const auto& binding : gameState.rootBindings)
+		const auto appendRootTables = [&](const auto& rootBindings, bool restoreComputePipeline)
 		{
-			if (binding.type == RenderPassMipChain::RootArgumentType::DescriptorTable)
-				slot.restoreRootTables.push_back({
-					binding.rootParameterIndex,
-					{ binding.value } });
-		}
-		slot.computePipeline = computePipeline;
+			for (const auto& binding : rootBindings)
+			{
+				if (binding.type == RenderPassMipChain::RootArgumentType::DescriptorTable)
+				{
+					slot.restoreRootTables.push_back({
+						binding.rootParameterIndex,
+						{ binding.value },
+						restoreComputePipeline });
+				}
+			}
+		};
+		appendRootTables(gameState.rootBindings, computePipeline);
+		appendRootTables(oppositePipelineState.rootBindings, !computePipeline);
 		slot.pendingRestore = true;
 		PerformanceMetrics::Increment(PerformanceMetrics::Counter::ShaderResourceBindSucceeded);
 		return true;
@@ -660,10 +875,111 @@ namespace ShaderResourceRuntime
 		slot->pendingRestore = false;
 	}
 
+	bool HasRecordedCommandListWork()
+	{
+		return gRecordedCommandListCount.load(std::memory_order_acquire) != 0;
+	}
+
 	void ResetCommandList(ID3D12GraphicsCommandList* commandList)
 	{
-		if (CommandListSlot* slot = FindCommandListSlot(commandList))
-			slot->pendingRestore = false;
+		if (!commandList)
+			return;
+
+		std::lock_guard<std::mutex> lock(gCommandListSlotMutex);
+		const auto slotIt = gCommandListSlots.find(commandList);
+		if (slotIt == gCommandListSlots.end())
+			return;
+
+		CommandListSlot& commandListSlot = *slotIt->second;
+		commandListSlot.pendingRestore = false;
+		for (DescriptorExecutionSlot* executionSlot : commandListSlot.recordedExecutionSlots)
+		{
+			if (executionSlot)
+				executionSlot->recorded = false;
+		}
+		if (!commandListSlot.recordedExecutionSlots.empty())
+			gRecordedCommandListCount.fetch_sub(1, std::memory_order_acq_rel);
+		commandListSlot.recordedExecutionSlots.clear();
+		commandListSlot.currentExecutionSlot = nullptr;
+	}
+
+	void NotifyCommandListsSubmitted(
+		ID3D12CommandQueue* commandQueue,
+		UINT commandListCount,
+		ID3D12CommandList* const* commandLists)
+	{
+		if (!HasRecordedCommandListWork() || !commandQueue || !commandLists || !commandListCount)
+		{
+			return;
+		}
+		const D3D12_COMMAND_LIST_TYPE queueType = commandQueue->GetDesc().Type;
+		if (queueType != D3D12_COMMAND_LIST_TYPE_DIRECT &&
+			queueType != D3D12_COMMAND_LIST_TYPE_COMPUTE)
+			return;
+
+		std::lock_guard<std::mutex> lock(gCommandListSlotMutex);
+		thread_local std::vector<DescriptorExecutionSlot*> submittedSlots;
+		thread_local std::unordered_set<DescriptorExecutionSlot*> uniqueSlots;
+		submittedSlots.clear();
+		uniqueSlots.clear();
+		submittedSlots.reserve(commandListCount);
+		uniqueSlots.reserve(commandListCount);
+		for (UINT commandListIndex = 0; commandListIndex < commandListCount; ++commandListIndex)
+		{
+			ID3D12GraphicsCommandList* graphicsCommandList =
+				reinterpret_cast<ID3D12GraphicsCommandList*>(commandLists[commandListIndex]);
+			const auto slotIt = gCommandListSlots.find(graphicsCommandList);
+			if (slotIt == gCommandListSlots.end())
+				continue;
+			for (DescriptorExecutionSlot* executionSlot : slotIt->second->recordedExecutionSlots)
+			{
+				if (executionSlot && uniqueSlots.insert(executionSlot).second)
+					submittedSlots.push_back(executionSlot);
+			}
+		}
+		if (submittedSlots.empty())
+			return;
+
+		QueueFence& queueFence = gQueueFences[commandQueue];
+		if (!queueFence.fence)
+		{
+			ComPtr<ID3D12Device> device;
+			if (FAILED(commandQueue->GetDevice(IID_PPV_ARGS(&device))) || !device ||
+				FAILED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&queueFence.fence))))
+			{
+				for (DescriptorExecutionSlot* executionSlot : submittedSlots)
+				{
+					executionSlot->submitted = true;
+					executionSlot->retirementBlocked = true;
+				}
+				ShaderInjectorIO::WriteToLogFileError(
+					"ShaderResourceRuntime->NotifyCommandListsSubmitted: could not create the retirement fence");
+				return;
+			}
+		}
+
+		const UINT64 fenceValue = ++queueFence.nextValue;
+		const HRESULT result = commandQueue->Signal(queueFence.fence.Get(), fenceValue);
+		if (FAILED(result))
+		{
+			for (DescriptorExecutionSlot* executionSlot : submittedSlots)
+			{
+				executionSlot->submitted = true;
+				executionSlot->retirementBlocked = true;
+			}
+			ShaderInjectorIO::WriteToLogFileError(
+				"ShaderResourceRuntime->NotifyCommandListsSubmitted: queue signal failed with " +
+				StringHelper::FormatHRESULT(result));
+			return;
+		}
+
+		for (DescriptorExecutionSlot* executionSlot : submittedSlots)
+		{
+			executionSlot->retirementFence = queueFence.fence;
+			executionSlot->retirementFenceValue = fenceValue;
+			executionSlot->submitted = true;
+			executionSlot->retirementBlocked = false;
+		}
 	}
 
 	void ReleaseResources()
@@ -675,6 +991,8 @@ namespace ShaderResourceRuntime
 		{
 			std::lock_guard<std::mutex> slotLock(gCommandListSlotMutex);
 			gCommandListSlots.clear();
+			gQueueFences.clear();
+			gRecordedCommandListCount.store(0, std::memory_order_release);
 		}
 		gCachedCommandList = nullptr;
 		gCachedCommandListSlot = nullptr;

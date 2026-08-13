@@ -19,6 +19,7 @@ namespace DatabaseRenderPasses
 	bool IsEventChainActive(const RenderPass::RenderPassDisk& renderPass);
 	bool CanReferenceRenderPass(const std::string& renderPassId, const std::string& eventRenderPassId);
 	bool CreateRenderPass(std::string& outRenderPassId);
+	bool SetRenderPassEnabled(const std::string& renderPassId, bool enabled);
 	bool SaveRenderPass(const std::string& renderPassId);
 	bool DeleteRenderPass(const std::string& renderPassId);
 	bool CreateFragmentShaderTemplate(const std::string& renderPassId, std::string& outError);

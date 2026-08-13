@@ -215,12 +215,14 @@ namespace RenderPassMipChain
 				renderPass.sourceTextureShaderRegister,
 				renderPass.sourceTextureRegisterSpace,
 				renderPass.maximumTrackedDescriptors,
+				D3D12_SHADER_VISIBILITY_PIXEL,
 				lookup.location) ||
 				RenderPassResourceRegistry::FindUniqueDescriptorBindingByShaderRegister(
 					rootSignature,
 					D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
 					renderPass.sourceTextureShaderRegister,
 					renderPass.maximumTrackedDescriptors,
+					D3D12_SHADER_VISIBILITY_PIXEL,
 					lookup.location);
 			outLocation = lookup.location;
 			gThreadMipBindingLookups[gNextThreadMipBindingLookup] = lookup;

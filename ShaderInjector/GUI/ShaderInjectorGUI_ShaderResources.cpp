@@ -41,7 +41,11 @@ namespace ShaderInjectorGUI
 		{
 			for (const auto& resource : refreshedResources)
 			{
-				const std::string label = resource.name + "##ShaderResource_" + resource.id;
+				std::string label = resource.name + " [" +
+					ShaderResource::TextureDimensionName(resource.dimension) + "]";
+				if (!resource.validationError.empty())
+					label += " (invalid)";
+				label += "##ShaderResource_" + resource.id;
 				if (ImGui::Selectable(label.c_str(), selectedResourceId == resource.id))
 					selectedResourceId = resource.id;
 			}
@@ -53,6 +57,20 @@ namespace ShaderInjectorGUI
 			ImGui::SeparatorText(resource->name.c_str());
 			ImGui::TextWrapped("File: %s", resource->fileName.c_str());
 			ImGui::TextWrapped("Resource ID: %s", resource->id.c_str());
+			if (!resource->validationError.empty())
+			{
+				ImGui::TextWrapped("DDS Error: %s", resource->validationError.c_str());
+			}
+			else
+			{
+				ImGui::Text("Dimension: %s", ShaderResource::TextureDimensionName(resource->dimension));
+				if (resource->dimension == ShaderResource::TextureDimension::Texture3D)
+					ImGui::Text("Extent: %ux%ux%u", resource->width, resource->height, resource->depth);
+				else
+					ImGui::Text("Extent: %ux%u, Array Slices: %u", resource->width, resource->height, resource->arraySize);
+				ImGui::Text("Mip Levels: %u", resource->mipLevels);
+				ImGui::Text("DXGI Format: %u", resource->format);
+			}
 		}
 		else if (refreshedResources.empty())
 		{

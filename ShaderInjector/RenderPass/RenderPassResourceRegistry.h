@@ -27,6 +27,7 @@ namespace RenderPassResourceRegistry
 	{
 		UINT rootParameterIndex = UINT32_MAX;
 		D3D12_DESCRIPTOR_HEAP_TYPE heapType = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
+		D3D12_SHADER_VISIBILITY shaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 		UINT descriptorCount = 0;
 		bool containsUnboundedRange = false;
 	};
@@ -38,6 +39,7 @@ namespace RenderPassResourceRegistry
 		UINT shaderRegister = UINT32_MAX;
 		UINT registerSpace = UINT32_MAX;
 		D3D12_DESCRIPTOR_HEAP_TYPE heapType = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
+		D3D12_SHADER_VISIBILITY shaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 		UINT descriptorCount = 0;
 		bool tableContainsUnboundedRange = false;
 	};
@@ -91,6 +93,10 @@ namespace RenderPassResourceRegistry
 	bool ResolveDescriptor(
 		D3D12_CPU_DESCRIPTOR_HANDLE descriptor,
 		RenderPass::ResourceBindingDiagnostic& outBinding);
+	UINT CountContiguousDescriptors(
+		D3D12_CPU_DESCRIPTOR_HANDLE firstDescriptor,
+		UINT descriptorIncrementSize,
+		UINT maximumDescriptors);
 	bool ResolveGpuVirtualAddress(
 		D3D12_GPU_VIRTUAL_ADDRESS gpuAddress,
 		RenderPass::ResourceBindingDiagnostic& outBinding);
@@ -118,12 +124,22 @@ namespace RenderPassResourceRegistry
 		UINT shaderRegister,
 		UINT registerSpace,
 		UINT maximumUnboundedDescriptors,
+		D3D12_SHADER_VISIBILITY shaderVisibility,
 		DescriptorBindingLocation& outLocation);
+	bool GetDescriptorBindingCandidates(
+		ID3D12RootSignature* rootSignature,
+		D3D12_DESCRIPTOR_RANGE_TYPE rangeType,
+		UINT shaderRegister,
+		UINT registerSpace,
+		UINT maximumUnboundedDescriptors,
+		D3D12_SHADER_VISIBILITY shaderVisibility,
+		std::vector<DescriptorBindingLocation>& outLocations);
 	bool FindUniqueDescriptorBindingByShaderRegister(
 		ID3D12RootSignature* rootSignature,
 		D3D12_DESCRIPTOR_RANGE_TYPE rangeType,
 		UINT shaderRegister,
 		UINT maximumUnboundedDescriptors,
+		D3D12_SHADER_VISIBILITY shaderVisibility,
 		DescriptorBindingLocation& outLocation);
 	RegistryStatistics GetStatistics();
 }
