@@ -68,7 +68,9 @@ namespace HookD3D12
 		UINT startVertexLocation,
 		UINT startInstanceLocation)
 	{
-		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsTrackingRequired())
+		if (!Globals::gShaderInjectorEnabled ||
+			!RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) ||
+			IsInsideRenderPassInjection())
 		{
 			Original_DrawInstanced(commandList, vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation);
 			return;
@@ -80,20 +82,17 @@ namespace HookD3D12
 			LogFirstCommandHookHit(gLoggedDrawInstancedHook, "Hook_DrawInstanced", commandList);
 			commandHookLogChecked = true;
 		}
-		const bool injectedCall = IsInsideRenderPassInjection();
 		uint32_t boundaryMask = 0;
-		if (!injectedCall)
 		{
 			PerformanceMetrics::ScopedTimer lookupTimer(
 				PerformanceMetrics::Timing::ExecutionHookLookup,
-				128);
-			if (Globals::gShaderInjectorEnabled)
-				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
-			if (boundaryMask)
-				PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
-			if ((boundaryMask & 1u) != 0)
-				RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "DrawInstanced");
+				512);
+			boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
 		}
+		if (boundaryMask)
+			PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
+		if ((boundaryMask & 1u) != 0)
+			RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "DrawInstanced");
 
 		Original_DrawInstanced(commandList, vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation);
 		if ((boundaryMask & 1u) != 0)
@@ -111,7 +110,9 @@ namespace HookD3D12
 		INT baseVertexLocation,
 		UINT startInstanceLocation)
 	{
-		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsTrackingRequired())
+		if (!Globals::gShaderInjectorEnabled ||
+			!RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) ||
+			IsInsideRenderPassInjection())
 		{
 			Original_DrawIndexedInstanced(commandList, indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation);
 			return;
@@ -123,20 +124,17 @@ namespace HookD3D12
 			LogFirstCommandHookHit(gLoggedDrawIndexedInstancedHook, "Hook_DrawIndexedInstanced", commandList);
 			commandHookLogChecked = true;
 		}
-		const bool injectedCall = IsInsideRenderPassInjection();
 		uint32_t boundaryMask = 0;
-		if (!injectedCall)
 		{
 			PerformanceMetrics::ScopedTimer lookupTimer(
 				PerformanceMetrics::Timing::ExecutionHookLookup,
-				128);
-			if (Globals::gShaderInjectorEnabled)
-				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
-			if (boundaryMask)
-				PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
-			if ((boundaryMask & 1u) != 0)
-				RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "DrawIndexedInstanced");
+				512);
+			boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
 		}
+		if (boundaryMask)
+			PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
+		if ((boundaryMask & 1u) != 0)
+			RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "DrawIndexedInstanced");
 
 		Original_DrawIndexedInstanced(commandList, indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation);
 		if ((boundaryMask & 1u) != 0)
@@ -152,7 +150,9 @@ namespace HookD3D12
 		UINT threadGroupCountY,
 		UINT threadGroupCountZ)
 	{
-		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsTrackingRequired())
+		if (!Globals::gShaderInjectorEnabled ||
+			!RenderPassRuntime::IsPipelineExecutionTrackingRequired(true) ||
+			IsInsideRenderPassInjection())
 		{
 			Original_Dispatch(commandList, threadGroupCountX, threadGroupCountY, threadGroupCountZ);
 			return;
@@ -164,20 +164,17 @@ namespace HookD3D12
 			LogFirstCommandHookHit(gLoggedDispatchHook, "Hook_Dispatch", commandList);
 			commandHookLogChecked = true;
 		}
-		const bool injectedCall = IsInsideRenderPassInjection();
 		uint32_t boundaryMask = 0;
-		if (!injectedCall)
 		{
 			PerformanceMetrics::ScopedTimer lookupTimer(
 				PerformanceMetrics::Timing::ExecutionHookLookup,
-				128);
-			if (Globals::gShaderInjectorEnabled)
-				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, true);
-			if (boundaryMask)
-				PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
-			if ((boundaryMask & 1u) != 0)
-				RenderPassRuntime::RecordExecutionBoundary(commandList, true, RenderPassRuntime::ExecutionBoundary::Before, "Dispatch");
+				512);
+			boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, true);
 		}
+		if (boundaryMask)
+			PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
+		if ((boundaryMask & 1u) != 0)
+			RenderPassRuntime::RecordExecutionBoundary(commandList, true, RenderPassRuntime::ExecutionBoundary::Before, "Dispatch");
 
 		Original_Dispatch(commandList, threadGroupCountX, threadGroupCountY, threadGroupCountZ);
 		if ((boundaryMask & 1u) != 0)
@@ -344,7 +341,9 @@ namespace HookD3D12
 		ID3D12Resource* countBuffer,
 		UINT64 countBufferOffset)
 	{
-		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsTrackingRequired())
+		if (!Globals::gShaderInjectorEnabled ||
+			!RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) ||
+			IsInsideRenderPassInjection())
 		{
 			Original_ExecuteIndirect(
 				commandList,
@@ -363,20 +362,17 @@ namespace HookD3D12
 			LogFirstCommandHookHit(gLoggedExecuteIndirectHook, "Hook_ExecuteIndirect", commandList);
 			commandHookLogChecked = true;
 		}
-		const bool injectedCall = IsInsideRenderPassInjection();
 		uint32_t boundaryMask = 0;
-		if (!injectedCall)
 		{
 			PerformanceMetrics::ScopedTimer lookupTimer(
 				PerformanceMetrics::Timing::ExecutionHookLookup,
-				128);
-			if (Globals::gShaderInjectorEnabled)
-				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
-			if (boundaryMask)
-				PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
-			if ((boundaryMask & 1u) != 0)
-				RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "ExecuteIndirect");
+				512);
+			boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
 		}
+		if (boundaryMask)
+			PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
+		if ((boundaryMask & 1u) != 0)
+			RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "ExecuteIndirect");
 
 		Original_ExecuteIndirect(
 			commandList,

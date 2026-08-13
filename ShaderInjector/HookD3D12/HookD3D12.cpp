@@ -778,16 +778,12 @@ namespace HookD3D12
 		}
 		PerformanceMetrics::ScopedTimer setPipelineStateTimer(
 			PerformanceMetrics::Timing::SetPipelineStateHook,
-			64);
+			256);
 
 		ID3D12PipelineState* boundPipelineState = pso;
 		RenderPassRuntime::TrackPipelineState(cmdList, pso);
 		CommandListPipelineState& commandListState = GetCommandListPipelineState(cmdList);
 		commandListState.pipelineState.store(pso, std::memory_order_release);
-		ID3D12RootSignature* observedGraphicsRootSignature =
-			commandListState.graphicsRootSignature.load(std::memory_order_acquire);
-		ID3D12RootSignature* observedComputeRootSignature =
-			commandListState.computeRootSignature.load(std::memory_order_acquire);
 
 		if (TryResolvePublishedPipelineState(pso, boundPipelineState))
 		{
@@ -804,6 +800,10 @@ namespace HookD3D12
 
 			if (!IsKnownPipelineStateLocked(pso))
 			{
+				ID3D12RootSignature* observedGraphicsRootSignature =
+					commandListState.graphicsRootSignature.load(std::memory_order_acquire);
+				ID3D12RootSignature* observedComputeRootSignature =
+					commandListState.computeRootSignature.load(std::memory_order_acquire);
 				const bool newlyObservedPipelineState = MarkUntrackedBoundPipelineStateLocked(pso);
 				bool needsRootSignatureRefresh = false;
 				auto uncapturedIndexIt = gUncapturedPipelineStateIndexByPointer.find(pso);

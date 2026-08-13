@@ -45,11 +45,15 @@ namespace RenderPassResourceRegistry
 		std::shared_mutex gResourceMutex;
 		std::shared_mutex gRootSignatureMutex;
 		using DescriptorRecord = std::shared_ptr<const RenderPass::ResourceBindingDiagnostic>;
-		constexpr size_t DescriptorPageSize = 1024;
+		// Four-kilobyte metadata pages keep unrelated command-recording threads from
+		// contending on the same lock while retaining cache-friendly linear copies.
+		constexpr size_t DescriptorPageSize = 256;
 
 		struct DescriptorPage
 		{
+			mutable std::shared_mutex mutex;
 			std::array<DescriptorRecord, DescriptorPageSize> descriptors;
+			std::atomic<uint32_t> trackedDescriptorCount{ 0 };
 		};
 
 		struct DescriptorHeapRecord
@@ -60,12 +64,18 @@ namespace RenderPassResourceRegistry
 			UINT descriptorCount = 0;
 			UINT descriptorIncrementSize = 0;
 			D3D12_DESCRIPTOR_HEAP_TYPE type = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
-			mutable std::shared_mutex mutex;
-			std::vector<std::unique_ptr<DescriptorPage>> pages;
-			std::unique_ptr<std::atomic<uint32_t>[]> trackedDescriptorsPerPage;
+			std::unique_ptr<std::atomic<DescriptorPage*>[]> pages;
 			size_t pageCount = 0;
 			std::atomic<size_t> trackedDescriptorCount{ 0 };
 			std::atomic<bool> active{ true };
+
+			~DescriptorHeapRecord()
+			{
+				if (!pages)
+					return;
+				for (size_t pageIndex = 0; pageIndex < pageCount; ++pageIndex)
+					delete pages[pageIndex].load(std::memory_order_relaxed);
+			}
 		};
 
 		struct DescriptorHeapLookupCache
@@ -77,7 +87,6 @@ namespace RenderPassResourceRegistry
 
 		std::map<SIZE_T, std::shared_ptr<DescriptorHeapRecord>> gDescriptorHeaps;
 		std::atomic<uint64_t> gDescriptorHeapGeneration{ 1 };
-		std::atomic<size_t> gHeapTrackedDescriptorCount{ 0 };
 		std::atomic<size_t> gFallbackTrackedDescriptorCount{ 0 };
 		// Descriptors created before the heap hook was installed remain supported here.
 		// Once heaps are registered, normal gameplay traffic uses the indexed pages above.
@@ -92,6 +101,12 @@ namespace RenderPassResourceRegistry
 			SIZE_T destinationStart = 0;
 			SIZE_T sourceStart = 0;
 			UINT descriptorCount = 0;
+			std::shared_ptr<DescriptorHeapRecord> destinationHeapOwner;
+			std::shared_ptr<DescriptorHeapRecord> sourceHeapOwner;
+			DescriptorHeapRecord* destinationHeap = nullptr;
+			DescriptorHeapRecord* sourceHeap = nullptr;
+			SIZE_T destinationFirstDescriptor = 0;
+			SIZE_T sourceFirstDescriptor = 0;
 		};
 
 		uint64_t MixDescriptorHandle(uint64_t value)
@@ -174,8 +189,11 @@ namespace RenderPassResourceRegistry
 		DescriptorHeapRecord* FindDescriptorHeap(
 			SIZE_T start,
 			UINT descriptorCount = 1,
-			UINT descriptorIncrementSize = 0)
+			UINT descriptorIncrementSize = 0,
+			std::shared_ptr<DescriptorHeapRecord>* retainedHeap = nullptr)
 		{
+			if (retainedHeap)
+				retainedHeap->reset();
 			thread_local DescriptorHeapLookupCache cache;
 			const uint64_t generation = gDescriptorHeapGeneration.load(std::memory_order_acquire);
 			if (cache.generation != generation)
@@ -193,6 +211,8 @@ namespace RenderPassResourceRegistry
 					descriptorCount,
 					descriptorIncrementSize))
 				{
+					if (retainedHeap)
+						*retainedHeap = cachedHeap;
 					return cachedHeap.get();
 				}
 			}
@@ -212,6 +232,8 @@ namespace RenderPassResourceRegistry
 					{
 						cache.entries[cache.nextEntry] = heapIt->second;
 						heap = heapIt->second.get();
+						if (retainedHeap)
+							*retainedHeap = heapIt->second;
 						cache.nextEntry = (cache.nextEntry + 1) % cache.entries.size();
 					}
 				}
@@ -219,34 +241,44 @@ namespace RenderPassResourceRegistry
 			return heap;
 		}
 
-		DescriptorRecord ReadHeapDescriptorLocked(
-			const DescriptorHeapRecord& heap,
-			SIZE_T descriptorIndex)
+		DescriptorPage* GetDescriptorPage(
+			DescriptorHeapRecord& heap,
+			size_t pageIndex,
+			bool create)
 		{
-			const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
-			const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
-			if (pageIndex >= heap.pages.size() || !heap.pages[pageIndex])
-				return {};
-			return heap.pages[pageIndex]->descriptors[pageOffset];
+			if (pageIndex >= heap.pageCount)
+				return nullptr;
+			DescriptorPage* page = heap.pages[pageIndex].load(std::memory_order_acquire);
+			if (page || !create)
+				return page;
+
+			std::unique_ptr<DescriptorPage> newPage = std::make_unique<DescriptorPage>();
+			DescriptorPage* expected = nullptr;
+			if (heap.pages[pageIndex].compare_exchange_strong(
+				expected,
+				newPage.get(),
+				std::memory_order_release,
+				std::memory_order_acquire))
+			{
+				return newPage.release();
+			}
+			return expected;
 		}
 
-		void SetHeapDescriptorLocked(
+		DescriptorRecord ReadPageDescriptorLocked(
+			const DescriptorPage& page,
+			size_t pageOffset)
+		{
+			return page.descriptors[pageOffset];
+		}
+
+		void SetPageDescriptorLocked(
 			DescriptorHeapRecord& heap,
-			SIZE_T descriptorIndex,
+			DescriptorPage& page,
+			size_t pageOffset,
 			DescriptorRecord record)
 		{
-			const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
-			const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
-			if (pageIndex >= heap.pages.size())
-				return;
-			if (!heap.pages[pageIndex])
-			{
-				if (!record)
-					return;
-				heap.pages[pageIndex] = std::make_unique<DescriptorPage>();
-			}
-
-			DescriptorRecord& destination = heap.pages[pageIndex]->descriptors[pageOffset];
+			DescriptorRecord& destination = page.descriptors[pageOffset];
 			if (destination == record)
 				return;
 			const bool wasTracked = static_cast<bool>(destination);
@@ -255,17 +287,13 @@ namespace RenderPassResourceRegistry
 			{
 				if (isTracked)
 				{
-					heap.trackedDescriptorsPerPage[pageIndex].fetch_add(1, std::memory_order_relaxed);
+					page.trackedDescriptorCount.fetch_add(1, std::memory_order_relaxed);
 					heap.trackedDescriptorCount.fetch_add(1, std::memory_order_relaxed);
-					if (heap.active.load(std::memory_order_relaxed))
-						gHeapTrackedDescriptorCount.fetch_add(1, std::memory_order_relaxed);
 				}
 				else
 				{
-					heap.trackedDescriptorsPerPage[pageIndex].fetch_sub(1, std::memory_order_relaxed);
+					page.trackedDescriptorCount.fetch_sub(1, std::memory_order_relaxed);
 					heap.trackedDescriptorCount.fetch_sub(1, std::memory_order_relaxed);
-					if (heap.active.load(std::memory_order_relaxed))
-						gHeapTrackedDescriptorCount.fetch_sub(1, std::memory_order_relaxed);
 				}
 			}
 			destination = std::move(record);
@@ -279,21 +307,22 @@ namespace RenderPassResourceRegistry
 			if (!heap)
 				return;
 			const SIZE_T descriptorIndex = (descriptor - heap->start) / heap->descriptorIncrementSize;
-			std::unique_lock<std::shared_mutex> lock(heap->mutex);
+			const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
+			const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
+			DescriptorPage* page = GetDescriptorPage(*heap, pageIndex, static_cast<bool>(record));
+			if (!page)
+				return;
+			std::unique_lock<std::shared_mutex> lock(page->mutex);
 			if (heap->active.load(std::memory_order_relaxed))
-				SetHeapDescriptorLocked(*heap, descriptorIndex, std::move(record));
+				SetPageDescriptorLocked(*heap, *page, pageOffset, std::move(record));
 		}
 
 		void DeactivateDescriptorHeap(const std::shared_ptr<DescriptorHeapRecord>& heap)
 		{
 			if (!heap)
 				return;
-			std::unique_lock<std::shared_mutex> lock(heap->mutex);
 			if (!heap->active.exchange(false, std::memory_order_acq_rel))
 				return;
-			const size_t trackedCount = heap->trackedDescriptorCount.load(std::memory_order_relaxed);
-			if (trackedCount)
-				gHeapTrackedDescriptorCount.fetch_sub(trackedCount, std::memory_order_relaxed);
 		}
 
 		DescriptorRecord ReadDescriptorRecord(SIZE_T descriptor)
@@ -302,10 +331,15 @@ namespace RenderPassResourceRegistry
 			if (heap)
 			{
 				const SIZE_T descriptorIndex = (descriptor - heap->start) / heap->descriptorIncrementSize;
-				std::shared_lock<std::shared_mutex> lock(heap->mutex);
+				const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
+				const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
+				DescriptorPage* page = GetDescriptorPage(*heap, pageIndex, false);
+				if (!page)
+					return {};
+				std::shared_lock<std::shared_mutex> lock(page->mutex);
 				if (!heap->active.load(std::memory_order_relaxed))
 					return {};
-				return ReadHeapDescriptorLocked(*heap, descriptorIndex);
+				return ReadPageDescriptorLocked(*page, pageOffset);
 			}
 
 			std::shared_lock<std::shared_mutex> lock(gDescriptorMutex);
@@ -496,26 +530,54 @@ namespace RenderPassResourceRegistry
 			return rangeStart + static_cast<SIZE_T>(descriptorCount) * descriptorIncrementSize;
 		}
 
+		void ResolveDescriptorCopySegment(
+			DescriptorCopySegment& segment,
+			UINT descriptorIncrementSize)
+		{
+			segment.sourceHeap = FindDescriptorHeap(
+				segment.sourceStart,
+				segment.descriptorCount,
+				descriptorIncrementSize,
+				&segment.sourceHeapOwner);
+			if (segment.sourceHeap)
+			{
+				segment.sourceFirstDescriptor =
+					(segment.sourceStart - segment.sourceHeap->start) /
+					segment.sourceHeap->descriptorIncrementSize;
+			}
+
+			segment.destinationHeap = FindDescriptorHeap(
+				segment.destinationStart,
+				segment.descriptorCount,
+				descriptorIncrementSize,
+				&segment.destinationHeapOwner);
+			if (segment.destinationHeap)
+			{
+				segment.destinationFirstDescriptor =
+					(segment.destinationStart - segment.destinationHeap->start) /
+					segment.destinationHeap->descriptorIncrementSize;
+			}
+		}
+
 		bool DescriptorRangeMayContainTracked(
 			SIZE_T start,
 			UINT descriptorCount,
-			UINT descriptorIncrementSize)
+			UINT descriptorIncrementSize,
+			DescriptorHeapRecord* heap,
+			SIZE_T firstDescriptor)
 		{
-			DescriptorHeapRecord* heap = FindDescriptorHeap(
-				start,
-				descriptorCount,
-				descriptorIncrementSize);
 			if (heap)
 			{
-				if (!heap->trackedDescriptorCount.load(std::memory_order_relaxed))
+				if (!heap->active.load(std::memory_order_relaxed) ||
+					!heap->trackedDescriptorCount.load(std::memory_order_relaxed))
 					return false;
-				const SIZE_T firstDescriptor = (start - heap->start) / heap->descriptorIncrementSize;
 				const SIZE_T lastDescriptor = firstDescriptor + descriptorCount - 1;
 				const size_t firstPage = static_cast<size_t>(firstDescriptor / DescriptorPageSize);
 				const size_t lastPage = static_cast<size_t>(lastDescriptor / DescriptorPageSize);
 				for (size_t pageIndex = firstPage; pageIndex <= lastPage; ++pageIndex)
 				{
-					if (heap->trackedDescriptorsPerPage[pageIndex].load(std::memory_order_relaxed))
+					DescriptorPage* page = GetDescriptorPage(*heap, pageIndex, false);
+					if (page && page->trackedDescriptorCount.load(std::memory_order_relaxed))
 						return true;
 				}
 				return false;
@@ -529,27 +591,41 @@ namespace RenderPassResourceRegistry
 			SIZE_T start,
 			UINT descriptorCount,
 			UINT descriptorIncrementSize,
+			DescriptorHeapRecord* heap,
+			SIZE_T firstDescriptor,
 			std::vector<DescriptorRecord>& records)
 		{
 			const size_t outputOffset = records.size();
 			records.resize(outputOffset + descriptorCount);
-			DescriptorHeapRecord* heap = FindDescriptorHeap(
-				start,
-				descriptorCount,
-				descriptorIncrementSize);
 			if (heap)
 			{
-				if (!heap->trackedDescriptorCount.load(std::memory_order_relaxed))
+				if (!heap->active.load(std::memory_order_relaxed) ||
+					!heap->trackedDescriptorCount.load(std::memory_order_relaxed))
 					return;
-				const SIZE_T firstDescriptor = (start - heap->start) / heap->descriptorIncrementSize;
-				std::shared_lock<std::shared_mutex> lock(heap->mutex);
-				if (!heap->active.load(std::memory_order_relaxed))
-					return;
-				for (UINT descriptorIndex = 0; descriptorIndex < descriptorCount; ++descriptorIndex)
+				UINT copiedDescriptorCount = 0;
+				while (copiedDescriptorCount < descriptorCount)
 				{
-					records[outputOffset + descriptorIndex] = ReadHeapDescriptorLocked(
-						*heap,
-						firstDescriptor + descriptorIndex);
+					const SIZE_T descriptorIndex = firstDescriptor + copiedDescriptorCount;
+					const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
+					const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
+					const UINT descriptorsOnPage = (std::min)(
+						descriptorCount - copiedDescriptorCount,
+						static_cast<UINT>(DescriptorPageSize - pageOffset));
+					DescriptorPage* page = GetDescriptorPage(*heap, pageIndex, false);
+					if (page && page->trackedDescriptorCount.load(std::memory_order_relaxed))
+					{
+						std::shared_lock<std::shared_mutex> lock(page->mutex);
+						if (!heap->active.load(std::memory_order_relaxed))
+							return;
+						for (UINT pageDescriptorIndex = 0;
+							pageDescriptorIndex < descriptorsOnPage;
+							++pageDescriptorIndex)
+						{
+							records[outputOffset + copiedDescriptorCount + pageDescriptorIndex] =
+								ReadPageDescriptorLocked(*page, pageOffset + pageDescriptorIndex);
+						}
+					}
+					copiedDescriptorCount += descriptorsOnPage;
 				}
 				return;
 			}
@@ -573,25 +649,51 @@ namespace RenderPassResourceRegistry
 			SIZE_T start,
 			UINT descriptorCount,
 			UINT descriptorIncrementSize,
+			DescriptorHeapRecord* heap,
+			SIZE_T firstDescriptor,
 			const std::vector<DescriptorRecord>& records,
 			size_t inputOffset)
 		{
-			DescriptorHeapRecord* heap = FindDescriptorHeap(
-				start,
-				descriptorCount,
-				descriptorIncrementSize);
 			if (heap)
 			{
-				const SIZE_T firstDescriptor = (start - heap->start) / heap->descriptorIncrementSize;
-				std::unique_lock<std::shared_mutex> lock(heap->mutex);
 				if (!heap->active.load(std::memory_order_relaxed))
 					return;
-				for (UINT descriptorIndex = 0; descriptorIndex < descriptorCount; ++descriptorIndex)
+				UINT writtenDescriptorCount = 0;
+				while (writtenDescriptorCount < descriptorCount)
 				{
-					SetHeapDescriptorLocked(
-						*heap,
-						firstDescriptor + descriptorIndex,
-						records[inputOffset + descriptorIndex]);
+					const SIZE_T descriptorIndex = firstDescriptor + writtenDescriptorCount;
+					const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
+					const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
+					const UINT descriptorsOnPage = (std::min)(
+						descriptorCount - writtenDescriptorCount,
+						static_cast<UINT>(DescriptorPageSize - pageOffset));
+					bool pageNeedsCreation = false;
+					for (UINT pageDescriptorIndex = 0;
+						pageDescriptorIndex < descriptorsOnPage && !pageNeedsCreation;
+						++pageDescriptorIndex)
+					{
+						pageNeedsCreation = static_cast<bool>(
+							records[inputOffset + writtenDescriptorCount + pageDescriptorIndex]);
+					}
+
+					DescriptorPage* page = GetDescriptorPage(*heap, pageIndex, pageNeedsCreation);
+					if (page)
+					{
+						std::unique_lock<std::shared_mutex> lock(page->mutex);
+						if (!heap->active.load(std::memory_order_relaxed))
+							return;
+						for (UINT pageDescriptorIndex = 0;
+							pageDescriptorIndex < descriptorsOnPage;
+							++pageDescriptorIndex)
+						{
+							SetPageDescriptorLocked(
+								*heap,
+								*page,
+								pageOffset + pageDescriptorIndex,
+								records[inputOffset + writtenDescriptorCount + pageDescriptorIndex]);
+						}
+					}
+					writtenDescriptorCount += descriptorsOnPage;
 				}
 				return;
 			}
@@ -621,6 +723,137 @@ namespace RenderPassResourceRegistry
 			}
 			if (insertedDescriptorCount)
 				gFallbackTrackedDescriptorCount.fetch_add(insertedDescriptorCount, std::memory_order_relaxed);
+		}
+
+		void CopyHeapDescriptorRange(const DescriptorCopySegment& segment)
+		{
+			if (!segment.sourceHeap || !segment.destinationHeap || !segment.descriptorCount)
+				return;
+			if (segment.sourceHeap == segment.destinationHeap &&
+				segment.sourceFirstDescriptor == segment.destinationFirstDescriptor)
+			{
+				return;
+			}
+
+			UINT copiedDescriptorCount = 0;
+			while (copiedDescriptorCount < segment.descriptorCount)
+			{
+				const SIZE_T sourceDescriptorIndex =
+					segment.sourceFirstDescriptor + copiedDescriptorCount;
+				const SIZE_T destinationDescriptorIndex =
+					segment.destinationFirstDescriptor + copiedDescriptorCount;
+				const size_t sourcePageIndex =
+					static_cast<size_t>(sourceDescriptorIndex / DescriptorPageSize);
+				const size_t destinationPageIndex =
+					static_cast<size_t>(destinationDescriptorIndex / DescriptorPageSize);
+				const size_t sourcePageOffset =
+					static_cast<size_t>(sourceDescriptorIndex % DescriptorPageSize);
+				const size_t destinationPageOffset =
+					static_cast<size_t>(destinationDescriptorIndex % DescriptorPageSize);
+				const UINT descriptorsOnPages = (std::min)({
+					segment.descriptorCount - copiedDescriptorCount,
+					static_cast<UINT>(DescriptorPageSize - sourcePageOffset),
+					static_cast<UINT>(DescriptorPageSize - destinationPageOffset) });
+
+				DescriptorPage* sourcePage = GetDescriptorPage(
+					*segment.sourceHeap,
+					sourcePageIndex,
+					false);
+				const bool sourcePageHasDescriptors = sourcePage &&
+					sourcePage->trackedDescriptorCount.load(std::memory_order_relaxed) != 0;
+				DescriptorPage* destinationPage = GetDescriptorPage(
+					*segment.destinationHeap,
+					destinationPageIndex,
+					sourcePageHasDescriptors);
+				if (!destinationPage)
+				{
+					copiedDescriptorCount += descriptorsOnPages;
+					continue;
+				}
+
+				if (sourcePage == destinationPage)
+				{
+					std::unique_lock<std::shared_mutex> pageLock(destinationPage->mutex);
+					if (!segment.sourceHeap->active.load(std::memory_order_relaxed) ||
+						!segment.destinationHeap->active.load(std::memory_order_relaxed))
+					{
+						return;
+					}
+
+					const bool rangesOverlap =
+						sourcePageOffset < destinationPageOffset + descriptorsOnPages &&
+						destinationPageOffset < sourcePageOffset + descriptorsOnPages;
+					if (!rangesOverlap)
+					{
+						for (UINT descriptorIndex = 0; descriptorIndex < descriptorsOnPages; ++descriptorIndex)
+						{
+							SetPageDescriptorLocked(
+								*segment.destinationHeap,
+								*destinationPage,
+								destinationPageOffset + descriptorIndex,
+								sourcePage->descriptors[sourcePageOffset + descriptorIndex]);
+						}
+					}
+					else
+					{
+						// D3D12 forbids overlapping source and destination ranges. Preserve
+						// predictable metadata even for an invalid call that aliases a page.
+						thread_local std::vector<DescriptorRecord> samePageDescriptors;
+						samePageDescriptors.clear();
+						samePageDescriptors.reserve(descriptorsOnPages);
+						for (UINT descriptorIndex = 0; descriptorIndex < descriptorsOnPages; ++descriptorIndex)
+						{
+							samePageDescriptors.push_back(
+								sourcePage->descriptors[sourcePageOffset + descriptorIndex]);
+						}
+						for (UINT descriptorIndex = 0; descriptorIndex < descriptorsOnPages; ++descriptorIndex)
+						{
+							SetPageDescriptorLocked(
+								*segment.destinationHeap,
+								*destinationPage,
+								destinationPageOffset + descriptorIndex,
+								samePageDescriptors[descriptorIndex]);
+						}
+					}
+				}
+				else if (sourcePageHasDescriptors)
+				{
+					std::shared_lock<std::shared_mutex> sourceLock(sourcePage->mutex, std::defer_lock);
+					std::unique_lock<std::shared_mutex> destinationLock(
+						destinationPage->mutex,
+						std::defer_lock);
+					std::lock(sourceLock, destinationLock);
+					if (!segment.sourceHeap->active.load(std::memory_order_relaxed) ||
+						!segment.destinationHeap->active.load(std::memory_order_relaxed))
+					{
+						return;
+					}
+					for (UINT descriptorIndex = 0; descriptorIndex < descriptorsOnPages; ++descriptorIndex)
+					{
+						SetPageDescriptorLocked(
+							*segment.destinationHeap,
+							*destinationPage,
+							destinationPageOffset + descriptorIndex,
+							sourcePage->descriptors[sourcePageOffset + descriptorIndex]);
+					}
+				}
+				else
+				{
+					std::unique_lock<std::shared_mutex> destinationLock(destinationPage->mutex);
+					if (!segment.destinationHeap->active.load(std::memory_order_relaxed))
+						return;
+					for (UINT descriptorIndex = 0; descriptorIndex < descriptorsOnPages; ++descriptorIndex)
+					{
+						SetPageDescriptorLocked(
+							*segment.destinationHeap,
+							*destinationPage,
+							destinationPageOffset + descriptorIndex,
+							{});
+					}
+				}
+
+				copiedDescriptorCount += descriptorsOnPages;
+			}
 		}
 	}
 
@@ -679,11 +912,9 @@ namespace RenderPassResourceRegistry
 		heap->pageCount =
 			(static_cast<size_t>(description.NumDescriptors) + DescriptorPageSize - 1) /
 			DescriptorPageSize;
-		heap->pages.resize(heap->pageCount);
-		heap->trackedDescriptorsPerPage =
-			std::make_unique<std::atomic<uint32_t>[]>(heap->pageCount);
+		heap->pages = std::make_unique<std::atomic<DescriptorPage*>[]>(heap->pageCount);
 		for (size_t pageIndex = 0; pageIndex < heap->pageCount; ++pageIndex)
-			heap->trackedDescriptorsPerPage[pageIndex].store(0, std::memory_order_relaxed);
+			heap->pages[pageIndex].store(nullptr, std::memory_order_relaxed);
 
 		std::unique_lock<std::shared_mutex> lock(gDescriptorHeapMutex);
 		const auto duplicateIt = gDescriptorHeaps.find(start);
@@ -721,7 +952,6 @@ namespace RenderPassResourceRegistry
 		// slots. A genuinely new heap instead discards metadata from a recycled handle
 		// range so an old resource can never bleed into the new heap.
 		{
-			std::unique_lock<std::shared_mutex> heapLock(heap->mutex);
 			std::unique_lock<std::shared_mutex> fallbackLock(gDescriptorMutex);
 			auto descriptorIt = gDescriptors.lower_bound(start);
 			size_t removedFallbackDescriptorCount = 0;
@@ -734,7 +964,12 @@ namespace RenderPassResourceRegistry
 					{
 						const SIZE_T descriptorIndex = byteOffset / descriptorIncrementSize;
 						if (descriptorIndex < description.NumDescriptors)
-							SetHeapDescriptorLocked(*heap, descriptorIndex, descriptorIt->second);
+						{
+							SetHeapDescriptor(
+								heap.get(),
+								start + descriptorIndex * descriptorIncrementSize,
+								descriptorIt->second);
+						}
 					}
 				}
 				descriptorIt = gDescriptors.erase(descriptorIt);
@@ -984,12 +1219,25 @@ namespace RenderPassResourceRegistry
 				sourceRangeSize - sourceOffset);
 			if (copyCount)
 			{
-				segments.push_back({
+				const SIZE_T destinationStart =
 					destinationRangeStarts[destinationRangeIndex].ptr +
-						static_cast<SIZE_T>(destinationOffset) * descriptorIncrementSize,
+					static_cast<SIZE_T>(destinationOffset) * descriptorIncrementSize;
+				const SIZE_T sourceStart =
 					sourceRangeStarts[sourceRangeIndex].ptr +
-						static_cast<SIZE_T>(sourceOffset) * descriptorIncrementSize,
-					copyCount });
+					static_cast<SIZE_T>(sourceOffset) * descriptorIncrementSize;
+				DescriptorCopySegment* previousSegment = segments.empty() ? nullptr : &segments.back();
+				const bool continuesPreviousSegment = previousSegment &&
+					previousSegment->descriptorCount <= UINT_MAX - copyCount &&
+					previousSegment->destinationStart +
+						static_cast<SIZE_T>(previousSegment->descriptorCount) * descriptorIncrementSize ==
+						destinationStart &&
+					previousSegment->sourceStart +
+						static_cast<SIZE_T>(previousSegment->descriptorCount) * descriptorIncrementSize ==
+						sourceStart;
+				if (continuesPreviousSegment)
+					previousSegment->descriptorCount += copyCount;
+				else
+					segments.push_back({ destinationStart, sourceStart, copyCount });
 			}
 
 			destinationOffset += copyCount;
@@ -1007,22 +1255,38 @@ namespace RenderPassResourceRegistry
 		}
 		if (segments.empty())
 			return false;
-		const bool possiblyTracked = std::any_of(segments.begin(), segments.end(), [&](const auto& segment)
+		bool possiblyTracked = false;
+		bool allSegmentsUseRegisteredHeaps = true;
+		for (DescriptorCopySegment& segment : segments)
 		{
-			return DescriptorRangeMayContainTracked(
+			ResolveDescriptorCopySegment(segment, descriptorIncrementSize);
+			allSegmentsUseRegisteredHeaps = allSegmentsUseRegisteredHeaps &&
+				segment.sourceHeap && segment.destinationHeap;
+			possiblyTracked = possiblyTracked || DescriptorRangeMayContainTracked(
 				segment.sourceStart,
 				segment.descriptorCount,
-				descriptorIncrementSize) ||
+				descriptorIncrementSize,
+				segment.sourceHeap,
+				segment.sourceFirstDescriptor) ||
 				DescriptorRangeMayContainTracked(
 					segment.destinationStart,
 					segment.descriptorCount,
-					descriptorIncrementSize);
-		});
+					descriptorIncrementSize,
+					segment.destinationHeap,
+					segment.destinationFirstDescriptor);
+		}
 		if (!possiblyTracked)
 			return false;
 		PerformanceMetrics::ScopedTimer registryTimer(
 			PerformanceMetrics::Timing::DescriptorRegistryTrackedPropagation,
-			128);
+			512);
+
+		if (allSegmentsUseRegisteredHeaps)
+		{
+			for (const DescriptorCopySegment& segment : segments)
+				CopyHeapDescriptorRange(segment);
+			return true;
+		}
 
 		// Capture all sources before mutating any destinations. Besides preserving the
 		// D3D12 range-copy ordering, this safely handles games that recycle descriptor
@@ -1035,6 +1299,8 @@ namespace RenderPassResourceRegistry
 				segment.sourceStart,
 				segment.descriptorCount,
 				descriptorIncrementSize,
+				segment.sourceHeap,
+				segment.sourceFirstDescriptor,
 				copiedDescriptors);
 		}
 
@@ -1045,6 +1311,8 @@ namespace RenderPassResourceRegistry
 				segment.destinationStart,
 				segment.descriptorCount,
 				descriptorIncrementSize,
+				segment.destinationHeap,
+				segment.destinationFirstDescriptor,
 				copiedDescriptors,
 				copiedDescriptorOffset);
 			copiedDescriptorOffset += segment.descriptorCount;
@@ -1061,35 +1329,49 @@ namespace RenderPassResourceRegistry
 		if (!descriptorIncrementSize)
 			return false;
 
-		const DescriptorCopySegment segment{
+		DescriptorCopySegment segment{
 			destinationStart.ptr,
 			sourceStart.ptr,
 			descriptorCount };
+		ResolveDescriptorCopySegment(segment, descriptorIncrementSize);
 		if (!DescriptorRangeMayContainTracked(
 				segment.sourceStart,
 				segment.descriptorCount,
-				descriptorIncrementSize) &&
+				descriptorIncrementSize,
+				segment.sourceHeap,
+				segment.sourceFirstDescriptor) &&
 			!DescriptorRangeMayContainTracked(
 				segment.destinationStart,
 				segment.descriptorCount,
-				descriptorIncrementSize))
+				descriptorIncrementSize,
+				segment.destinationHeap,
+				segment.destinationFirstDescriptor))
 		{
 			return false;
 		}
 		PerformanceMetrics::ScopedTimer registryTimer(
 			PerformanceMetrics::Timing::DescriptorRegistryTrackedPropagation,
-			128);
+			512);
+		if (segment.sourceHeap && segment.destinationHeap)
+		{
+			CopyHeapDescriptorRange(segment);
+			return true;
+		}
 		thread_local std::vector<DescriptorRecord> copiedDescriptors;
 		copiedDescriptors.clear();
 		AppendDescriptorRange(
 			segment.sourceStart,
 			segment.descriptorCount,
 			descriptorIncrementSize,
+			segment.sourceHeap,
+			segment.sourceFirstDescriptor,
 			copiedDescriptors);
 		WriteDescriptorRange(
 			segment.destinationStart,
 			segment.descriptorCount,
 			descriptorIncrementSize,
+			segment.destinationHeap,
+			segment.destinationFirstDescriptor,
 			copiedDescriptors,
 			0);
 		return true;
@@ -1118,16 +1400,23 @@ namespace RenderPassResourceRegistry
 	RegistryStatistics GetStatistics()
 	{
 		RegistryStatistics statistics{};
-		statistics.heapDescriptorCount =
-			gHeapTrackedDescriptorCount.load(std::memory_order_relaxed);
 		statistics.fallbackDescriptorCount =
 			gFallbackTrackedDescriptorCount.load(std::memory_order_relaxed);
-		statistics.descriptorCount =
-			statistics.heapDescriptorCount + statistics.fallbackDescriptorCount;
 		{
 			std::shared_lock<std::shared_mutex> lock(gDescriptorHeapMutex);
 			statistics.descriptorHeapCount = gDescriptorHeaps.size();
+			for (const auto& heapEntry : gDescriptorHeaps)
+			{
+				const std::shared_ptr<DescriptorHeapRecord>& heap = heapEntry.second;
+				if (heap && heap->active.load(std::memory_order_relaxed))
+				{
+					statistics.heapDescriptorCount +=
+						heap->trackedDescriptorCount.load(std::memory_order_relaxed);
+				}
+			}
 		}
+		statistics.descriptorCount =
+			statistics.heapDescriptorCount + statistics.fallbackDescriptorCount;
 		{
 			std::shared_lock<std::shared_mutex> lock(gResourceMutex);
 			statistics.bufferResourceCount = gResourcesByGpuAddress.size();
