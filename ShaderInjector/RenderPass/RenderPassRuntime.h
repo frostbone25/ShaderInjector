@@ -31,8 +31,10 @@ namespace RenderPassRuntime
 	bool HasEnabledMipChainPasses();
 	bool IsTrackingRequired();
 	bool IsResourceTrackingRequired();
+	bool IsDescriptorTableTrackingRequired();
 	bool IsDescriptorRegistryTrackingRequired();
 	bool IsGraphicsStateTrackingRequired();
+	bool IsPipelineExecutionTrackingRequired(bool computePipeline);
 	bool HasPendingCommandListSubmissionWork();
 	bool IsExecutionTrackingRequired(bool computePipeline, ExecutionBoundary boundary);
 	uint32_t GetExecutionBoundaryMask(
@@ -118,6 +120,7 @@ namespace RenderPassRuntime
 		ID3D12CommandQueue* commandQueue,
 		UINT commandListCount,
 		ID3D12CommandList* const* commandLists);
+	void LogPerformanceSnapshot();
 
 	RenderPass::RuntimeDiagnostics GetDiagnostics(const std::string& renderPassId);
 	void ClearDiagnostics(const std::string& renderPassId);

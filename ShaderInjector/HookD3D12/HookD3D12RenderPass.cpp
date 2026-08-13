@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include "Globals.h"
+#include "Performance/PerformanceMetrics.h"
 #include "RenderPass/RenderPassRuntime.h"
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
@@ -67,13 +68,29 @@ namespace HookD3D12
 		UINT startVertexLocation,
 		UINT startInstanceLocation)
 	{
+		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsTrackingRequired())
+		{
+			Original_DrawInstanced(commandList, vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation);
+			return;
+		}
+		PerformanceMetrics::Increment(PerformanceMetrics::Counter::DrawInstanced);
+		thread_local bool commandHookLogChecked = false;
+		if (!commandHookLogChecked)
+		{
+			LogFirstCommandHookHit(gLoggedDrawInstancedHook, "Hook_DrawInstanced", commandList);
+			commandHookLogChecked = true;
+		}
 		const bool injectedCall = IsInsideRenderPassInjection();
 		uint32_t boundaryMask = 0;
 		if (!injectedCall)
 		{
-			LogFirstCommandHookHit(gLoggedDrawInstancedHook, "Hook_DrawInstanced", commandList);
+			PerformanceMetrics::ScopedTimer lookupTimer(
+				PerformanceMetrics::Timing::ExecutionHookLookup,
+				128);
 			if (Globals::gShaderInjectorEnabled)
 				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
+			if (boundaryMask)
+				PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
 			if ((boundaryMask & 1u) != 0)
 				RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "DrawInstanced");
 		}
@@ -94,13 +111,29 @@ namespace HookD3D12
 		INT baseVertexLocation,
 		UINT startInstanceLocation)
 	{
+		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsTrackingRequired())
+		{
+			Original_DrawIndexedInstanced(commandList, indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation);
+			return;
+		}
+		PerformanceMetrics::Increment(PerformanceMetrics::Counter::DrawIndexedInstanced);
+		thread_local bool commandHookLogChecked = false;
+		if (!commandHookLogChecked)
+		{
+			LogFirstCommandHookHit(gLoggedDrawIndexedInstancedHook, "Hook_DrawIndexedInstanced", commandList);
+			commandHookLogChecked = true;
+		}
 		const bool injectedCall = IsInsideRenderPassInjection();
 		uint32_t boundaryMask = 0;
 		if (!injectedCall)
 		{
-			LogFirstCommandHookHit(gLoggedDrawIndexedInstancedHook, "Hook_DrawIndexedInstanced", commandList);
+			PerformanceMetrics::ScopedTimer lookupTimer(
+				PerformanceMetrics::Timing::ExecutionHookLookup,
+				128);
 			if (Globals::gShaderInjectorEnabled)
 				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
+			if (boundaryMask)
+				PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
 			if ((boundaryMask & 1u) != 0)
 				RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "DrawIndexedInstanced");
 		}
@@ -119,13 +152,29 @@ namespace HookD3D12
 		UINT threadGroupCountY,
 		UINT threadGroupCountZ)
 	{
+		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsTrackingRequired())
+		{
+			Original_Dispatch(commandList, threadGroupCountX, threadGroupCountY, threadGroupCountZ);
+			return;
+		}
+		PerformanceMetrics::Increment(PerformanceMetrics::Counter::Dispatch);
+		thread_local bool commandHookLogChecked = false;
+		if (!commandHookLogChecked)
+		{
+			LogFirstCommandHookHit(gLoggedDispatchHook, "Hook_Dispatch", commandList);
+			commandHookLogChecked = true;
+		}
 		const bool injectedCall = IsInsideRenderPassInjection();
 		uint32_t boundaryMask = 0;
 		if (!injectedCall)
 		{
-			LogFirstCommandHookHit(gLoggedDispatchHook, "Hook_Dispatch", commandList);
+			PerformanceMetrics::ScopedTimer lookupTimer(
+				PerformanceMetrics::Timing::ExecutionHookLookup,
+				128);
 			if (Globals::gShaderInjectorEnabled)
 				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, true);
+			if (boundaryMask)
+				PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
 			if ((boundaryMask & 1u) != 0)
 				RenderPassRuntime::RecordExecutionBoundary(commandList, true, RenderPassRuntime::ExecutionBoundary::Before, "Dispatch");
 		}
@@ -142,7 +191,8 @@ namespace HookD3D12
 		ID3D12GraphicsCommandList* commandList,
 		D3D12_PRIMITIVE_TOPOLOGY primitiveTopology)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsGraphicsStateTrackingRequired() &&
+			!IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackPrimitiveTopology(commandList, primitiveTopology);
 		Original_IASetPrimitiveTopology(commandList, primitiveTopology);
 	}
@@ -152,8 +202,8 @@ namespace HookD3D12
 		UINT viewportCount,
 		const D3D12_VIEWPORT* viewports)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() &&
-			RenderPassRuntime::IsGraphicsStateTrackingRequired())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsGraphicsStateTrackingRequired() &&
+			!IsInsideRenderPassInjection())
 		{
 			RenderPassRuntime::TrackViewports(commandList, viewportCount, viewports);
 		}
@@ -165,8 +215,8 @@ namespace HookD3D12
 		UINT rectangleCount,
 		const D3D12_RECT* rectangles)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() &&
-			RenderPassRuntime::IsGraphicsStateTrackingRequired())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsGraphicsStateTrackingRequired() &&
+			!IsInsideRenderPassInjection())
 		{
 			RenderPassRuntime::TrackScissorRectangles(commandList, rectangleCount, rectangles);
 		}
@@ -178,52 +228,58 @@ namespace HookD3D12
 		UINT descriptorHeapCount,
 		ID3D12DescriptorHeap* const* descriptorHeaps)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() &&
-			RenderPassRuntime::IsGraphicsStateTrackingRequired())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsDescriptorTableTrackingRequired() &&
+			(RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) ||
+				RenderPassRuntime::IsPipelineExecutionTrackingRequired(true)) &&
+			!IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackDescriptorHeaps(commandList, descriptorHeapCount, descriptorHeaps);
 		Original_SetDescriptorHeaps(commandList, descriptorHeapCount, descriptorHeaps);
 	}
 
 	void STDMETHODCALLTYPE Hook_SetComputeRootDescriptorTable(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE descriptorHandle)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() &&
-			RenderPassRuntime::IsResourceTrackingRequired())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsDescriptorTableTrackingRequired() &&
+			RenderPassRuntime::IsPipelineExecutionTrackingRequired(true) &&
+			!IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackRootDescriptorTable(commandList, true, rootParameterIndex, descriptorHandle);
 		Original_SetComputeRootDescriptorTable(commandList, rootParameterIndex, descriptorHandle);
 	}
 
 	void STDMETHODCALLTYPE Hook_SetGraphicsRootDescriptorTable(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE descriptorHandle)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() &&
-			RenderPassRuntime::IsGraphicsStateTrackingRequired())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsDescriptorTableTrackingRequired() &&
+			RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) &&
+			!IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackRootDescriptorTable(commandList, false, rootParameterIndex, descriptorHandle);
 		Original_SetGraphicsRootDescriptorTable(commandList, rootParameterIndex, descriptorHandle);
 	}
 
 	void STDMETHODCALLTYPE Hook_SetComputeRoot32BitConstant(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, UINT value, UINT destinationOffset)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() && RenderPassRuntime::IsResourceTrackingRequired())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsResourceTrackingRequired() &&
+			RenderPassRuntime::IsPipelineExecutionTrackingRequired(true) && !IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackRootConstants(commandList, true, rootParameterIndex, 1, &value, destinationOffset);
 		Original_SetComputeRoot32BitConstant(commandList, rootParameterIndex, value, destinationOffset);
 	}
 
 	void STDMETHODCALLTYPE Hook_SetGraphicsRoot32BitConstant(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, UINT value, UINT destinationOffset)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() && RenderPassRuntime::IsGraphicsStateTrackingRequired())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsGraphicsStateTrackingRequired() && !IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackRootConstants(commandList, false, rootParameterIndex, 1, &value, destinationOffset);
 		Original_SetGraphicsRoot32BitConstant(commandList, rootParameterIndex, value, destinationOffset);
 	}
 
 	void STDMETHODCALLTYPE Hook_SetComputeRoot32BitConstants(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, UINT valueCount, const void* values, UINT destinationOffset)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() && RenderPassRuntime::IsResourceTrackingRequired())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsResourceTrackingRequired() &&
+			RenderPassRuntime::IsPipelineExecutionTrackingRequired(true) && !IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackRootConstants(commandList, true, rootParameterIndex, valueCount, values, destinationOffset);
 		Original_SetComputeRoot32BitConstants(commandList, rootParameterIndex, valueCount, values, destinationOffset);
 	}
 
 	void STDMETHODCALLTYPE Hook_SetGraphicsRoot32BitConstants(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, UINT valueCount, const void* values, UINT destinationOffset)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() && RenderPassRuntime::IsGraphicsStateTrackingRequired())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsGraphicsStateTrackingRequired() && !IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackRootConstants(commandList, false, rootParameterIndex, valueCount, values, destinationOffset);
 		Original_SetGraphicsRoot32BitConstants(commandList, rootParameterIndex, valueCount, values, destinationOffset);
 	}
@@ -231,8 +287,10 @@ namespace HookD3D12
 #define DEFINE_ROOT_DESCRIPTOR_HOOK(HookName, OriginalName, IsCompute, BindingName) \
 	void STDMETHODCALLTYPE HookName(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS gpuAddress) \
 	{ \
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() && \
-			(IsCompute ? RenderPassRuntime::IsResourceTrackingRequired() : RenderPassRuntime::IsGraphicsStateTrackingRequired())) \
+		if (Globals::gShaderInjectorEnabled && \
+			RenderPassRuntime::IsPipelineExecutionTrackingRequired(IsCompute) && \
+			(IsCompute ? RenderPassRuntime::IsResourceTrackingRequired() : RenderPassRuntime::IsGraphicsStateTrackingRequired()) && \
+			!IsInsideRenderPassInjection()) \
 			RenderPassRuntime::TrackRootDescriptor(commandList, IsCompute, BindingName, rootParameterIndex, gpuAddress); \
 		OriginalName(commandList, rootParameterIndex, gpuAddress); \
 	}
@@ -248,14 +306,16 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Hook_IASetIndexBuffer(ID3D12GraphicsCommandList* commandList, const D3D12_INDEX_BUFFER_VIEW* view)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() && RenderPassRuntime::IsResourceTrackingRequired())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsResourceTrackingRequired() &&
+			RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) && !IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackIndexBuffer(commandList, view);
 		Original_IASetIndexBuffer(commandList, view);
 	}
 
 	void STDMETHODCALLTYPE Hook_IASetVertexBuffers(ID3D12GraphicsCommandList* commandList, UINT startSlot, UINT viewCount, const D3D12_VERTEX_BUFFER_VIEW* views)
 	{
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() && RenderPassRuntime::IsResourceTrackingRequired())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsResourceTrackingRequired() &&
+			RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) && !IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackVertexBuffers(commandList, startSlot, viewCount, views);
 		Original_IASetVertexBuffers(commandList, startSlot, viewCount, views);
 	}
@@ -284,13 +344,36 @@ namespace HookD3D12
 		ID3D12Resource* countBuffer,
 		UINT64 countBufferOffset)
 	{
+		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsTrackingRequired())
+		{
+			Original_ExecuteIndirect(
+				commandList,
+				commandSignature,
+				maximumCommandCount,
+				argumentBuffer,
+				argumentBufferOffset,
+				countBuffer,
+				countBufferOffset);
+			return;
+		}
+		PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecuteIndirect);
+		thread_local bool commandHookLogChecked = false;
+		if (!commandHookLogChecked)
+		{
+			LogFirstCommandHookHit(gLoggedExecuteIndirectHook, "Hook_ExecuteIndirect", commandList);
+			commandHookLogChecked = true;
+		}
 		const bool injectedCall = IsInsideRenderPassInjection();
 		uint32_t boundaryMask = 0;
 		if (!injectedCall)
 		{
-			LogFirstCommandHookHit(gLoggedExecuteIndirectHook, "Hook_ExecuteIndirect", commandList);
+			PerformanceMetrics::ScopedTimer lookupTimer(
+				PerformanceMetrics::Timing::ExecutionHookLookup,
+				128);
 			if (Globals::gShaderInjectorEnabled)
 				boundaryMask = RenderPassRuntime::GetExecutionBoundaryMask(commandList, false);
+			if (boundaryMask)
+				PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
 			if ((boundaryMask & 1u) != 0)
 				RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::Before, "ExecuteIndirect");
 		}

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <unordered_map>
 
 #include "IO/ShaderInjectorIO.h"
 
@@ -10,12 +11,14 @@ namespace DatabaseShaderResources
 	namespace
 	{
 		std::vector<ShaderResource::TextureDisk> gShaderResources;
+		std::unordered_map<std::string, size_t> gShaderResourceIndices;
 		bool gShaderResourcesLoaded = false;
 	}
 
 	void RefreshShaderResources()
 	{
 		gShaderResources.clear();
+		gShaderResourceIndices.clear();
 		gShaderResourcesLoaded = true;
 		const std::string rootDirectory = ShaderInjectorIO::GetShaderResourcesDirectory();
 		ShaderInjectorIO::DirectoryCreate(rootDirectory);
@@ -43,6 +46,9 @@ namespace DatabaseShaderResources
 		{
 			return left.id < right.id;
 		});
+		gShaderResourceIndices.reserve(gShaderResources.size());
+		for (size_t resourceIndex = 0; resourceIndex < gShaderResources.size(); ++resourceIndex)
+			gShaderResourceIndices.emplace(gShaderResources[resourceIndex].id, resourceIndex);
 		ShaderInjectorIO::WriteToLogFile(
 			"DatabaseShaderResources->RefreshShaderResources: loaded DDS textures=" +
 			std::to_string(gShaderResources.size()));
@@ -63,10 +69,9 @@ namespace DatabaseShaderResources
 	const ShaderResource::TextureDisk* FindShaderResourceById(const std::string& resourceId)
 	{
 		EnsureShaderResourcesLoaded();
-		const auto resourceIt = std::find_if(gShaderResources.begin(), gShaderResources.end(), [&](const auto& resource)
-		{
-			return resource.id == resourceId;
-		});
-		return resourceIt != gShaderResources.end() ? &*resourceIt : nullptr;
+		const auto resourceIt = gShaderResourceIndices.find(resourceId);
+		return resourceIt != gShaderResourceIndices.end()
+			? &gShaderResources[resourceIt->second]
+			: nullptr;
 	}
 }

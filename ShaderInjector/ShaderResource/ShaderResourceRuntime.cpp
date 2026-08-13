@@ -6,12 +6,15 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
 #include <wrl/client.h>
 
 #include "HookD3D12/HookD3D12RenderPass.h"
+#include "Performance/PerformanceMetrics.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
 #include "ShaderResource/DatabaseShaderResources.h"
 #include "StringHelper.h"
@@ -69,8 +72,15 @@ namespace ShaderResourceRuntime
 		{
 			ComPtr<ID3D12Resource> texture;
 			ComPtr<ID3D12Resource> upload;
+			ComPtr<ID3D12DescriptorHeap> srvHeap;
 			D3D12_SHADER_RESOURCE_VIEW_DESC view{};
 			bool uploadRecorded = false;
+		};
+
+		struct RootTableRestore
+		{
+			UINT rootParameterIndex = UINT32_MAX;
+			D3D12_GPU_DESCRIPTOR_HANDLE descriptorHandle{};
 		};
 
 		struct ActiveTable
@@ -85,16 +95,56 @@ namespace ShaderResourceRuntime
 
 		struct CommandListSlot
 		{
+			ComPtr<ID3D12Device> device;
 			ComPtr<ID3D12DescriptorHeap> heap;
 			UINT capacity = 0;
-			RenderPassMipChain::GraphicsStateSnapshot restoreState;
+			UINT descriptorIncrementSize = 0;
+			ID3D12RootSignature* cachedRootSignature = nullptr;
+			uint32_t cachedMaximumTrackedDescriptors = 0;
+			std::vector<RenderPassResourceRegistry::DescriptorTableLayout> layouts;
+			std::vector<ActiveTable> activeTables;
+			std::unordered_map<uint64_t, RenderPassResourceRegistry::DescriptorBindingLocation> bindingLocations;
+			std::unordered_map<std::string, TextureGpu*> resolvedTextures;
+			std::vector<ID3D12DescriptorHeap*> restoreHeaps;
+			std::vector<RootTableRestore> restoreRootTables;
 			bool computePipeline = false;
 			bool pendingRestore = false;
 		};
 
-		std::mutex gMutex;
-		std::unordered_map<ID3D12Device*, std::unordered_map<std::string, TextureGpu>> gTextures;
-		std::unordered_map<ID3D12GraphicsCommandList*, CommandListSlot> gCommandListSlots;
+		std::mutex gTextureMutex;
+		std::unordered_map<ID3D12Device*, std::unordered_map<std::string, std::unique_ptr<TextureGpu>>> gTextures;
+		std::mutex gCommandListSlotMutex;
+		std::unordered_map<ID3D12GraphicsCommandList*, std::unique_ptr<CommandListSlot>> gCommandListSlots;
+		thread_local ID3D12GraphicsCommandList* gCachedCommandList = nullptr;
+		thread_local CommandListSlot* gCachedCommandListSlot = nullptr;
+
+		CommandListSlot& GetCommandListSlot(ID3D12GraphicsCommandList* commandList)
+		{
+			if (gCachedCommandList == commandList && gCachedCommandListSlot)
+				return *gCachedCommandListSlot;
+
+			std::lock_guard<std::mutex> lock(gCommandListSlotMutex);
+			auto& slot = gCommandListSlots[commandList];
+			if (!slot)
+				slot = std::make_unique<CommandListSlot>();
+			gCachedCommandList = commandList;
+			gCachedCommandListSlot = slot.get();
+			return *slot;
+		}
+
+		CommandListSlot* FindCommandListSlot(ID3D12GraphicsCommandList* commandList)
+		{
+			if (gCachedCommandList == commandList)
+				return gCachedCommandListSlot;
+
+			std::lock_guard<std::mutex> lock(gCommandListSlotMutex);
+			const auto slotIt = gCommandListSlots.find(commandList);
+			if (slotIt == gCommandListSlots.end())
+				return nullptr;
+			gCachedCommandList = commandList;
+			gCachedCommandListSlot = slotIt->second.get();
+			return gCachedCommandListSlot;
+		}
 
 		DXGI_FORMAT LegacyFormat(const DdsPixelFormat& format)
 		{
@@ -226,7 +276,11 @@ namespace ShaderResourceRuntime
 			const ShaderResource::TextureDisk& disk,
 			std::string& outError)
 		{
-			TextureGpu& cached = gTextures[device][disk.id];
+			std::lock_guard<std::mutex> lock(gTextureMutex);
+			auto& cachedEntry = gTextures[device][disk.id];
+			if (!cachedEntry)
+				cachedEntry = std::make_unique<TextureGpu>();
+			TextureGpu& cached = *cachedEntry;
 			if (cached.texture)
 				return &cached;
 
@@ -348,8 +402,22 @@ namespace ShaderResourceRuntime
 			cached.view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 			cached.view.Texture2D.MipLevels = image.mipLevels;
 		}
-		cached.uploadRecorded = true;
-		return &cached;
+			D3D12_DESCRIPTOR_HEAP_DESC srvHeapDescription{};
+			srvHeapDescription.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+			srvHeapDescription.NumDescriptors = 1;
+			result = device->CreateDescriptorHeap(&srvHeapDescription, IID_PPV_ARGS(&cached.srvHeap));
+			if (FAILED(result))
+			{
+				outError = "DDS SRV descriptor heap creation failed with " + StringHelper::FormatHRESULT(result);
+				cached = {};
+				return nullptr;
+			}
+			device->CreateShaderResourceView(
+				cached.texture.Get(),
+				&cached.view,
+				cached.srvHeap->GetCPUDescriptorHandleForHeapStart());
+			cached.uploadRecorded = true;
+			return &cached;
 		}
 
 		const RenderPassMipChain::DescriptorHeapBinding* FindHeap(
@@ -370,15 +438,12 @@ namespace ShaderResourceRuntime
 
 		void RestoreRootTables(ID3D12GraphicsCommandList* commandList, const CommandListSlot& slot)
 		{
-			for (const auto& binding : slot.restoreState.rootBindings)
+			for (const RootTableRestore& binding : slot.restoreRootTables)
 			{
-				if (binding.bindingType != "Descriptor Table")
-					continue;
-				const D3D12_GPU_DESCRIPTOR_HANDLE handle{ binding.gpuDescriptorHandle };
 				if (slot.computePipeline)
-					commandList->SetComputeRootDescriptorTable(binding.rootParameterIndex, handle);
+					commandList->SetComputeRootDescriptorTable(binding.rootParameterIndex, binding.descriptorHandle);
 				else
-					commandList->SetGraphicsRootDescriptorTable(binding.rootParameterIndex, handle);
+					commandList->SetGraphicsRootDescriptorTable(binding.rootParameterIndex, binding.descriptorHandle);
 			}
 		}
 	}
@@ -393,42 +458,54 @@ namespace ShaderResourceRuntime
 		outError.clear();
 		if (renderPass.shaderResources.empty())
 			return true;
+		PerformanceMetrics::Increment(PerformanceMetrics::Counter::ShaderResourceBindAttempted);
+		PerformanceMetrics::ScopedTimer bindTimer(PerformanceMetrics::Timing::BindShaderResources);
 		if (!commandList || !gameState.rootSignature)
 		{
 			outError = "Shader resources require a captured root signature.";
 			return false;
 		}
-		ComPtr<ID3D12Device> device;
-		if (FAILED(commandList->GetDevice(IID_PPV_ARGS(&device))) || !device)
+		CommandListSlot& slot = GetCommandListSlot(commandList);
+		if (!slot.device && FAILED(commandList->GetDevice(IID_PPV_ARGS(&slot.device))))
 		{
 			outError = "Could not query the D3D12 device.";
 			return false;
 		}
+		ID3D12Device* device = slot.device.Get();
 
-		std::lock_guard<std::mutex> lock(gMutex);
-		std::vector<RenderPassResourceRegistry::DescriptorTableLayout> layouts;
-		if (!RenderPassResourceRegistry::GetDescriptorTableLayouts(gameState.rootSignature,
-			renderPass.maximumTrackedDescriptors, layouts))
+		if (slot.cachedRootSignature != gameState.rootSignature ||
+			slot.cachedMaximumTrackedDescriptors != renderPass.maximumTrackedDescriptors)
 		{
-			outError = "Root-signature descriptor tables are unavailable.";
-			return false;
+			slot.cachedRootSignature = gameState.rootSignature;
+			slot.cachedMaximumTrackedDescriptors = renderPass.maximumTrackedDescriptors;
+			slot.layouts.clear();
+			slot.bindingLocations.clear();
+			if (!RenderPassResourceRegistry::GetDescriptorTableLayouts(
+				gameState.rootSignature,
+				renderPass.maximumTrackedDescriptors,
+				slot.layouts))
+			{
+				outError = "Root-signature descriptor tables are unavailable.";
+				return false;
+			}
 		}
-		std::vector<ActiveTable> tables;
+
+		slot.activeTables.clear();
 		UINT totalDescriptors = 0;
 		for (const auto& binding : gameState.rootBindings)
 		{
-			if (binding.bindingType != "Descriptor Table")
+			if (binding.type != RenderPassMipChain::RootArgumentType::DescriptorTable)
 				continue;
-			const auto layoutIt = std::find_if(layouts.begin(), layouts.end(), [&](const auto& layout)
+			const auto layoutIt = std::find_if(slot.layouts.begin(), slot.layouts.end(), [&](const auto& layout)
 			{
 				return layout.rootParameterIndex == binding.rootParameterIndex;
 			});
-			if (layoutIt == layouts.end())
+			if (layoutIt == slot.layouts.end())
 				continue;
-			const auto* sourceHeap = FindHeap(gameState, { binding.gpuDescriptorHandle }, layoutIt->heapType);
+			const auto* sourceHeap = FindHeap(gameState, { binding.value }, layoutIt->heapType);
 			if (!sourceHeap)
 				continue;
-			const UINT64 byteOffset = binding.gpuDescriptorHandle - sourceHeap->gpuStart.ptr;
+			const UINT64 byteOffset = binding.value - sourceHeap->gpuStart.ptr;
 			const UINT64 requiredBytes = static_cast<UINT64>(layoutIt->descriptorCount) * sourceHeap->descriptorIncrementSize;
 			const UINT64 heapBytes = static_cast<UINT64>(sourceHeap->descriptorCount) * sourceHeap->descriptorIncrementSize;
 			if (byteOffset + requiredBytes > heapBytes)
@@ -437,14 +514,14 @@ namespace ShaderResourceRuntime
 			table.rootParameterIndex = binding.rootParameterIndex;
 			table.heapType = layoutIt->heapType;
 			table.descriptorCount = layoutIt->descriptorCount;
-			table.originalGpu = { binding.gpuDescriptorHandle };
+			table.originalGpu = { binding.value };
 			table.originalCpu = { sourceHeap->cpuStart.ptr + byteOffset };
 			if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
 			{
 				table.customOffset = totalDescriptors;
 				totalDescriptors += table.descriptorCount;
 			}
-			tables.push_back(table);
+			slot.activeTables.push_back(table);
 		}
 		if (!totalDescriptors)
 		{
@@ -452,7 +529,6 @@ namespace ShaderResourceRuntime
 			return false;
 		}
 
-		CommandListSlot& slot = gCommandListSlots[commandList];
 		if (!slot.heap || slot.capacity < totalDescriptors)
 		{
 			D3D12_DESCRIPTOR_HEAP_DESC heapDescription{};
@@ -468,10 +544,12 @@ namespace ShaderResourceRuntime
 			}
 			slot.capacity = totalDescriptors;
 		}
-		const UINT increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		if (!slot.descriptorIncrementSize)
+			slot.descriptorIncrementSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		const UINT increment = slot.descriptorIncrementSize;
 		const D3D12_CPU_DESCRIPTOR_HANDLE cpuStart = slot.heap->GetCPUDescriptorHandleForHeapStart();
 		const D3D12_GPU_DESCRIPTOR_HANDLE gpuStart = slot.heap->GetGPUDescriptorHandleForHeapStart();
-		for (const ActiveTable& table : tables)
+		for (const ActiveTable& table : slot.activeTables)
 		{
 			if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
 				device->CopyDescriptorsSimple(table.descriptorCount,
@@ -487,30 +565,50 @@ namespace ShaderResourceRuntime
 				outError = "Shader resource is missing: " + reference.resourceId;
 				return false;
 			}
-			RenderPassResourceRegistry::DescriptorBindingLocation location{};
-			if (!RenderPassResourceRegistry::FindDescriptorBinding(gameState.rootSignature,
-				D3D12_DESCRIPTOR_RANGE_TYPE_SRV, reference.shaderRegister, reference.registerSpace,
-				renderPass.maximumTrackedDescriptors, location))
+			const uint64_t bindingKey =
+				(static_cast<uint64_t>(reference.registerSpace) << 32) | reference.shaderRegister;
+			auto locationIt = slot.bindingLocations.find(bindingKey);
+			if (locationIt == slot.bindingLocations.end())
 			{
-				outError = "No SRV root binding exists for t" + std::to_string(reference.shaderRegister) +
-					", space" + std::to_string(reference.registerSpace) + ".";
-				return false;
+				RenderPassResourceRegistry::DescriptorBindingLocation location{};
+				if (!RenderPassResourceRegistry::FindDescriptorBinding(gameState.rootSignature,
+					D3D12_DESCRIPTOR_RANGE_TYPE_SRV, reference.shaderRegister, reference.registerSpace,
+					renderPass.maximumTrackedDescriptors, location))
+				{
+					outError = "No SRV root binding exists for t" + std::to_string(reference.shaderRegister) +
+						", space" + std::to_string(reference.registerSpace) + ".";
+					return false;
+				}
+				locationIt = slot.bindingLocations.emplace(bindingKey, location).first;
 			}
-			const auto tableIt = std::find_if(tables.begin(), tables.end(), [&](const auto& table)
+			const auto& location = locationIt->second;
+			const auto tableIt = std::find_if(slot.activeTables.begin(), slot.activeTables.end(), [&](const auto& table)
 			{
 				return table.rootParameterIndex == location.rootParameterIndex;
 			});
-			if (tableIt == tables.end() || location.tableOffset >= tableIt->descriptorCount)
+			if (tableIt == slot.activeTables.end() || location.tableOffset >= tableIt->descriptorCount)
 			{
 				outError = "The configured SRV table is not active on this draw or dispatch.";
 				return false;
 			}
-			TextureGpu* texture = GetOrCreateTexture(device.Get(), commandList, *disk, outError);
+			TextureGpu* texture = nullptr;
+			const auto cachedTextureIt = slot.resolvedTextures.find(reference.resourceId);
+			if (cachedTextureIt != slot.resolvedTextures.end())
+				texture = cachedTextureIt->second;
+			else
+			{
+				texture = GetOrCreateTexture(device, commandList, *disk, outError);
+				if (texture)
+					slot.resolvedTextures.emplace(reference.resourceId, texture);
+			}
 			if (!texture)
 				return false;
 			const UINT descriptorOffset = tableIt->customOffset + location.tableOffset;
-			device->CreateShaderResourceView(texture->texture.Get(), &texture->view,
-				{ cpuStart.ptr + static_cast<SIZE_T>(descriptorOffset) * increment });
+			device->CopyDescriptorsSimple(
+				1,
+				{ cpuStart.ptr + static_cast<SIZE_T>(descriptorOffset) * increment },
+				texture->srvHeap->GetCPUDescriptorHandleForHeapStart(),
+				D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 		}
 
 		ID3D12DescriptorHeap* samplerHeap = nullptr;
@@ -518,7 +616,7 @@ namespace ShaderResourceRuntime
 			if (heap.type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER) samplerHeap = heap.heap;
 		ID3D12DescriptorHeap* heaps[] = { slot.heap.Get(), samplerHeap };
 		commandList->SetDescriptorHeaps(samplerHeap ? 2u : 1u, heaps);
-		for (const ActiveTable& table : tables)
+		for (const ActiveTable& table : slot.activeTables)
 		{
 			const D3D12_GPU_DESCRIPTOR_HANDLE handle = table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
 				? D3D12_GPU_DESCRIPTOR_HANDLE{ gpuStart.ptr + static_cast<UINT64>(table.customOffset) * increment }
@@ -528,39 +626,57 @@ namespace ShaderResourceRuntime
 			else
 				commandList->SetGraphicsRootDescriptorTable(table.rootParameterIndex, handle);
 		}
-		slot.restoreState = gameState;
+		slot.restoreHeaps.clear();
+		for (const auto& heap : gameState.descriptorHeaps)
+		{
+			if (heap.heap)
+				slot.restoreHeaps.push_back(heap.heap);
+		}
+		slot.restoreRootTables.clear();
+		for (const auto& binding : gameState.rootBindings)
+		{
+			if (binding.type == RenderPassMipChain::RootArgumentType::DescriptorTable)
+				slot.restoreRootTables.push_back({
+					binding.rootParameterIndex,
+					{ binding.value } });
+		}
 		slot.computePipeline = computePipeline;
 		slot.pendingRestore = true;
+		PerformanceMetrics::Increment(PerformanceMetrics::Counter::ShaderResourceBindSucceeded);
 		return true;
 	}
 
 	void RestoreResources(ID3D12GraphicsCommandList* commandList)
 	{
-		std::lock_guard<std::mutex> lock(gMutex);
-		auto slotIt = gCommandListSlots.find(commandList);
-		if (slotIt == gCommandListSlots.end() || !slotIt->second.pendingRestore)
+		CommandListSlot* slot = FindCommandListSlot(commandList);
+		if (!slot || !slot->pendingRestore)
 			return;
-		CommandListSlot& slot = slotIt->second;
-		std::vector<ID3D12DescriptorHeap*> heaps;
-		for (const auto& heap : slot.restoreState.descriptorHeaps)
-			if (heap.heap) heaps.push_back(heap.heap);
-		commandList->SetDescriptorHeaps(static_cast<UINT>(heaps.size()), heaps.empty() ? nullptr : heaps.data());
-		RestoreRootTables(commandList, slot);
-		slot.pendingRestore = false;
+		PerformanceMetrics::ScopedTimer restoreTimer(
+			PerformanceMetrics::Timing::RestoreShaderResources);
+		commandList->SetDescriptorHeaps(
+			static_cast<UINT>(slot->restoreHeaps.size()),
+			slot->restoreHeaps.empty() ? nullptr : slot->restoreHeaps.data());
+		RestoreRootTables(commandList, *slot);
+		slot->pendingRestore = false;
 	}
 
 	void ResetCommandList(ID3D12GraphicsCommandList* commandList)
 	{
-		std::lock_guard<std::mutex> lock(gMutex);
-		auto slotIt = gCommandListSlots.find(commandList);
-		if (slotIt != gCommandListSlots.end())
-			slotIt->second.pendingRestore = false;
+		if (CommandListSlot* slot = FindCommandListSlot(commandList))
+			slot->pendingRestore = false;
 	}
 
 	void ReleaseResources()
 	{
-		std::lock_guard<std::mutex> lock(gMutex);
-		gTextures.clear();
-		gCommandListSlots.clear();
+		{
+			std::lock_guard<std::mutex> textureLock(gTextureMutex);
+			gTextures.clear();
+		}
+		{
+			std::lock_guard<std::mutex> slotLock(gCommandListSlotMutex);
+			gCommandListSlots.clear();
+		}
+		gCachedCommandList = nullptr;
+		gCachedCommandListSlot = nullptr;
 	}
 }

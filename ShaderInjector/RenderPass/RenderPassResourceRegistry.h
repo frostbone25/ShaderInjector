@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -10,6 +11,16 @@
 
 namespace RenderPassResourceRegistry
 {
+	struct RegistryStatistics
+	{
+		size_t descriptorCount = 0;
+		size_t descriptorHeapCount = 0;
+		size_t heapDescriptorCount = 0;
+		size_t fallbackDescriptorCount = 0;
+		size_t bufferResourceCount = 0;
+		size_t rootSignatureCount = 0;
+	};
+
 	struct DescriptorTableLayout
 	{
 		UINT rootParameterIndex = UINT32_MAX;
@@ -33,8 +44,11 @@ namespace RenderPassResourceRegistry
 		ID3D12RootSignature* rootSignature,
 		const void* serializedRootSignature,
 		SIZE_T serializedRootSignatureSize);
+	void RegisterDescriptorHeap(
+		ID3D12DescriptorHeap* descriptorHeap,
+		UINT descriptorIncrementSize = 0,
+		bool newlyCreated = false);
 	void RegisterResource(ID3D12Resource* resource);
-
 	void RegisterConstantBufferView(
 		const D3D12_CONSTANT_BUFFER_VIEW_DESC* description,
 		D3D12_CPU_DESCRIPTOR_HANDLE destination);
@@ -58,7 +72,7 @@ namespace RenderPassResourceRegistry
 		D3D12_CPU_DESCRIPTOR_HANDLE destination);
 	void RegisterSampler(D3D12_CPU_DESCRIPTOR_HANDLE destination);
 
-	void CopyDescriptors(
+	bool CopyDescriptors(
 		UINT destinationRangeCount,
 		const D3D12_CPU_DESCRIPTOR_HANDLE* destinationRangeStarts,
 		const UINT* destinationRangeSizes,
@@ -66,7 +80,7 @@ namespace RenderPassResourceRegistry
 		const D3D12_CPU_DESCRIPTOR_HANDLE* sourceRangeStarts,
 		const UINT* sourceRangeSizes,
 		UINT descriptorIncrementSize);
-	void CopyDescriptorsSimple(
+	bool CopyDescriptorsSimple(
 		UINT descriptorCount,
 		D3D12_CPU_DESCRIPTOR_HANDLE destinationStart,
 		D3D12_CPU_DESCRIPTOR_HANDLE sourceStart,
@@ -109,4 +123,5 @@ namespace RenderPassResourceRegistry
 		UINT shaderRegister,
 		UINT maximumUnboundedDescriptors,
 		DescriptorBindingLocation& outLocation);
+	RegistryStatistics GetStatistics();
 }

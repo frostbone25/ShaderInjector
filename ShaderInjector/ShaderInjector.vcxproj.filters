@@ -40,6 +40,9 @@
     <Filter Include="IO">
       <UniqueIdentifier>{6e42df63-7acf-42ed-9b30-047d0246d8db}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Performance">
+      <UniqueIdentifier>{61D6D2A3-0D2B-4B2A-BD4A-5A41E4F01939}</UniqueIdentifier>
+    </Filter>
     <Filter Include="ShaderTarget">
       <UniqueIdentifier>{60bbf43e-10f1-4daf-8410-0bce36a6cc7b}</UniqueIdentifier>
     </Filter>
@@ -179,6 +182,9 @@
     </ClInclude>
     <ClInclude Include="ShaderResource\ShaderResourceRuntime.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Performance\PerformanceMetrics.h">
+      <Filter>Performance</Filter>
     </ClInclude>
     <ClInclude Include="IO\ProcessRunner.h">
       <Filter>IO</Filter>
@@ -353,6 +359,9 @@
     <ClCompile Include="ShaderResource\ShaderResourceRuntime.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Performance\PerformanceMetrics.cpp">
+      <Filter>Performance</Filter>
+    </ClCompile>
     <ClCompile Include="GUI\ShaderInjectorGUI_ApplyStyle.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
@@ -365,6 +374,9 @@
     <ClCompile Include="GUI\ShaderInjectorGUI_RenderPasses.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
+	<ClCompile Include="GUI\ShaderInjectorGUI_ShaderResources.cpp">
+	  <Filter>GUI</Filter>
+	</ClCompile>
     <ClCompile Include="GUI\ShaderInjectorGUI_RuntimeLogs.cpp">
       <Filter>GUI</Filter>
     </ClCompile>

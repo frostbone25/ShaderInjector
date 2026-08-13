@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -19,13 +20,30 @@ namespace RenderPassMipChain
 		D3D12_GPU_DESCRIPTOR_HANDLE gpuStart{};
 	};
 
+	enum class RootArgumentType : uint8_t
+	{
+		DescriptorTable,
+		ConstantBufferView,
+		ShaderResourceView,
+		UnorderedAccessView,
+		Constants
+	};
+
+	struct RootArgumentSnapshot
+	{
+		RootArgumentType type = RootArgumentType::DescriptorTable;
+		UINT rootParameterIndex = UINT32_MAX;
+		uint64_t value = 0;
+		std::vector<uint32_t> constants;
+	};
+
 	struct GraphicsStateSnapshot
 	{
 		ID3D12RootSignature* rootSignature = nullptr;
 		ID3D12PipelineState* pipelineState = nullptr;
 		D3D12_PRIMITIVE_TOPOLOGY primitiveTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
 		std::vector<DescriptorHeapBinding> descriptorHeaps;
-		std::vector<RenderPass::ResourceBindingDiagnostic> rootBindings;
+		std::vector<RootArgumentSnapshot> rootBindings;
 		std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> renderTargets;
 		D3D12_CPU_DESCRIPTOR_HANDLE depthStencil{};
 		std::vector<D3D12_VIEWPORT> viewports;
@@ -34,17 +52,20 @@ namespace RenderPassMipChain
 
 	struct ExecutionResult
 	{
-		std::string renderPassId;
+		const RenderPass::RenderPassDisk* renderPass = nullptr;
 		bool attempted = false;
 		bool succeeded = false;
 		std::string error;
 	};
 
-	std::vector<ExecutionResult> PrepareForTargetDraw(
+	void PrepareForTargetDraw(
 		const std::vector<const RenderPass::RenderPassDisk*>& renderPasses,
 		ID3D12GraphicsCommandList* commandList,
+		const GraphicsStateSnapshot& gameState,
+		std::vector<ExecutionResult>& outResults);
+	void RestoreAfterTargetDraw(
+		ID3D12GraphicsCommandList* commandList,
 		const GraphicsStateSnapshot& gameState);
-	void RestoreAfterTargetDraw(ID3D12GraphicsCommandList* commandList);
 	bool HasRecordedCommandListWork();
 	void ResetCommandListRecording(ID3D12GraphicsCommandList* commandList);
 	void NotifyCommandListsSubmitted(

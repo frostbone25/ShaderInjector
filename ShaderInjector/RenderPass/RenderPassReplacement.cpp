@@ -1,5 +1,6 @@
 #include "RenderPass/RenderPassReplacement.h"
 
+#include <array>
 #include <mutex>
 #include <unordered_map>
 
@@ -15,6 +16,46 @@ namespace RenderPassReplacement
 	{
 		std::mutex gCacheMutex;
 		std::unordered_map<std::string, ID3D12PipelineState*> gPipelineCache;
+
+		struct ThreadPipelineLookup
+		{
+			const RenderPass::RenderPassDisk* renderPass = nullptr;
+			ID3D12PipelineState* originalPipelineState = nullptr;
+			uint64_t shaderBlobHash = 0;
+			ID3D12PipelineState* replacementPipelineState = nullptr;
+		};
+
+		thread_local std::array<ThreadPipelineLookup, 16> gThreadPipelineLookups;
+		thread_local size_t gNextThreadPipelineLookup = 0;
+
+		ID3D12PipelineState* FindThreadPipeline(
+			const RenderPass::RenderPassDisk& renderPass,
+			ID3D12PipelineState* originalPipelineState)
+		{
+			for (const ThreadPipelineLookup& lookup : gThreadPipelineLookups)
+			{
+				if (lookup.renderPass == &renderPass &&
+					lookup.originalPipelineState == originalPipelineState &&
+					lookup.shaderBlobHash == renderPass.fragmentShaderBlobHash)
+				{
+					return lookup.replacementPipelineState;
+				}
+			}
+			return nullptr;
+		}
+
+		void CacheThreadPipeline(
+			const RenderPass::RenderPassDisk& renderPass,
+			ID3D12PipelineState* originalPipelineState,
+			ID3D12PipelineState* replacementPipelineState)
+		{
+			gThreadPipelineLookups[gNextThreadPipelineLookup] = {
+				&renderPass,
+				originalPipelineState,
+				renderPass.fragmentShaderBlobHash,
+				replacementPipelineState };
+			gNextThreadPipelineLookup = (gNextThreadPipelineLookup + 1) % gThreadPipelineLookups.size();
+		}
 
 		std::string CacheKey(const RenderPass::RenderPassDisk& renderPass, ID3D12PipelineState* original)
 		{
@@ -199,11 +240,16 @@ namespace RenderPassReplacement
 			outError = "Replacement pass is missing its target PSO or compiled shader.";
 			return nullptr;
 		}
+		if (ID3D12PipelineState* cachedPipeline = FindThreadPipeline(renderPass, originalPipelineState))
+			return cachedPipeline;
 		const std::string key = CacheKey(renderPass, originalPipelineState);
 		std::lock_guard<std::mutex> cacheLock(gCacheMutex);
 		const auto cachedIt = gPipelineCache.find(key);
 		if (cachedIt != gPipelineCache.end())
+		{
+			CacheThreadPipeline(renderPass, originalPipelineState, cachedIt->second);
 			return cachedIt->second;
+		}
 
 		std::lock_guard<std::mutex> pipelineLock(HookD3D12::gPipelineMutex);
 		ID3D12PipelineState* pipeline = renderPass.type == RenderPass::RenderPassType::ReplacementPixelShader
@@ -214,7 +260,10 @@ namespace RenderPassReplacement
 		if (!pipeline && outError.empty())
 			outError = "The target PSO has no captured rebuild template for this replacement pass.";
 		if (pipeline)
+		{
 			gPipelineCache.emplace(key, pipeline);
+			CacheThreadPipeline(renderPass, originalPipelineState, pipeline);
+		}
 		return pipeline;
 	}
 
@@ -224,5 +273,7 @@ namespace RenderPassReplacement
 		for (auto& pipeline : gPipelineCache)
 			if (pipeline.second) pipeline.second->Release();
 		gPipelineCache.clear();
+		gThreadPipelineLookups = {};
+		gNextThreadPipelineLookup = 0;
 	}
 }

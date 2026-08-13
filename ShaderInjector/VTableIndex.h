@@ -53,6 +53,7 @@ namespace VTableIndex
 	constexpr size_t indexCreateRootSignature = 16;
 
 	//ID3D12Device descriptor creation and copy methods
+	constexpr size_t indexCreateDescriptorHeap = 14;
 	constexpr size_t indexCreateConstantBufferView = 17;
 	constexpr size_t indexCreateShaderResourceView = 18;
 	constexpr size_t indexCreateUnorderedAccessView = 19;

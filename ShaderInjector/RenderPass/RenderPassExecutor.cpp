@@ -1,6 +1,7 @@
 #include "RenderPass/RenderPassExecutor.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <mutex>
 #include <unordered_map>
@@ -41,7 +42,8 @@ namespace RenderPassExecutor
 			ID3D12PipelineState* pipelineState = nullptr;
 		};
 
-		thread_local ThreadPipelineLookup gThreadPipelineLookup;
+		thread_local std::array<ThreadPipelineLookup, 16> gThreadPipelineLookups;
+		thread_local size_t gNextThreadPipelineLookup = 0;
 		thread_local const RenderPass::RenderPassDisk* gEventNameRenderPass = nullptr;
 		thread_local std::wstring gEventName;
 
@@ -67,7 +69,17 @@ namespace RenderPassExecutor
 			const RenderTargetState& renderTargets,
 			ID3D12PipelineState* pipelineState)
 		{
-			gThreadPipelineLookup = { &renderPass, rootSignature, renderTargets, pipelineState };
+			for (ThreadPipelineLookup& lookup : gThreadPipelineLookups)
+			{
+				if (lookup.renderPass == &renderPass && lookup.rootSignature == rootSignature)
+				{
+					lookup = { &renderPass, rootSignature, renderTargets, pipelineState };
+					return;
+				}
+			}
+			gThreadPipelineLookups[gNextThreadPipelineLookup] = {
+				&renderPass, rootSignature, renderTargets, pipelineState };
+			gNextThreadPipelineLookup = (gNextThreadPipelineLookup + 1) % gThreadPipelineLookups.size();
 		}
 
 		const std::wstring& GetRenderPassEventName(const RenderPass::RenderPassDisk& renderPass)
@@ -167,12 +179,15 @@ namespace RenderPassExecutor
 			const RenderTargetState& renderTargets,
 			std::string& outError)
 		{
-			if (gThreadPipelineLookup.renderPass == &renderPass &&
-				gThreadPipelineLookup.rootSignature == rootSignature &&
-				gThreadPipelineLookup.pipelineState &&
-				RenderTargetStatesEqual(gThreadPipelineLookup.renderTargets, renderTargets))
+			for (const ThreadPipelineLookup& lookup : gThreadPipelineLookups)
 			{
-				return gThreadPipelineLookup.pipelineState;
+				if (lookup.renderPass == &renderPass &&
+					lookup.rootSignature == rootSignature &&
+					lookup.pipelineState &&
+					RenderTargetStatesEqual(lookup.renderTargets, renderTargets))
+				{
+					return lookup.pipelineState;
+				}
 			}
 
 			const std::string cacheKey = BuildPipelineCacheKey(renderPass, rootSignature, renderTargets);
@@ -356,7 +371,8 @@ namespace RenderPassExecutor
 		}
 		gPipelineCache.clear();
 		gPipelineCreationErrors.clear();
-		gThreadPipelineLookup = {};
+		gThreadPipelineLookups = {};
+		gNextThreadPipelineLookup = 0;
 		gEventNameRenderPass = nullptr;
 		gEventName.clear();
 	}

@@ -202,6 +202,7 @@
     <ClInclude Include="ModifiedShader\DatabaseModifiedShaders.h" />
     <ClInclude Include="ModifiedShader\ModifiedShader.h" />
     <ClInclude Include="ModifiedShader\ModifiedShaderCreation.h" />
+    <ClInclude Include="Performance\PerformanceMetrics.h" />
     <ClInclude Include="RenderDoc\RenderDocIntegration.h" />
     <ClInclude Include="RenderPass\DatabaseRenderPasses.h" />
     <ClInclude Include="RenderPass\RenderPass.h" />
@@ -232,6 +233,7 @@
     <ClCompile Include="GUI\ShaderInjectorGUI_DeveloperSettings.cpp" />
     <ClCompile Include="GUI\ShaderInjectorGUI_ModifiedShaders.cpp" />
     <ClCompile Include="GUI\ShaderInjectorGUI_RenderPasses.cpp" />
+	<ClCompile Include="GUI\ShaderInjectorGUI_ShaderResources.cpp" />
     <ClCompile Include="GUI\ShaderInjectorGUI_RuntimeLogs.cpp" />
     <ClCompile Include="GUI\ShaderInjectorGUI_ShaderConfiguration.cpp" />
     <ClCompile Include="GUI\ShaderInjectorGUI_ShaderTargets.cpp" />
@@ -267,6 +269,7 @@
     <ClCompile Include="ModifiedShader\DatabaseModifiedShaders.cpp" />
     <ClCompile Include="ModifiedShader\ModifiedShader.cpp" />
     <ClCompile Include="ModifiedShader\ModifiedShaderCreation.cpp" />
+    <ClCompile Include="Performance\PerformanceMetrics.cpp" />
     <ClCompile Include="RenderDoc\RenderDocIntegration.cpp" />
     <ClCompile Include="RenderPass\DatabaseRenderPasses.cpp" />
     <ClCompile Include="RenderPass\RenderPass.cpp" />

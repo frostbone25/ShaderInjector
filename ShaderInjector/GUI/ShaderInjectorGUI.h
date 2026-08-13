@@ -71,6 +71,7 @@ namespace ShaderInjectorGUI
 
 	//===================== render passes =====================
 	void UI_RenderPasses();
+	void UI_ShaderResources();
 
 	template<typename PipelineT>
 	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderTarget::ShaderTargetDisk& replacement);

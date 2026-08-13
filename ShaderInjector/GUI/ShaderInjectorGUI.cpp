@@ -117,6 +117,7 @@ namespace ShaderInjectorGUI
 		UI_ModifiedShaders();
 		UI_ShaderConfiguration();
 		UI_ShaderTargets();
+		UI_ShaderResources();
 		UI_RenderPasses();
 		UI_DeveloperSettings();
 	}

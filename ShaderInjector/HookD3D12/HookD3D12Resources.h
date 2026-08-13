@@ -4,6 +4,7 @@
 
 namespace HookD3D12
 {
+	using FunctionCreateDescriptorHeapD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_DESCRIPTOR_HEAP_DESC*, REFIID, void**);
 	using FunctionCreateConstantBufferViewD3D12 = void(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_CONSTANT_BUFFER_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
 	using FunctionCreateShaderResourceViewD3D12 = void(STDMETHODCALLTYPE*)(ID3D12Device*, ID3D12Resource*, const D3D12_SHADER_RESOURCE_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
 	using FunctionCreateUnorderedAccessViewD3D12 = void(STDMETHODCALLTYPE*)(ID3D12Device*, ID3D12Resource*, ID3D12Resource*, const D3D12_UNORDERED_ACCESS_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
@@ -16,6 +17,7 @@ namespace HookD3D12
 	using FunctionCreatePlacedResourceD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, ID3D12Heap*, UINT64, const D3D12_RESOURCE_DESC*, D3D12_RESOURCE_STATES, const D3D12_CLEAR_VALUE*, REFIID, void**);
 	using FunctionCreateReservedResourceD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_RESOURCE_DESC*, D3D12_RESOURCE_STATES, const D3D12_CLEAR_VALUE*, REFIID, void**);
 
+	extern FunctionCreateDescriptorHeapD3D12 Original_CreateDescriptorHeap;
 	extern FunctionCreateConstantBufferViewD3D12 Original_CreateConstantBufferView;
 	extern FunctionCreateShaderResourceViewD3D12 Original_CreateShaderResourceView;
 	extern FunctionCreateUnorderedAccessViewD3D12 Original_CreateUnorderedAccessView;
@@ -28,6 +30,7 @@ namespace HookD3D12
 	extern FunctionCreatePlacedResourceD3D12 Original_CreatePlacedResource;
 	extern FunctionCreateReservedResourceD3D12 Original_CreateReservedResource;
 
+	HRESULT STDMETHODCALLTYPE Hook_CreateDescriptorHeap(ID3D12Device*, const D3D12_DESCRIPTOR_HEAP_DESC*, REFIID, void**);
 	void STDMETHODCALLTYPE Hook_CreateConstantBufferView(ID3D12Device*, const D3D12_CONSTANT_BUFFER_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
 	void STDMETHODCALLTYPE Hook_CreateShaderResourceView(ID3D12Device*, ID3D12Resource*, const D3D12_SHADER_RESOURCE_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
 	void STDMETHODCALLTYPE Hook_CreateUnorderedAccessView(ID3D12Device*, ID3D12Resource*, ID3D12Resource*, const D3D12_UNORDERED_ACCESS_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);

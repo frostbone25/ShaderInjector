@@ -60,6 +60,7 @@
 #include "HookD3D12RenderPass.h"
 #include "RenderPass/RenderPassRuntime.h"
 #include "RenderPass/RenderPassExecutor.h"
+#include "Performance/PerformanceMetrics.h"
 #include "RenderDoc/RenderDocIntegration.h"
 #include "VTableIndex.h"
 #include "StringHelper.h"
@@ -161,7 +162,9 @@ namespace HookD3D12
 		const PipelineStateOverrideMap* overrideSnapshot = nullptr;
 	};
 
-	static thread_local std::array<PipelineBindingCacheEntry, 16> gPipelineBindingCache;
+	// Games rotate through hundreds of PSOs while recording a frame. A larger direct
+	// cache prevents ordinary binds from repeatedly reaching the shared PSO registry.
+	static thread_local std::array<PipelineBindingCacheEntry, 256> gPipelineBindingCache;
 	static std::vector<ID3D12PipelineState*> gRetiredPipelineStates;
 	static std::unordered_set<ID3D12PipelineState*> gRetiredPipelineStateSet;
 
@@ -628,13 +631,22 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Hook_SetGraphicsRootSignature(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSignature)
 	{
+		if (!Globals::gShaderInjectorEnabled)
+		{
+			GetCommandListPipelineState(cmdList).graphicsRootSignature.store(
+				rootSignature,
+				std::memory_order_release);
+			Original_SetGraphicsRootSignature(cmdList, rootSignature);
+			return;
+		}
+
 		if (IsInsideRenderPassInjection())
 		{
 			Original_SetGraphicsRootSignature(cmdList, rootSignature);
 			return;
 		}
 
-		if (Globals::gShaderInjectorEnabled)
+		if (RenderPassRuntime::IsPipelineExecutionTrackingRequired(false))
 			RenderPassRuntime::TrackRootSignature(cmdList, false, rootSignature);
 
 		CommandListPipelineState& commandListState = GetCommandListPipelineState(cmdList);
@@ -642,8 +654,7 @@ namespace HookD3D12
 		ID3D12PipelineState* currentPipelineState =
 			commandListState.pipelineState.load(std::memory_order_acquire);
 
-		if (Globals::gShaderInjectorEnabled &&
-			currentPipelineState &&
+		if (currentPipelineState &&
 			!IsKnownPipelineStateLocked(currentPipelineState))
 		{
 			std::lock_guard<std::mutex> lock(gPipelineMutex);
@@ -659,13 +670,22 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Hook_SetComputeRootSignature(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSignature)
 	{
+		if (!Globals::gShaderInjectorEnabled)
+		{
+			GetCommandListPipelineState(cmdList).computeRootSignature.store(
+				rootSignature,
+				std::memory_order_release);
+			Original_SetComputeRootSignature(cmdList, rootSignature);
+			return;
+		}
+
 		if (IsInsideRenderPassInjection())
 		{
 			Original_SetComputeRootSignature(cmdList, rootSignature);
 			return;
 		}
 
-		if (Globals::gShaderInjectorEnabled)
+		if (RenderPassRuntime::IsPipelineExecutionTrackingRequired(true))
 			RenderPassRuntime::TrackRootSignature(cmdList, true, rootSignature);
 
 		CommandListPipelineState& commandListState = GetCommandListPipelineState(cmdList);
@@ -673,8 +693,7 @@ namespace HookD3D12
 		ID3D12PipelineState* currentPipelineState =
 			commandListState.pipelineState.load(std::memory_order_acquire);
 
-		if (Globals::gShaderInjectorEnabled &&
-			currentPipelineState &&
+		if (currentPipelineState &&
 			!IsKnownPipelineStateLocked(currentPipelineState))
 		{
 			std::lock_guard<std::mutex> lock(gPipelineMutex);
@@ -757,6 +776,9 @@ namespace HookD3D12
 			Original_SetPipelineState(cmdList, pso);
 			return;
 		}
+		PerformanceMetrics::ScopedTimer setPipelineStateTimer(
+			PerformanceMetrics::Timing::SetPipelineStateHook,
+			64);
 
 		ID3D12PipelineState* boundPipelineState = pso;
 		RenderPassRuntime::TrackPipelineState(cmdList, pso);
@@ -821,7 +843,8 @@ namespace HookD3D12
 
 	HRESULT STDMETHODCALLTYPE Hook_ResetGraphicsCommandList(ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* allocator, ID3D12PipelineState* initialState)
 	{
-		const bool trackRenderPassState = RenderPassRuntime::IsTrackingRequired();
+		const bool trackRenderPassState =
+			Globals::gShaderInjectorEnabled && RenderPassRuntime::IsTrackingRequired();
 		const bool retireRecordedRenderPassWork =
 			RenderPassRuntime::HasPendingCommandListSubmissionWork();
 		if (trackRenderPassState)
@@ -2753,6 +2776,8 @@ namespace HookD3D12
 		FunctionPresent1D3D12 present1Override)
 	{
 		FPSCounter::UpdateFPSCounter();
+		if (PerformanceMetrics::RecordPresentAndMaybeLog())
+			RenderPassRuntime::LogPerformanceSnapshot();
 
 		if (usePresent1)
 		{
@@ -2820,8 +2845,13 @@ namespace HookD3D12
 		//IMPORTANT NOTE: we do hit this point after x amount of startup frames where we continue with initalization
 		//MessageBoxA(nullptr, "Hook_Present1D3D12: startup frames beyond 300, continuing", "Shader Injector", MB_OK);
 
-		ProcessPendingRebuilds(); // <-- add here, before gInitialized check and before ImGui
-		ApplyShaderTargetPSOs();
+		{
+			PerformanceMetrics::ScopedTimer maintenanceTimer(
+				PerformanceMetrics::Timing::PresentShaderMaintenance,
+				16);
+			ProcessPendingRebuilds(); // <-- add here, before gInitialized check and before ImGui
+			ApplyShaderTargetPSOs();
+		}
 
 		if (gOverlayRenderingDisabled)
 			return CallOriginalPresent();

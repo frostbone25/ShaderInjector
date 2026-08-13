@@ -48,6 +48,7 @@ namespace HookD3D12
 	FunctionIASetVertexBuffersD3D12            Original_IASetVertexBuffers = nullptr;
 	FunctionOMSetRenderTargetsD3D12            Original_OMSetRenderTargets = nullptr;
 	FunctionExecuteIndirectD3D12               Original_ExecuteIndirect = nullptr;
+	FunctionCreateDescriptorHeapD3D12           Original_CreateDescriptorHeap = nullptr;
 	FunctionCreateConstantBufferViewD3D12      Original_CreateConstantBufferView = nullptr;
 	FunctionCreateShaderResourceViewD3D12      Original_CreateShaderResourceView = nullptr;
 	FunctionCreateUnorderedAccessViewD3D12     Original_CreateUnorderedAccessView = nullptr;

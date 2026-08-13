@@ -1,6 +1,7 @@
 //HookD3D12Install.cpp
 #include "HookD3D12.h"
 
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <unordered_set>
@@ -28,6 +29,9 @@ namespace HookD3D12
 	static std::unordered_set<void*> renderPassHookedDeviceVTables;
 	static std::unordered_set<void*> renderPassHookedCommandListVTables;
 	static void** capturedGraphicsCommandListVTable = nullptr;
+	static std::atomic<void*> fastCommandListHookedVTable = nullptr;
+	static std::atomic<void*> fastDeferredDeviceVTable = nullptr;
+	static std::atomic<void*> fastDeferredCommandListVTable = nullptr;
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL D3D12 CREATE DEVICE HOOK |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL D3D12 CREATE DEVICE HOOK |||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -180,15 +184,20 @@ namespace HookD3D12
 	{
 		if (!commandList)
 			return;
+		void** commandListVTable = *reinterpret_cast<void***>(commandList);
+		if (fastCommandListHookedVTable.load(std::memory_order_acquire) == commandListVTable)
+			return;
 
 		std::lock_guard<std::mutex> installationLock(hookInstallationMutex);
 
-		void** commandListVTable = *reinterpret_cast<void***>(commandList);
 		void* commandListVTableKey = commandListVTable;
 		capturedGraphicsCommandListVTable = commandListVTable;
 
 		if (!graphicsCommandListHookedVTables.insert(commandListVTableKey).second)
+		{
+			fastCommandListHookedVTable.store(commandListVTableKey, std::memory_order_release);
 			return;
+		}
 
 		MH_STATUS resetCreate = MH_CreateHook(commandListVTable[VTableIndex::indexResetGraphicsCommandList], &Hook_ResetGraphicsCommandList, reinterpret_cast<void**>(&Original_ResetGraphicsCommandList));
 		MH_STATUS resetEnable = MH_EnableHook(commandListVTable[VTableIndex::indexResetGraphicsCommandList]);
@@ -222,7 +231,8 @@ namespace HookD3D12
 		else
 			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12Install->InstallCommandListHooksForCommandList: SetGraphicsRootSignature hook failed");
 
-			checkCommandListHookInstalled = true;
+		checkCommandListHookInstalled = true;
+		fastCommandListHookedVTable.store(commandListVTableKey, std::memory_order_release);
 	}
 
 	void InstallRenderPassResourceHooksForDevice(ID3D12Device* device)
@@ -245,6 +255,7 @@ namespace HookD3D12
 
 		const HookDefinition resourceHooks[] =
 		{
+			{ VTableIndex::indexCreateDescriptorHeap, reinterpret_cast<void*>(&Hook_CreateDescriptorHeap), reinterpret_cast<void**>(&Original_CreateDescriptorHeap) },
 			{ VTableIndex::indexCreateConstantBufferView, reinterpret_cast<void*>(&Hook_CreateConstantBufferView), reinterpret_cast<void**>(&Original_CreateConstantBufferView) },
 			{ VTableIndex::indexCreateShaderResourceView, reinterpret_cast<void*>(&Hook_CreateShaderResourceView), reinterpret_cast<void**>(&Original_CreateShaderResourceView) },
 			{ VTableIndex::indexCreateUnorderedAccessView, reinterpret_cast<void*>(&Hook_CreateUnorderedAccessView), reinterpret_cast<void**>(&Original_CreateUnorderedAccessView) },
@@ -286,14 +297,20 @@ namespace HookD3D12
 
 	void InstallDeferredRenderPassHooks(ID3D12Device* device)
 	{
+		if (!device || !capturedGraphicsCommandListVTable || !RenderPassRuntime::HasEnabledRenderPasses())
+			return;
+		void** initialDeviceVTable = *reinterpret_cast<void***>(device);
+		if (fastDeferredDeviceVTable.load(std::memory_order_acquire) == initialDeviceVTable &&
+			fastDeferredCommandListVTable.load(std::memory_order_acquire) == capturedGraphicsCommandListVTable)
+		{
+			return;
+		}
+
 		InstallRenderPassResourceHooksForDevice(device);
 
 		// The game performs its most intensive pipeline/query work before the overlay is
 		// ready. Render-pass observation is unnecessary during that phase, especially on
 		// a fresh shader-cache run where no shader target can be resolved yet.
-		if (!device || !capturedGraphicsCommandListVTable || !RenderPassRuntime::HasEnabledRenderPasses())
-			return;
-
 		std::lock_guard<std::mutex> installationLock(hookInstallationMutex);
 
 		struct HookDefinition
@@ -309,6 +326,7 @@ namespace HookD3D12
 		{
 			const HookDefinition resourceHooks[] =
 			{
+				{ VTableIndex::indexCreateDescriptorHeap, reinterpret_cast<void*>(&Hook_CreateDescriptorHeap), reinterpret_cast<void**>(&Original_CreateDescriptorHeap) },
 				{ VTableIndex::indexCreateConstantBufferView, reinterpret_cast<void*>(&Hook_CreateConstantBufferView), reinterpret_cast<void**>(&Original_CreateConstantBufferView) },
 				{ VTableIndex::indexCreateShaderResourceView, reinterpret_cast<void*>(&Hook_CreateShaderResourceView), reinterpret_cast<void**>(&Original_CreateShaderResourceView) },
 				{ VTableIndex::indexCreateUnorderedAccessView, reinterpret_cast<void*>(&Hook_CreateUnorderedAccessView), reinterpret_cast<void**>(&Original_CreateUnorderedAccessView) },
@@ -404,6 +422,13 @@ namespace HookD3D12
 				ShaderInjectorIO::WriteToLogFileError(
 					"HookD3D12Install->InstallDeferredRenderPassHooks: one or more deferred command-list hooks failed");
 			}
+		}
+
+		if (renderPassHookedDeviceVTables.find(deviceVTableKey) != renderPassHookedDeviceVTables.end() &&
+			renderPassHookedCommandListVTables.find(commandListVTableKey) != renderPassHookedCommandListVTables.end())
+		{
+			fastDeferredDeviceVTable.store(deviceVTableKey, std::memory_order_release);
+			fastDeferredCommandListVTable.store(commandListVTableKey, std::memory_order_release);
 		}
 	}
 }
