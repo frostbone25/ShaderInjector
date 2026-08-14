@@ -58,30 +58,46 @@
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - AUTO EXPOSURE ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - AUTO EXPOSURE ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - AUTO EXPOSURE ||||||||||||||||||||||||||||||||||
-//jank auto-expousre implementation, in the future I definetly wish to improve upon this because its way more expensive than it should be
-//by leveraging mip generation and calculating average exposure based off of that... instead of doing AUTO_EXPOSURE_GRID_X x AUTO_EXPOSURE_GRID_Y samples for every pixel
-//but for now... we are limited so just deal with it
+//The metering is measured ONCE PER WAVE rather than once per pixel, and it reads the glare (bloom) chain
+//which is already a downsampled + wide-blurred copy of the scene. That gives us the "sample an averaged
+//mip" behaviour we always wanted without needing to generate mips ourselves, so a full-screen measurement
+//costs a handful of texture fetches per lane instead of a full grid per pixel.
 
 //(AUTO_EXPOSURE) automatic exposure, checks the overall exposure of the final image and adjusts the expousre so that it is not too bright or too dark.
-//unfortunately this is unusally expensive at the moment but because we are kinda limited... we just gotta deal with it for now
-//it's not perfect and will flicker occasionally, brightness changes are instantaneous also
+//note that brightness changes are still instantaneous, there is no adaptation over time yet, that would need state that survives between frames which the injector cannot provide today
 #define AUTO_EXPOSURE
 
-//(AUTO_EXPOSURE) how many horizontal samples we take of the final image to gauge overall image exposure
-//more samples = more stable auto exposure (less flicker) but can be slower
-//less samples = less stable auto exposure (more flicker) but faster
-//[CONFIG TYPE]: int
-//[CONFIG DEFAULT]: 16
-//[CONFIG RANGE]: [1, 256]
-#define AUTO_EXPOSURE_GRID_X 16
+//(AUTO_EXPOSURE) meters the glare/bloom buffer instead of the raw scene color, the glare chain is already downsampled and heavily blurred so every sample is an area average instead of a single point
+//this is what cuts down most of the flicker, point samples of the raw framebuffer land on different scene content every time the camera moves but averaged samples do not
+//turn this off to meter the raw scene color instead, useful if the game's bloom is ever unavailable
+#define AUTO_EXPOSURE_SOURCE_GLARE
 
-//(AUTO_EXPOSURE) how many vertical samples we take of the final image to gauge overall image exposure
-//more samples = more stable auto exposure (less flicker) but can be slower
-//less samples = less stable auto exposure (more flicker) but faster
+//(AUTO_EXPOSURE) how many metering samples are taken of the image, spread over the whole screen, these are shared across the wave so the cost is roughly (this / wave size) fetches per lane rather than per pixel
+//it is not free though, the cost is linear in this number at roughly 0.0012ms per sample at 1440p, so drop it to 128 if you are short on frametime
+//if you want more stability leave AUTO_EXPOSURE_SOURCE_GLARE on rather than raising this, area averaged samples buy far more stability for the cost
 //[CONFIG TYPE]: int
-//[CONFIG DEFAULT]: 16
-//[CONFIG RANGE]: [1, 256]
-#define AUTO_EXPOSURE_GRID_Y 16
+//[CONFIG DEFAULT]: 256
+//[CONFIG RANGE]: [16, 512]
+#define AUTO_EXPOSURE_SAMPLE_COUNT 256
+
+//(AUTO_EXPOSURE) calibration offset in EV that converts glare brightness back into scene brightness, the glare chain sits at roughly 1/15th of scene brightness and log2(15) is about 3.9
+//only used when AUTO_EXPOSURE_SOURCE_GLARE is enabled, lower this if the image is consistently too dark and raise it if it is consistently too bright
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 3.9
+#define AUTO_EXPOSURE_GLARE_CALIBRATION_EV 3.9
+
+//(AUTO_EXPOSURE) how far below the average a sample is allowed to sit before it stops pulling the exposure down, rejecting outliers like this stops a single dark corner from washing the whole image out
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 3.0
+//[CONFIG RANGE]: [0, 16]
+#define AUTO_EXPOSURE_REJECT_LOW_EV 3.0
+
+//(AUTO_EXPOSURE) how far above the average a sample is allowed to sit before it stops pulling the exposure up, this is deliberately tighter than the low side
+//the sun, speculars and emissives are the main cause of sudden exposure jumps, so bright outliers get clamped harder than dark ones
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 2.0
+//[CONFIG RANGE]: [0, 16]
+#define AUTO_EXPOSURE_REJECT_HIGH_EV 2.0
 
 //(AUTO_EXPOSURE) this is the middle gray value that the auto exposure will try to achieve, this is a standard value for middle gray
 //[CONFIG TYPE]: float
@@ -108,13 +124,25 @@
 //[CONFIG DEFAULT]: -0.35
 #define AUTO_EXPOSURE_COMPENSATION_EV -0.35
 
-//(AUTO_EXPOSURE) this controls how focused the grid points are when sampling the final image to determine the automatic exposure value
-//values closer to 1.0 are focused towards the center of the screen
-//values closer to 0.0 are more spread out across the entire screen
+//(AUTO_EXPOSURE) how much the metering favours the center of the screen, note that this is a weight and not a crop, the samples always cover the whole screen and just count for more towards the middle
+//the old implementation shrank the sampled region instead, which meant at 0.5 the exposure only ever looked at the middle quarter of the image and anything bright wandering through it swung the exposure hard
+//0.0 means every part of the screen counts equally, 1.0 means strongly weighted towards the center with the edges barely counting
 //[CONFIG TYPE]: float
 //[CONFIG DEFAULT]: 0.5
 //[CONFIG RANGE]: [0, 1]
 #define AUTO_EXPOSURE_CENTER_FOCUS 0.5
+
+//(AUTO_EXPOSURE) debug visualisation of the metering, see AUTO_EXPOSURE_DEBUG_MODE below.
+//[NO CONFIG]
+//#define AUTO_EXPOSURE_DEBUG
+
+//(AUTO_EXPOSURE) which debug view to draw when AUTO_EXPOSURE_DEBUG is enabled.
+//1 = metering source check, left half of the screen shows scene luminance and right half shows glare luminance with the calibration applied, the two halves should match tonally if the glare chain is a full scene blur
+//2 = exposure uniformity, computes the exposure both ways in the same frame and shows the difference, dark blue means they agree and red is a seam you would actually see, very slow since it runs the slow metering for every pixel
+//3 = metering weight field, shows what AUTO_EXPOSURE_CENTER_FOCUS is actually weighting
+//4 = sample point positions, tinted by the luminance each point measured
+//[NO CONFIG]
+#define AUTO_EXPOSURE_DEBUG_MODE 1
 
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - COLOR / BRIGHTNESS ADJUSTMENTS ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| CONFIGURATION - COLOR / BRIGHTNESS ADJUSTMENTS ||||||||||||||||||||||||||||||||||
@@ -755,56 +783,284 @@ float ComputeVignette(float3 vignetteRayContext)
 //|||||||||||||||||||||||||||||||||||||||||||| AUTO EXPOSURE ||||||||||||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||||||||||||| AUTO EXPOSURE ||||||||||||||||||||||||||||||||||||||||||||
 
-float2 ApplyAutoExposureCenterFocus(float2 uv)
+#if defined(AUTO_EXPOSURE)
+
+//Where the metering samples land, in destination UV space.
+//IMPORTANT NOTE: these have to be specific fixed points, not relative to the current pixel,
+//so that way every pixel is measuring the same set of points and agrees on the same exposure.
+//This is the R2 low discrepancy sequence rather than a regular grid, a grid lines up with repeating
+//structure in the scene (railings, tiles, foliage) and aliases against it, which shows up as exposure
+//wobble when the camera moves. R2 covers the screen just as evenly without ever lining up.
+float2 AutoExposureSamplePoint(uint sampleIndex)
 {
-    float focus = saturate(AUTO_EXPOSURE_CENTER_FOCUS);
-    return lerp(uv, float2(0.5f, 0.5f), focus);
+    //1/g and 1/g^2 for the plastic constant g = 1.32471795724474602596
+    const float2 alpha = float2(0.7548776662466927f, 0.5698402909980532f);
+
+    return frac(0.5f.xx + alpha * (float)(sampleIndex + 1));
 }
 
-//this is a scuffed way of calculating exposure...
-//ideally just before this we could generate mips of the raw framebuffer
-//this would allow us to very efficently sample the lowest mip level once, natrually the mips are averages
-//and we can use that average to calculate an exposure factor
-float CalculateAutoExposure()
+//How much a sample counts towards the average, based on how close to the center of the screen it is.
+//Weighting the center is what a camera's center weighted metering mode does. Note that we still SAMPLE
+//the whole screen, we just count the middle for more, so a bright object at the edge still registers.
+float AutoExposureSampleWeight(float2 destinationUV)
 {
-    float accumulatedLogLuminance = 0.0f;
+    float focus = saturate(AUTO_EXPOSURE_CENTER_FOCUS);
 
-    [unroll]
-    for (uint y = 0; y < AUTO_EXPOSURE_GRID_Y; ++y)
+    //0 at the center, 1 at the middle of an edge, 2 in the corners
+    float2 offsetFromCenter = (destinationUV - 0.5f.xx) * 2.0f;
+    float radiusSquared = dot(offsetFromCenter, offsetFromCenter);
+
+    //smooth falloff, never reaches zero so the edges are always represented
+    float centerWeight = exp2(-radiusSquared * 2.0f);
+
+    return lerp(1.0f, centerWeight, focus);
+}
+
+//The scene brightness a metering sample sees, in EV (log2 luminance).
+float AutoExposureSampleEV(float2 destinationUV)
+{
+    #if defined(AUTO_EXPOSURE_SOURCE_GLARE)
+        //the glare chain is already downsampled and blurred, so this one fetch is effectively an
+        //area average of that part of the screen rather than a single point
+        float2 sampleUV = DestinationUVToGlareTextureUV(destinationUV);
+        float3 sampleColor = GlareTexture.SampleLevel(View_SharedBilinearClampedSampler, sampleUV, 0.0f).rgb;
+    #else
+        float2 sampleUV = DestinationUVToColorTextureUV(destinationUV);
+        float3 sampleColor = ColorTexture.SampleLevel(View_SharedBilinearClampedSampler, sampleUV, 0.0f).rgb;
+    #endif
+
+    sampleColor = max(sampleColor, 0.0f.xxx);
+
+    //float luminance = max(Luminance(sampleColor), 1.0e-5f);
+    float luminance = max(LuminanceRec709(sampleColor), 1.0e-5f);
+
+    //working in log2 throughout, so a few very bright pixels cannot dominate the average
+    return log2(luminance);
+}
+
+//Measures the average scene brightness in EV.
+//
+//The samples are split across the lanes of the wave and summed with WaveActiveSum, so the whole wave pays
+//for one full screen measurement between them instead of every pixel paying for all of it. Note that we
+//normalise by the summed WEIGHT rather than by the sample count, which means a partially filled wave at the
+//edge of the viewport still produces a correct average from whichever samples it did take.
+float MeasureAutoExposureEV()
+{
+    const uint sampleCount = AUTO_EXPOSURE_SAMPLE_COUNT;
+
+    uint laneCount = WaveGetLaneCount();
+    uint laneIndex = WaveGetLaneIndex();
+
+    //first pass, plain weighted average of the whole screen
+    float laneSum = 0.0f;
+    float laneWeight = 0.0f;
+
+    for (uint i = laneIndex; i < sampleCount; i += laneCount)
     {
-        [unroll]
-        for (uint x = 0; x < AUTO_EXPOSURE_GRID_X; ++x)
-        {
-            //Sample the center of each grid cell
-			//IMPORTANT NOTE: this has to be a specific points, not relative to the current pixel
-			//So that way every pixel is sampling the same set of points
-			float2 destinationUV = (float2(x, y) + 0.5f) / float2(AUTO_EXPOSURE_GRID_X, AUTO_EXPOSURE_GRID_Y);
-			destinationUV = ApplyAutoExposureCenterFocus(destinationUV);
+        float2 destinationUV = AutoExposureSamplePoint(i);
+        float weight = AutoExposureSampleWeight(destinationUV);
 
-            float2 colorUV = DestinationUVToColorTextureUV(destinationUV);
-
-            float3 sampleColor = ColorTexture.SampleLevel(View_SharedBilinearClampedSampler, colorUV, 0.0f).rgb;
-
-            sampleColor = max(sampleColor, 0.0f.xxx);
-
-			//float luminance = max(Luminance(sampleColor), 1.0e-5f);
-            float luminance = max(LuminanceRec709(sampleColor), 1.0e-5f);
-
-            //log averaging prevents a few very bright pixels from dominating the exposure calculation.
-            accumulatedLogLuminance += log2(luminance);
-        }
+        laneSum += AutoExposureSampleEV(destinationUV) * weight;
+        laneWeight += weight;
     }
 
-    const float sampleCount = AUTO_EXPOSURE_GRID_X * AUTO_EXPOSURE_GRID_Y;
+    float meanEV = WaveActiveSum(laneSum) / max(WaveActiveSum(laneWeight), 1.0e-5f);
 
-    float averageLuminance = exp2(accumulatedLogLuminance / sampleCount);
-    float meteredEV  = log2(AUTO_EXPOSURE_MIDDLE_GRAY / averageLuminance);
-	float exposureEV = meteredEV * AUTO_EXPOSURE_STRENGTH + AUTO_EXPOSURE_COMPENSATION_EV;
+    //second pass, same samples but clamped to a window around the mean so that outliers stop dragging it.
+    //this is what stops the sun, a spell effect or a specular highlight entering frame from making the
+    //whole image dip. re-reading the samples is cheaper than keeping them in registers.
+    float rejectLowEV = meanEV - AUTO_EXPOSURE_REJECT_LOW_EV;
+    float rejectHighEV = meanEV + AUTO_EXPOSURE_REJECT_HIGH_EV;
+
+    float laneRobustSum = 0.0f;
+    float laneRobustWeight = 0.0f;
+
+    for (uint j = laneIndex; j < sampleCount; j += laneCount)
+    {
+        float2 destinationUV = AutoExposureSamplePoint(j);
+        float weight = AutoExposureSampleWeight(destinationUV);
+
+        laneRobustSum += clamp(AutoExposureSampleEV(destinationUV), rejectLowEV, rejectHighEV) * weight;
+        laneRobustWeight += weight;
+    }
+
+    float averageEV = WaveActiveSum(laneRobustSum) / max(WaveActiveSum(laneRobustWeight), 1.0e-5f);
+
+    #if defined(AUTO_EXPOSURE_SOURCE_GLARE)
+        //convert glare brightness back into scene brightness
+        averageEV += AUTO_EXPOSURE_GLARE_CALIBRATION_EV;
+    #endif
+
+    return averageEV;
+}
+
+//Turns the measured scene brightness into the exposure multiplier applied to the image.
+float CalculateAutoExposure()
+{
+    float averageEV = MeasureAutoExposureEV();
+
+    float meteredEV = log2(AUTO_EXPOSURE_MIDDLE_GRAY) - averageEV;
+    float exposureEV = meteredEV * AUTO_EXPOSURE_STRENGTH + AUTO_EXPOSURE_COMPENSATION_EV;
 
     exposureEV = clamp(exposureEV, AUTO_EXPOSURE_MIN_EV, AUTO_EXPOSURE_MAX_EV);
 
     return exp2(exposureEV);
 }
+
+#if defined(AUTO_EXPOSURE_DEBUG)
+
+//Reference implementation of MeasureAutoExposureEV that uses no wave intrinsics at all: every pixel walks
+//every sample by itself. This is the ground truth the cooperative version is supposed to reproduce.
+//
+//It is deliberately the slow, obvious version. Only AUTO_EXPOSURE_DEBUG_MODE 2 calls it, and only so that
+//the two results can be differenced inside a single frame.
+float MeasureAutoExposureEVPerPixel()
+{
+    const uint sampleCount = AUTO_EXPOSURE_SAMPLE_COUNT;
+
+    float sum = 0.0f;
+    float totalWeight = 0.0f;
+
+    for (uint i = 0; i < sampleCount; ++i)
+    {
+        float2 destinationUV = AutoExposureSamplePoint(i);
+        float weight = AutoExposureSampleWeight(destinationUV);
+
+        sum += AutoExposureSampleEV(destinationUV) * weight;
+        totalWeight += weight;
+    }
+
+    float meanEV = sum / max(totalWeight, 1.0e-5f);
+
+    float rejectLowEV = meanEV - AUTO_EXPOSURE_REJECT_LOW_EV;
+    float rejectHighEV = meanEV + AUTO_EXPOSURE_REJECT_HIGH_EV;
+
+    float robustSum = 0.0f;
+    float robustWeight = 0.0f;
+
+    for (uint j = 0; j < sampleCount; ++j)
+    {
+        float2 destinationUV = AutoExposureSamplePoint(j);
+        float weight = AutoExposureSampleWeight(destinationUV);
+
+        robustSum += clamp(AutoExposureSampleEV(destinationUV), rejectLowEV, rejectHighEV) * weight;
+        robustWeight += weight;
+    }
+
+    float averageEV = robustSum / max(robustWeight, 1.0e-5f);
+
+    #if defined(AUTO_EXPOSURE_SOURCE_GLARE)
+        averageEV += AUTO_EXPOSURE_GLARE_CALIBRATION_EV;
+    #endif
+
+    return averageEV;
+}
+
+//Colour code for the mode 2 error bands. The thresholds are in EV of the MEASUREMENT, which is what
+//MeasureAutoExposureEV returns, before AUTO_EXPOSURE_STRENGTH scales it on the way to the final exposure.
+//At the default strength of 0.5, a measurement error of 0.05 EV is about 1.7% brightness, which is under
+//the threshold where a flat gradient becomes visible as a band.
+float3 AutoExposureDebugErrorBand(float errorEV)
+{
+    //dark blue rather than black, so that "everything agrees" still looks like a live debug view
+    if (errorEV < 0.005f)
+        return float3(0.0f, 0.0f, 0.12f);
+
+    //green, the wave reduction disagrees but far below anything visible
+    if (errorEV < 0.05f)
+        return lerp(float3(0.0f, 0.25f, 0.0f), float3(0.0f, 1.0f, 0.0f), (errorEV - 0.005f) / 0.045f);
+
+    //yellow to orange, borderline
+    if (errorEV < 0.20f)
+        return lerp(float3(1.0f, 1.0f, 0.0f), float3(1.0f, 0.4f, 0.0f), (errorEV - 0.05f) / 0.15f);
+
+    //red, a seam that should be visible in the actual image
+    return float3(1.0f, 0.0f, 0.0f);
+}
+
+//maps an EV reading onto a blue -> green -> red ramp so relative brightness is readable at a glance
+float3 AutoExposureDebugHeat(float exposureValue)
+{
+    float t = saturate((exposureValue + 10.0f) / 15.0f);
+
+    float3 cold = float3(0.0f, 0.1f, 1.0f);
+    float3 mid = float3(0.0f, 1.0f, 0.2f);
+    float3 hot = float3(1.0f, 0.2f, 0.0f);
+
+    return t < 0.5f ? lerp(cold, mid, t * 2.0f) : lerp(mid, hot, (t - 0.5f) * 2.0f);
+}
+
+//Replaces the image with a diagnostic view, see AUTO_EXPOSURE_DEBUG_MODE for what each one answers.
+float3 ApplyAutoExposureDebug(float3 sceneColor, float2 destinationUV)
+{
+    #if AUTO_EXPOSURE_DEBUG_MODE == 1
+
+        //metering source check: is the glare chain a full scene blur, or a thresholded highlight pass?
+        float2 colorUV = DestinationUVToColorTextureUV(destinationUV);
+        float2 glareUV = DestinationUVToGlareTextureUV(destinationUV);
+
+        float sceneLuminance = max(LuminanceRec709(max(ColorTexture.SampleLevel(View_SharedBilinearClampedSampler, colorUV, 0.0f).rgb, 0.0f.xxx)), 1.0e-5f);
+        float glareLuminance = max(LuminanceRec709(max(GlareTexture.SampleLevel(View_SharedBilinearClampedSampler, glareUV, 0.0f).rgb, 0.0f.xxx)), 1.0e-5f);
+
+        //put the glare on the same scale as the scene so the two halves are directly comparable
+        glareLuminance *= exp2(AUTO_EXPOSURE_GLARE_CALIBRATION_EV);
+
+        //red divider down the middle
+        if (abs(destinationUV.x - 0.5f) < 0.0015f)
+            return float3(1.0f, 0.0f, 0.0f);
+
+        return (destinationUV.x < 0.5f ? sceneLuminance : glareLuminance).xxx;
+
+    #elif AUTO_EXPOSURE_DEBUG_MODE == 2
+
+        //Exposure uniformity, measured as a DIFFERENCE so that the test cannot be fooled by the scene
+        //simply getting brighter or darker while you look at it.
+        //
+        //Both numbers come from the same samples in the same frame. The only thing that differs is how
+        //they are summed, so anything other than "agrees" is the wave reduction itself being wrong,
+        //typically a wave at the viewport edge that only had some of its lanes populated.
+        //
+        //  dark blue      the two agree, nothing to see (this is the result you want)
+        //  green          they differ, but far too little to ever be visible
+        //  yellow/orange  borderline, look for the shape of it
+        //  red            a real seam, this would show in the image
+        //
+        //This view is expensive by design, it is the slow reference running for every pixel. Expect a
+        //large framerate drop while it is on, that is not what is being measured here.
+        float errorEV = abs(MeasureAutoExposureEV() - MeasureAutoExposureEVPerPixel());
+
+        return AutoExposureDebugErrorBand(errorEV);
+
+    #elif AUTO_EXPOSURE_DEBUG_MODE == 3
+
+        //what AUTO_EXPOSURE_CENTER_FOCUS is actually weighting
+        return AutoExposureSampleWeight(destinationUV).xxx;
+
+    #elif AUTO_EXPOSURE_DEBUG_MODE == 4
+
+        //where the samples land, tinted by the brightness each one measured
+        //NOTE: this one really is per pixel, it is a debug view only
+        float2 aspect = float2(ViewportDestination_ViewportSize.x * ViewportDestination_ViewportSizeInverse.y, 1.0f);
+        float3 result = sceneColor * 0.15f;
+
+        for (uint i = 0; i < AUTO_EXPOSURE_SAMPLE_COUNT; ++i)
+        {
+            float2 samplePoint = AutoExposureSamplePoint(i);
+
+            if (distance(destinationUV * aspect, samplePoint * aspect) < 0.004f)
+                result = AutoExposureDebugHeat(AutoExposureSampleEV(samplePoint));
+        }
+
+        return result;
+
+    #else
+        return sceneColor;
+    #endif
+}
+
+#endif //AUTO_EXPOSURE_DEBUG
+
+#endif //AUTO_EXPOSURE
 
 //||||||||||||||||||||||||||||||| IMAGE ADJUSTMENTS |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| IMAGE ADJUSTMENTS |||||||||||||||||||||||||||||||
@@ -1123,6 +1379,10 @@ PixelOutput main(PixelInput input)
 	#if defined(AUTO_EXPOSURE)
 		float autoExposure = CalculateAutoExposure();
 		sceneColor *= autoExposure;
+
+		#if defined(AUTO_EXPOSURE_DEBUG)
+			sceneColor = ApplyAutoExposureDebug(sceneColor, destinationUV);
+		#endif
 	#endif
 
 	//apply any custom artistic adjustments before we tonemap
