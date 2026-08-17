@@ -3,14 +3,14 @@
     "format": "ShaderInjector.ModifiedShader",
     "enabled": true,
     "id": "ModifiedPixelShader_AD971BD64DEB7F9E",
-    "name": "GameVersion1005_PostProcessFinalHDRMenuFull",
+    "name": "GameVersion1005_PostProcessFinalHDRGameplay3LayerFull",
     "author": "",
-    "description": "HDR menu variant of the final post process pass for non-neutral HDR calibration with a composition backdrop active (three UI layers, DeviceCorrectorContext brightness gamma + 1000 to 250 nit peak remap LUT, plus the BT.2020 PQ to sRGB LUT used for the backdrop). Reconstructed from the game HDR shader; outputs BT.2020 PQ.",
+    "description": "HDR gameplay variant of the final post process pass for non-neutral HDR calibration with a composition backdrop active (three UI layers, DeviceCorrectorContext brightness gamma + 1000 to 250 nit peak remap LUT, plus the BT.2020 PQ to sRGB LUT used for the backdrop). Non-neutral sibling of AFD51D036C4730AD, which was observed during a boss fight with a single controllable character. Reconstructed from the game HDR shader; outputs BT.2020 PQ.",
     "shaderType": 4,
     "shaderProfile": "ps_6_6",
     "shaderEntryPoint": "main",
-    "sourceFile": "GameVersion1005_PostProcessFinalHDRMenuFull_Source.hlsl",
-    "compiledBlobFile": "GameVersion1005_PostProcessFinalHDRMenuFull_Compiled.blob",
+    "sourceFile": "GameVersion1005_PostProcessFinalHDRGameplay3LayerFull_Source.hlsl",
+    "compiledBlobFile": "GameVersion1005_PostProcessFinalHDRGameplay3LayerFull_Compiled.blob",
     "targets": [
         {
             "name": "CapturedShader_AD971BD64DEB7F9E",

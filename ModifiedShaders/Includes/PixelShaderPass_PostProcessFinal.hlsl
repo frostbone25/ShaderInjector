@@ -268,10 +268,14 @@
 //                                         maximum or the brightness slider is off default, so in practice these are
 //                                         the common case; the four above only run at exactly neutral calibration.
 // POSTPROCESS_FINAL_HDR_MENU_REMAP      - menus with non-neutral HDR calibration. three UI layers, same LUT pair
+//                                         (game shader EB2D0BCAD9327257)
 // POSTPROCESS_FINAL_HDR_GAMEPLAY_FULL   - gameplay, non-neutral calibration AND a composition backdrop active.
 //                                         one UI layer, all three LUTs (game shader 10D1F04978261DDC)
-// POSTPROCESS_FINAL_HDR_MENU_FULL       - as above with three UI layers (game shader AD971BD64DEB7F9E)
-//                                         (game shader EB2D0BCAD9327257)
+// POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER_FULL
+//                                       - as above with three UI layers (game shader AD971BD64DEB7F9E). the
+//                                         neutral sibling AFD51D036C4730AD was observed during a boss fight
+//                                         with a single controllable character, so the three layer backdrop
+//                                         case is gameplay, not menus.
 //POSTPROCESS_FINAL_HDR_GAMEPLAY and POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER also read HDRCompositionContext/
 //HDRCompositionContextColor from the constant buffer - see the HDR OUTPUT section below for what those do.
 //Everything above this point - auto exposure, bloom, vignette
@@ -299,22 +303,22 @@
 #define HDR_OUTPUT_SCALE 1.0
 
 //internal helpers derived from the variant selectors above, never set these by hand
-#if defined(POSTPROCESS_FINAL_HDR) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_SIMPLE) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_REMAP) || defined(POSTPROCESS_FINAL_HDR_MENU_REMAP) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_FULL) || defined(POSTPROCESS_FINAL_HDR_MENU_FULL)
+#if defined(POSTPROCESS_FINAL_HDR) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_SIMPLE) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_REMAP) || defined(POSTPROCESS_FINAL_HDR_MENU_REMAP) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_FULL) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER_FULL)
 	//[NO CONFIG]
 	#define POSTPROCESS_FINAL_HDR_ANY
 #endif
 
-#if defined(POSTPROCESS_FINAL_HDR) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER) || defined(POSTPROCESS_FINAL_HDR_MENU_REMAP) || defined(POSTPROCESS_FINAL_HDR_MENU_FULL)
+#if defined(POSTPROCESS_FINAL_HDR) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER) || defined(POSTPROCESS_FINAL_HDR_MENU_REMAP) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER_FULL)
 	//[NO CONFIG]
 	#define POSTPROCESS_FINAL_HDR_UI_3LAYER
 #endif
 
-#if defined(POSTPROCESS_FINAL_HDR_GAMEPLAY) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_FULL) || defined(POSTPROCESS_FINAL_HDR_MENU_FULL)
+#if defined(POSTPROCESS_FINAL_HDR_GAMEPLAY) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_FULL) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER_FULL)
 	//[NO CONFIG]
 	#define POSTPROCESS_FINAL_HDR_COMPOSITION
 #endif
 
-#if defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_REMAP) || defined(POSTPROCESS_FINAL_HDR_MENU_REMAP) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_FULL) || defined(POSTPROCESS_FINAL_HDR_MENU_FULL)
+#if defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_REMAP) || defined(POSTPROCESS_FINAL_HDR_MENU_REMAP) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_FULL) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER_FULL)
 	//[NO CONFIG]
 	#define POSTPROCESS_FINAL_HDR_DEVICE_REMAP
 #endif
@@ -345,8 +349,8 @@ Texture2D<float4> CompositeSDRTexture : register(t3);
 	Texture2D<float4> CompositeSDRForegroundTexture : register(t5);
 	Texture3D<float4> BT709PQToBT2020PQLUT : register(t6);
 	Texture3D<float4> BT2020PQTosRGBLUT : register(t7);
-#elif defined(POSTPROCESS_FINAL_HDR_MENU_FULL)
-	//calibrated menus with a composition backdrop: three UI layers and all three LUTs
+#elif defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER_FULL)
+	//calibrated gameplay with a composition backdrop: three UI layers and all three LUTs
 	Texture2D<float4> CompositeSDRBackgroundTexture : register(t4);
 	Texture2D<float4> CompositeSDRForegroundTexture : register(t5);
 	Texture3D<float4> BT709PQToBT2020PQLUT : register(t6);
@@ -1199,7 +1203,7 @@ float3 ApplyQuadSharpen(float3 centerColor, float2 pixelPosition)
 // 75C16A8ECF232D62 (calibrated gameplay, one UI layer, POSTPROCESS_FINAL_HDR_GAMEPLAY_REMAP)
 // EB2D0BCAD9327257 (calibrated menus, three UI layers, POSTPROCESS_FINAL_HDR_MENU_REMAP)
 // 10D1F04978261DDC (calibrated gameplay + backdrop, one UI layer, POSTPROCESS_FINAL_HDR_GAMEPLAY_FULL)
-// AD971BD64DEB7F9E (calibrated menus + backdrop, three UI layers, POSTPROCESS_FINAL_HDR_MENU_FULL)
+// AD971BD64DEB7F9E (calibrated gameplay + backdrop, three UI layers, POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER_FULL)
 //They work in absolute luminance (nits) rather than the 0-1 framebuffer scale the SDR path uses,
 //and write BT.2020 PQ for a 10 bit HDR10 swapchain.
 //
