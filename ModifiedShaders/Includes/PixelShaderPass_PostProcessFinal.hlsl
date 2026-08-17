@@ -255,15 +255,23 @@
 //These only apply to the HDR variants of this pass (GameVersion*_PostProcessFinalHDR*). In SDR they are simply unused.
 //
 //The game runs completely separate shaders for the final pass in HDR, all writing BT.2020 PQ (HDR10) instead of sRGB.
-//There are four permutations, each selected by the package that includes this file:
+//There are six permutations, each selected by the package that includes this file:
 // POSTPROCESS_FINAL_HDR_GAMEPLAY_SIMPLE - normal gameplay. one UI layer, only BT709PQToBT2020PQLUT, no composition
 //                                         context (game shader CBA9C01BD1B69ABF). Identified from a RenderDoc capture;
 //                                         this is the one that actually draws the world, so it is the one that matters most.
 // POSTPROCESS_FINAL_HDR                  - menus. three UI composite layers, no BT2020PQTosRGBLUT (game shader 3966BB6523888928)
 // POSTPROCESS_FINAL_HDR_GAMEPLAY        - gameplay. one UI layer, both LUTs, same resource layout as SDR (game shader 6ACF39BD7FB286B8)
 // POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER - gameplay. three UI layers, both LUTs (game shader AFD51D036C4730AD)
-//The middle two also read HDRCompositionContext/HDRCompositionContextColor from the constant buffer - see the
-//HDR OUTPUT section below for what those do. Everything above this point - auto exposure, bloom, vignette
+// POSTPROCESS_FINAL_HDR_GAMEPLAY_REMAP  - gameplay with non-neutral HDR calibration. one UI layer, BT709PQToBT2020PQLUT
+//                                         plus the BT2020PQ1000ToBT2020PQ250LUT remap (game shader 75C16A8ECF232D62).
+//                                         the game switches to the *_REMAP pair whenever HDR brightness is set below
+//                                         maximum or the brightness slider is off default, so in practice these are
+//                                         the common case; the four above only run at exactly neutral calibration.
+// POSTPROCESS_FINAL_HDR_MENU_REMAP      - menus with non-neutral HDR calibration. three UI layers, same LUT pair
+//                                         (game shader EB2D0BCAD9327257)
+//POSTPROCESS_FINAL_HDR_GAMEPLAY and POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER also read HDRCompositionContext/
+//HDRCompositionContextColor from the constant buffer - see the HDR OUTPUT section below for what those do.
+//Everything above this point - auto exposure, bloom, vignette
 //and all the ADJUSTMENT_* controls - applies to SDR and HDR alike.
 
 //(HDR) how bright the UI/subtitles are, in nits.
@@ -287,13 +295,13 @@
 //[CONFIG RANGE]: [0.1, 4]
 #define HDR_OUTPUT_SCALE 1.0
 
-//internal helpers derived from the three variant selectors above, never set these by hand
-#if defined(POSTPROCESS_FINAL_HDR) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_SIMPLE)
+//internal helpers derived from the variant selectors above, never set these by hand
+#if defined(POSTPROCESS_FINAL_HDR) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_SIMPLE) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_REMAP) || defined(POSTPROCESS_FINAL_HDR_MENU_REMAP)
 	//[NO CONFIG]
 	#define POSTPROCESS_FINAL_HDR_ANY
 #endif
 
-#if defined(POSTPROCESS_FINAL_HDR) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER)
+#if defined(POSTPROCESS_FINAL_HDR) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER) || defined(POSTPROCESS_FINAL_HDR_MENU_REMAP)
 	//[NO CONFIG]
 	#define POSTPROCESS_FINAL_HDR_UI_3LAYER
 #endif
@@ -301,6 +309,11 @@
 #if defined(POSTPROCESS_FINAL_HDR_GAMEPLAY) || defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER)
 	//[NO CONFIG]
 	#define POSTPROCESS_FINAL_HDR_COMPOSITION
+#endif
+
+#if defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_REMAP) || defined(POSTPROCESS_FINAL_HDR_MENU_REMAP)
+	//[NO CONFIG]
+	#define POSTPROCESS_FINAL_HDR_DEVICE_REMAP
 #endif
 
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -329,6 +342,16 @@ Texture2D<float4> CompositeSDRTexture : register(t3);
 	Texture2D<float4> CompositeSDRForegroundTexture : register(t5);
 	Texture3D<float4> BT709PQToBT2020PQLUT : register(t6);
 	Texture3D<float4> BT2020PQTosRGBLUT : register(t7);
+#elif defined(POSTPROCESS_FINAL_HDR_MENU_REMAP)
+	//the calibrated menu pass: three UI layers plus the 1000 -> 250 nit remap LUT (see HDR OUTPUT below)
+	Texture2D<float4> CompositeSDRBackgroundTexture : register(t4);
+	Texture2D<float4> CompositeSDRForegroundTexture : register(t5);
+	Texture3D<float4> BT709PQToBT2020PQLUT : register(t6);
+	Texture3D<float4> BT2020PQ1000ToBT2020PQ250LUT : register(t7);
+#elif defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_REMAP)
+	//the calibrated gameplay pass: one UI layer plus the 1000 -> 250 nit remap LUT (see HDR OUTPUT below)
+	Texture3D<float4> BT709PQToBT2020PQLUT : register(t4);
+	Texture3D<float4> BT2020PQ1000ToBT2020PQ250LUT : register(t5);
 #elif defined(POSTPROCESS_FINAL_HDR_GAMEPLAY_SIMPLE)
 	//the plain gameplay pass: one UI layer and one LUT. No HDR->SDR LUT because it has no composition backdrop.
 	Texture3D<float4> BT709PQToBT2020PQLUT : register(t4);
@@ -1158,10 +1181,12 @@ float3 ApplyQuadSharpen(float3 centerColor, float2 pixelPosition)
 // 3966BB6523888928 (menus, POSTPROCESS_FINAL_HDR)
 // 6ACF39BD7FB286B8 (gameplay, one UI layer, POSTPROCESS_FINAL_HDR_GAMEPLAY)
 // AFD51D036C4730AD (gameplay, three UI layers, POSTPROCESS_FINAL_HDR_GAMEPLAY_3LAYER)
+// 75C16A8ECF232D62 (calibrated gameplay, one UI layer, POSTPROCESS_FINAL_HDR_GAMEPLAY_REMAP)
+// EB2D0BCAD9327257 (calibrated menus, three UI layers, POSTPROCESS_FINAL_HDR_MENU_REMAP)
 //They work in absolute luminance (nits) rather than the 0-1 framebuffer scale the SDR path uses,
 //and write BT.2020 PQ for a 10 bit HDR10 swapchain.
 //
-//All three share the same skeleton, decoded from the DXIL:
+//All of them share the same skeleton, decoded from the DXIL:
 //  sceneNormalized = PQToLinear( BT709PQToBT2020PQLUT[ Linear100NitsToPQ(sceneColor) ] )  // 0..1 of 10000 nits
 //  sceneNits       = sceneNormalized * 10000
 //  UI: premultiplied "over" composite (one layer, or back to front Background(t4) -> Main(t3) -> Foreground(t5))
@@ -1175,6 +1200,10 @@ float3 ApplyQuadSharpen(float3 centerColor, float2 pixelPosition)
 //can blend the area behind the UI away from the live HDR scene toward an SDR display mapped, luminance only,
 //tinted copy of it, in a vignette shape (strongest at the screen edges). With the context values at zero it
 //vanishes entirely. The menu pass reads neither of those constants and hard-codes UI paper white instead.
+//
+//The two *_REMAP passes instead apply the player's HDR calibration to the scene, driven by DeviceCorrectorContext -
+//see ApplyDeviceCorrectorRemap below for the decoded maths. They read neither HDRCompositionContext row, so they
+//have no composition backdrop.
 
 #if defined(POSTPROCESS_FINAL_HDR_ANY)
 
@@ -1267,12 +1296,68 @@ float ComputeHDRCompositionBlend(float4 vignetteRayContext)
 
 #endif //POSTPROCESS_FINAL_HDR_COMPOSITION
 
+#if defined(POSTPROCESS_FINAL_HDR_DEVICE_REMAP)
+
+//(calibrated passes only) the game's HDR device calibration, decoded from the DXIL of 75C16A8ECF232D62 and
+//EB2D0BCAD9327257 (their scene maths are instruction for instruction identical, only the UI composite differs):
+//
+//  x = saturate(DeviceCorrectorContext.x)                     // brightness slider amount, 0 = default
+//  y = saturate(DeviceCorrectorContext.y)                     // HDR peak brightness calibration, 1 = maximum
+//  if (x > 0)                                                 // brightness gamma, applied in 0..1000 nit space
+//      exponent  = 1 - x * 0.29289323                         // = lerp(1, 1/sqrt(2), x), exponent < 1 brightens
+//      adjusted  = pow(saturate(sceneNits / 1000), exponent)  // note: this clips the scene at 1000 nits
+//      sceneNits = adjusted * 1000
+//      scenePQ   = PQ(adjusted / 10)                          // re-encode nits/10000 so the LUT below sees the change
+//  if (y < 1)                                                 // peak brightness remap
+//      remapNits = PQToLinear(BT2020PQ1000ToBT2020PQ250LUT[scenePQ * 31/32 + 0.5/32]) * 10000
+//      sceneNits = lerp(remapNits, sceneNits, y)              // y = 0 is the full 1000 -> 250 nit display mapping
+//
+//with x = 0 and y = 1 (neutral calibration) both branches vanish and these passes reduce exactly to the
+//non-remap variants - which is why the game only runs those when the calibration is untouched.
+float3 ApplyDeviceCorrectorRemap(float3 sceneNits, float3 sceneNormalized, float3 scenePQ)
+{
+    const float lutScale = 31.0f / 32.0f;
+    const float lutBias  = 0.5f / 32.0f;
+
+    float brightnessWeight = saturate(DeviceCorrectorContext.x);
+    float peakBrightnessWeight = saturate(DeviceCorrectorContext.y);
+
+    if (brightnessWeight > 0.0f)
+    {
+        //0.29289323f is float(1 - 1/sqrt(2)), the exact constant in the game's DXIL
+        float gammaExponent = 1.0f - brightnessWeight * 0.29289323f;
+        float3 gammaAdjusted = pow(saturate(sceneNormalized * 10.0f), gammaExponent);
+        sceneNits = gammaAdjusted * 1000.0f;
+        //the game encodes PQ(gammaAdjusted * 0.1); LinearNitsToPQ(gammaAdjusted * 1000) is the same value
+        scenePQ = LinearNitsToPQ(sceneNits);
+    }
+
+    if (peakBrightnessWeight < 1.0f)
+    {
+        float3 remapPQ = BT2020PQ1000ToBT2020PQ250LUT.SampleLevel(View_SharedBilinearClampedSampler, scenePQ * lutScale + lutBias, 0.0f).rgb;
+        float3 remapNits = PQToLinearNormalized(remapPQ) * PQ_MAX_NITS;
+        sceneNits = lerp(remapNits, sceneNits, peakBrightnessWeight);
+    }
+
+    return sceneNits;
+}
+
+#endif //POSTPROCESS_FINAL_HDR_DEVICE_REMAP
+
 float3 ComposeHDROutput(float3 sceneColor, float2 compositeUV, float2 pixelPosition, float4 vignetteRayContext)
 {
     //|||| SCENE ||||
     //the game's own HDR grade, decoded from PQ back to linear light
-    float3 sceneNormalized = PQToLinearNormalized(SampleGameGradeBT2020PQ(sceneColor));
+    float3 scenePQ = SampleGameGradeBT2020PQ(sceneColor);
+    float3 sceneNormalized = PQToLinearNormalized(scenePQ);
     float3 sceneNits = sceneNormalized * PQ_MAX_NITS;
+
+    #if defined(POSTPROCESS_FINAL_HDR_DEVICE_REMAP)
+        //the player's HDR calibration - see ApplyDeviceCorrectorRemap above. The readability term further down
+        //has to see the remapped brightness, so the normalized value is refreshed from the remapped nits.
+        sceneNits = ApplyDeviceCorrectorRemap(sceneNits, sceneNormalized, scenePQ);
+        sceneNormalized = sceneNits * (1.0f / PQ_MAX_NITS);
+    #endif
 
     #if defined(POSTPROCESS_FINAL_HDR_COMPOSITION)
         float compositionBlend = ComputeHDRCompositionBlend(vignetteRayContext);
