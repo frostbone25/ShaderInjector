@@ -83,8 +83,8 @@
 //(AUTO_EXPOSURE) calibration offset in EV that converts glare brightness back into scene brightness, the glare chain sits at roughly 1/15th of scene brightness and log2(15) is about 3.9
 //only used when AUTO_EXPOSURE_SOURCE_GLARE is enabled, lower this if the image is consistently too dark and raise it if it is consistently too bright
 //[CONFIG TYPE]: float
-//[CONFIG DEFAULT]: 3.9
-#define AUTO_EXPOSURE_GLARE_CALIBRATION_EV 3.9
+//[CONFIG DEFAULT]: 6.1
+#define AUTO_EXPOSURE_GLARE_CALIBRATION_EV 6.1
 
 //(AUTO_EXPOSURE) how far below the average a sample is allowed to sit before it stops pulling the exposure down, rejecting outliers like this stops a single dark corner from washing the whole image out
 //[CONFIG TYPE]: float
