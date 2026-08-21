@@ -2,24 +2,24 @@
     "schemaVersion": 2,
     "format": "ShaderInjector.ModifiedShader",
     "enabled": true,
-    "id": "ModifiedPixelShader_AD971BD64DEB7F9E",
-    "name": "GameVersion1005_PostProcessFinalHDRGameplay3LayerFull",
+    "id": "ModifiedPixelShader_52F84DBF2D54B015",
+    "name": "GameVersion1005_PostProcessFinalHDRGameplaySimpleFrameGen",
     "author": "",
-    "description": "HDR gameplay variant of the final post process pass for non-neutral HDR calibration with a composition backdrop active (three UI layers, DeviceCorrectorContext brightness gamma + 1000 to 250 nit peak remap LUT, plus the BT.2020 PQ to sRGB LUT used for the backdrop). Non-neutral sibling of AFD51D036C4730AD. Neither has been observed rendering; both are matched on resource layout and bytecode structure. Reconstructed from the game HDR shader; outputs BT.2020 PQ.",
+    "description": "HDR final pass for normal gameplay: one UI layer, single LUT, no composition context, with DLSS frame generation enabled. Writes three render targets (composited image, hudless scene, recovered UI colour + alpha) instead of one; resource layout is identical to CBA9C01BD1B69ABF. Reconstructed from the game HDR shader; outputs BT.2020 PQ.",
     "shaderType": 4,
     "shaderProfile": "ps_6_6",
     "shaderEntryPoint": "main",
-    "sourceFile": "GameVersion1005_PostProcessFinalHDRGameplay3LayerFull_Source.hlsl",
-    "compiledBlobFile": "GameVersion1005_PostProcessFinalHDRGameplay3LayerFull_Compiled.blob",
+    "sourceFile": "GameVersion1005_PostProcessFinalHDRGameplaySimpleFrameGen_Source.hlsl",
+    "compiledBlobFile": "GameVersion1005_PostProcessFinalHDRGameplaySimpleFrameGen_Compiled.blob",
     "targets": [
         {
-            "name": "CapturedShader_AD971BD64DEB7F9E",
+            "name": "CapturedShader_52F84DBF2D54B015",
             "targetApplication": "",
             "gameVersion": "",
             "knownShaderBytecodeHashes": [
-                "AD971BD64DEB7F9E"
+                "52F84DBF2D54B015"
             ],
-            "originalShaderBytecodeLength": "28632",
+            "originalShaderBytecodeLength": "27024",
             "shaderAnalysis": {
                 "analysisVersion": 1,
                 "succeeded": true,
@@ -32,19 +32,19 @@
                 "shaderModelMinor": 6,
                 "shaderModelProfile": "ps_6_6",
                 "compilationFlags": 0,
-                "containerSignatureHash": "69693BE6E724C2E6",
-                "interfaceSignatureHash": "F4A22A79242AB2E2",
-                "resourceSignatureHash": "182804AEF47B2CA8",
-                "constantBufferSignatureHash": "F46A88D036A6C271",
-                "instructionStatisticsHash": "260245CE8126778A",
+                "containerSignatureHash": "F2C7822E2BDCF7CD",
+                "interfaceSignatureHash": "6BF9FFA01DC64897",
+                "resourceSignatureHash": "936B81B8114B233C",
+                "constantBufferSignatureHash": "95EC729786E4561D",
+                "instructionStatisticsHash": "8F4A846530F679C0",
                 "executionSignatureHash": "E2EDE190F036AB73",
-                "portableReflectionIdentityHash": "393F40A38A4EE498",
+                "portableReflectionIdentityHash": "0EBBAED21C5F4F92",
                 "entryFunctionName": "MainPS",
-                "normalizedInstructionCount": 770,
-                "uniqueNormalizedInstructionCount": 138,
-                "semanticInstructionSetHash": "4DE04EFFD1B95828",
-                "crossVersionIdentityHash": "540BAD5F96F1D727",
-                "reflectionSignatureHash": "907AD92764C4A4EA",
+                "normalizedInstructionCount": 540,
+                "uniqueNormalizedInstructionCount": 126,
+                "semanticInstructionSetHash": "21DC3AED221AB203",
+                "crossVersionIdentityHash": "44FB8C758C92F18A",
+                "reflectionSignatureHash": "5293CFE4EDAB9F23",
                 "containerParts": [
                     {
                         "fourCC": "SFI0",
@@ -56,43 +56,43 @@
                         "fourCC": "ISG1",
                         "kind": 826757961,
                         "size": 128,
-                        "contentHash": "4F8EB8946920C1E3"
+                        "contentHash": "2CB6298D83E8FB6B"
                     },
                     {
                         "fourCC": "OSG1",
                         "kind": 826757967,
-                        "size": 52,
-                        "contentHash": "5116C835E844E585"
+                        "size": 116,
+                        "contentHash": "261C0ACC72F1965B"
                     },
                     {
                         "fourCC": "PSV0",
                         "kind": 810963792,
-                        "size": 512,
-                        "contentHash": "A668FD7C1039280F"
+                        "size": 452,
+                        "contentHash": "D8EA1CF52FAB448C"
                     },
                     {
                         "fourCC": "STAT",
                         "kind": 1413567571,
-                        "size": 19340,
-                        "contentHash": "FD5ACB40D8B8D0AC"
+                        "size": 19260,
+                        "contentHash": "73DA6E22570F2677"
                     },
                     {
                         "fourCC": "ILDN",
                         "kind": 1313098825,
                         "size": 44,
-                        "contentHash": "40A6061BEA4A993F"
+                        "contentHash": "C9947B9541BCE338"
                     },
                     {
                         "fourCC": "HASH",
                         "kind": 1213415752,
                         "size": 20,
-                        "contentHash": "4F221FB3FFC95727"
+                        "contentHash": "5EE5727688AF08AC"
                     },
                     {
                         "fourCC": "DXIL",
                         "kind": 1279875140,
-                        "size": 8372,
-                        "contentHash": "2D23FA55B5192F49"
+                        "size": 6840,
+                        "contentHash": "8E05F140DCCB1B01"
                     },
                     {
                         "fourCC": "PRIV",
@@ -120,7 +120,7 @@
                         "systemValueType": 0,
                         "componentType": 3,
                         "mask": 15,
-                        "readWriteMask": 15,
+                        "readWriteMask": 7,
                         "stream": 0,
                         "minimumPrecision": 0
                     },
@@ -141,6 +141,28 @@
                         "semanticName": "SV_TARGET",
                         "semanticIndex": 0,
                         "registerIndex": 0,
+                        "systemValueType": 64,
+                        "componentType": 3,
+                        "mask": 15,
+                        "readWriteMask": 0,
+                        "stream": 0,
+                        "minimumPrecision": 0
+                    },
+                    {
+                        "semanticName": "SV_TARGET",
+                        "semanticIndex": 1,
+                        "registerIndex": 1,
+                        "systemValueType": 64,
+                        "componentType": 3,
+                        "mask": 15,
+                        "readWriteMask": 0,
+                        "stream": 0,
+                        "minimumPrecision": 0
+                    },
+                    {
+                        "semanticName": "SV_TARGET",
+                        "semanticIndex": 2,
+                        "registerIndex": 2,
                         "systemValueType": 64,
                         "componentType": 3,
                         "mask": 15,
@@ -236,64 +258,16 @@
                         "rangeId": 3
                     },
                     {
-                        "name": "CompositeSDRBackgroundTexture",
+                        "name": "BT709PQToBT2020PQLUT",
                         "type": 2,
                         "bindPoint": 4,
                         "bindCount": 1,
                         "flags": 12,
                         "returnType": 5,
-                        "dimension": 4,
+                        "dimension": 8,
                         "sampleCountOrStride": 4294967295,
                         "registerSpace": 0,
                         "rangeId": 4
-                    },
-                    {
-                        "name": "CompositeSDRForegroundTexture",
-                        "type": 2,
-                        "bindPoint": 5,
-                        "bindCount": 1,
-                        "flags": 12,
-                        "returnType": 5,
-                        "dimension": 4,
-                        "sampleCountOrStride": 4294967295,
-                        "registerSpace": 0,
-                        "rangeId": 5
-                    },
-                    {
-                        "name": "BT709PQToBT2020PQLUT",
-                        "type": 2,
-                        "bindPoint": 6,
-                        "bindCount": 1,
-                        "flags": 12,
-                        "returnType": 5,
-                        "dimension": 8,
-                        "sampleCountOrStride": 4294967295,
-                        "registerSpace": 0,
-                        "rangeId": 6
-                    },
-                    {
-                        "name": "BT2020PQTosRGBLUT",
-                        "type": 2,
-                        "bindPoint": 7,
-                        "bindCount": 1,
-                        "flags": 12,
-                        "returnType": 5,
-                        "dimension": 8,
-                        "sampleCountOrStride": 4294967295,
-                        "registerSpace": 0,
-                        "rangeId": 7
-                    },
-                    {
-                        "name": "BT2020PQ1000ToBT2020PQ250LUT",
-                        "type": 2,
-                        "bindPoint": 8,
-                        "bindCount": 1,
-                        "flags": 12,
-                        "returnType": 5,
-                        "dimension": 8,
-                        "sampleCountOrStride": 4294967295,
-                        "registerSpace": 0,
-                        "rangeId": 8
                     }
                 ],
                 "constantBuffers": [
@@ -1747,7 +1721,7 @@
                                 "name": "HDRCompositionContext",
                                 "startOffset": 816,
                                 "size": 16,
-                                "flags": 2,
+                                "flags": 0,
                                 "startTexture": 0,
                                 "textureCount": 0,
                                 "startSampler": 0,
@@ -1767,7 +1741,7 @@
                                 "name": "HDRCompositionContextColor",
                                 "startOffset": 832,
                                 "size": 16,
-                                "flags": 2,
+                                "flags": 0,
                                 "startTexture": 0,
                                 "textureCount": 0,
                                 "startSampler": 0,
@@ -7275,21 +7249,21 @@
                     }
                 ],
                 "instructionStatistics": {
-                    "instructionCount": 770,
+                    "instructionCount": 540,
                     "temporaryRegisterCount": 0,
                     "temporaryArrayCount": 0,
                     "constantDefinitionCount": 0,
                     "declarationCount": 0,
-                    "textureNormalInstructionCount": 8,
+                    "textureNormalInstructionCount": 4,
                     "textureLoadInstructionCount": 1,
                     "textureComparisonInstructionCount": 0,
                     "textureBiasInstructionCount": 0,
                     "textureGradientInstructionCount": 0,
-                    "floatInstructionCount": 594,
+                    "floatInstructionCount": 415,
                     "signedIntegerInstructionCount": 1,
                     "unsignedIntegerInstructionCount": 5,
                     "staticFlowControlCount": 0,
-                    "dynamicFlowControlCount": 8,
+                    "dynamicFlowControlCount": 3,
                     "macroInstructionCount": 0,
                     "arrayInstructionCount": 0,
                     "cutInstructionCount": 0,
