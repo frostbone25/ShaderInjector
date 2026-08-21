@@ -323,6 +323,13 @@
 	#define POSTPROCESS_FINAL_HDR_DEVICE_REMAP
 #endif
 
+//POSTPROCESS_FINAL_HDR_FRAMEGEN is a modifier, not a variant: pair it with one of the HDR selectors
+//above. On its own it would leave SV_Target1 and SV_Target2 undefined, which is not a compile error
+//but hands DLSS-G garbage, so fail loudly instead.
+#if defined(POSTPROCESS_FINAL_HDR_FRAMEGEN) && !defined(POSTPROCESS_FINAL_HDR_ANY)
+	#error POSTPROCESS_FINAL_HDR_FRAMEGEN requires one of the POSTPROCESS_FINAL_HDR* variant selectors alongside it.
+#endif
+
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -767,6 +774,13 @@ struct PixelInput
 struct PixelOutput
 {
     float4 Color : SV_Target0;
+#if defined(POSTPROCESS_FINAL_HDR_FRAMEGEN)
+    //Frame generation needs the scene without UI and the UI on its own, so DLSS-G can interpolate the
+    //scene and re-overlay the HUD instead of smearing it. Traced from the game's own frame generation
+    //final pass (52F84DBF2D54B015 and friends), which writes exactly these three targets.
+    float4 SceneNoUI     : SV_Target1;
+    float4 UIColorAlpha  : SV_Target2;
+#endif
 };
 
 //||||||||||||||||||||||||||||||| UV |||||||||||||||||||||||||||||||
@@ -1365,7 +1379,12 @@ float3 ApplyDeviceCorrectorRemap(float3 sceneNits, float3 sceneNormalized, float
 
 #endif //POSTPROCESS_FINAL_HDR_DEVICE_REMAP
 
-float3 ComposeHDROutput(float3 sceneColor, float2 compositeUV, float2 pixelPosition, float4 vignetteRayContext)
+float3 ComposeHDROutput(float3 sceneColor, float2 compositeUV, float2 pixelPosition, float4 vignetteRayContext
+#if defined(POSTPROCESS_FINAL_HDR_FRAMEGEN)
+    //the hudless scene and how much of it survives the UI, both needed to rebuild the UI layer downstream
+    , out float3 outSceneNoUIPQ, out float outSceneTransmittance
+#endif
+)
 {
     //|||| SCENE ||||
     //the game's own HDR grade, decoded from PQ back to linear light
@@ -1445,6 +1464,21 @@ float3 ComposeHDROutput(float3 sceneColor, float2 compositeUV, float2 pixelPosit
 
     uint3 noiseAddress = uint3((uint2)pixelPosition & 127u, (uint)View_StateFrameIndex & 63u);
     float blueNoise = View_SpatiotemporalBlueNoiseVolumeTexture.Load(int4(noiseAddress, 0)).r;
+
+#if defined(POSTPROCESS_FINAL_HDR_FRAMEGEN)
+    //The hudless scene must get an IDENTICAL grade, output scale, encode and dither to the composited
+    //image. The UI target is derived by subtracting the two, so any difference in treatment between them
+    //does not cancel and shows up as UI fringing - and only on interpolated frames in motion, which is
+    //close to undebuggable from a screenshot. sceneNits is read after the sharpen block on purpose so
+    //both targets see the same sharpened scene.
+    outSceneNoUIPQ = ApplyOutputDither10Bit(LinearNitsToPQ(sceneNits * HDR_OUTPUT_SCALE), blueNoise);
+
+    //Transmittance is the plain UI alpha, deliberately excluding sceneAttenuation. The readability dim is
+    //per channel and only acts where UI is present; folding it in would make its residual land in the UI
+    //layer, while applying it to the hudless target instead would bake UI-shaped darkening into the very
+    //buffer DLSS-G interpolates. The latter is the worse error, so the residual goes to the UI layer.
+    outSceneTransmittance = uiAlpha;
+#endif
 
     return ApplyOutputDither10Bit(encodedOutput, blueNoise);
 }
@@ -1533,7 +1567,23 @@ PixelOutput main(PixelInput input)
 
 	//HDR keeps the game's own grade and does its own UI composite and PQ encode - see ComposeHDROutput above.
 	//The SDR tonemap selection does not apply here; every one of those curves maps to [0,1] and has no headroom to give.
-	output.Color = float4(ComposeHDROutput(sceneColor, compositeUV, input.Position.xy, input.VignetteRayContext), 0.0f);
+	#if defined(POSTPROCESS_FINAL_HDR_FRAMEGEN)
+		float3 sceneNoUIPQ;
+		float sceneTransmittance;
+		float3 finalPQ = ComposeHDROutput(sceneColor, compositeUV, input.Position.xy, input.VignetteRayContext, sceneNoUIPQ, sceneTransmittance);
+
+		output.Color = float4(finalPQ, 0.0f);
+		output.SceneNoUI = float4(sceneNoUIPQ, 0.0f);
+
+		//Undo the composite to recover the UI on its own: the final image is scene*transmittance + UI,
+		//so UI is what is left after taking the attenuated scene back out, and UI opacity is 1 - transmittance.
+		//The game does this subtraction on the encoded PQ values rather than in linear light - it is only an
+		//approximation either way, but matching where it happens keeps our output consistent with what
+		//DLSS-G is tuned against.
+		output.UIColorAlpha = float4(max(0.0f.xxx, finalPQ - sceneNoUIPQ * sceneTransmittance), max(0.0f, 1.0f - sceneTransmittance));
+	#else
+		output.Color = float4(ComposeHDROutput(sceneColor, compositeUV, input.Position.xy, input.VignetteRayContext), 0.0f);
+	#endif
 
 #else
 
