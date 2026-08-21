@@ -2,24 +2,24 @@
     "schemaVersion": 2,
     "format": "ShaderInjector.ModifiedShader",
     "enabled": true,
-    "id": "ModifiedPixelShader_52F84DBF2D54B015",
-    "name": "GameVersion1005_PostProcessFinalHDRFrameGen",
+    "id": "ModifiedPixelShader_F909954AE4C73ED4",
+    "name": "GameVersion1005_PostProcessFinalHDRRemapFrameGen",
     "author": "",
-    "description": "HDR final pass for normal gameplay: one UI layer, single LUT, no composition context, with DLSS frame generation enabled. Writes three render targets (composited image, hudless scene, recovered UI colour + alpha) instead of one; resource layout is identical to CBA9C01BD1B69ABF. Reconstructed from the game HDR shader; outputs BT.2020 PQ.",
+    "description": "HDR final pass for gameplay at non-neutral HDR calibration: one UI layer, DeviceCorrectorContext brightness gamma + 1000 to 250 nit peak remap LUT, with DLSS frame generation enabled. Writes three render targets (composited image, hudless scene, recovered UI colour + alpha) instead of one; resource layout is identical to 75C16A8ECF232D62. Reconstructed from the game HDR shader; outputs BT.2020 PQ.",
     "shaderType": 4,
     "shaderProfile": "ps_6_6",
     "shaderEntryPoint": "main",
-    "sourceFile": "GameVersion1005_PostProcessFinalHDRFrameGen_Source.hlsl",
-    "compiledBlobFile": "GameVersion1005_PostProcessFinalHDRFrameGen_Compiled.blob",
+    "sourceFile": "GameVersion1005_PostProcessFinalHDRRemapFrameGen_Source.hlsl",
+    "compiledBlobFile": "GameVersion1005_PostProcessFinalHDRRemapFrameGen_Compiled.blob",
     "targets": [
         {
-            "name": "CapturedShader_52F84DBF2D54B015",
+            "name": "CapturedShader_F909954AE4C73ED4",
             "targetApplication": "",
             "gameVersion": "",
             "knownShaderBytecodeHashes": [
-                "52F84DBF2D54B015"
+                "F909954AE4C73ED4"
             ],
-            "originalShaderBytecodeLength": "27024",
+            "originalShaderBytecodeLength": "28148",
             "shaderAnalysis": {
                 "analysisVersion": 1,
                 "succeeded": true,
@@ -32,19 +32,19 @@
                 "shaderModelMinor": 6,
                 "shaderModelProfile": "ps_6_6",
                 "compilationFlags": 0,
-                "containerSignatureHash": "F2C7822E2BDCF7CD",
+                "containerSignatureHash": "19FFF7DD94006859",
                 "interfaceSignatureHash": "6BF9FFA01DC64897",
-                "resourceSignatureHash": "936B81B8114B233C",
+                "resourceSignatureHash": "B631A132E663F904",
                 "constantBufferSignatureHash": "95EC729786E4561D",
-                "instructionStatisticsHash": "8F4A846530F679C0",
+                "instructionStatisticsHash": "6691FD1D0BF150A8",
                 "executionSignatureHash": "E2EDE190F036AB73",
-                "portableReflectionIdentityHash": "0EBBAED21C5F4F92",
+                "portableReflectionIdentityHash": "7E0C724A0F695A24",
                 "entryFunctionName": "MainPS",
-                "normalizedInstructionCount": 540,
-                "uniqueNormalizedInstructionCount": 126,
-                "semanticInstructionSetHash": "21DC3AED221AB203",
-                "crossVersionIdentityHash": "44FB8C758C92F18A",
-                "reflectionSignatureHash": "5293CFE4EDAB9F23",
+                "normalizedInstructionCount": 693,
+                "uniqueNormalizedInstructionCount": 132,
+                "semanticInstructionSetHash": "615E690DC1EA1BA7",
+                "crossVersionIdentityHash": "0EC825C336CCC9AE",
+                "reflectionSignatureHash": "6D690C6481F6EBD3",
                 "containerParts": [
                     {
                         "fourCC": "SFI0",
@@ -67,32 +67,32 @@
                     {
                         "fourCC": "PSV0",
                         "kind": 810963792,
-                        "size": 452,
-                        "contentHash": "D8EA1CF52FAB448C"
+                        "size": 476,
+                        "contentHash": "6B5D20C230F5F03A"
                     },
                     {
                         "fourCC": "STAT",
                         "kind": 1413567571,
-                        "size": 19260,
-                        "contentHash": "73DA6E22570F2677"
+                        "size": 19280,
+                        "contentHash": "7FB607ADC84244D4"
                     },
                     {
                         "fourCC": "ILDN",
                         "kind": 1313098825,
                         "size": 44,
-                        "contentHash": "C9947B9541BCE338"
+                        "contentHash": "FEDFB1570BB2B9F4"
                     },
                     {
                         "fourCC": "HASH",
                         "kind": 1213415752,
                         "size": 20,
-                        "contentHash": "5EE5727688AF08AC"
+                        "contentHash": "1FA353A0521B878A"
                     },
                     {
                         "fourCC": "DXIL",
                         "kind": 1279875140,
-                        "size": 6840,
-                        "contentHash": "8E05F140DCCB1B01"
+                        "size": 7920,
+                        "contentHash": "3BA71AFCD227CF28"
                     },
                     {
                         "fourCC": "PRIV",
@@ -268,6 +268,18 @@
                         "sampleCountOrStride": 4294967295,
                         "registerSpace": 0,
                         "rangeId": 4
+                    },
+                    {
+                        "name": "BT2020PQ1000ToBT2020PQ250LUT",
+                        "type": 2,
+                        "bindPoint": 5,
+                        "bindCount": 1,
+                        "flags": 12,
+                        "returnType": 5,
+                        "dimension": 8,
+                        "sampleCountOrStride": 4294967295,
+                        "registerSpace": 0,
+                        "rangeId": 5
                     }
                 ],
                 "constantBuffers": [
@@ -7249,21 +7261,21 @@
                     }
                 ],
                 "instructionStatistics": {
-                    "instructionCount": 540,
+                    "instructionCount": 693,
                     "temporaryRegisterCount": 0,
                     "temporaryArrayCount": 0,
                     "constantDefinitionCount": 0,
                     "declarationCount": 0,
-                    "textureNormalInstructionCount": 4,
+                    "textureNormalInstructionCount": 5,
                     "textureLoadInstructionCount": 1,
                     "textureComparisonInstructionCount": 0,
                     "textureBiasInstructionCount": 0,
                     "textureGradientInstructionCount": 0,
-                    "floatInstructionCount": 415,
+                    "floatInstructionCount": 547,
                     "signedIntegerInstructionCount": 1,
                     "unsignedIntegerInstructionCount": 5,
                     "staticFlowControlCount": 0,
-                    "dynamicFlowControlCount": 3,
+                    "dynamicFlowControlCount": 5,
                     "macroInstructionCount": 0,
                     "arrayInstructionCount": 0,
                     "cutInstructionCount": 0,

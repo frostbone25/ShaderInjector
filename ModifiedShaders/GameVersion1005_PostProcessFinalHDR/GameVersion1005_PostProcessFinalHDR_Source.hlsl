@@ -1,13 +1,13 @@
 //PostProcessFinalHDR.hlsl
 //Game Shader Version: 1.0.0.5
 
-//The HDR variant of the final pass. The game runs a completely separate shader when Windows HDR is on:
-//it composites three UI layers instead of one, drops the BT2020PQ->sRGB LUT (that LUT is the HDR->SDR display map),
-//and writes BT.2020 PQ to a 10 bit swapchain instead of sRGB to an 8 bit one.
-//Original game shader: PixelShader 3966BB6523888928
+//The HDR final pass that actually draws normal gameplay. Identified from a RenderDoc capture of a gameplay frame -
+//it is the only PostProcessFinal permutation present in that frame, and none of the other three ever bound during play.
+//One UI composite layer, only BT709PQToBT2020PQLUT, and no HDRCompositionContext use at all: the simplest of the family.
+//Original game shader: PixelShader CBA9C01BD1B69ABF (26120 bytes)
 //[NO CONFIG]
 #define POSTPROCESS_FINAL_HDR
 
-//NOTE: shared with the SDR pass - every setting lives in one place so both variants stay in sync.
+//NOTE: shared with the SDR pass and the other HDR variants - every setting lives in one place so they all stay in sync.
 //You'll find this in ShaderInjector/ModifiedShaders/Includes
 #include "PixelShaderPass_PostProcessFinal.hlsl"

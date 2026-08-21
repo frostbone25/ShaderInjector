@@ -1,7 +1,7 @@
-//PostProcessFinalHDRFrameGen.hlsl
+//PostProcessFinalHDRBackdropRemapFrameGen.hlsl
 //Game Shader Version: 1.0.0.5
 
-//Frame generation variant of PostProcessFinalHDR: normal gameplay: one UI layer, single LUT, no composition context.
+//Frame generation variant of PostProcessFinalHDRBackdropRemap: gameplay at non-neutral HDR calibration with a composition backdrop active: one UI layer.
 //
 //With DLSS frame generation enabled the game selects a parallel set of final pass shaders that
 //write THREE render targets instead of one, so the interpolator receives the scene and the UI
@@ -9,11 +9,11 @@
 //compositing, and target 2 the UI recovered as max(0, target0 - target1 * transmittance) with
 //alpha 1 - transmittance.
 //
-//The resource layout is identical to CBA9C01BD1B69ABF register for register - only the output
+//The resource layout is identical to 10D1F04978261DDC register for register - only the output
 //signature differs.
-//Original game shader: PixelShader 52F84DBF2D54B015
+//Original game shader: PixelShader A8CAE0001D94F80F
 //[NO CONFIG]
-#define POSTPROCESS_FINAL_HDR
+#define POSTPROCESS_FINAL_HDR_BACKDROP_REMAP
 #define POSTPROCESS_FINAL_HDR_FRAMEGEN
 
 //NOTE: shared with the SDR pass - every setting lives in one place so all variants stay in sync.
