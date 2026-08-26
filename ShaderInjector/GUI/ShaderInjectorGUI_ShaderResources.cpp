@@ -11,16 +11,16 @@ namespace ShaderInjectorGUI
 {
 	void UI_ShaderResources()
 	{
-		if (!ImGui::CollapsingHeader("Shader Resources"))
+		DatabaseShaderResources::EnsureShaderResourcesLoaded();
+		const auto& resources = DatabaseShaderResources::GetShaderResources();
+		const std::string shaderResourcesHeader =
+			"Shader Resources: " + std::to_string(resources.size()) + "###ShaderResources";
+
+		if (!ImGui::CollapsingHeader(shaderResourcesHeader.c_str()))
 			return;
 
 		ImGui::Indent(indentSpace);
 		ImGui::Spacing();
-		DatabaseShaderResources::EnsureShaderResourcesLoaded();
-
-		const auto& resources = DatabaseShaderResources::GetShaderResources();
-		ImGui::Text("Loaded: %zu", resources.size());
-		ImGui::SameLine();
 		if (ImGui::Button("Refresh##ShaderResources"))
 			DatabaseShaderResources::RefreshShaderResources();
 		ImGui::SameLine();

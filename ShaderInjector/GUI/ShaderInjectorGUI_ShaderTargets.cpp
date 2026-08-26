@@ -147,7 +147,12 @@ namespace ShaderInjectorGUI
 
 	void UI_ShaderTargets()
 	{
-		if (ImGui::CollapsingHeader("Shader Targets"))
+		if (!HookD3D12::gLoadedShaderTargetsOnce)
+			HookD3D12::RefreshLoadedShaderTargets();
+		const std::string shaderTargetsHeader =
+			"Shader Targets: " + std::to_string(HookD3D12::gLoadedShaderTargets.size()) + "###ShaderTargets";
+
+		if (ImGui::CollapsingHeader(shaderTargetsHeader.c_str()))
 		{
 			ImGui::Indent(indentSpace);
 			ImGui::Spacing();
@@ -158,13 +163,6 @@ namespace ShaderInjectorGUI
 				ImVec2(-FLT_MIN, 0), // -FLT_MIN width = stretch to window edge, 0 height = auto
 				ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap
 			);
-
-			if (!HookD3D12::gLoadedShaderTargetsOnce)
-				HookD3D12::RefreshLoadedShaderTargets();
-
-			ImGui::Text("Loaded: %zu", HookD3D12::gLoadedShaderTargets.size());
-
-			ImGui::SameLine();
 
 			if (ImGui::Button("Refresh##ShaderTargets"))
 				HookD3D12::RefreshLoadedShaderTargets();

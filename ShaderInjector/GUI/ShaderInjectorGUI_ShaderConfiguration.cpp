@@ -208,16 +208,16 @@ namespace ShaderInjectorGUI
 
 	void UI_ShaderConfiguration()
 	{
-		if (!ImGui::CollapsingHeader("Shader Configuration"))
+		DatabaseShaderConfigurations::EnsureLoaded();
+		ShaderConfiguration::DocumentDisk& configurationDocument = DatabaseShaderConfigurations::GetEditableDocument();
+		const std::string shaderConfigurationHeader =
+			"Shader Configuration: " + std::to_string(configurationDocument.properties.size()) + "###ShaderConfiguration";
+
+		if (!ImGui::CollapsingHeader(shaderConfigurationHeader.c_str()))
 			return;
 
 		ImGui::Indent(indentSpace);
 		ImGui::Spacing();
-
-		DatabaseShaderConfigurations::EnsureLoaded();
-		ShaderConfiguration::DocumentDisk& configurationDocument = DatabaseShaderConfigurations::GetEditableDocument();
-
-		ImGui::Text("Properties: %zu", configurationDocument.properties.size());
 
 		if (gShaderConfigurationDirty)
 		{

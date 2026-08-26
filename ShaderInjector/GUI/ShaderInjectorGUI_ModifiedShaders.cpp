@@ -172,7 +172,12 @@ namespace ShaderInjectorGUI
 
 	void UI_ModifiedShaders()
 	{
-		if (ImGui::CollapsingHeader("Modified Shaders"))
+		DatabaseModifiedShaders::EnsureModifiedShadersLoaded();
+		const std::vector<ModifiedShader::PackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
+		const std::string modifiedShadersHeader =
+			"Modified Shaders: " + std::to_string(modifiedShaders.size()) + "###ModifiedShaders";
+
+		if (ImGui::CollapsingHeader(modifiedShadersHeader.c_str()))
 		{
 			ImGui::Indent(indentSpace);
 			ImGui::Spacing();
@@ -184,15 +189,8 @@ namespace ShaderInjectorGUI
 				ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap
 			);
 
-			DatabaseModifiedShaders::EnsureModifiedShadersLoaded();
-
 			if (!HookD3D12::gLoadedShaderTargetsOnce)
 				HookD3D12::RefreshLoadedShaderTargets();
-
-			const std::vector<ModifiedShader::PackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
-
-			ImGui::Text("Loaded: %zu", modifiedShaders.size());
-			ImGui::SameLine();
 
 			if (ImGui::Button("Refresh##ModifiedShaders"))
 			{
