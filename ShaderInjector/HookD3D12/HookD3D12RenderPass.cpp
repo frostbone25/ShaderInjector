@@ -174,14 +174,28 @@ namespace HookD3D12
 		if (boundaryMask)
 			PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecutionBoundaryCandidate);
 		if ((boundaryMask & 1u) != 0)
-			RenderPassRuntime::RecordExecutionBoundary(commandList, true, RenderPassRuntime::ExecutionBoundary::Before, "Dispatch");
+			RenderPassRuntime::RecordExecutionBoundary(
+				commandList,
+				true,
+				RenderPassRuntime::ExecutionBoundary::Before,
+				"Dispatch",
+				threadGroupCountX,
+				threadGroupCountY,
+				threadGroupCountZ);
 
 		Original_Dispatch(commandList, threadGroupCountX, threadGroupCountY, threadGroupCountZ);
 		if ((boundaryMask & 1u) != 0)
 			RenderPassRuntime::CompleteComputeExecutionBoundary(commandList);
 
 		if ((boundaryMask & 2u) != 0)
-			RenderPassRuntime::RecordExecutionBoundary(commandList, true, RenderPassRuntime::ExecutionBoundary::After, "Dispatch");
+			RenderPassRuntime::RecordExecutionBoundary(
+				commandList,
+				true,
+				RenderPassRuntime::ExecutionBoundary::After,
+				"Dispatch",
+				threadGroupCountX,
+				threadGroupCountY,
+				threadGroupCountZ);
 	}
 
 	void STDMETHODCALLTYPE Hook_IASetPrimitiveTopology(

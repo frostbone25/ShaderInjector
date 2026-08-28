@@ -22,6 +22,6 @@ namespace DatabaseRenderPasses
 	bool SetRenderPassEnabled(const std::string& renderPassId, bool enabled);
 	bool SaveRenderPass(const std::string& renderPassId);
 	bool DeleteRenderPass(const std::string& renderPassId);
-	bool CreateFragmentShaderTemplate(const std::string& renderPassId, std::string& outError);
+	bool CreateShaderTemplate(const std::string& renderPassId, std::string& outError);
 	bool CompileRenderPassShaders(const std::string& renderPassId, std::string& outError);
 }

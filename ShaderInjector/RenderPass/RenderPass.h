@@ -7,10 +7,11 @@
 #include <d3d12.h>
 
 #include "JsonHelper.h"
+#include "ShaderResource/ShaderResource.h"
 namespace RenderPass
 {
 	inline constexpr const char* formatName = "ShaderInjector.RenderPass";
-	inline constexpr int currentSchemaVersion = 3;
+	inline constexpr int currentSchemaVersion = 7;
 	inline constexpr const char* timingBefore = "Before";
 	inline constexpr const char* timingAfter = "After";
 
@@ -29,6 +30,176 @@ namespace RenderPass
 		{ RenderPassType::ReplacementPixelShader, "ReplacementPixelShader" },
 		{ RenderPassType::ReplacementComputeShader, "ReplacementComputeShader" },
 	})
+
+	enum class ExecutionMode
+	{
+		Automatic,
+		FullscreenPixel,
+		Compute,
+	};
+
+	NLOHMANN_JSON_SERIALIZE_ENUM(ExecutionMode,
+	{
+		{ ExecutionMode::Automatic, "Automatic" },
+		{ ExecutionMode::FullscreenPixel, "FullscreenPixel" },
+		{ ExecutionMode::Compute, "Compute" },
+	})
+
+	enum class PassOperation
+	{
+		Automatic,
+		Custom,
+		ReplaceOriginal,
+		MipChain,
+		Downsample,
+		UpsampleChain,
+		Copy,
+		Resolve,
+	};
+
+	NLOHMANN_JSON_SERIALIZE_ENUM(PassOperation,
+	{
+		{ PassOperation::Automatic, "Automatic" },
+		{ PassOperation::Custom, "Custom" },
+		{ PassOperation::ReplaceOriginal, "ReplaceOriginal" },
+		{ PassOperation::MipChain, "MipChain" },
+		{ PassOperation::Downsample, "Downsample" },
+		{ PassOperation::UpsampleChain, "UpsampleChain" },
+		{ PassOperation::Copy, "Copy" },
+		{ PassOperation::Resolve, "Resolve" },
+	})
+
+	enum class DispatchMode
+	{
+		InheritOriginal,
+		ScaleByResolution,
+		ExplicitThreadGroups,
+	};
+
+	NLOHMANN_JSON_SERIALIZE_ENUM(DispatchMode,
+	{
+		{ DispatchMode::InheritOriginal, "InheritOriginal" },
+		{ DispatchMode::ScaleByResolution, "ScaleByResolution" },
+		{ DispatchMode::ExplicitThreadGroups, "ExplicitThreadGroups" },
+	})
+
+	enum class ViewportMode
+	{
+		InheritOriginal,
+		MatchOutput,
+		Explicit,
+	};
+
+	NLOHMANN_JSON_SERIALIZE_ENUM(ViewportMode,
+	{
+		{ ViewportMode::InheritOriginal, "InheritOriginal" },
+		{ ViewportMode::MatchOutput, "MatchOutput" },
+		{ ViewportMode::Explicit, "Explicit" },
+	})
+
+	enum class ResourceAccess
+	{
+		ShaderResource,
+		UnorderedAccess,
+		RenderTarget,
+		DepthStencil,
+		CopySource,
+		CopyDestination,
+	};
+
+	NLOHMANN_JSON_SERIALIZE_ENUM(ResourceAccess,
+	{
+		{ ResourceAccess::ShaderResource, "ShaderResource" },
+		{ ResourceAccess::UnorderedAccess, "UnorderedAccess" },
+		{ ResourceAccess::RenderTarget, "RenderTarget" },
+		{ ResourceAccess::DepthStencil, "DepthStencil" },
+		{ ResourceAccess::CopySource, "CopySource" },
+		{ ResourceAccess::CopyDestination, "CopyDestination" },
+	})
+
+	enum class GameResourceViewType
+	{
+		ShaderResource,
+		UnorderedAccess,
+	};
+
+	NLOHMANN_JSON_SERIALIZE_ENUM(GameResourceViewType,
+	{
+		{ GameResourceViewType::ShaderResource, "ShaderResource" },
+		{ GameResourceViewType::UnorderedAccess, "UnorderedAccess" },
+	})
+
+	struct DispatchPolicyDisk
+	{
+		DispatchMode mode = DispatchMode::InheritOriginal;
+		uint32_t threadGroupSizeX = 8;
+		uint32_t threadGroupSizeY = 8;
+		uint32_t threadGroupSizeZ = 1;
+		uint32_t explicitGroupCountX = 0;
+		uint32_t explicitGroupCountY = 0;
+		uint32_t explicitGroupCountZ = 0;
+
+		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
+			DispatchPolicyDisk,
+			mode,
+			threadGroupSizeX,
+			threadGroupSizeY,
+			threadGroupSizeZ,
+			explicitGroupCountX,
+			explicitGroupCountY,
+			explicitGroupCountZ)
+	};
+
+	struct ViewportPolicyDisk
+	{
+		ViewportMode mode = ViewportMode::InheritOriginal;
+		uint32_t width = 0;
+		uint32_t height = 0;
+
+		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
+			ViewportPolicyDisk,
+			mode,
+			width,
+			height)
+	};
+
+	struct LogicalResourceBindingDisk
+	{
+		std::string resourceId;
+		std::string hlslName;
+		ShaderResource::ResourceOrigin origin = ShaderResource::ResourceOrigin::Runtime;
+		ResourceAccess access = ResourceAccess::ShaderResource;
+		GameResourceViewType gameResourceViewType = GameResourceViewType::UnorderedAccess;
+		ShaderResource::TemporalView temporalView = ShaderResource::TemporalView::Current;
+		uint32_t shaderRegister = 0;
+		uint32_t registerSpace = 0;
+		bool optional = false;
+
+		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
+			LogicalResourceBindingDisk,
+			resourceId,
+			hlslName,
+			origin,
+			access,
+			gameResourceViewType,
+			temporalView,
+			shaderRegister,
+			registerSpace,
+			optional)
+	};
+
+	struct RuntimeResourceDefinitionDisk
+	{
+		std::string id;
+		std::string name;
+		ShaderResource::TextureDescriptionDisk texture;
+
+		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
+			RuntimeResourceDefinitionDisk,
+			id,
+			name,
+			texture)
+	};
 
 	struct ShaderResourceReferenceDisk
 	{
@@ -76,8 +247,16 @@ namespace RenderPass
 		std::string name;
 		bool enabled = true;
 		RenderPassType type = RenderPassType::Custom;
+		ExecutionMode executionMode = ExecutionMode::Automatic;
+		PassOperation operation = PassOperation::Automatic;
 		EventReferenceDisk event;
 		std::string timing = timingBefore;
+		ShaderResource::ResolutionPolicyDisk resolution;
+		DispatchPolicyDisk dispatch;
+		ViewportPolicyDisk viewport;
+		std::vector<LogicalResourceBindingDisk> inputs;
+		std::vector<LogicalResourceBindingDisk> outputs;
+		std::vector<RuntimeResourceDefinitionDisk> runtimeResources;
 		uint32_t sourceTextureShaderRegister = 0;
 		uint32_t sourceTextureRegisterSpace = 0;
 		bool trackResourceBindings = true;
@@ -112,8 +291,16 @@ namespace RenderPass
 			name,
 			enabled,
 			type,
+			executionMode,
+			operation,
 			event,
 			timing,
+			resolution,
+			dispatch,
+			viewport,
+			inputs,
+			outputs,
+			runtimeResources,
 			sourceTextureShaderRegister,
 			sourceTextureRegisterSpace,
 			trackResourceBindings,
@@ -190,7 +377,14 @@ namespace RenderPass
 	void ResolveShaderPaths(RenderPassDisk& renderPass);
 	bool LoadCompiledShaderBlobs(RenderPassDisk& renderPass);
 	const char* TypeName(RenderPassType type);
+	const char* ExecutionModeName(ExecutionMode mode);
+	const char* PassOperationName(PassOperation operation);
 	const char* EventTypeName(EventType type);
+	ExecutionMode ResolveExecutionMode(const RenderPassDisk& renderPass);
+	PassOperation ResolvePassOperation(const RenderPassDisk& renderPass);
+	const LogicalResourceBindingDisk* FindMipChainRuntimeSource(const RenderPassDisk& renderPass);
+	std::string MipChainOutputResourceId(const RenderPassDisk& renderPass);
+	void NormalizeExecutionResources(RenderPassDisk& renderPass);
 	bool HasShaderTemplate(const RenderPassDisk& renderPass);
 	bool HasCompiledShaders(const RenderPassDisk& renderPass);
 	bool IsReplacementPass(RenderPassType type);

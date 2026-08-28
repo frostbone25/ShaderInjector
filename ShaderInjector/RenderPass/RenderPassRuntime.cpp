@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -19,8 +21,11 @@
 #include "Performance/PerformanceMetrics.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
 #include "RenderPass/RenderPassExecutor.h"
+#include "RenderPass/RenderPassGraph.h"
 #include "RenderPass/RenderPassMipChain.h"
 #include "RenderPass/RenderPassReplacement.h"
+#include "RenderPass/RenderPassTexturePool.h"
+#include "ShaderResource/ShaderResourceCatalog.h"
 #include "ShaderResource/ShaderResourceRuntime.h"
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
@@ -53,6 +58,7 @@ namespace RenderPassRuntime
 			std::array<std::vector<const RenderPass::RenderPassDisk*>, 2> mipChainOrders;
 			uint32_t graphicsBoundaryMask = 0;
 			uint32_t computeBoundaryMask = 0;
+			bool hasRuntimeResources = false;
 		};
 
 		struct RuntimeCounters
@@ -71,6 +77,7 @@ namespace RenderPassRuntime
 		{
 			std::vector<RenderPass::RenderPassDisk> renderPasses;
 			std::vector<std::unique_ptr<RuntimeCounters>> runtimeCounters;
+			RenderPassGraph::Compilation compiledGraph;
 			std::unordered_map<std::string, size_t> renderPassIndices;
 			std::vector<ResolvedEventBinding> resolvedEvents;
 			std::unordered_map<std::string, ModifiedShaderExecutionPlan> executionPlans;
@@ -145,6 +152,7 @@ namespace RenderPassRuntime
 		std::atomic<bool> gHasExecutableMipChainBinding = false;
 		std::atomic<bool> gHasShaderResourcePasses = false;
 		std::atomic<bool> gHasCustomFullscreenPasses = false;
+		std::atomic<bool> gHasGameTextureInputs = false;
 		std::atomic<bool> gResourceTrackingRequired = false;
 		std::atomic<uint32_t> gTrackingModeFlags = 0;
 		std::atomic<uint32_t> gGraphicsExecutionBoundaryMask = 0;
@@ -161,10 +169,22 @@ namespace RenderPassRuntime
 		thread_local ID3D12GraphicsCommandList* gCachedCommandList = nullptr;
 		thread_local CommandListRenderState* gCachedCommandListState = nullptr;
 		thread_local RenderPassMipChain::GraphicsStateSnapshot gMipChainGraphicsState;
+		thread_local RenderPassMipChain::GraphicsStateSnapshot gFullscreenGraphicsState;
 		thread_local RenderPassMipChain::GraphicsStateSnapshot gShaderResourceState;
 		thread_local RenderPassMipChain::GraphicsStateSnapshot gOppositeShaderResourceState;
 		thread_local ID3D12GraphicsCommandList* gPendingMipRestoreCommandList = nullptr;
 		thread_local bool gPendingMipRestore = false;
+		struct ThreadGameTextureBindingLookup
+		{
+			const RenderPass::RenderPassDisk* renderPass = nullptr;
+			ID3D12RootSignature* rootSignature = nullptr;
+			RenderPass::GameResourceViewType viewType = RenderPass::GameResourceViewType::UnorderedAccess;
+			uint32_t shaderRegister = 0;
+			uint32_t registerSpace = 0;
+			std::vector<RenderPassResourceRegistry::DescriptorBindingLocation> locations;
+		};
+		thread_local std::array<ThreadGameTextureBindingLookup, 16> gGameTextureBindingLookups;
+		thread_local size_t gNextGameTextureBindingLookup = 0;
 
 		std::mutex gDiagnosticsMutex;
 		std::unordered_map<std::string, RenderPass::RuntimeDiagnostics> gDiagnosticsByRenderPassId;
@@ -194,6 +214,7 @@ namespace RenderPassRuntime
 			// discovery resolves a pass. Preserve that provenance from pass load time;
 			// command-list state tracking still waits for an executable target binding.
 			const bool descriptorRegistryTrackingEnabled = resourceTrackingEnabled ||
+				gHasGameTextureInputs.load(std::memory_order_relaxed) ||
 				gHasEnabledMipChainPasses.load(std::memory_order_relaxed) ||
 				gHasShaderResourcePasses.load(std::memory_order_relaxed);
 			const bool graphicsStateTrackingEnabled = trackingEnabled &&
@@ -215,65 +236,20 @@ namespace RenderPassRuntime
 
 		void BuildResolvedEventBindings(RenderPassConfigurationSnapshot& configuration)
 		{
-			configuration.renderPassIndices.clear();
+			configuration.compiledGraph = RenderPassGraph::Compile(configuration.renderPasses);
+			configuration.renderPassIndices = configuration.compiledGraph.renderPassIndices;
 			configuration.resolvedEvents.assign(configuration.renderPasses.size(), {});
-			for (size_t renderPassIndex = 0; renderPassIndex < configuration.renderPasses.size(); ++renderPassIndex)
-				configuration.renderPassIndices[configuration.renderPasses[renderPassIndex].id] = renderPassIndex;
-
-			enum class ResolutionState : uint8_t
+			for (const RenderPassGraph::CompiledNode& node : configuration.compiledGraph.nodes)
 			{
-				Unvisited,
-				Visiting,
-				Complete,
-			};
-			std::vector<ResolutionState> resolutionStates(
-				configuration.renderPasses.size(),
-				ResolutionState::Unvisited);
-
-			const auto resolveEvent = [&](const auto& resolveEventSelf, size_t renderPassIndex) -> ResolvedEventBinding
-			{
-				if (resolutionStates[renderPassIndex] == ResolutionState::Complete)
-					return configuration.resolvedEvents[renderPassIndex];
-				if (resolutionStates[renderPassIndex] == ResolutionState::Visiting)
-					return {};
-
-				resolutionStates[renderPassIndex] = ResolutionState::Visiting;
-				const RenderPass::RenderPassDisk& renderPass = configuration.renderPasses[renderPassIndex];
-				ResolvedEventBinding resolved{};
-				if (renderPass.enabled && !renderPass.event.id.empty())
-				{
-					if (renderPass.event.type == RenderPass::EventType::ModifiedShader)
-					{
-						resolved.valid = true;
-						resolved.modifiedShaderId = renderPass.event.id;
-						resolved.rootBoundary = renderPass.type == RenderPass::RenderPassType::MipChain ||
-							renderPass.timing != RenderPass::timingAfter
-							? ExecutionBoundary::Before
-							: ExecutionBoundary::After;
-					}
-					else
-					{
-						const auto parentIt = configuration.renderPassIndices.find(renderPass.event.id);
-						if (parentIt != configuration.renderPassIndices.end() && parentIt->second != renderPassIndex)
-							resolved = resolveEventSelf(resolveEventSelf, parentIt->second);
-					}
-				}
-
-				// A mip chain modifies descriptor bindings for the game draw that follows it.
-				// It cannot safely live on a graph rooted after that draw has already executed.
-				if (resolved.valid && renderPass.type == RenderPass::RenderPassType::MipChain &&
-					resolved.rootBoundary == ExecutionBoundary::After)
-				{
-					resolved = {};
-				}
-
-				configuration.resolvedEvents[renderPassIndex] = resolved;
-				resolutionStates[renderPassIndex] = ResolutionState::Complete;
-				return resolved;
-			};
-
-			for (size_t renderPassIndex = 0; renderPassIndex < configuration.renderPasses.size(); ++renderPassIndex)
-				resolveEvent(resolveEvent, renderPassIndex);
+				if (!node.valid || node.renderPassIndex >= configuration.resolvedEvents.size())
+					continue;
+				ResolvedEventBinding& resolved = configuration.resolvedEvents[node.renderPassIndex];
+				resolved.valid = true;
+				resolved.modifiedShaderId = node.modifiedShaderId;
+				resolved.rootBoundary = node.rootBoundary == RenderPassGraph::Boundary::After
+					? ExecutionBoundary::After
+					: ExecutionBoundary::Before;
+			}
 		}
 
 		const ResolvedEventBinding* FindResolvedEventBinding(
@@ -604,6 +580,189 @@ namespace RenderPassRuntime
 			return nullptr;
 		}
 
+		const std::vector<RenderPassResourceRegistry::DescriptorBindingLocation>*
+			FindGameTextureBindingLocations(
+				const RenderPass::RenderPassDisk& renderPass,
+				const RenderPass::LogicalResourceBindingDisk& binding,
+				ID3D12RootSignature* rootSignature,
+				bool computePipeline)
+		{
+			for (const ThreadGameTextureBindingLookup& lookup : gGameTextureBindingLookups)
+			{
+				if (lookup.renderPass == &renderPass && lookup.rootSignature == rootSignature &&
+					lookup.viewType == binding.gameResourceViewType &&
+					lookup.shaderRegister == binding.shaderRegister &&
+					lookup.registerSpace == binding.registerSpace)
+				{
+					return lookup.locations.empty() ? nullptr : &lookup.locations;
+				}
+			}
+
+			ThreadGameTextureBindingLookup lookup{};
+			lookup.renderPass = &renderPass;
+			lookup.rootSignature = rootSignature;
+			lookup.viewType = binding.gameResourceViewType;
+			lookup.shaderRegister = binding.shaderRegister;
+			lookup.registerSpace = binding.registerSpace;
+			const D3D12_DESCRIPTOR_RANGE_TYPE rangeType =
+				binding.gameResourceViewType == RenderPass::GameResourceViewType::UnorderedAccess
+					? D3D12_DESCRIPTOR_RANGE_TYPE_UAV
+					: D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+			RenderPassResourceRegistry::GetDescriptorBindingCandidates(
+				rootSignature,
+				rangeType,
+				binding.shaderRegister,
+				binding.registerSpace,
+				renderPass.maximumTrackedDescriptors,
+				computePipeline ? D3D12_SHADER_VISIBILITY_ALL : D3D12_SHADER_VISIBILITY_PIXEL,
+				lookup.locations);
+
+			if (lookup.locations.empty())
+				return nullptr;
+			ThreadGameTextureBindingLookup& destination = gGameTextureBindingLookups[gNextGameTextureBindingLookup];
+			destination = std::move(lookup);
+			gNextGameTextureBindingLookup =
+				(gNextGameTextureBindingLookup + 1) % gGameTextureBindingLookups.size();
+			return &destination.locations;
+		}
+
+		bool ResolveGameTexture(
+			const RenderPass::RenderPassDisk& renderPass,
+			const RenderPass::LogicalResourceBindingDisk& binding,
+			const CommandListRenderState& state,
+			bool computePipeline,
+			RenderPassTexturePool::TextureView& outTexture,
+			std::string& outError)
+		{
+			outTexture = {};
+			ID3D12RootSignature* rootSignature = computePipeline
+				? state.computeRootSignature
+				: state.graphicsRootSignature;
+			if (!rootSignature)
+			{
+				outError = "The game texture's root signature is not currently bound.";
+				return false;
+			}
+
+			const auto* locations = FindGameTextureBindingLocations(
+				renderPass,
+				binding,
+				rootSignature,
+				computePipeline);
+			const char registerPrefix = binding.gameResourceViewType ==
+				RenderPass::GameResourceViewType::UnorderedAccess ? 'u' : 't';
+			if (!locations)
+			{
+				outError = StringHelper::Format(
+					"The target root signature does not expose %c%u, space%u.",
+					registerPrefix,
+					binding.shaderRegister,
+					binding.registerSpace);
+				return false;
+			}
+
+			const std::vector<RootBindingState>& rootBindings = RootBindings(state, computePipeline);
+			const char* expectedBindingType = binding.gameResourceViewType ==
+				RenderPass::GameResourceViewType::UnorderedAccess ? "UAV" : "SRV";
+			for (const RenderPassResourceRegistry::DescriptorBindingLocation& location : *locations)
+			{
+				if (location.rootParameterIndex >= rootBindings.size())
+					continue;
+				const RootBindingState& rootBinding = rootBindings[location.rootParameterIndex];
+				if (rootBinding.type != RootBindingType::DescriptorTable || !rootBinding.value)
+					continue;
+
+				for (const DescriptorHeapState& heap : state.descriptorHeaps)
+				{
+					if (heap.type != location.heapType || !heap.gpuStart.ptr ||
+						!heap.cpuStart.ptr || !heap.descriptorIncrementSize || !heap.descriptorCount)
+					{
+						continue;
+					}
+					const uint64_t heapByteSize = static_cast<uint64_t>(heap.descriptorIncrementSize) *
+						heap.descriptorCount;
+					if (rootBinding.value < heap.gpuStart.ptr ||
+						rootBinding.value >= heap.gpuStart.ptr + heapByteSize)
+					{
+						continue;
+					}
+
+					const uint64_t descriptorByteOffset = rootBinding.value - heap.gpuStart.ptr +
+						static_cast<uint64_t>(location.tableOffset) * heap.descriptorIncrementSize;
+					if (descriptorByteOffset >= heapByteSize)
+						continue;
+					RenderPass::ResourceBindingDiagnostic metadata{};
+					if (!RenderPassResourceRegistry::ResolveDescriptor(
+						{ heap.cpuStart.ptr + static_cast<SIZE_T>(descriptorByteOffset) },
+						metadata) || metadata.bindingType != expectedBindingType ||
+						!metadata.resourcePointer)
+					{
+						continue;
+					}
+
+					ID3D12Resource* resource = reinterpret_cast<ID3D12Resource*>(metadata.resourcePointer);
+					const D3D12_RESOURCE_DESC description = resource->GetDesc();
+					if (description.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D &&
+						description.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE3D)
+					{
+						outError = "The selected game binding is not a Texture2D or Texture3D resource.";
+						return false;
+					}
+
+					outTexture.resource = resource;
+					outTexture.description.dimension = description.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D
+						? ShaderResource::TextureDimension::Texture3D
+						: (description.DepthOrArraySize > 1
+							? ShaderResource::TextureDimension::Texture2DArray
+							: ShaderResource::TextureDimension::Texture2D);
+					outTexture.description.format = description.Format;
+					outTexture.description.width = static_cast<uint32_t>((std::min)(
+						description.Width,
+						static_cast<UINT64>((std::numeric_limits<uint32_t>::max)())));
+					outTexture.description.height = description.Height;
+					outTexture.description.depth = description.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D
+						? description.DepthOrArraySize
+						: 1u;
+					outTexture.description.arraySize = description.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D
+						? 1u
+						: description.DepthOrArraySize;
+					outTexture.description.mipLevels = description.MipLevels;
+					outTexture.description.sampleCount = description.SampleDesc.Count;
+					outTexture.description.flags = description.Flags;
+					outTexture.initialState = binding.gameResourceViewType ==
+						RenderPass::GameResourceViewType::UnorderedAccess
+							? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+							: (computePipeline
+								? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+								: D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+					return true;
+				}
+			}
+
+			outError = StringHelper::Format(
+				"No live %s texture metadata is available for %c%u, space%u. Reload the scene or application after saving this pass if the descriptor predates tracking.",
+				expectedBindingType,
+				registerPrefix,
+				binding.shaderRegister,
+				binding.registerSpace);
+			return false;
+		}
+
+		RenderPassTexturePool::ReferenceExtent BuildTextureReference(
+			const RenderPassTexturePool::TextureView& texture)
+		{
+			RenderPassTexturePool::ReferenceExtent reference{};
+			reference.dimension = texture.description.dimension;
+			reference.width = texture.description.width;
+			reference.height = texture.description.height;
+			reference.depth = texture.description.depth;
+			reference.arraySize = texture.description.arraySize;
+			reference.mipLevels = texture.description.mipLevels;
+			reference.sampleCount = texture.description.sampleCount;
+			reference.fallbackFormat = texture.description.format;
+			return reference;
+		}
+
 		std::vector<RenderPass::ResourceBindingDiagnostic> BuildResourceSnapshot(
 			const CommandListRenderState& state,
 			bool computePipeline,
@@ -816,99 +975,216 @@ namespace RenderPassRuntime
 			}
 		}
 
-		void AppendRenderPassExecutionOrder(
-			const RenderPassConfigurationSnapshot& configuration,
-			size_t renderPassIndex,
-			std::vector<const RenderPass::RenderPassDisk*>& executionOrder,
-			std::vector<uint8_t>& appendedRenderPasses)
+		RenderPassTexturePool::ReferenceExtent BuildRuntimeTextureReferenceExtent(
+			const CommandListRenderState& state,
+			const PipelineOutputState& pipelineOutputState)
 		{
-			if (renderPassIndex >= configuration.renderPasses.size() || appendedRenderPasses[renderPassIndex])
-				return;
-			const RenderPass::RenderPassDisk& renderPass = configuration.renderPasses[renderPassIndex];
-			if (!FindResolvedEventBinding(configuration, renderPass))
+			RenderPassTexturePool::ReferenceExtent referenceExtent{};
+			if (!state.viewports.empty())
 			{
-				return;
+				referenceExtent.width = static_cast<uint32_t>(
+					(std::max)(1.0, std::ceil(static_cast<double>(state.viewports.front().Width))));
+				referenceExtent.height = static_cast<uint32_t>(
+					(std::max)(1.0, std::ceil(static_cast<double>(state.viewports.front().Height))));
 			}
-			appendedRenderPasses[renderPassIndex] = 1;
 
-			const auto appendChildren = [&](const char* timing)
+			for (const RenderPass::ResourceBindingDiagnostic& output : state.outputBindings)
 			{
-				for (size_t childIndex = 0; childIndex < configuration.renderPasses.size(); ++childIndex)
+				if (output.bindingType != "RTV")
+					continue;
+				if (!referenceExtent.width && output.resourceWidth)
+					referenceExtent.width = static_cast<uint32_t>((std::min)(
+						output.resourceWidth,
+						static_cast<uint64_t>(UINT32_MAX)));
+				if (!referenceExtent.height && output.resourceHeight)
+					referenceExtent.height = output.resourceHeight;
+				if (referenceExtent.fallbackFormat == DXGI_FORMAT_UNKNOWN && output.resourceFormat)
+					referenceExtent.fallbackFormat = static_cast<DXGI_FORMAT>(output.resourceFormat);
+			}
+
+			if (referenceExtent.fallbackFormat == DXGI_FORMAT_UNKNOWN)
+			{
+				for (UINT renderTargetIndex = 0;
+					renderTargetIndex < pipelineOutputState.renderTargetCount;
+					++renderTargetIndex)
 				{
-					const RenderPass::RenderPassDisk& child = configuration.renderPasses[childIndex];
-					if (child.enabled && child.event.type == RenderPass::EventType::RenderPass &&
-						child.event.id == renderPass.id && child.timing == timing)
+					if (pipelineOutputState.renderTargetFormats[renderTargetIndex] != DXGI_FORMAT_UNKNOWN)
 					{
-						AppendRenderPassExecutionOrder(
-							configuration,
-							childIndex,
-							executionOrder,
-							appendedRenderPasses);
+						referenceExtent.fallbackFormat =
+							pipelineOutputState.renderTargetFormats[renderTargetIndex];
+						break;
 					}
 				}
-			};
+			}
+			return referenceExtent;
+		}
 
-			appendChildren(RenderPass::timingBefore);
-			executionOrder.push_back(&renderPass);
-			appendChildren(RenderPass::timingAfter);
+		const RenderPass::LogicalResourceBindingDisk* FindRuntimeInput(
+			const RenderPass::RenderPassDisk& renderPass,
+			RenderPass::ResourceAccess preferredAccess)
+		{
+			const auto preferred = std::find_if(renderPass.inputs.begin(), renderPass.inputs.end(), [&](const auto& input)
+			{
+				return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+					input.access == preferredAccess && !input.resourceId.empty();
+			});
+			if (preferred != renderPass.inputs.end())
+				return &*preferred;
+			const auto shaderInput = std::find_if(renderPass.inputs.begin(), renderPass.inputs.end(), [](const auto& input)
+			{
+				return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+					input.access == RenderPass::ResourceAccess::ShaderResource && !input.resourceId.empty();
+			});
+			return shaderInput != renderPass.inputs.end() ? &*shaderInput : nullptr;
+		}
+
+		const RenderPass::LogicalResourceBindingDisk* FindCopyInput(
+			const RenderPass::RenderPassDisk& renderPass)
+		{
+			const auto copyInput = std::find_if(renderPass.inputs.begin(), renderPass.inputs.end(), [](const auto& input)
+			{
+				return input.access == RenderPass::ResourceAccess::CopySource &&
+					(input.origin == ShaderResource::ResourceOrigin::Game || !input.resourceId.empty());
+			});
+			if (copyInput != renderPass.inputs.end())
+				return &*copyInput;
+			return FindRuntimeInput(renderPass, RenderPass::ResourceAccess::ShaderResource);
+		}
+
+		const RenderPass::LogicalResourceBindingDisk* FindRuntimeOutput(
+			const RenderPass::RenderPassDisk& renderPass,
+			RenderPass::ResourceAccess preferredAccess)
+		{
+			const auto preferred = std::find_if(renderPass.outputs.begin(), renderPass.outputs.end(), [&](const auto& output)
+			{
+				return output.origin == ShaderResource::ResourceOrigin::Runtime &&
+					output.access == preferredAccess && !output.resourceId.empty();
+			});
+			if (preferred != renderPass.outputs.end())
+				return &*preferred;
+			const auto renderTarget = std::find_if(renderPass.outputs.begin(), renderPass.outputs.end(), [](const auto& output)
+			{
+				return output.origin == ShaderResource::ResourceOrigin::Runtime &&
+					output.access == RenderPass::ResourceAccess::RenderTarget && !output.resourceId.empty();
+			});
+			return renderTarget != renderPass.outputs.end() ? &*renderTarget : nullptr;
+		}
+
+		bool ResolveRuntimeTexture(
+			const RenderPass::LogicalResourceBindingDisk* binding,
+			RenderPassTexturePool::TextureView& outTexture,
+			std::string& outError,
+			const char* role,
+			bool inputTexture = false)
+		{
+			outTexture = {};
+			if (!binding)
+			{
+				outError = std::string("Render Pass has no runtime ") + role + " binding.";
+				return false;
+			}
+			const bool found = inputTexture
+				? RenderPassTexturePool::GetInputTexture(binding->resourceId, binding->temporalView, outTexture)
+				: RenderPassTexturePool::GetTexture(binding->resourceId, binding->temporalView, outTexture);
+			if (!found)
+			{
+				outError = std::string("Runtime ") + role + " texture is unavailable: " + binding->resourceId;
+				return false;
+			}
+			return true;
+		}
+
+		bool ResolveComputeDispatch(
+			const RenderPass::RenderPassDisk& renderPass,
+			UINT originalThreadGroupCountX,
+			UINT originalThreadGroupCountY,
+			UINT originalThreadGroupCountZ,
+			const std::vector<RenderPassTexturePool::TextureView>& unorderedAccessOutputs,
+			UINT& outThreadGroupCountX,
+			UINT& outThreadGroupCountY,
+			UINT& outThreadGroupCountZ,
+			std::string& outError)
+		{
+			outThreadGroupCountX = 0;
+			outThreadGroupCountY = 0;
+			outThreadGroupCountZ = 0;
+			switch (renderPass.dispatch.mode)
+			{
+				case RenderPass::DispatchMode::InheritOriginal:
+					outThreadGroupCountX = originalThreadGroupCountX;
+					outThreadGroupCountY = originalThreadGroupCountY;
+					outThreadGroupCountZ = originalThreadGroupCountZ;
+					break;
+				case RenderPass::DispatchMode::ExplicitThreadGroups:
+					outThreadGroupCountX = renderPass.dispatch.explicitGroupCountX;
+					outThreadGroupCountY = renderPass.dispatch.explicitGroupCountY;
+					outThreadGroupCountZ = renderPass.dispatch.explicitGroupCountZ;
+					break;
+				case RenderPass::DispatchMode::ScaleByResolution:
+				{
+					uint32_t width = 0;
+					uint32_t height = 0;
+					uint32_t depth = 1;
+					if (!unorderedAccessOutputs.empty())
+					{
+						width = unorderedAccessOutputs.front().description.width;
+						height = unorderedAccessOutputs.front().description.height;
+						depth = unorderedAccessOutputs.front().description.dimension == ShaderResource::TextureDimension::Texture3D
+							? unorderedAccessOutputs.front().description.depth
+							: 1u;
+					}
+					else if (renderPass.resolution.mode == ShaderResource::ResolutionMode::Explicit)
+					{
+						width = renderPass.resolution.width;
+						height = renderPass.resolution.height;
+					}
+					if (!width || !height)
+					{
+						outError = "Scale-by-resolution dispatch requires a runtime UAV output or explicit pass resolution.";
+						return false;
+					}
+					const uint32_t groupSizeX = (std::max)(1u, renderPass.dispatch.threadGroupSizeX);
+					const uint32_t groupSizeY = (std::max)(1u, renderPass.dispatch.threadGroupSizeY);
+					const uint32_t groupSizeZ = (std::max)(1u, renderPass.dispatch.threadGroupSizeZ);
+					outThreadGroupCountX = (width + groupSizeX - 1u) / groupSizeX;
+					outThreadGroupCountY = (height + groupSizeY - 1u) / groupSizeY;
+					outThreadGroupCountZ = (depth + groupSizeZ - 1u) / groupSizeZ;
+					break;
+				}
+			}
+
+			if (!outThreadGroupCountX || !outThreadGroupCountY || !outThreadGroupCountZ)
+			{
+				outError = "Compute dispatch dimensions are unavailable for the selected dispatch policy.";
+				return false;
+			}
+			return true;
 		}
 
 		void BuildModifiedShaderExecutionPlans(RenderPassConfigurationSnapshot& configuration)
 		{
 			configuration.executionPlans.clear();
-			for (size_t renderPassIndex = 0; renderPassIndex < configuration.renderPasses.size(); ++renderPassIndex)
+			for (const auto& compiledPlanEntry : configuration.compiledGraph.executionPlans)
 			{
-				const RenderPass::RenderPassDisk& renderPass = configuration.renderPasses[renderPassIndex];
-				const ResolvedEventBinding* resolvedEvent =
-					FindResolvedEventBinding(configuration, renderPass);
-				if (!resolvedEvent || renderPass.event.type != RenderPass::EventType::ModifiedShader)
+				ModifiedShaderExecutionPlan& plan = configuration.executionPlans[compiledPlanEntry.first];
+				plan.graphicsBoundaryMask = compiledPlanEntry.second.graphicsBoundaryMask;
+				plan.computeBoundaryMask = compiledPlanEntry.second.computeBoundaryMask;
+				for (size_t boundaryIndex = 0; boundaryIndex < 2; ++boundaryIndex)
 				{
-					continue;
-				}
-
-				ModifiedShaderExecutionPlan& plan = configuration.executionPlans[resolvedEvent->modifiedShaderId];
-				const size_t boundaryIndex = resolvedEvent->rootBoundary == ExecutionBoundary::After ? 1u : 0u;
-				std::vector<const RenderPass::RenderPassDisk*> rootExecutionOrder;
-				rootExecutionOrder.reserve(configuration.renderPasses.size());
-				std::vector<uint8_t> appendedRenderPasses(configuration.renderPasses.size(), 0);
-				AppendRenderPassExecutionOrder(
-					configuration,
-					renderPassIndex,
-					rootExecutionOrder,
-					appendedRenderPasses);
-				plan.executionOrders[boundaryIndex].insert(
-					plan.executionOrders[boundaryIndex].end(),
-					rootExecutionOrder.begin(),
-					rootExecutionOrder.end());
-				for (const RenderPass::RenderPassDisk* candidate : rootExecutionOrder)
-				{
-					if (candidate && candidate->type == RenderPass::RenderPassType::MipChain)
-						plan.mipChainOrders[boundaryIndex].push_back(candidate);
-				}
-				const uint32_t boundaryMask = boundaryIndex == 1 ? 2u : 1u;
-				plan.graphicsBoundaryMask |= boundaryMask;
-				if (std::any_of(
-					rootExecutionOrder.begin(),
-					rootExecutionOrder.end(),
-					[](const RenderPass::RenderPassDisk* candidate)
+					for (size_t renderPassIndex : compiledPlanEntry.second.executionOrders[boundaryIndex])
 					{
-						return candidate && candidate->type != RenderPass::RenderPassType::MipChain;
-					}))
-				{
-					plan.computeBoundaryMask |= boundaryMask;
-				}
-			}
-
-			// Replacement passes must be the last injected operation before the game's
-			// draw or dispatch so another fullscreen pass cannot restore the normal PSO over them.
-			for (auto& planEntry : configuration.executionPlans)
-			{
-				for (auto& executionOrder : planEntry.second.executionOrders)
-				{
-					std::stable_partition(executionOrder.begin(), executionOrder.end(), [](const auto* renderPass)
+						if (renderPassIndex < configuration.renderPasses.size())
+						{
+							plan.executionOrders[boundaryIndex].push_back(&configuration.renderPasses[renderPassIndex]);
+							plan.hasRuntimeResources = plan.hasRuntimeResources ||
+								!configuration.renderPasses[renderPassIndex].runtimeResources.empty();
+						}
+					}
+					for (size_t renderPassIndex : compiledPlanEntry.second.mipChainOrders[boundaryIndex])
 					{
-						return renderPass && !RenderPass::IsReplacementPass(renderPass->type);
-					});
+						if (renderPassIndex < configuration.renderPasses.size())
+							plan.mipChainOrders[boundaryIndex].push_back(&configuration.renderPasses[renderPassIndex]);
+					}
 				}
 			}
 		}
@@ -924,6 +1200,7 @@ namespace RenderPassRuntime
 
 	void PublishRenderPassConfigurations(const std::vector<RenderPass::RenderPassDisk>& renderPasses)
 	{
+		RenderPassTexturePool::PublishConfigurations(renderPasses);
 		auto snapshot = std::make_unique<RenderPassConfigurationSnapshot>();
 		snapshot->renderPasses = renderPasses;
 		snapshot->runtimeCounters.reserve(renderPasses.size());
@@ -931,30 +1208,104 @@ namespace RenderPassRuntime
 			snapshot->runtimeCounters.push_back(std::make_unique<RuntimeCounters>());
 		BuildResolvedEventBindings(*snapshot);
 		BuildModifiedShaderExecutionPlans(*snapshot);
+		for (const std::string& diagnostic : snapshot->compiledGraph.diagnostics)
+		{
+			ShaderInjectorIO::WriteToLogFileWarning(
+				"RenderPassRuntime->PublishRenderPassConfigurations: graph: " + diagnostic);
+		}
 		bool hasEnabledRenderPass = false;
 		bool hasEnabledMipChainPass = false;
 		bool hasShaderResourcePass = false;
 		bool hasCustomFullscreenPass = false;
+		bool hasGameTextureInput = false;
 		std::unordered_set<std::string> activeIds;
 
-		for (const RenderPass::RenderPassDisk& renderPass : renderPasses)
+		for (size_t renderPassIndex = 0; renderPassIndex < renderPasses.size(); ++renderPassIndex)
 		{
+			const RenderPass::RenderPassDisk& renderPass = renderPasses[renderPassIndex];
 			activeIds.insert(renderPass.id);
-			if (renderPass.enabled && !renderPass.event.id.empty())
+			const bool graphNodeValid = renderPassIndex < snapshot->compiledGraph.nodes.size() &&
+				snapshot->compiledGraph.nodes[renderPassIndex].valid;
+			if (graphNodeValid)
 			{
+				const bool hasGameInput = std::any_of(
+					renderPass.inputs.begin(),
+					renderPass.inputs.end(),
+					[](const RenderPass::LogicalResourceBindingDisk& input)
+					{
+						return input.origin == ShaderResource::ResourceOrigin::Game;
+					});
+				const bool hasRuntimeShaderInput = std::any_of(
+					renderPass.inputs.begin(),
+					renderPass.inputs.end(),
+					[](const RenderPass::LogicalResourceBindingDisk& input)
+					{
+						return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+							input.access == RenderPass::ResourceAccess::ShaderResource;
+					});
+				const bool hasRuntimeUnorderedAccessOutput = std::any_of(
+					renderPass.outputs.begin(),
+					renderPass.outputs.end(),
+					[](const RenderPass::LogicalResourceBindingDisk& output)
+					{
+						return output.origin == ShaderResource::ResourceOrigin::Runtime &&
+							output.access == RenderPass::ResourceAccess::UnorderedAccess;
+					});
 				hasEnabledRenderPass = true;
 				hasEnabledMipChainPass = hasEnabledMipChainPass ||
 					renderPass.type == RenderPass::RenderPassType::MipChain;
-				hasShaderResourcePass = hasShaderResourcePass || !renderPass.shaderResources.empty();
+				hasShaderResourcePass = hasShaderResourcePass ||
+					!renderPass.shaderResources.empty() || hasRuntimeShaderInput ||
+					hasRuntimeUnorderedAccessOutput || hasGameInput;
+				hasGameTextureInput = hasGameTextureInput || hasGameInput;
 				hasCustomFullscreenPass = hasCustomFullscreenPass ||
-					renderPass.type == RenderPass::RenderPassType::Custom;
-				if (!FindResolvedEventBinding(*snapshot, renderPass))
-				{
-					ShaderInjectorIO::WriteToLogFileWarning(
-						"RenderPassRuntime->PublishRenderPassConfigurations: unresolved or invalid event chain for " +
-						renderPass.name + " event=" + RenderPass::EventTypeName(renderPass.event.type) +
-						":" + renderPass.event.id);
-				}
+					(renderPass.type == RenderPass::RenderPassType::Custom &&
+						RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::FullscreenPixel);
+			}
+		}
+
+		for (const ShaderResource::CatalogEntry& resource : ShaderResourceCatalog::GetSnapshot())
+		{
+			if (resource.origin == ShaderResource::ResourceOrigin::Runtime &&
+				!resource.ownerRenderPassId.empty() &&
+				activeIds.find(resource.ownerRenderPassId) == activeIds.end())
+			{
+				ShaderResourceCatalog::RemoveRuntimeResourcesByOwner(resource.ownerRenderPassId);
+			}
+		}
+		for (const RenderPass::RenderPassDisk& renderPass : renderPasses)
+		{
+			if (RenderPass::FindMipChainRuntimeSource(renderPass))
+			{
+				ShaderResource::CatalogEntry entry{};
+				entry.id = RenderPass::MipChainOutputResourceId(renderPass);
+				entry.name = renderPass.name + " Mip Chain";
+				entry.origin = ShaderResource::ResourceOrigin::Runtime;
+				entry.lifetime = ShaderResource::ResourceLifetime::Persistent;
+				entry.ownerRenderPassId = renderPass.id;
+				entry.dimension = ShaderResource::TextureDimension::Texture2D;
+				entry.status = "Declared mip chain";
+				ShaderResourceCatalog::Upsert(entry);
+			}
+			for (const RenderPass::RuntimeResourceDefinitionDisk& definition : renderPass.runtimeResources)
+			{
+				if (definition.id.empty())
+					continue;
+				ShaderResource::CatalogEntry entry{};
+				entry.id = definition.id;
+				entry.name = definition.name.empty() ? definition.id : definition.name;
+				entry.origin = ShaderResource::ResourceOrigin::Runtime;
+				entry.lifetime = definition.texture.lifetime;
+				entry.ownerRenderPassId = renderPass.id;
+				entry.dimension = definition.texture.dimension;
+				entry.width = definition.texture.resolution.width;
+				entry.height = definition.texture.resolution.height;
+				entry.depth = definition.texture.depth;
+				entry.arraySize = definition.texture.arraySize;
+				entry.mipLevels = definition.texture.mipLevels;
+				entry.format = definition.texture.format;
+				entry.status = "Declared";
+				ShaderResourceCatalog::Upsert(entry);
 			}
 		}
 
@@ -969,6 +1320,7 @@ namespace RenderPassRuntime
 		gHasEnabledMipChainPasses.store(hasEnabledMipChainPass, std::memory_order_release);
 		gHasShaderResourcePasses.store(hasShaderResourcePass, std::memory_order_release);
 		gHasCustomFullscreenPasses.store(hasCustomFullscreenPass, std::memory_order_release);
+		gHasGameTextureInputs.store(hasGameTextureInput, std::memory_order_release);
 		const ShaderTargetBindingMap* shaderTargetBindings =
 			gPublishedShaderTargetBindings.load(std::memory_order_acquire);
 		gHasExecutableRenderPassBinding.store(
@@ -1021,6 +1373,11 @@ namespace RenderPassRuntime
 	bool IsResourceTrackingRequired()
 	{
 		return (gTrackingModeFlags.load(std::memory_order_relaxed) & ResourceTrackingEnabled) != 0;
+	}
+
+	bool IsGameTextureDescriptorTrackingRequired()
+	{
+		return gHasGameTextureInputs.load(std::memory_order_relaxed);
 	}
 
 	bool IsDescriptorTableTrackingRequired()
@@ -1563,7 +1920,10 @@ namespace RenderPassRuntime
 		ID3D12GraphicsCommandList* commandList,
 		bool computePipeline,
 		ExecutionBoundary boundary,
-		const char* operationName)
+		const char* operationName,
+		UINT originalThreadGroupCountX,
+		UINT originalThreadGroupCountY,
+		UINT originalThreadGroupCountZ)
 	{
 		if (!IsTrackingRequired())
 			return;
@@ -1592,17 +1952,41 @@ namespace RenderPassRuntime
 			executionPlan->executionOrders[boundaryIndex];
 		if (executionOrder.empty())
 			return;
+		RenderPassTexturePool::ScopedInputTextureOverrides inputTextureOverrides;
 
 		thread_local std::vector<RenderPassMipChain::ExecutionResult> mipChainResults;
 		mipChainResults.clear();
+		thread_local std::unordered_set<std::string> unavailableRuntimeResources;
+		unavailableRuntimeResources.clear();
 		bool mipChainsPrepared = false;
+		RenderPassTexturePool::ReferenceExtent runtimeTextureReference{};
+		bool runtimeTextureReferenceBuilt = false;
+		bool shaderResourceStateBuilt = false;
+		bool fullscreenGraphicsStateBuilt = false;
+		const auto captureShaderResourceState = [&]
+		{
+			if (!shaderResourceStateBuilt)
+			{
+				BuildShaderResourceState(state, computePipeline, gShaderResourceState);
+				BuildShaderResourceState(state, !computePipeline, gOppositeShaderResourceState);
+				shaderResourceStateBuilt = true;
+			}
+		};
+		const auto captureFullscreenGraphicsState = [&]
+		{
+			if (!fullscreenGraphicsStateBuilt)
+			{
+				BuildMipChainGraphicsState(state, gFullscreenGraphicsState);
+				fullscreenGraphicsStateBuilt = true;
+			}
+		};
 		for (const RenderPass::RenderPassDisk* renderPassPointer : executionOrder)
 		{
 			const RenderPass::RenderPassDisk& renderPass = *renderPassPointer;
+			const RenderPass::PassOperation passOperation = RenderPass::ResolvePassOperation(renderPass);
 			const ResolvedEventBinding* resolvedEvent =
 				FindResolvedEventBinding(*configuration, renderPass);
-			if (!resolvedEvent ||
-				(renderPass.type == RenderPass::RenderPassType::MipChain && computePipeline))
+			if (!resolvedEvent)
 			{
 				continue;
 			}
@@ -1610,14 +1994,124 @@ namespace RenderPassRuntime
 			bool executionAttempted = false;
 			bool executionSucceeded = false;
 			std::string executionError;
-			if (renderPass.type == RenderPass::RenderPassType::MipChain)
+			const RenderPass::LogicalResourceBindingDisk* mipRuntimeSource =
+				RenderPass::FindMipChainRuntimeSource(renderPass);
+			RenderPassTexturePool::TextureView generatedMipTexture;
+			bool dependenciesReady = true;
+			for (const RenderPass::LogicalResourceBindingDisk& input : renderPass.inputs)
+			{
+				if (input.origin != ShaderResource::ResourceOrigin::Runtime || input.optional ||
+					input.resourceId.empty() ||
+					unavailableRuntimeResources.find(input.resourceId) == unavailableRuntimeResources.end())
+				{
+					continue;
+				}
+
+				dependenciesReady = false;
+				executionError = "A required runtime texture was not produced during this execution: " +
+					input.resourceId;
+				break;
+			}
+			if (!runtimeTextureReferenceBuilt && !renderPass.runtimeResources.empty() &&
+				passOperation != RenderPass::PassOperation::Copy)
+			{
+				runtimeTextureReference = BuildRuntimeTextureReferenceExtent(state, targetIt->second.outputState);
+				runtimeTextureReferenceBuilt = true;
+			}
+			RenderPassTexturePool::ReferenceExtent passTextureReference = runtimeTextureReference;
+			if (computePipeline && originalThreadGroupCountX && originalThreadGroupCountY)
+			{
+				passTextureReference.width = originalThreadGroupCountX *
+					(std::max)(1u, renderPass.dispatch.threadGroupSizeX);
+				passTextureReference.height = originalThreadGroupCountY *
+					(std::max)(1u, renderPass.dispatch.threadGroupSizeY);
+			}
+
+			const RenderPass::LogicalResourceBindingDisk* copySourceBinding = nullptr;
+			RenderPassTexturePool::TextureView copySourceTexture;
+			bool copySourceReady = dependenciesReady;
+			if (dependenciesReady && passOperation == RenderPass::PassOperation::Copy)
+			{
+				copySourceBinding = FindCopyInput(renderPass);
+				if (!copySourceBinding)
+				{
+					copySourceReady = false;
+					executionError = "Render Pass has no copy source binding.";
+				}
+				else if (copySourceBinding->origin == ShaderResource::ResourceOrigin::Game)
+				{
+					copySourceReady = ResolveGameTexture(
+						renderPass,
+						*copySourceBinding,
+						state,
+						computePipeline,
+						copySourceTexture,
+						executionError);
+				}
+				else
+				{
+					copySourceReady = ResolveRuntimeTexture(
+						copySourceBinding,
+						copySourceTexture,
+						executionError,
+						"copy source",
+						true);
+				}
+				if (copySourceReady)
+					passTextureReference = BuildTextureReference(copySourceTexture);
+			}
+
+			const bool runtimeResourcesReady = dependenciesReady && copySourceReady &&
+				(renderPass.runtimeResources.empty() ||
+				RenderPassTexturePool::EnsurePassResources(
+					renderPass,
+					commandList,
+					passTextureReference,
+					executionError));
+			if (!runtimeResourcesReady)
+			{
+				executionAttempted = true;
+			}
+			else if (mipRuntimeSource &&
+				RenderPass::ResolveExecutionMode(renderPass) == (computePipeline
+					? RenderPass::ExecutionMode::Compute : RenderPass::ExecutionMode::FullscreenPixel))
+			{
+				executionAttempted = true;
+				RenderPassTexturePool::TextureView sourceTexture;
+				if (ResolveRuntimeTexture(mipRuntimeSource, sourceTexture, executionError, "mip source", true))
+				{
+					captureShaderResourceState();
+					if (!computePipeline)
+						captureFullscreenGraphicsState();
+					PerformanceMetrics::ScopedTimer prepareTimer(PerformanceMetrics::Timing::PrepareMipChains);
+					executionSucceeded = RenderPassMipChain::GenerateRuntimeMipChain(
+						renderPass,
+						commandList,
+						sourceTexture,
+						computePipeline ? gShaderResourceState : gFullscreenGraphicsState,
+						gOppositeShaderResourceState,
+						computePipeline,
+						generatedMipTexture,
+						executionError);
+				}
+				PerformanceMetrics::Increment(PerformanceMetrics::Counter::MipPassAttempted);
+				PerformanceMetrics::Increment(executionSucceeded
+					? PerformanceMetrics::Counter::MipPassSucceeded : PerformanceMetrics::Counter::MipPassFailed);
+			}
+			else if (passOperation == RenderPass::PassOperation::MipChain && !mipRuntimeSource &&
+				RenderPass::ResolveExecutionMode(renderPass) == (computePipeline
+					? RenderPass::ExecutionMode::Compute
+					: RenderPass::ExecutionMode::FullscreenPixel))
 			{
 				if (!mipChainsPrepared)
 				{
 					{
 						PerformanceMetrics::ScopedTimer buildStateTimer(
 							PerformanceMetrics::Timing::BuildMipGraphicsState);
-						BuildMipChainGraphicsState(state, gMipChainGraphicsState);
+						if (computePipeline)
+							BuildShaderResourceState(state, true, gMipChainGraphicsState);
+						else
+							BuildMipChainGraphicsState(state, gMipChainGraphicsState);
 					}
 					{
 						PerformanceMetrics::ScopedTimer prepareTimer(
@@ -1626,6 +2120,7 @@ namespace RenderPassRuntime
 							executionPlan->mipChainOrders[boundaryIndex],
 							commandList,
 							gMipChainGraphicsState,
+							computePipeline,
 							mipChainResults);
 					}
 					gPendingMipRestore = std::any_of(
@@ -1651,6 +2146,23 @@ namespace RenderPassRuntime
 						: PerformanceMetrics::Counter::MipPassFailed);
 				}
 			}
+			else if (passOperation == RenderPass::PassOperation::Copy)
+			{
+				executionAttempted = true;
+				RenderPassTexturePool::TextureView destinationTexture;
+				if (ResolveRuntimeTexture(
+						FindRuntimeOutput(renderPass, RenderPass::ResourceAccess::CopyDestination),
+						destinationTexture,
+						executionError,
+						"copy destination"))
+				{
+					executionSucceeded = RenderPassExecutor::ExecuteTextureCopy(
+						commandList,
+						copySourceTexture,
+						destinationTexture,
+						executionError);
+				}
+			}
 			else if (RenderPass::IsReplacementPass(renderPass.type) &&
 				RenderPass::HasCompiledShaders(renderPass) &&
 				((computePipeline && renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader) ||
@@ -1665,8 +2177,7 @@ namespace RenderPassRuntime
 					ShaderResourceRuntime::RestoreResources(commandList);
 					state.replacementPassActive = false;
 				}
-				BuildShaderResourceState(state, computePipeline, gShaderResourceState);
-				BuildShaderResourceState(state, !computePipeline, gOppositeShaderResourceState);
+				captureShaderResourceState();
 				bool shaderResourcesBound = false;
 				{
 					// Descriptor heaps and root tables installed by an injected pass are
@@ -1708,7 +2219,183 @@ namespace RenderPassRuntime
 					}
 				}
 			}
-			else if (!computePipeline && RenderPass::HasCompiledShaders(renderPass))
+			else if (computePipeline &&
+				renderPass.type == RenderPass::RenderPassType::Custom &&
+				RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute &&
+				(passOperation == RenderPass::PassOperation::Custom ||
+					passOperation == RenderPass::PassOperation::Downsample ||
+					passOperation == RenderPass::PassOperation::UpsampleChain) &&
+				RenderPass::HasCompiledShaders(renderPass))
+			{
+				PerformanceMetrics::Increment(PerformanceMetrics::Counter::CustomPassAttempted);
+				executionAttempted = true;
+				captureShaderResourceState();
+
+				thread_local std::vector<RenderPassTexturePool::TextureView> unorderedAccessOutputs;
+				unorderedAccessOutputs.clear();
+				if (passOperation == RenderPass::PassOperation::UpsampleChain)
+				{
+					const RenderPass::LogicalResourceBindingDisk* sourceBinding =
+						FindRuntimeInput(renderPass, RenderPass::ResourceAccess::ShaderResource);
+					const RenderPass::LogicalResourceBindingDisk* destinationBinding =
+						FindRuntimeOutput(renderPass, RenderPass::ResourceAccess::UnorderedAccess);
+					RenderPassTexturePool::TextureView sourceTexture;
+					RenderPassTexturePool::TextureView destinationTexture;
+					thread_local std::vector<RenderPassTexturePool::TextureView> stageTargets;
+					stageTargets.clear();
+					if (ResolveRuntimeTexture(sourceBinding, sourceTexture, executionError, "upsample source", true) &&
+						ResolveRuntimeTexture(destinationBinding, destinationTexture, executionError, "upsample destination") &&
+						RenderPassTexturePool::EnsureUpsampleChainStages(
+							renderPass,
+							commandList,
+							sourceTexture,
+							destinationTexture,
+							true,
+							stageTargets,
+							executionError))
+					{
+						ID3D12PipelineState* computePipelineState = RenderPassReplacement::GetOrCreatePipeline(
+							renderPass,
+							state.pipelineState,
+							executionError);
+						executionSucceeded = computePipelineState != nullptr;
+						RenderPassTexturePool::TextureView stageSource = sourceTexture;
+						for (const RenderPassTexturePool::TextureView& stageTarget : stageTargets)
+						{
+							const ShaderResourceRuntime::RuntimeTextureBindingOverride textureOverride{
+								sourceBinding->resourceId,
+								stageSource.shaderResourceView,
+								destinationBinding->resourceId,
+								stageTarget.unorderedAccessView };
+							bool resourcesBound = false;
+							{
+								HookD3D12::ScopedRenderPassInjection injectionScope;
+								resourcesBound = ShaderResourceRuntime::BindResources(
+									renderPass,
+									commandList,
+									gShaderResourceState,
+									gOppositeShaderResourceState,
+									true,
+									executionError,
+									&textureOverride);
+							}
+							unorderedAccessOutputs.assign(1, stageTarget);
+							UINT threadGroupCountX = 0;
+							UINT threadGroupCountY = 0;
+							UINT threadGroupCountZ = 0;
+							if (resourcesBound && ResolveComputeDispatch(
+								renderPass,
+								originalThreadGroupCountX,
+								originalThreadGroupCountY,
+								originalThreadGroupCountZ,
+								unorderedAccessOutputs,
+								threadGroupCountX,
+								threadGroupCountY,
+								threadGroupCountZ,
+								executionError))
+							{
+								executionSucceeded = RenderPassExecutor::ExecuteCompute(
+									renderPass,
+									commandList,
+									computePipelineState,
+									state.boundPipelineState,
+									threadGroupCountX,
+									threadGroupCountY,
+									threadGroupCountZ,
+									unorderedAccessOutputs,
+									executionError);
+							}
+							else
+							{
+								executionSucceeded = false;
+							}
+							{
+								HookD3D12::ScopedRenderPassInjection injectionScope;
+								ShaderResourceRuntime::RestoreResources(commandList);
+							}
+							if (!executionSucceeded)
+								break;
+							stageSource = stageTarget;
+						}
+					}
+				}
+				else
+				{
+					for (const RenderPass::LogicalResourceBindingDisk& output : renderPass.outputs)
+					{
+						if (output.origin != ShaderResource::ResourceOrigin::Runtime ||
+							output.access != RenderPass::ResourceAccess::UnorderedAccess)
+							continue;
+						RenderPassTexturePool::TextureView texture;
+						if (!RenderPassTexturePool::GetTexture(output.resourceId, output.temporalView, texture) ||
+							!texture.unorderedAccessView.ptr)
+						{
+							if (output.optional)
+								continue;
+							executionError = "Runtime unordered-access output is unavailable: " + output.resourceId;
+							break;
+						}
+						const bool duplicate = std::any_of(
+							unorderedAccessOutputs.begin(),
+							unorderedAccessOutputs.end(),
+							[&](const auto& existing) { return existing.resource.Get() == texture.resource.Get(); });
+						if (!duplicate)
+							unorderedAccessOutputs.push_back(std::move(texture));
+					}
+
+					bool shaderResourcesBound = false;
+					if (executionError.empty())
+					{
+						HookD3D12::ScopedRenderPassInjection injectionScope;
+						shaderResourcesBound = ShaderResourceRuntime::BindResources(
+							renderPass,
+							commandList,
+							gShaderResourceState,
+							gOppositeShaderResourceState,
+							true,
+							executionError);
+					}
+
+					ID3D12PipelineState* computePipelineState = shaderResourcesBound
+						? RenderPassReplacement::GetOrCreatePipeline(renderPass, state.pipelineState, executionError)
+						: nullptr;
+					UINT threadGroupCountX = 0;
+					UINT threadGroupCountY = 0;
+					UINT threadGroupCountZ = 0;
+					if (computePipelineState && ResolveComputeDispatch(
+						renderPass,
+						originalThreadGroupCountX,
+						originalThreadGroupCountY,
+						originalThreadGroupCountZ,
+						unorderedAccessOutputs,
+						threadGroupCountX,
+						threadGroupCountY,
+						threadGroupCountZ,
+						executionError))
+					{
+						executionSucceeded = RenderPassExecutor::ExecuteCompute(
+							renderPass,
+							commandList,
+							computePipelineState,
+							state.boundPipelineState,
+							threadGroupCountX,
+							threadGroupCountY,
+							threadGroupCountZ,
+							unorderedAccessOutputs,
+							executionError);
+					}
+					{
+						HookD3D12::ScopedRenderPassInjection injectionScope;
+						ShaderResourceRuntime::RestoreResources(commandList);
+					}
+				}
+				if (executionSucceeded)
+					PerformanceMetrics::Increment(PerformanceMetrics::Counter::CustomPassSucceeded);
+			}
+			else if (!computePipeline && RenderPass::HasCompiledShaders(renderPass) &&
+				(passOperation == RenderPass::PassOperation::Custom ||
+				passOperation == RenderPass::PassOperation::Downsample ||
+				passOperation == RenderPass::PassOperation::UpsampleChain))
 			{
 				PerformanceMetrics::Increment(PerformanceMetrics::Counter::CustomPassAttempted);
 				thread_local std::vector<RenderPass::ResourceBindingDiagnostic> effectiveOutputBindings;
@@ -1745,25 +2432,111 @@ namespace RenderPassRuntime
 				}
 
 				executionAttempted = true;
-				BuildShaderResourceState(state, false, gShaderResourceState);
-				BuildShaderResourceState(state, true, gOppositeShaderResourceState);
-				bool shaderResourcesBound = false;
+				captureShaderResourceState();
+				captureFullscreenGraphicsState();
+				if (passOperation == RenderPass::PassOperation::UpsampleChain)
 				{
-					HookD3D12::ScopedRenderPassInjection injectionScope;
-					shaderResourcesBound = ShaderResourceRuntime::BindResources(
-						renderPass,
-						commandList,
-						gShaderResourceState,
-						gOppositeShaderResourceState,
-						false,
-						executionError);
-				}
-				if (!shaderResourcesBound)
-				{
-					executionSucceeded = false;
+					const RenderPass::LogicalResourceBindingDisk* sourceBinding =
+						FindRuntimeInput(renderPass, RenderPass::ResourceAccess::ShaderResource);
+					RenderPassTexturePool::TextureView sourceTexture;
+					RenderPassTexturePool::TextureView destinationTexture;
+					thread_local std::vector<RenderPassTexturePool::TextureView> stageTargets;
+					stageTargets.clear();
+					if (ResolveRuntimeTexture(sourceBinding, sourceTexture, executionError, "upsample source", true) &&
+						ResolveRuntimeTexture(
+							FindRuntimeOutput(renderPass, RenderPass::ResourceAccess::RenderTarget),
+							destinationTexture,
+							executionError,
+							"upsample destination") &&
+						RenderPassTexturePool::EnsureUpsampleChainStages(
+							renderPass,
+							commandList,
+							sourceTexture,
+							destinationTexture,
+							false,
+							stageTargets,
+							executionError))
+					{
+						executionSucceeded = true;
+						RenderPassTexturePool::TextureView stageSource = sourceTexture;
+						for (const RenderPassTexturePool::TextureView& stageTarget : stageTargets)
+						{
+							const ShaderResourceRuntime::RuntimeTextureBindingOverride sourceOverride{
+								sourceBinding->resourceId,
+								stageSource.shaderResourceView };
+							bool resourcesBound = false;
+							{
+								HookD3D12::ScopedRenderPassInjection injectionScope;
+								resourcesBound = ShaderResourceRuntime::BindResources(
+									renderPass,
+									commandList,
+									gShaderResourceState,
+									gOppositeShaderResourceState,
+									false,
+									executionError,
+									&sourceOverride);
+							}
+							if (resourcesBound)
+							{
+								executionSucceeded = RenderPassExecutor::ExecuteFullscreenTriangle(
+									renderPass,
+									commandList,
+									state.graphicsRootSignature,
+									state.boundPipelineState,
+									state.primitiveTopology,
+									effectiveOutputBindings,
+									&stageTarget,
+									&gFullscreenGraphicsState,
+									executionError);
+							}
+							else
+							{
+								executionSucceeded = false;
+							}
+							{
+								HookD3D12::ScopedRenderPassInjection injectionScope;
+								ShaderResourceRuntime::RestoreResources(commandList);
+							}
+							if (!executionSucceeded)
+								break;
+							stageSource = stageTarget;
+						}
+					}
 				}
 				else
 				{
+					RenderPassTexturePool::TextureView runtimeOutputTexture;
+					const RenderPass::LogicalResourceBindingDisk* outputBinding =
+						FindRuntimeOutput(renderPass, RenderPass::ResourceAccess::RenderTarget);
+					const RenderPassTexturePool::TextureView* runtimeOutput = nullptr;
+					bool outputAvailable = true;
+					if (outputBinding)
+					{
+						outputAvailable = ResolveRuntimeTexture(
+							outputBinding,
+							runtimeOutputTexture,
+							executionError,
+							"render target");
+						runtimeOutput = outputAvailable ? &runtimeOutputTexture : nullptr;
+					}
+
+					bool shaderResourcesBound = false;
+					if (outputAvailable)
+					{
+						HookD3D12::ScopedRenderPassInjection injectionScope;
+						shaderResourcesBound = ShaderResourceRuntime::BindResources(
+							renderPass,
+							commandList,
+							gShaderResourceState,
+							gOppositeShaderResourceState,
+							false,
+							executionError);
+					}
+					if (!shaderResourcesBound)
+					{
+						executionSucceeded = false;
+					}
+					else
 					{
 						PerformanceMetrics::ScopedTimer customPassTimer(
 							PerformanceMetrics::Timing::ExecuteCustomPass);
@@ -1774,6 +2547,8 @@ namespace RenderPassRuntime
 							state.boundPipelineState,
 							state.primitiveTopology,
 							effectiveOutputBindings,
+							runtimeOutput,
+							runtimeOutput ? &gFullscreenGraphicsState : nullptr,
 							executionError);
 					}
 					if (executionSucceeded)
@@ -1783,6 +2558,34 @@ namespace RenderPassRuntime
 						ShaderResourceRuntime::RestoreResources(commandList);
 					}
 				}
+			}
+
+			if (mipRuntimeSource)
+			{
+				const std::string outputId = RenderPass::MipChainOutputResourceId(renderPass);
+				RenderPassTexturePool::OverrideInputTexture(
+					mipRuntimeSource->resourceId, mipRuntimeSource->temporalView, generatedMipTexture);
+				RenderPassTexturePool::OverrideInputTexture(
+					outputId, ShaderResource::TemporalView::Current, generatedMipTexture);
+				if (executionSucceeded)
+				{
+					unavailableRuntimeResources.erase(mipRuntimeSource->resourceId);
+					unavailableRuntimeResources.erase(outputId);
+				}
+				else
+				{
+					unavailableRuntimeResources.insert(mipRuntimeSource->resourceId);
+					unavailableRuntimeResources.insert(outputId);
+				}
+			}
+			for (const RenderPass::LogicalResourceBindingDisk& output : renderPass.outputs)
+			{
+				if (output.origin != ShaderResource::ResourceOrigin::Runtime || output.resourceId.empty())
+					continue;
+				if (executionSucceeded)
+					unavailableRuntimeResources.erase(output.resourceId);
+				else
+					unavailableRuntimeResources.insert(output.resourceId);
 			}
 
 			const size_t renderPassIndex = static_cast<size_t>(
@@ -1865,7 +2668,7 @@ namespace RenderPassRuntime
 					commandList,
 					state.pipelineState,
 					state.boundPipelineState,
-					state.graphicsRootSignature,
+					computePipeline ? state.computeRootSignature : state.graphicsRootSignature,
 					static_cast<unsigned long long>(state.outputBindings.size()),
 					targetIt->second.outputState.renderTargetCount,
 					static_cast<UINT>(targetIt->second.outputState.renderTargetFormats[0]),
@@ -1882,11 +2685,22 @@ namespace RenderPassRuntime
 					"RenderPassRuntime->RecordExecutionBoundary: first " +
 					std::string(RenderPass::TypeName(renderPass.type)) + " execution succeeded for " +
 					renderPass.name + " via " + (operationName ? operationName : "Unknown"));
+				if (mipRuntimeSource)
+				{
+					ShaderInjectorIO::WriteToLogFileSuccess(StringHelper::Format(
+						"RenderPassRuntime->RecordExecutionBoundary: runtime mip chain source=%s output=%s extent=%ux%u mips=%u mode=%s",
+						mipRuntimeSource->resourceId.c_str(),
+						RenderPass::MipChainOutputResourceId(renderPass).c_str(),
+						generatedMipTexture.description.width,
+						generatedMipTexture.description.height,
+						generatedMipTexture.description.mipLevels,
+						RenderPass::ExecutionModeName(RenderPass::ResolveExecutionMode(renderPass))));
+				}
 			}
 			else if (firstFailedExecution)
 			{
 				ShaderInjectorGUI::WriteToRuntimeLogError(
-					"RenderPassRuntime->RecordExecutionBoundary: first fullscreen execution failed for " +
+					"RenderPassRuntime->RecordExecutionBoundary: first render-pass execution failed for " +
 					renderPass.name + " via " + (operationName ? operationName : "Unknown") +
 					" error=" + executionError);
 			}
@@ -1907,7 +2721,7 @@ namespace RenderPassRuntime
 		{
 			PerformanceMetrics::ScopedTimer restoreTimer(
 				PerformanceMetrics::Timing::RestoreMipState);
-			RenderPassMipChain::RestoreAfterTargetDraw(commandList, gMipChainGraphicsState);
+			RenderPassMipChain::RestoreAfterTargetDraw(commandList, gMipChainGraphicsState, false);
 			gPendingMipRestore = false;
 			gPendingMipRestoreCommandList = nullptr;
 		}
@@ -1916,12 +2730,21 @@ namespace RenderPassRuntime
 	void CompleteComputeExecutionBoundary(ID3D12GraphicsCommandList* commandList)
 	{
 		CommandListRenderState& state = GetCommandListState(commandList);
-		if (!state.replacementPassActive)
-			return;
-		HookD3D12::ScopedRenderPassInjection injectionScope;
-		commandList->SetPipelineState(state.boundPipelineState);
-		ShaderResourceRuntime::RestoreResources(commandList);
-		state.replacementPassActive = false;
+		if (state.replacementPassActive)
+		{
+			HookD3D12::ScopedRenderPassInjection injectionScope;
+			commandList->SetPipelineState(state.boundPipelineState);
+			ShaderResourceRuntime::RestoreResources(commandList);
+			state.replacementPassActive = false;
+		}
+		if (gPendingMipRestore && gPendingMipRestoreCommandList == commandList)
+		{
+			PerformanceMetrics::ScopedTimer restoreTimer(
+				PerformanceMetrics::Timing::RestoreMipState);
+			RenderPassMipChain::RestoreAfterTargetDraw(commandList, gMipChainGraphicsState, true);
+			gPendingMipRestore = false;
+			gPendingMipRestoreCommandList = nullptr;
+		}
 	}
 
 	void NotifyCommandListsSubmitted(
@@ -1940,6 +2763,11 @@ namespace RenderPassRuntime
 			commandQueue,
 			commandListCount,
 			commandLists);
+	}
+
+	void AdvanceFrame()
+	{
+		RenderPassTexturePool::AdvanceFrame();
 	}
 
 	void LogPerformanceSnapshot()

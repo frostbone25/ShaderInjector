@@ -262,7 +262,8 @@ namespace DatabaseRenderPasses
 				return {};
 			if (currentRenderPass->event.type == RenderPass::EventType::ModifiedShader)
 			{
-				return currentRenderPass->type == RenderPass::RenderPassType::MipChain
+				return currentRenderPass->type == RenderPass::RenderPassType::MipChain &&
+					!RenderPass::FindMipChainRuntimeSource(*currentRenderPass)
 					? RenderPass::timingBefore
 					: currentRenderPass->timing;
 			}
@@ -284,7 +285,8 @@ namespace DatabaseRenderPasses
 	bool IsEventChainActive(const RenderPass::RenderPassDisk& renderPass)
 	{
 		EnsureRenderPassesLoaded();
-		const bool mipChainPass = renderPass.type == RenderPass::RenderPassType::MipChain;
+		const bool mipChainPass = renderPass.type == RenderPass::RenderPassType::MipChain &&
+			!RenderPass::FindMipChainRuntimeSource(renderPass);
 		const RenderPass::RenderPassDisk* currentRenderPass = &renderPass;
 		std::unordered_set<std::string> visitedRenderPassIds;
 		while (currentRenderPass)
@@ -298,7 +300,8 @@ namespace DatabaseRenderPasses
 
 			if (currentRenderPass->event.type == RenderPass::EventType::ModifiedShader)
 			{
-				const bool rootExecutesAfter = currentRenderPass->type != RenderPass::RenderPassType::MipChain &&
+				const bool rootExecutesAfter = (currentRenderPass->type != RenderPass::RenderPassType::MipChain ||
+					RenderPass::FindMipChainRuntimeSource(*currentRenderPass)) &&
 					currentRenderPass->timing == RenderPass::timingAfter;
 				return (!mipChainPass || !rootExecutesAfter) &&
 					DatabaseModifiedShaders::FindModifiedShaderById(currentRenderPass->event.id) != nullptr;
@@ -403,12 +406,14 @@ namespace DatabaseRenderPasses
 			return false;
 		}
 		if (renderPass->type == RenderPass::RenderPassType::MipChain &&
+			!RenderPass::FindMipChainRuntimeSource(*renderPass) &&
 			ResolveRootTiming(*renderPass) == RenderPass::timingAfter)
 		{
 			return false;
 		}
 		if (RenderPass::IsReplacementPass(renderPass->type))
 			renderPass->timing = RenderPass::timingBefore;
+		RenderPass::NormalizeExecutionResources(*renderPass);
 		std::unordered_set<std::string> resourceBindings;
 		for (const RenderPass::ShaderResourceReferenceDisk& resource : renderPass->shaderResources)
 		{
@@ -459,7 +464,7 @@ namespace DatabaseRenderPasses
 		return true;
 	}
 
-	bool CreateFragmentShaderTemplate(const std::string& renderPassId, std::string& outError)
+	bool CreateShaderTemplate(const std::string& renderPassId, std::string& outError)
 	{
 		RenderPass::RenderPassDisk* renderPass = FindRenderPassById(renderPassId);
 		if (!renderPass)
@@ -475,7 +480,7 @@ namespace DatabaseRenderPasses
 			return false;
 		}
 
-		if (!RenderPassShaders::CreateFragmentShaderTemplate(*renderPass, *modifiedShader, outError) ||
+		if (!RenderPassShaders::CreateShaderTemplate(*renderPass, *modifiedShader, outError) ||
 			!RenderPass::WriteJson(*renderPass))
 		{
 			if (outError.empty())

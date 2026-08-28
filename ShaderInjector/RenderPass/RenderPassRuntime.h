@@ -31,6 +31,7 @@ namespace RenderPassRuntime
 	bool HasEnabledMipChainPasses();
 	bool IsTrackingRequired();
 	bool IsResourceTrackingRequired();
+	bool IsGameTextureDescriptorTrackingRequired();
 	bool IsDescriptorTableTrackingRequired();
 	bool IsDescriptorRegistryTrackingRequired();
 	bool IsGraphicsStateTrackingRequired();
@@ -113,13 +114,17 @@ namespace RenderPassRuntime
 		ID3D12GraphicsCommandList* commandList,
 		bool computePipeline,
 		ExecutionBoundary boundary,
-		const char* operationName);
+		const char* operationName,
+		UINT originalThreadGroupCountX = 0,
+		UINT originalThreadGroupCountY = 0,
+		UINT originalThreadGroupCountZ = 0);
 	void CompleteGraphicsExecutionBoundary(ID3D12GraphicsCommandList* commandList);
 	void CompleteComputeExecutionBoundary(ID3D12GraphicsCommandList* commandList);
 	void NotifyCommandListsSubmitted(
 		ID3D12CommandQueue* commandQueue,
 		UINT commandListCount,
 		ID3D12CommandList* const* commandLists);
+	void AdvanceFrame();
 	void LogPerformanceSnapshot();
 
 	RenderPass::RuntimeDiagnostics GetDiagnostics(const std::string& renderPassId);

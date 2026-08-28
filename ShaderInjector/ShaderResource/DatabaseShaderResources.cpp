@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include "IO/ShaderInjectorIO.h"
+#include "ShaderResource/ShaderResourceCatalog.h"
 #include "ShaderResource/ShaderResourceDDS.h"
 
 namespace DatabaseShaderResources
@@ -68,6 +69,7 @@ namespace DatabaseShaderResources
 		gShaderResourceIndices.reserve(gShaderResources.size());
 		for (size_t resourceIndex = 0; resourceIndex < gShaderResources.size(); ++resourceIndex)
 			gShaderResourceIndices.emplace(gShaderResources[resourceIndex].id, resourceIndex);
+		ShaderResourceCatalog::PublishDiskResources(gShaderResources);
 		ShaderInjectorIO::WriteToLogFile(
 			"DatabaseShaderResources->RefreshShaderResources: loaded DDS textures=" +
 			std::to_string(gShaderResources.size()));

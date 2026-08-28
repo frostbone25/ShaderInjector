@@ -2814,6 +2814,8 @@ namespace HookD3D12
 		if ((Flags & DXGI_PRESENT_TEST) != 0)
 			return CallOriginalPresent();
 
+		RenderPassRuntime::AdvanceFrame();
+
 		// ExecuteCommandLists records the most recently submitted direct queue. The queue
 		// immediately preceding Present is the safest fallback when the swap chain was
 		// created before this DLL installed its hooks.

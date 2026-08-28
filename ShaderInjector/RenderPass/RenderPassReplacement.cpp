@@ -106,7 +106,7 @@ namespace RenderPassReplacement
 				if (pipeline.pipelineState != original || pipeline.streamBlob.empty())
 					continue;
 				const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetType =
-					renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader
+					RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute
 					? D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS
 					: D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS;
 				std::vector<uint8_t> stream = pipeline.streamBlob;
@@ -237,7 +237,7 @@ namespace RenderPassReplacement
 		outError.clear();
 		if (!originalPipelineState || renderPass.fragmentShaderBlob.empty())
 		{
-			outError = "Replacement pass is missing its target PSO or compiled shader.";
+			outError = "Render Pass is missing its target PSO or compiled shader.";
 			return nullptr;
 		}
 		if (ID3D12PipelineState* cachedPipeline = FindThreadPipeline(renderPass, originalPipelineState))
@@ -252,9 +252,10 @@ namespace RenderPassReplacement
 		}
 
 		std::lock_guard<std::mutex> pipelineLock(HookD3D12::gPipelineMutex);
-		ID3D12PipelineState* pipeline = renderPass.type == RenderPass::RenderPassType::ReplacementPixelShader
-			? BuildGraphicsPipeline(renderPass, originalPipelineState, outError)
-			: BuildComputePipeline(renderPass, originalPipelineState, outError);
+		ID3D12PipelineState* pipeline =
+			RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute
+				? BuildComputePipeline(renderPass, originalPipelineState, outError)
+				: BuildGraphicsPipeline(renderPass, originalPipelineState, outError);
 		if (!pipeline)
 			pipeline = BuildStreamPipeline(renderPass, originalPipelineState, outError);
 		if (!pipeline && outError.empty())

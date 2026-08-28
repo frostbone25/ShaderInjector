@@ -18,6 +18,7 @@
 #include "IO/ShaderInjectorIO.h"
 #include "Performance/PerformanceMetrics.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
+#include "RenderPass/RenderPassTexturePool.h"
 #include "ShaderResource/DatabaseShaderResources.h"
 #include "ShaderResource/ShaderResourceDDS.h"
 #include "StringHelper.h"
@@ -612,10 +613,27 @@ namespace ShaderResourceRuntime
 		const RenderPassMipChain::GraphicsStateSnapshot& gameState,
 		const RenderPassMipChain::GraphicsStateSnapshot& oppositePipelineState,
 		bool computePipeline,
-		std::string& outError)
+		std::string& outError,
+		const RuntimeTextureBindingOverride* runtimeTextureOverride)
 	{
 		outError.clear();
-		if (renderPass.shaderResources.empty())
+		const bool hasRuntimeShaderResource = std::any_of(
+			renderPass.inputs.begin(),
+			renderPass.inputs.end(),
+			[](const RenderPass::LogicalResourceBindingDisk& input)
+			{
+				return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+					input.access == RenderPass::ResourceAccess::ShaderResource;
+			});
+		const bool hasRuntimeUnorderedAccess = std::any_of(
+			renderPass.outputs.begin(),
+			renderPass.outputs.end(),
+			[](const RenderPass::LogicalResourceBindingDisk& output)
+			{
+				return output.origin == ShaderResource::ResourceOrigin::Runtime &&
+					output.access == RenderPass::ResourceAccess::UnorderedAccess;
+			});
+		if (renderPass.shaderResources.empty() && !hasRuntimeShaderResource && !hasRuntimeUnorderedAccess)
 			return true;
 		PerformanceMetrics::Increment(PerformanceMetrics::Counter::ShaderResourceBindAttempted);
 		PerformanceMetrics::ScopedTimer bindTimer(PerformanceMetrics::Timing::BindShaderResources);
@@ -743,16 +761,14 @@ namespace ShaderResourceRuntime
 					D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 		}
 
-		for (const RenderPass::ShaderResourceReferenceDisk& reference : renderPass.shaderResources)
+		const auto bindDescriptor = [&](D3D12_DESCRIPTOR_RANGE_TYPE rangeType,
+			uint32_t shaderRegister,
+			uint32_t registerSpace,
+			D3D12_CPU_DESCRIPTOR_HANDLE sourceDescriptor) -> bool
 		{
-			const ShaderResource::TextureDisk* disk = DatabaseShaderResources::FindShaderResourceById(reference.resourceId);
-			if (!disk)
-			{
-				outError = "Shader resource is missing: " + reference.resourceId;
-				return false;
-			}
-			const uint64_t bindingKey =
-				(static_cast<uint64_t>(reference.registerSpace) << 32) | reference.shaderRegister;
+			const uint64_t bindingKey = (static_cast<uint64_t>(rangeType) << 56) |
+				((static_cast<uint64_t>(registerSpace) & 0x0FFFFFFFull) << 28) |
+				(static_cast<uint64_t>(shaderRegister) & 0x0FFFFFFFull);
 			auto& bindingLocations = computePipeline
 				? slot.computeBindingLocations
 				: slot.graphicsBindingLocations;
@@ -762,15 +778,17 @@ namespace ShaderResourceRuntime
 				std::vector<RenderPassResourceRegistry::DescriptorBindingLocation> locations;
 				if (!RenderPassResourceRegistry::GetDescriptorBindingCandidates(
 					gameState.rootSignature,
-					D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-					reference.shaderRegister,
-					reference.registerSpace,
+					rangeType,
+					shaderRegister,
+					registerSpace,
 					renderPass.maximumTrackedDescriptors,
 					computePipeline ? D3D12_SHADER_VISIBILITY_ALL : D3D12_SHADER_VISIBILITY_PIXEL,
 					locations))
 				{
-					outError = "No SRV root binding exists for t" + std::to_string(reference.shaderRegister) +
-						", space" + std::to_string(reference.registerSpace) + ".";
+					const char registerPrefix = rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_UAV ? 'u' : 't';
+					outError = "No " + std::string(rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_UAV ? "UAV" : "SRV") +
+						" root binding exists for " + registerPrefix + std::to_string(shaderRegister) +
+						", space" + std::to_string(registerSpace) + ".";
 					return false;
 				}
 				locationIt = bindingLocations.emplace(bindingKey, std::move(locations)).first;
@@ -794,9 +812,28 @@ namespace ShaderResourceRuntime
 			}
 			if (!location || !activeTable)
 			{
-				outError = "No compatible active SRV table exists for t" +
-					std::to_string(reference.shaderRegister) + ", space" +
-					std::to_string(reference.registerSpace) + " on this draw or dispatch.";
+				const char registerPrefix = rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_UAV ? 'u' : 't';
+				outError = "No compatible active " +
+					std::string(rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_UAV ? "UAV" : "SRV") +
+					" table exists for " + registerPrefix + std::to_string(shaderRegister) + ", space" +
+					std::to_string(registerSpace) + " on this draw or dispatch.";
+				return false;
+			}
+			const UINT descriptorOffset = activeTable->customOffset + location->tableOffset;
+			device->CopyDescriptorsSimple(
+				1,
+				{ cpuStart.ptr + static_cast<SIZE_T>(descriptorOffset) * increment },
+				sourceDescriptor,
+				D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+			return true;
+		};
+
+		for (const RenderPass::ShaderResourceReferenceDisk& reference : renderPass.shaderResources)
+		{
+			const ShaderResource::TextureDisk* disk = DatabaseShaderResources::FindShaderResourceById(reference.resourceId);
+			if (!disk)
+			{
+				outError = "Shader resource is missing: " + reference.resourceId;
 				return false;
 			}
 			TextureGpu* texture = nullptr;
@@ -811,12 +848,90 @@ namespace ShaderResourceRuntime
 			}
 			if (!texture)
 				return false;
-			const UINT descriptorOffset = activeTable->customOffset + location->tableOffset;
-			device->CopyDescriptorsSimple(
-				1,
-				{ cpuStart.ptr + static_cast<SIZE_T>(descriptorOffset) * increment },
-				texture->srvHeap->GetCPUDescriptorHandleForHeapStart(),
-				D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+			if (!bindDescriptor(
+				D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+				reference.shaderRegister,
+				reference.registerSpace,
+				texture->srvHeap->GetCPUDescriptorHandleForHeapStart()))
+			{
+				return false;
+			}
+		}
+
+		for (const RenderPass::LogicalResourceBindingDisk& input : renderPass.inputs)
+		{
+			if (input.origin != ShaderResource::ResourceOrigin::Runtime ||
+				input.access != RenderPass::ResourceAccess::ShaderResource)
+			{
+				continue;
+			}
+
+			D3D12_CPU_DESCRIPTOR_HANDLE sourceDescriptor{};
+			if (runtimeTextureOverride && runtimeTextureOverride->resourceId == input.resourceId)
+				sourceDescriptor = runtimeTextureOverride->shaderResourceView;
+			else
+			{
+				RenderPassTexturePool::TextureView runtimeTexture;
+				if (RenderPassTexturePool::GetInputTexture(input.resourceId, input.temporalView, runtimeTexture))
+					sourceDescriptor = runtimeTexture.shaderResourceView;
+			}
+
+			if (!sourceDescriptor.ptr)
+			{
+				if (input.optional)
+					continue;
+				outError = "Runtime shader resource is unavailable: " + input.resourceId;
+				return false;
+			}
+			if (!bindDescriptor(
+				D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+				input.shaderRegister,
+				input.registerSpace,
+				sourceDescriptor))
+				return false;
+		}
+
+		for (const RenderPass::LogicalResourceBindingDisk& output : renderPass.outputs)
+		{
+			if (output.origin != ShaderResource::ResourceOrigin::Runtime ||
+				output.access != RenderPass::ResourceAccess::UnorderedAccess)
+			{
+				continue;
+			}
+
+			D3D12_CPU_DESCRIPTOR_HANDLE sourceDescriptor{};
+			if (runtimeTextureOverride &&
+				runtimeTextureOverride->unorderedAccessResourceId == output.resourceId)
+			{
+				sourceDescriptor = runtimeTextureOverride->unorderedAccessView;
+			}
+			else
+			{
+				RenderPassTexturePool::TextureView runtimeTexture;
+				if (RenderPassTexturePool::GetTexture(
+					output.resourceId,
+					output.temporalView,
+					runtimeTexture))
+				{
+					sourceDescriptor = runtimeTexture.unorderedAccessView;
+				}
+			}
+			if (!sourceDescriptor.ptr)
+			{
+				if (output.optional)
+					continue;
+				outError = "Runtime unordered-access output is unavailable: " + output.resourceId;
+				return false;
+			}
+
+			if (!bindDescriptor(
+				D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+				output.shaderRegister,
+				output.registerSpace,
+				sourceDescriptor))
+			{
+				return false;
+			}
 		}
 
 		ID3D12DescriptorHeap* samplerHeap = nullptr;

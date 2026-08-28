@@ -10,6 +10,7 @@
 #include "HookD3D12RenderPass.h"
 #include "RenderPass/RenderPassMipChain.h"
 #include "RenderPass/RenderPassReplacement.h"
+#include "RenderPass/RenderPassTexturePool.h"
 #include "ShaderResource/ShaderResourceRuntime.h"
 #include "Globals.h"
 #include "RenderDoc/RenderDocIntegration.h"
@@ -116,6 +117,42 @@ namespace RenderPassExecutor
 				}
 			}
 			return outState.count > 0 && outState.formats[0] != DXGI_FORMAT_UNKNOWN;
+		}
+
+		bool BuildRenderTargetState(
+			const RenderPassTexturePool::TextureView& runtimeOutput,
+			RenderTargetState& outState)
+		{
+			outState = {};
+			if (!runtimeOutput.resource || !runtimeOutput.renderTargetView.ptr ||
+				runtimeOutput.description.format == DXGI_FORMAT_UNKNOWN)
+			{
+				return false;
+			}
+			outState.count = 1;
+			outState.formats[0] = runtimeOutput.description.format;
+			outState.sampleCount = runtimeOutput.description.sampleCount;
+			return true;
+		}
+
+		void RestoreGameOutputState(
+			ID3D12GraphicsCommandList* commandList,
+			const RenderPassMipChain::GraphicsStateSnapshot& gameState)
+		{
+			const D3D12_CPU_DESCRIPTOR_HANDLE* depthStencil = gameState.depthStencil.ptr
+				? &gameState.depthStencil
+				: nullptr;
+			commandList->OMSetRenderTargets(
+				static_cast<UINT>(gameState.renderTargets.size()),
+				gameState.renderTargets.empty() ? nullptr : gameState.renderTargets.data(),
+				FALSE,
+				depthStencil);
+			if (!gameState.viewports.empty())
+				commandList->RSSetViewports(static_cast<UINT>(gameState.viewports.size()), gameState.viewports.data());
+			if (!gameState.scissorRectangles.empty())
+				commandList->RSSetScissorRects(
+					static_cast<UINT>(gameState.scissorRectangles.size()),
+					gameState.scissorRectangles.data());
 		}
 
 		std::string BuildPipelineCacheKey(
@@ -268,6 +305,8 @@ namespace RenderPassExecutor
 		ID3D12PipelineState* pipelineStateToRestore,
 		D3D12_PRIMITIVE_TOPOLOGY primitiveTopologyToRestore,
 		const std::vector<RenderPass::ResourceBindingDiagnostic>& outputBindings,
+		const RenderPassTexturePool::TextureView* runtimeOutput,
+		const RenderPassMipChain::GraphicsStateSnapshot* gameStateToRestore,
 		std::string& outError)
 	{
 		outError.clear();
@@ -293,9 +332,20 @@ namespace RenderPassExecutor
 			outError = "One or more original D3D12 draw functions are unavailable.";
 			return false;
 		}
+		if (runtimeOutput && (!gameStateToRestore ||
+			gameStateToRestore->renderTargets.empty() ||
+			gameStateToRestore->viewports.empty() ||
+			gameStateToRestore->scissorRectangles.empty()))
+		{
+			outError = "Runtime output requires captured render-target, viewport, and scissor state.";
+			return false;
+		}
 
 		RenderTargetState renderTargets{};
-		if (!BuildRenderTargetState(outputBindings, renderTargets))
+		const bool renderTargetStateAvailable = runtimeOutput
+			? BuildRenderTargetState(*runtimeOutput, renderTargets)
+			: BuildRenderTargetState(outputBindings, renderTargets);
+		if (!renderTargetStateAvailable)
 		{
 			outError = "The target draw's render-target formats are not available yet.";
 			return false;
@@ -350,10 +400,189 @@ namespace RenderPassExecutor
 				static_cast<UINT>((eventName.size() + 1) * sizeof(wchar_t)));
 			commandList->SetPipelineState(fullscreenPipelineState);
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			if (runtimeOutput)
+			{
+				D3D12_RESOURCE_BARRIER barrier{};
+				barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+				barrier.Transition.pResource = runtimeOutput->resource.Get();
+				barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+				barrier.Transition.StateBefore = runtimeOutput->initialState;
+				barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+				commandList->ResourceBarrier(1, &barrier);
+				commandList->OMSetRenderTargets(1, &runtimeOutput->renderTargetView, FALSE, nullptr);
+				const D3D12_VIEWPORT viewport{
+					0.0f,
+					0.0f,
+					static_cast<float>(runtimeOutput->description.width),
+					static_cast<float>(runtimeOutput->description.height),
+					0.0f,
+					1.0f };
+				const D3D12_RECT scissor{
+					0,
+					0,
+					static_cast<LONG>(runtimeOutput->description.width),
+					static_cast<LONG>(runtimeOutput->description.height) };
+				commandList->RSSetViewports(1, &viewport);
+				commandList->RSSetScissorRects(1, &scissor);
+			}
 			commandList->DrawInstanced(3, 1, 0, 0);
+			if (runtimeOutput)
+			{
+				D3D12_RESOURCE_BARRIER barrier{};
+				barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+				barrier.Transition.pResource = runtimeOutput->resource.Get();
+				barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+				barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+				barrier.Transition.StateAfter = runtimeOutput->initialState;
+				commandList->ResourceBarrier(1, &barrier);
+				if (gameStateToRestore)
+					RestoreGameOutputState(commandList, *gameStateToRestore);
+			}
 			commandList->IASetPrimitiveTopology(primitiveTopologyToRestore);
 			commandList->SetPipelineState(pipelineStateToRestore);
 			commandList->EndEvent();
+		}
+		return true;
+	}
+
+	bool ExecuteCompute(
+		const RenderPass::RenderPassDisk& renderPass,
+		ID3D12GraphicsCommandList* commandList,
+		ID3D12PipelineState* computePipelineState,
+		ID3D12PipelineState* pipelineStateToRestore,
+		UINT threadGroupCountX,
+		UINT threadGroupCountY,
+		UINT threadGroupCountZ,
+		const std::vector<RenderPassTexturePool::TextureView>& unorderedAccessOutputs,
+		std::string& outError)
+	{
+		outError.clear();
+		if (!commandList || !computePipelineState || !pipelineStateToRestore)
+		{
+			outError = "The target dispatch does not have complete compute state.";
+			return false;
+		}
+		if (!threadGroupCountX || !threadGroupCountY || !threadGroupCountZ)
+		{
+			outError = "The injected compute dispatch resolved to zero thread groups.";
+			return false;
+		}
+		if (!HookD3D12::Original_SetPipelineState || !HookD3D12::Original_Dispatch)
+		{
+			outError = "One or more original D3D12 compute functions are unavailable.";
+			return false;
+		}
+
+		std::vector<D3D12_RESOURCE_BARRIER> transitions;
+		transitions.reserve(unorderedAccessOutputs.size());
+		for (const RenderPassTexturePool::TextureView& output : unorderedAccessOutputs)
+		{
+			if (!output.resource || !output.unorderedAccessView.ptr)
+			{
+				outError = "A compute output is missing its texture or UAV descriptor.";
+				return false;
+			}
+			D3D12_RESOURCE_BARRIER barrier{};
+			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barrier.Transition.pResource = output.resource.Get();
+			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			barrier.Transition.StateBefore = output.initialState;
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+			transitions.push_back(barrier);
+		}
+
+		const std::wstring& eventName = GetRenderPassEventName(renderPass);
+		{
+			HookD3D12::ScopedRenderPassInjection injectionScope;
+			commandList->BeginEvent(
+				0,
+				eventName.c_str(),
+				static_cast<UINT>((eventName.size() + 1) * sizeof(wchar_t)));
+			if (!transitions.empty())
+				commandList->ResourceBarrier(static_cast<UINT>(transitions.size()), transitions.data());
+			commandList->SetPipelineState(computePipelineState);
+			HookD3D12::Original_Dispatch(
+				commandList,
+				threadGroupCountX,
+				threadGroupCountY,
+				threadGroupCountZ);
+
+			if (!transitions.empty())
+			{
+				std::vector<D3D12_RESOURCE_BARRIER> completionBarriers;
+				completionBarriers.reserve(transitions.size() * 2);
+				for (D3D12_RESOURCE_BARRIER& transition : transitions)
+				{
+					D3D12_RESOURCE_BARRIER unorderedAccessBarrier{};
+					unorderedAccessBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+					unorderedAccessBarrier.UAV.pResource = transition.Transition.pResource;
+					completionBarriers.push_back(unorderedAccessBarrier);
+					std::swap(transition.Transition.StateBefore, transition.Transition.StateAfter);
+					completionBarriers.push_back(transition);
+				}
+				commandList->ResourceBarrier(
+					static_cast<UINT>(completionBarriers.size()),
+					completionBarriers.data());
+			}
+			commandList->SetPipelineState(pipelineStateToRestore);
+			commandList->EndEvent();
+		}
+		return true;
+	}
+
+	bool ExecuteTextureCopy(
+		ID3D12GraphicsCommandList* commandList,
+		const RenderPassTexturePool::TextureView& source,
+		const RenderPassTexturePool::TextureView& destination,
+		std::string& outError)
+	{
+		outError.clear();
+		if (!commandList || !source.resource || !destination.resource)
+		{
+			outError = "Copy pass requires valid source and destination textures.";
+			return false;
+		}
+		if (source.resource.Get() == destination.resource.Get())
+		{
+			outError = "Copy pass source and destination refer to the same texture.";
+			return false;
+		}
+		const auto& left = source.description;
+		const auto& right = destination.description;
+		if (left.dimension != right.dimension || left.format != right.format ||
+			left.width != right.width || left.height != right.height ||
+			left.depth != right.depth || left.arraySize != right.arraySize ||
+			left.mipLevels != right.mipLevels || left.sampleCount != right.sampleCount)
+		{
+			outError = "Copy pass textures must have matching dimensions, format, mip count, and sample count.";
+			return false;
+		}
+
+		std::array<D3D12_RESOURCE_BARRIER, 2> barriers{};
+		barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barriers[0].Transition.pResource = source.resource.Get();
+		barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		barriers[0].Transition.StateBefore = source.initialState;
+		barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+		barriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barriers[1].Transition.pResource = destination.resource.Get();
+		barriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		barriers[1].Transition.StateBefore = destination.initialState;
+		barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+		{
+			HookD3D12::ScopedRenderPassInjection injectionScope;
+			if (source.initialState == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+			{
+				D3D12_RESOURCE_BARRIER unorderedAccessBarrier{};
+				unorderedAccessBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+				unorderedAccessBarrier.UAV.pResource = source.resource.Get();
+				commandList->ResourceBarrier(1, &unorderedAccessBarrier);
+			}
+			commandList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+			commandList->CopyResource(destination.resource.Get(), source.resource.Get());
+			std::swap(barriers[0].Transition.StateBefore, barriers[0].Transition.StateAfter);
+			std::swap(barriers[1].Transition.StateBefore, barriers[1].Transition.StateAfter);
+			commandList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
 		}
 		return true;
 	}
@@ -362,6 +591,7 @@ namespace RenderPassExecutor
 	{
 		RenderPassMipChain::ReleaseResources();
 		RenderPassReplacement::ReleaseResources();
+		RenderPassTexturePool::ReleaseResources();
 		ShaderResourceRuntime::ReleaseResources();
 		std::lock_guard<std::mutex> cacheLock(gPipelineCacheMutex);
 		for (auto& cachedPipeline : gPipelineCache)

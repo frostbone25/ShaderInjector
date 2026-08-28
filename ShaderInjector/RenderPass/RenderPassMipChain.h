@@ -7,6 +7,7 @@
 #include <d3d12.h>
 
 #include "RenderPass.h"
+#include "RenderPassTexturePool.h"
 
 namespace RenderPassMipChain
 {
@@ -58,14 +59,26 @@ namespace RenderPassMipChain
 		std::string error;
 	};
 
+	bool GenerateRuntimeMipChain(
+		const RenderPass::RenderPassDisk& renderPass,
+		ID3D12GraphicsCommandList* commandList,
+		const RenderPassTexturePool::TextureView& source,
+		const GraphicsStateSnapshot& gameState,
+		const GraphicsStateSnapshot& oppositePipelineState,
+		bool computePipeline,
+		RenderPassTexturePool::TextureView& outTexture,
+		std::string& outError);
+
 	void PrepareForTargetDraw(
 		const std::vector<const RenderPass::RenderPassDisk*>& renderPasses,
 		ID3D12GraphicsCommandList* commandList,
 		const GraphicsStateSnapshot& gameState,
+		bool computePipeline,
 		std::vector<ExecutionResult>& outResults);
 	void RestoreAfterTargetDraw(
 		ID3D12GraphicsCommandList* commandList,
-		const GraphicsStateSnapshot& gameState);
+		const GraphicsStateSnapshot& gameState,
+		bool computePipeline);
 	bool HasRecordedCommandListWork();
 	void ResetCommandListRecording(ID3D12GraphicsCommandList* commandList);
 	void NotifyCommandListsSubmitted(

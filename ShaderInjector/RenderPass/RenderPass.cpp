@@ -1,5 +1,6 @@
 #include "RenderPass/RenderPass.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "Hash.h"
@@ -16,6 +17,154 @@ namespace RenderPass
 			case RenderPassType::ReplacementComputeShader: return "Replacement Compute Shader";
 			case RenderPassType::Custom:
 			default: return "Custom";
+		}
+	}
+
+	const char* ExecutionModeName(ExecutionMode mode)
+	{
+		switch (mode)
+		{
+			case ExecutionMode::FullscreenPixel: return "Fullscreen Pixel";
+			case ExecutionMode::Compute: return "Compute";
+			case ExecutionMode::Automatic:
+			default: return "Automatic";
+		}
+	}
+
+	const char* PassOperationName(PassOperation operation)
+	{
+		switch (operation)
+		{
+			case PassOperation::Custom: return "Custom";
+			case PassOperation::ReplaceOriginal: return "Replace Original";
+			case PassOperation::MipChain: return "Mip Chain";
+			case PassOperation::Downsample: return "Downsample";
+			case PassOperation::UpsampleChain: return "Upsample Chain";
+			case PassOperation::Copy: return "Copy";
+			case PassOperation::Resolve: return "Resolve";
+			case PassOperation::Automatic:
+			default: return "Automatic";
+		}
+	}
+
+	ExecutionMode ResolveExecutionMode(const RenderPassDisk& renderPass)
+	{
+		if (renderPass.executionMode != ExecutionMode::Automatic)
+			return renderPass.executionMode;
+		return renderPass.type == RenderPassType::ReplacementComputeShader
+			? ExecutionMode::Compute
+			: ExecutionMode::FullscreenPixel;
+	}
+
+	PassOperation ResolvePassOperation(const RenderPassDisk& renderPass)
+	{
+		if (renderPass.operation != PassOperation::Automatic)
+			return renderPass.operation;
+		switch (renderPass.type)
+		{
+			case RenderPassType::MipChain: return PassOperation::MipChain;
+			case RenderPassType::ReplacementPixelShader:
+			case RenderPassType::ReplacementComputeShader: return PassOperation::ReplaceOriginal;
+			case RenderPassType::Custom:
+			default: return PassOperation::Custom;
+		}
+	}
+
+	const LogicalResourceBindingDisk* FindMipChainRuntimeSource(const RenderPassDisk& renderPass)
+	{
+		if (ResolvePassOperation(renderPass) != PassOperation::MipChain)
+			return nullptr;
+		for (const LogicalResourceBindingDisk& input : renderPass.inputs)
+		{
+			if (input.origin == ShaderResource::ResourceOrigin::Runtime &&
+				input.access == ResourceAccess::ShaderResource)
+				return &input;
+		}
+		return nullptr;
+	}
+
+	std::string MipChainOutputResourceId(const RenderPassDisk& renderPass)
+	{
+		return renderPass.id + ":MipChain";
+	}
+
+	void NormalizeExecutionResources(RenderPassDisk& renderPass)
+	{
+		if (renderPass.type != RenderPassType::Custom)
+			return;
+
+		const PassOperation operation = ResolvePassOperation(renderPass);
+		if (operation == PassOperation::Copy)
+		{
+			for (LogicalResourceBindingDisk& input : renderPass.inputs)
+				input.access = ResourceAccess::CopySource;
+
+			for (LogicalResourceBindingDisk& output : renderPass.outputs)
+			{
+				if (output.origin != ShaderResource::ResourceOrigin::Runtime || output.resourceId.empty())
+				{
+					continue;
+				}
+				output.access = ResourceAccess::CopyDestination;
+
+				const auto definitionIt = std::find_if(
+					renderPass.runtimeResources.begin(),
+					renderPass.runtimeResources.end(),
+					[&](const RuntimeResourceDefinitionDisk& definition)
+					{
+						return definition.id == output.resourceId;
+					});
+				if (definitionIt != renderPass.runtimeResources.end())
+				{
+					definitionIt->texture.matchReferenceTexture = true;
+					definitionIt->texture.allowRenderTarget = false;
+					definitionIt->texture.allowUnorderedAccess = false;
+				}
+			}
+			return;
+		}
+		if (operation != PassOperation::Custom &&
+			operation != PassOperation::Downsample &&
+			operation != PassOperation::UpsampleChain)
+			return;
+
+		const ExecutionMode executionMode = ResolveExecutionMode(renderPass);
+		if (executionMode != ExecutionMode::Compute &&
+			executionMode != ExecutionMode::FullscreenPixel)
+		{
+			return;
+		}
+
+		for (LogicalResourceBindingDisk& output : renderPass.outputs)
+		{
+			if (output.origin != ShaderResource::ResourceOrigin::Runtime || output.resourceId.empty())
+				continue;
+
+			if (executionMode == ExecutionMode::Compute && output.access == ResourceAccess::RenderTarget)
+				output.access = ResourceAccess::UnorderedAccess;
+			else if (executionMode == ExecutionMode::FullscreenPixel && output.access == ResourceAccess::UnorderedAccess)
+				output.access = ResourceAccess::RenderTarget;
+
+			const auto definitionIt = std::find_if(
+				renderPass.runtimeResources.begin(),
+				renderPass.runtimeResources.end(),
+				[&](const RuntimeResourceDefinitionDisk& definition)
+				{
+					return definition.id == output.resourceId;
+				});
+			if (definitionIt == renderPass.runtimeResources.end())
+				continue;
+
+			if (output.access == ResourceAccess::UnorderedAccess)
+				definitionIt->texture.allowUnorderedAccess = true;
+			else if (output.access == ResourceAccess::RenderTarget)
+				definitionIt->texture.allowRenderTarget = true;
+		}
+
+		if (executionMode == ExecutionMode::Compute &&
+			(operation == PassOperation::Downsample || operation == PassOperation::UpsampleChain))
+		{
+			renderPass.dispatch.mode = DispatchMode::ScaleByResolution;
 		}
 	}
 
@@ -40,6 +189,7 @@ namespace RenderPass
 			return false;
 
 		RenderPassDisk portableRenderPass = renderPass;
+		NormalizeExecutionResources(portableRenderPass);
 		portableRenderPass.packageDirectory.clear();
 		portableRenderPass.jsonPath.clear();
 		portableRenderPass.vertexShaderSourcePath.clear();
@@ -80,13 +230,23 @@ namespace RenderPass
 
 			if (!IsTimingValid(renderPass.timing))
 				renderPass.timing = timingBefore;
+			if (!ShaderResource::IsValidDownscaleFactor(renderPass.resolution.downscaleFactor))
+				renderPass.resolution.downscaleFactor = 1;
+			if (!renderPass.dispatch.threadGroupSizeX)
+				renderPass.dispatch.threadGroupSizeX = 8;
+			if (!renderPass.dispatch.threadGroupSizeY)
+				renderPass.dispatch.threadGroupSizeY = 8;
+			if (!renderPass.dispatch.threadGroupSizeZ)
+				renderPass.dispatch.threadGroupSizeZ = 1;
 			if (renderPass.type == RenderPassType::MipChain &&
+				!FindMipChainRuntimeSource(renderPass) &&
 				renderPass.event.type == EventType::ModifiedShader)
 			{
 				renderPass.timing = timingBefore;
 			}
 			if (IsReplacementPass(renderPass.type))
 				renderPass.timing = timingBefore;
+			NormalizeExecutionResources(renderPass);
 			renderPass.schemaVersion = currentSchemaVersion;
 
 			renderPass.packageDirectory = ShaderInjectorIO::DirectoryFromPath(jsonPath);
@@ -124,14 +284,15 @@ namespace RenderPass
 		renderPass.fragmentShaderBlob.clear();
 		renderPass.vertexShaderBlobHash = 0;
 		renderPass.fragmentShaderBlobHash = 0;
-		const bool replacementPass = IsReplacementPass(renderPass.type);
-		if ((!replacementPass && renderPass.vertexShaderCompiledBlobPath.empty()) ||
+		const bool computePass = ResolveExecutionMode(renderPass) == ExecutionMode::Compute;
+		const bool fragmentOnlyPass = IsReplacementPass(renderPass.type) || computePass;
+		if ((!fragmentOnlyPass && renderPass.vertexShaderCompiledBlobPath.empty()) ||
 			renderPass.fragmentShaderCompiledBlobPath.empty())
 		{
 			return false;
 		}
 
-		const bool vertexLoaded = replacementPass || ShaderInjectorIO::LoadDXILBlobFromDisk(
+		const bool vertexLoaded = fragmentOnlyPass || ShaderInjectorIO::LoadDXILBlobFromDisk(
 			renderPass.vertexShaderCompiledBlobPath,
 			renderPass.vertexShaderBlob);
 		const bool fragmentLoaded = ShaderInjectorIO::LoadDXILBlobFromDisk(
@@ -151,12 +312,8 @@ namespace RenderPass
 
 	bool HasShaderTemplate(const RenderPassDisk& renderPass)
 	{
-		if (renderPass.type == RenderPassType::ReplacementComputeShader)
-		{
-			return !renderPass.fragmentShaderSourcePath.empty() &&
-				ShaderInjectorIO::FileExists(renderPass.fragmentShaderSourcePath);
-		}
-		if (renderPass.type == RenderPassType::ReplacementPixelShader)
+		if (IsReplacementPass(renderPass.type) ||
+			ResolveExecutionMode(renderPass) == ExecutionMode::Compute)
 		{
 			return !renderPass.fragmentShaderSourcePath.empty() &&
 				ShaderInjectorIO::FileExists(renderPass.fragmentShaderSourcePath);
@@ -169,7 +326,8 @@ namespace RenderPass
 
 	bool HasCompiledShaders(const RenderPassDisk& renderPass)
 	{
-		if (IsReplacementPass(renderPass.type))
+		if (IsReplacementPass(renderPass.type) ||
+			ResolveExecutionMode(renderPass) == ExecutionMode::Compute)
 			return !renderPass.fragmentShaderBlob.empty();
 		return !renderPass.vertexShaderBlob.empty() && !renderPass.fragmentShaderBlob.empty();
 	}

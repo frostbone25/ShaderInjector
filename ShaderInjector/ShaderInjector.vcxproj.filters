@@ -156,6 +156,9 @@
     <ClInclude Include="RenderPass\RenderPass.h">
       <Filter>RenderPass</Filter>
     </ClInclude>
+    <ClInclude Include="RenderPass\RenderPassGraph.h">
+      <Filter>RenderPass</Filter>
+    </ClInclude>
     <ClInclude Include="RenderPass\RenderPassExecutor.h">
       <Filter>RenderPass</Filter>
     </ClInclude>
@@ -171,6 +174,9 @@
     <ClInclude Include="RenderPass\RenderPassShaders.h">
       <Filter>RenderPass</Filter>
     </ClInclude>
+    <ClInclude Include="RenderPass\RenderPassTexturePool.h">
+      <Filter>RenderPass</Filter>
+    </ClInclude>
     <ClInclude Include="RenderPass\RenderPassReplacement.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -178,6 +184,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\ShaderResource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderResource\ShaderResourceCatalog.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\ShaderResourceDDS.h">
@@ -338,6 +347,9 @@
     <ClCompile Include="RenderPass\RenderPass.cpp">
       <Filter>RenderPass</Filter>
     </ClCompile>
+    <ClCompile Include="RenderPass\RenderPassGraph.cpp">
+      <Filter>RenderPass</Filter>
+    </ClCompile>
     <ClCompile Include="RenderPass\RenderPassExecutor.cpp">
       <Filter>RenderPass</Filter>
     </ClCompile>
@@ -353,6 +365,9 @@
     <ClCompile Include="RenderPass\RenderPassShaders.cpp">
       <Filter>RenderPass</Filter>
     </ClCompile>
+    <ClCompile Include="RenderPass\RenderPassTexturePool.cpp">
+      <Filter>RenderPass</Filter>
+    </ClCompile>
     <ClCompile Include="RenderPass\RenderPassReplacement.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -363,6 +378,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ShaderResource\ShaderResourceRuntime.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderResource\ShaderResource.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderResource\ShaderResourceCatalog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Performance\PerformanceMetrics.cpp">

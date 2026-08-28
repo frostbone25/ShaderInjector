@@ -105,7 +105,8 @@ namespace HookD3D12
 				resource,
 				description,
 				destination,
-				RenderPassRuntime::IsResourceTrackingRequired());
+				RenderPassRuntime::IsResourceTrackingRequired() ||
+					RenderPassRuntime::IsGameTextureDescriptorTrackingRequired());
 		}
 	}
 
@@ -113,8 +114,11 @@ namespace HookD3D12
 	{
 		Original_CreateUnorderedAccessView(device, resource, counterResource, description, destination);
 		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() &&
-			RenderPassRuntime::IsResourceTrackingRequired())
+			RenderPassRuntime::IsDescriptorRegistryTrackingRequired())
 		{
+			// A copy pass can be changed from an SRV source to a UAV source at
+			// runtime. Preserve UAV provenance whenever descriptor propagation is
+			// active so shader-visible heap copies do not retain an unknown slot.
 			RenderPassResourceRegistry::RegisterUnorderedAccessView(resource, counterResource, description, destination);
 		}
 	}

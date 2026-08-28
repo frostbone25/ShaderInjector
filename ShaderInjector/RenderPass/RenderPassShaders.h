@@ -7,7 +7,7 @@
 
 namespace RenderPassShaders
 {
-	bool CreateFragmentShaderTemplate(
+	bool CreateShaderTemplate(
 		RenderPass::RenderPassDisk& renderPass,
 		const ModifiedShader::PackageDisk& modifiedShader,
 		std::string& outError);

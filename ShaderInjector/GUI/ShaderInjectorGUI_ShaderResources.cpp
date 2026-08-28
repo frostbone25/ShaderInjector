@@ -1,18 +1,21 @@
 #include "GUI/ShaderInjectorGUI.h"
 
+#include <algorithm>
 #include <string>
+#include <vector>
 
 #include "imgui.h"
 
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderResource/DatabaseShaderResources.h"
+#include "ShaderResource/ShaderResourceCatalog.h"
 
 namespace ShaderInjectorGUI
 {
 	void UI_ShaderResources()
 	{
 		DatabaseShaderResources::EnsureShaderResourcesLoaded();
-		const auto& resources = DatabaseShaderResources::GetShaderResources();
+		std::vector<ShaderResource::CatalogEntry> resources = ShaderResourceCatalog::GetSnapshot();
 		const std::string shaderResourcesHeader =
 			"Shader Resources: " + std::to_string(resources.size()) + "###ShaderResources";
 
@@ -22,7 +25,10 @@ namespace ShaderInjectorGUI
 		ImGui::Indent(indentSpace);
 		ImGui::Spacing();
 		if (ImGui::Button("Refresh##ShaderResources"))
+		{
 			DatabaseShaderResources::RefreshShaderResources();
+			resources = ShaderResourceCatalog::GetSnapshot();
+		}
 		ImGui::SameLine();
 		if (ImGui::Button("Open Folder##ShaderResources") &&
 			!ShaderInjectorIO::OpenDirectory(ShaderInjectorIO::GetShaderResourcesDirectory()))
@@ -30,49 +36,59 @@ namespace ShaderInjectorGUI
 			WriteToRuntimeLogError("Could not open the Shader Resources folder.");
 		}
 
-		static std::string selectedResourceId;
-		const auto& refreshedResources = DatabaseShaderResources::GetShaderResources();
-		if (!selectedResourceId.empty() && !DatabaseShaderResources::FindShaderResourceById(selectedResourceId))
-			selectedResourceId.clear();
-		if (selectedResourceId.empty() && !refreshedResources.empty())
-			selectedResourceId = refreshedResources.front().id;
+		const auto catalogKey = [](const ShaderResource::CatalogEntry& resource)
+		{
+			return std::to_string(static_cast<unsigned int>(resource.origin)) + ":" + resource.id;
+		};
+		static std::string selectedResourceKey;
+		const auto selectedIt = std::find_if(resources.begin(), resources.end(), [&](const auto& resource)
+		{
+			return catalogKey(resource) == selectedResourceKey;
+		});
+		if (selectedIt == resources.end())
+			selectedResourceKey = resources.empty() ? std::string() : catalogKey(resources.front());
 
 		if (ImGui::BeginChild("ShaderResourceList", ImVec2(0, 180), ImGuiChildFlags_Borders))
 		{
-			for (const auto& resource : refreshedResources)
+			for (const auto& resource : resources)
 			{
 				std::string label = resource.name + " [" +
-					ShaderResource::TextureDimensionName(resource.dimension) + "]";
-				if (!resource.validationError.empty())
-					label += " (invalid)";
-				label += "##ShaderResource_" + resource.id;
-				if (ImGui::Selectable(label.c_str(), selectedResourceId == resource.id))
-					selectedResourceId = resource.id;
+					ShaderResource::TextureDimensionName(resource.dimension) + "] - " +
+					ShaderResource::ResourceOriginName(resource.origin);
+				if (resource.resident)
+					label += " (resident)";
+				const std::string resourceKey = catalogKey(resource);
+				label += "##ShaderResource_" + resourceKey;
+				if (ImGui::Selectable(label.c_str(), selectedResourceKey == resourceKey))
+					selectedResourceKey = resourceKey;
 			}
 		}
 		ImGui::EndChild();
 
-		if (const auto* resource = DatabaseShaderResources::FindShaderResourceById(selectedResourceId))
+		const auto refreshedSelectedIt = std::find_if(resources.begin(), resources.end(), [&](const auto& resource)
 		{
-			ImGui::SeparatorText(resource->name.c_str());
-			ImGui::TextWrapped("File: %s", resource->fileName.c_str());
-			ImGui::TextWrapped("Resource ID: %s", resource->id.c_str());
-			if (!resource->validationError.empty())
-			{
-				ImGui::TextWrapped("DDS Error: %s", resource->validationError.c_str());
-			}
+			return catalogKey(resource) == selectedResourceKey;
+		});
+		if (refreshedSelectedIt != resources.end())
+		{
+			const ShaderResource::CatalogEntry& resource = *refreshedSelectedIt;
+			ImGui::SeparatorText(resource.name.c_str());
+			ImGui::TextWrapped("Resource ID: %s", resource.id.c_str());
+			ImGui::Text("Origin: %s", ShaderResource::ResourceOriginName(resource.origin));
+			ImGui::Text("Lifetime: %s", ShaderResource::ResourceLifetimeName(resource.lifetime));
+			if (!resource.ownerRenderPassId.empty())
+				ImGui::TextWrapped("Owner: %s", resource.ownerRenderPassId.c_str());
+			ImGui::Text("Dimension: %s", ShaderResource::TextureDimensionName(resource.dimension));
+			if (resource.dimension == ShaderResource::TextureDimension::Texture3D)
+				ImGui::Text("Extent: %ux%ux%u", resource.width, resource.height, resource.depth);
 			else
-			{
-				ImGui::Text("Dimension: %s", ShaderResource::TextureDimensionName(resource->dimension));
-				if (resource->dimension == ShaderResource::TextureDimension::Texture3D)
-					ImGui::Text("Extent: %ux%ux%u", resource->width, resource->height, resource->depth);
-				else
-					ImGui::Text("Extent: %ux%u, Array Slices: %u", resource->width, resource->height, resource->arraySize);
-				ImGui::Text("Mip Levels: %u", resource->mipLevels);
-				ImGui::Text("DXGI Format: %u", resource->format);
-			}
+				ImGui::Text("Extent: %ux%u, Array Slices: %u", resource.width, resource.height, resource.arraySize);
+			ImGui::Text("Mip Levels: %u", resource.mipLevels);
+			ImGui::Text("DXGI Format: %u", resource.format);
+			if (!resource.status.empty())
+				ImGui::TextWrapped("Status: %s", resource.status.c_str());
 		}
-		else if (refreshedResources.empty())
+		else if (resources.empty())
 		{
 			ImGui::TextUnformatted("Drop .dds files into ShaderInjector/ShaderResources, then refresh.");
 		}
