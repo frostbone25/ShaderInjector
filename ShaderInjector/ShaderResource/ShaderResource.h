@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "JsonHelper.h"
 
@@ -192,7 +193,16 @@ namespace ShaderResource
 		std::string status;
 	};
 
+	struct TextureFormatOption
+	{
+		uint32_t value = 0;
+		const char* name = "DXGI_FORMAT_UNKNOWN";
+		const char* displayName = "DXGI_FORMAT_UNKNOWN (0)";
+	};
+
 	const char* ResourceOriginName(ResourceOrigin origin);
 	const char* ResourceLifetimeName(ResourceLifetime lifetime);
+	const std::vector<TextureFormatOption>& TextureFormatOptions();
+	std::string TextureFormatDisplayName(uint32_t format);
 	bool IsValidDownscaleFactor(uint32_t downscaleFactor);
 }

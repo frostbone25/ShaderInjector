@@ -151,6 +151,7 @@ namespace RenderPassRuntime
 		std::atomic<bool> gHasExecutableRenderPassBinding = false;
 		std::atomic<bool> gHasExecutableMipChainBinding = false;
 		std::atomic<bool> gHasShaderResourcePasses = false;
+		std::atomic<bool> gHasInheritedGameBindings = false;
 		std::atomic<bool> gHasCustomFullscreenPasses = false;
 		std::atomic<bool> gHasGameTextureInputs = false;
 		std::atomic<bool> gResourceTrackingRequired = false;
@@ -196,7 +197,8 @@ namespace RenderPassRuntime
 			ResourceTrackingEnabled = 1u << 1,
 			DescriptorRegistryTrackingEnabled = 1u << 2,
 			GraphicsStateTrackingEnabled = 1u << 3,
-			DescriptorTableTrackingEnabled = 1u << 4
+			DescriptorTableTrackingEnabled = 1u << 4,
+			RootBindingTrackingEnabled = 1u << 5
 		};
 
 		void RefreshTrackingModeFlags()
@@ -206,9 +208,13 @@ namespace RenderPassRuntime
 				gHasExecutableRenderPassBinding.load(std::memory_order_relaxed);
 			const bool resourceTrackingEnabled = trackingEnabled &&
 				gResourceTrackingRequired.load(std::memory_order_relaxed);
+			const bool rootBindingTrackingEnabled = trackingEnabled &&
+				(gHasInheritedGameBindings.load(std::memory_order_relaxed) ||
+					gHasExecutableMipChainBinding.load(std::memory_order_relaxed));
 			const bool descriptorTableTrackingEnabled = trackingEnabled &&
 				(gHasShaderResourcePasses.load(std::memory_order_relaxed) ||
 				gHasExecutableMipChainBinding.load(std::memory_order_relaxed) ||
+				rootBindingTrackingEnabled ||
 				resourceTrackingEnabled);
 			// SRVs and their CPU staging copies can be created before shader-target
 			// discovery resolves a pass. Preserve that provenance from pass load time;
@@ -227,6 +233,8 @@ namespace RenderPassRuntime
 				flags |= ResourceTrackingEnabled;
 			if (descriptorTableTrackingEnabled)
 				flags |= DescriptorTableTrackingEnabled;
+			if (rootBindingTrackingEnabled)
+				flags |= RootBindingTrackingEnabled;
 			if (descriptorRegistryTrackingEnabled)
 				flags |= DescriptorRegistryTrackingEnabled;
 			if (graphicsStateTrackingEnabled)
@@ -1216,6 +1224,7 @@ namespace RenderPassRuntime
 		bool hasEnabledRenderPass = false;
 		bool hasEnabledMipChainPass = false;
 		bool hasShaderResourcePass = false;
+		bool hasInheritedGameBinding = false;
 		bool hasCustomFullscreenPass = false;
 		bool hasGameTextureInput = false;
 		std::unordered_set<std::string> activeIds;
@@ -1257,6 +1266,9 @@ namespace RenderPassRuntime
 				hasShaderResourcePass = hasShaderResourcePass ||
 					!renderPass.shaderResources.empty() || hasRuntimeShaderInput ||
 					hasRuntimeUnorderedAccessOutput || hasGameInput;
+				hasInheritedGameBinding = hasInheritedGameBinding ||
+					renderPass.inheritedGameBindings.shaderResources ||
+					renderPass.inheritedGameBindings.constantBuffers;
 				hasGameTextureInput = hasGameTextureInput || hasGameInput;
 				hasCustomFullscreenPass = hasCustomFullscreenPass ||
 					(renderPass.type == RenderPass::RenderPassType::Custom &&
@@ -1319,6 +1331,7 @@ namespace RenderPassRuntime
 		gHasEnabledRenderPasses.store(hasEnabledRenderPass, std::memory_order_release);
 		gHasEnabledMipChainPasses.store(hasEnabledMipChainPass, std::memory_order_release);
 		gHasShaderResourcePasses.store(hasShaderResourcePass, std::memory_order_release);
+		gHasInheritedGameBindings.store(hasInheritedGameBinding, std::memory_order_release);
 		gHasCustomFullscreenPasses.store(hasCustomFullscreenPass, std::memory_order_release);
 		gHasGameTextureInputs.store(hasGameTextureInput, std::memory_order_release);
 		const ShaderTargetBindingMap* shaderTargetBindings =
@@ -1373,6 +1386,12 @@ namespace RenderPassRuntime
 	bool IsResourceTrackingRequired()
 	{
 		return (gTrackingModeFlags.load(std::memory_order_relaxed) & ResourceTrackingEnabled) != 0;
+	}
+
+	bool IsRootBindingTrackingRequired()
+	{
+		return (gTrackingModeFlags.load(std::memory_order_relaxed) &
+			RootBindingTrackingEnabled) != 0;
 	}
 
 	bool IsGameTextureDescriptorTrackingRequired()
@@ -2685,6 +2704,32 @@ namespace RenderPassRuntime
 					"RenderPassRuntime->RecordExecutionBoundary: first " +
 					std::string(RenderPass::TypeName(renderPass.type)) + " execution succeeded for " +
 					renderPass.name + " via " + (operationName ? operationName : "Unknown"));
+				if (shaderResourceStateBuilt &&
+					(renderPass.inheritedGameBindings.shaderResources ||
+						renderPass.inheritedGameBindings.constantBuffers))
+				{
+					size_t descriptorTableCount = 0;
+					size_t constantRootArgumentCount = 0;
+					size_t resourceRootArgumentCount = 0;
+					for (const RenderPassMipChain::RootArgumentSnapshot& binding : gShaderResourceState.rootBindings)
+					{
+						if (binding.type == RenderPassMipChain::RootArgumentType::DescriptorTable)
+							++descriptorTableCount;
+						else if (binding.type == RenderPassMipChain::RootArgumentType::ConstantBufferView ||
+							binding.type == RenderPassMipChain::RootArgumentType::Constants)
+							++constantRootArgumentCount;
+						else
+							++resourceRootArgumentCount;
+					}
+					ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+						"RenderPassRuntime->RecordExecutionBoundary: inherited bindings pass=%s tables=%llu constantRoots=%llu resourceRoots=%llu inheritResources=%u inheritConstants=%u",
+						renderPass.name.c_str(),
+						static_cast<unsigned long long>(descriptorTableCount),
+						static_cast<unsigned long long>(constantRootArgumentCount),
+						static_cast<unsigned long long>(resourceRootArgumentCount),
+						renderPass.inheritedGameBindings.shaderResources ? 1u : 0u,
+						renderPass.inheritedGameBindings.constantBuffers ? 1u : 0u));
+				}
 				if (mipRuntimeSource)
 				{
 					ShaderInjectorIO::WriteToLogFileSuccess(StringHelper::Format(

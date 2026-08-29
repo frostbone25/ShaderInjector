@@ -605,6 +605,85 @@ namespace ShaderResourceRuntime
 					commandList->SetGraphicsRootDescriptorTable(binding.rootParameterIndex, binding.descriptorHandle);
 			}
 		}
+
+		void ApplyInheritedRootBindings(
+			const RenderPass::RenderPassDisk& renderPass,
+			ID3D12GraphicsCommandList* commandList,
+			const RenderPassMipChain::GraphicsStateSnapshot& gameState,
+			bool computePipeline,
+			bool includeDescriptorTables)
+		{
+			const bool inheritShaderResources =
+				renderPass.inheritedGameBindings.shaderResources;
+			const bool inheritConstantBuffers =
+				renderPass.inheritedGameBindings.constantBuffers;
+			for (const RenderPassMipChain::RootArgumentSnapshot& binding : gameState.rootBindings)
+			{
+				switch (binding.type)
+				{
+					case RenderPassMipChain::RootArgumentType::DescriptorTable:
+						if (includeDescriptorTables &&
+							(inheritShaderResources || inheritConstantBuffers) && binding.value)
+						{
+							if (computePipeline)
+								commandList->SetComputeRootDescriptorTable(
+									binding.rootParameterIndex, { binding.value });
+							else
+								commandList->SetGraphicsRootDescriptorTable(
+									binding.rootParameterIndex, { binding.value });
+						}
+						break;
+					case RenderPassMipChain::RootArgumentType::Constants:
+						if (inheritConstantBuffers && !binding.constants.empty())
+						{
+							if (computePipeline)
+								commandList->SetComputeRoot32BitConstants(
+									binding.rootParameterIndex,
+									static_cast<UINT>(binding.constants.size()),
+									binding.constants.data(), 0);
+							else
+								commandList->SetGraphicsRoot32BitConstants(
+									binding.rootParameterIndex,
+									static_cast<UINT>(binding.constants.size()),
+									binding.constants.data(), 0);
+						}
+						break;
+					case RenderPassMipChain::RootArgumentType::ConstantBufferView:
+						if (inheritConstantBuffers && binding.value)
+						{
+							if (computePipeline)
+								commandList->SetComputeRootConstantBufferView(
+									binding.rootParameterIndex, binding.value);
+							else
+								commandList->SetGraphicsRootConstantBufferView(
+									binding.rootParameterIndex, binding.value);
+						}
+						break;
+					case RenderPassMipChain::RootArgumentType::ShaderResourceView:
+						if (inheritShaderResources && binding.value)
+						{
+							if (computePipeline)
+								commandList->SetComputeRootShaderResourceView(
+									binding.rootParameterIndex, binding.value);
+							else
+								commandList->SetGraphicsRootShaderResourceView(
+									binding.rootParameterIndex, binding.value);
+						}
+						break;
+					case RenderPassMipChain::RootArgumentType::UnorderedAccessView:
+						if (inheritShaderResources && binding.value)
+						{
+							if (computePipeline)
+								commandList->SetComputeRootUnorderedAccessView(
+									binding.rootParameterIndex, binding.value);
+							else
+								commandList->SetGraphicsRootUnorderedAccessView(
+									binding.rootParameterIndex, binding.value);
+						}
+						break;
+				}
+			}
+		}
 	}
 
 	bool BindResources(
@@ -633,7 +712,11 @@ namespace ShaderResourceRuntime
 				return output.origin == ShaderResource::ResourceOrigin::Runtime &&
 					output.access == RenderPass::ResourceAccess::UnorderedAccess;
 			});
-		if (renderPass.shaderResources.empty() && !hasRuntimeShaderResource && !hasRuntimeUnorderedAccess)
+		const bool hasDescriptorOverrides = !renderPass.shaderResources.empty() ||
+			hasRuntimeShaderResource || hasRuntimeUnorderedAccess;
+		const bool hasInheritedBindings = renderPass.inheritedGameBindings.shaderResources ||
+			renderPass.inheritedGameBindings.constantBuffers;
+		if (!hasDescriptorOverrides && !hasInheritedBindings)
 			return true;
 		PerformanceMetrics::Increment(PerformanceMetrics::Counter::ShaderResourceBindAttempted);
 		PerformanceMetrics::ScopedTimer bindTimer(PerformanceMetrics::Timing::BindShaderResources);
@@ -641,6 +724,19 @@ namespace ShaderResourceRuntime
 		{
 			outError = "Shader resources require a captured root signature.";
 			return false;
+		}
+		if (!hasDescriptorOverrides)
+		{
+			// The game descriptor heap is still active here. Reassert its tables and
+			// root descriptors without allocating or cloning an injector heap.
+			ApplyInheritedRootBindings(
+				renderPass,
+				commandList,
+				gameState,
+				computePipeline,
+				true);
+			PerformanceMetrics::Increment(PerformanceMetrics::Counter::ShaderResourceBindSucceeded);
+			return true;
 		}
 		CommandListSlot& slot = GetCommandListSlot(commandList);
 		if (!slot.device && FAILED(commandList->GetDevice(IID_PPV_ARGS(&slot.device))))
@@ -949,6 +1045,12 @@ namespace ShaderResourceRuntime
 			else
 				commandList->SetGraphicsRootDescriptorTable(table.rootParameterIndex, handle);
 		}
+		ApplyInheritedRootBindings(
+			renderPass,
+			commandList,
+			gameState,
+			computePipeline,
+			false);
 		slot.restoreHeaps.clear();
 		for (const auto& heap : gameState.descriptorHeaps)
 		{

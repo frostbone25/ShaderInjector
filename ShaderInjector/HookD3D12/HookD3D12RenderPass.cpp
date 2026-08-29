@@ -267,7 +267,7 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Hook_SetComputeRoot32BitConstant(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, UINT value, UINT destinationOffset)
 	{
-		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsResourceTrackingRequired() &&
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsRootBindingTrackingRequired() &&
 			RenderPassRuntime::IsPipelineExecutionTrackingRequired(true) && !IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackRootConstants(commandList, true, rootParameterIndex, 1, &value, destinationOffset);
 		Original_SetComputeRoot32BitConstant(commandList, rootParameterIndex, value, destinationOffset);
@@ -275,14 +275,15 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Hook_SetGraphicsRoot32BitConstant(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, UINT value, UINT destinationOffset)
 	{
-		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsGraphicsStateTrackingRequired() && !IsInsideRenderPassInjection())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsRootBindingTrackingRequired() &&
+			RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) && !IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackRootConstants(commandList, false, rootParameterIndex, 1, &value, destinationOffset);
 		Original_SetGraphicsRoot32BitConstant(commandList, rootParameterIndex, value, destinationOffset);
 	}
 
 	void STDMETHODCALLTYPE Hook_SetComputeRoot32BitConstants(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, UINT valueCount, const void* values, UINT destinationOffset)
 	{
-		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsResourceTrackingRequired() &&
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsRootBindingTrackingRequired() &&
 			RenderPassRuntime::IsPipelineExecutionTrackingRequired(true) && !IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackRootConstants(commandList, true, rootParameterIndex, valueCount, values, destinationOffset);
 		Original_SetComputeRoot32BitConstants(commandList, rootParameterIndex, valueCount, values, destinationOffset);
@@ -290,7 +291,8 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Hook_SetGraphicsRoot32BitConstants(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, UINT valueCount, const void* values, UINT destinationOffset)
 	{
-		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsGraphicsStateTrackingRequired() && !IsInsideRenderPassInjection())
+		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsRootBindingTrackingRequired() &&
+			RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) && !IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackRootConstants(commandList, false, rootParameterIndex, valueCount, values, destinationOffset);
 		Original_SetGraphicsRoot32BitConstants(commandList, rootParameterIndex, valueCount, values, destinationOffset);
 	}
@@ -300,7 +302,7 @@ namespace HookD3D12
 	{ \
 		if (Globals::gShaderInjectorEnabled && \
 			RenderPassRuntime::IsPipelineExecutionTrackingRequired(IsCompute) && \
-			(IsCompute ? RenderPassRuntime::IsResourceTrackingRequired() : RenderPassRuntime::IsGraphicsStateTrackingRequired()) && \
+			RenderPassRuntime::IsRootBindingTrackingRequired() && \
 			!IsInsideRenderPassInjection()) \
 			RenderPassRuntime::TrackRootDescriptor(commandList, IsCompute, BindingName, rootParameterIndex, gpuAddress); \
 		OriginalName(commandList, rootParameterIndex, gpuAddress); \

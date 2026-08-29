@@ -31,6 +31,7 @@ namespace RenderPassRuntime
 	bool HasEnabledMipChainPasses();
 	bool IsTrackingRequired();
 	bool IsResourceTrackingRequired();
+	bool IsRootBindingTrackingRequired();
 	bool IsGameTextureDescriptorTrackingRequired();
 	bool IsDescriptorTableTrackingRequired();
 	bool IsDescriptorRegistryTrackingRequired();

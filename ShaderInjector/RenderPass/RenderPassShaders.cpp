@@ -453,6 +453,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			});
 		}
 
+		bool ShouldDeclareInheritedResource(
+			const RenderPass::RenderPassDisk& renderPass,
+			const ShaderAnalysis::ResourceBindingDisk& resource)
+		{
+			return static_cast<D3D_SHADER_INPUT_TYPE>(resource.type) == D3D_SIT_CBUFFER
+				? renderPass.inheritedGameBindings.constantBuffers
+				: renderPass.inheritedGameBindings.shaderResources;
+		}
+
 		std::string SignatureValueType(const ShaderAnalysis::SignatureParameterDisk& parameter)
 		{
 			const char* scalarType = "float";
@@ -525,7 +534,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			std::ostringstream source;
 			source << "// Fullscreen fragment shader for Modified Shader: "
 				<< (modifiedShader.name.empty() ? modifiedShader.id : modifiedShader.name) << "\n"
-				<< "// Root bindings remain exactly as the linked game draw configured them.\n"
+				<< "// Enabled inherited bindings use the values from the linked game draw.\n"
 				<< "// Reflected declarations use raw cbuffer storage where original HLSL types are unavailable.\n\n";
 
 			const ShaderAnalysis::ShaderAnalysisDisk* analysis = SelectReflectionAnalysis(modifiedShader);
@@ -533,7 +542,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			if (analysis)
 			{
 				for (const ShaderAnalysis::ResourceBindingDisk& resource : analysis->resourceBindings)
-					if (!IsInjectedTextureBinding(renderPass, resource))
+					if (ShouldDeclareInheritedResource(renderPass, resource) &&
+						!IsInjectedTextureBinding(renderPass, resource))
 						AppendResourceDeclaration(source, *analysis, resource, usedIdentifiers);
 			}
 			AppendInjectedResourceDeclarations(source, renderPass, usedIdentifiers);
@@ -616,13 +626,15 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			const bool replacement = renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader;
 			source << (replacement ? "// Replacement" : "// Custom Render Pass")
 				<< " compute shader for Modified Shader: "
-				<< (modifiedShader.name.empty() ? modifiedShader.id : modifiedShader.name) << "\n\n";
+				<< (modifiedShader.name.empty() ? modifiedShader.id : modifiedShader.name) << "\n"
+				<< "// Enabled inherited bindings use the values from the linked game dispatch.\n\n";
 			std::unordered_set<std::string> usedIdentifiers;
 			const ShaderAnalysis::ShaderAnalysisDisk* analysis = SelectReflectionAnalysis(modifiedShader);
 			if (analysis)
 			{
 				for (const ShaderAnalysis::ResourceBindingDisk& resource : analysis->resourceBindings)
-					if (!IsInjectedTextureBinding(renderPass, resource))
+					if (ShouldDeclareInheritedResource(renderPass, resource) &&
+						!IsInjectedTextureBinding(renderPass, resource))
 						AppendResourceDeclaration(source, *analysis, resource, usedIdentifiers);
 			}
 			AppendInjectedResourceDeclarations(source, renderPass, usedIdentifiers);

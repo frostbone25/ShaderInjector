@@ -37,6 +37,7 @@
 namespace ShaderInjectorGUI
 {
 	static std::string gSelectedRenderPassId;
+	static std::string gRenderPassPendingDeletionId;
 	static std::string gRenderPassNameBufferId;
 	static char gRenderPassNameBuffer[256]{};
 	static std::string gSelectedRenderPassResourceOwnerId;
@@ -62,6 +63,40 @@ namespace ShaderInjectorGUI
 		uint32_t shaderRegister = 0;
 		uint32_t registerSpace = 0;
 	};
+
+	struct InheritedBindingSummary
+	{
+		size_t shaderResourceCount = 0;
+		size_t constantBufferCount = 0;
+	};
+
+	InheritedBindingSummary SummarizeInheritedBindings(
+		const ModifiedShader::PackageDisk* modifiedShader)
+	{
+		InheritedBindingSummary summary{};
+		if (!modifiedShader)
+			return summary;
+
+		std::unordered_set<std::string> shaderResources;
+		std::unordered_set<std::string> constantBuffers;
+		for (const ModifiedShader::TargetDisk& target : modifiedShader->targets)
+		{
+			if (!target.shaderAnalysis.succeeded)
+				continue;
+			for (const ShaderAnalysis::ResourceBindingDisk& resource : target.shaderAnalysis.resourceBindings)
+			{
+				const std::string key = std::to_string(resource.type) + ':' +
+					std::to_string(resource.bindPoint) + ':' + std::to_string(resource.registerSpace);
+				if (resource.type == D3D_SIT_CBUFFER)
+					constantBuffers.insert(key);
+				else
+					shaderResources.insert(key);
+			}
+		}
+		summary.shaderResourceCount = shaderResources.size();
+		summary.constantBufferCount = constantBuffers.size();
+		return summary;
+	}
 
 	const char* GameResourceViewTypeName(RenderPass::GameResourceViewType viewType)
 	{
@@ -417,7 +452,13 @@ namespace ShaderInjectorGUI
 
 	void UI_RuntimeResources(RenderPass::RenderPassDisk& renderPass)
 	{
-		ImGui::SeparatorText("Runtime Textures");
+		if (!ImGui::TreeNodeEx(
+			"Runtime Textures##RenderPassRuntimeTextures",
+			ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Framed))
+		{
+			return;
+		}
+
 		if (gSelectedRuntimeResourceOwnerId != renderPass.id)
 		{
 			gSelectedRuntimeResourceOwnerId = renderPass.id;
@@ -491,7 +532,10 @@ namespace ShaderInjectorGUI
 		ImGui::EndChild();
 
 		if (gSelectedRuntimeResourceIndex >= renderPass.runtimeResources.size())
+		{
+			ImGui::TreePop();
 			return;
+		}
 		auto& resource = renderPass.runtimeResources[gSelectedRuntimeResourceIndex];
 		char name[128]{};
 		strncpy_s(name, resource.name.c_str(), _TRUNCATE);
@@ -518,11 +562,23 @@ namespace ShaderInjectorGUI
 			}
 			ImGui::EndCombo();
 		}
-		int format = static_cast<int>(resource.texture.format);
-		ImGui::TextUnformatted("DXGI Format (0 = target)");
+		const std::string formatPreview = ShaderResource::TextureFormatDisplayName(resource.texture.format);
+		ImGui::TextUnformatted("DXGI Format");
 		ImGui::SameLine();
-		if (ImGui::DragInt("##Format", &format, 1.0f, 0, 255))
-			resource.texture.format = static_cast<uint32_t>((std::max)(0, format));
+		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+		if (ImGui::BeginCombo("##Format", formatPreview.c_str()))
+		{
+			for (const ShaderResource::TextureFormatOption& formatOption : ShaderResource::TextureFormatOptions())
+			{
+				const bool selected = resource.texture.format == formatOption.value;
+				if (ImGui::Selectable(formatOption.displayName, selected))
+					resource.texture.format = formatOption.value;
+				if (selected)
+					ImGui::SetItemDefaultFocus();
+			}
+			ImGui::EndCombo();
+		}
+		ImGui::TextDisabled("DXGI_FORMAT_UNKNOWN inherits the target or reference texture format.");
 		UI_ResolutionPolicy("TextureResolution", resource.texture.resolution);
 
 		int mipLevels = static_cast<int>(resource.texture.mipLevels);
@@ -611,6 +667,7 @@ namespace ShaderInjectorGUI
 		if (requiresRenderTarget || requiresUnorderedAccess || requiresCopySourceMatch)
 			ImGui::TextUnformatted("Output bindings lock the required resource access flags.");
 		ImGui::PopID();
+		ImGui::TreePop();
 	}
 
 	void UI_LogicalBindings(
@@ -620,8 +677,16 @@ namespace ShaderInjectorGUI
 		std::string& selectedOwnerId,
 		size_t& selectedIndex)
 	{
-		const char* sectionName = outputs ? "Outputs" : "Inputs";
-		ImGui::SeparatorText(sectionName);
+		const char* sectionId = outputs
+			? "Outputs##RenderPassLogicalOutputs"
+			: "Inputs##RenderPassLogicalInputs";
+		if (!ImGui::TreeNodeEx(
+			sectionId,
+			ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Framed))
+		{
+			return;
+		}
+
 		if (selectedOwnerId != renderPass.id)
 		{
 			selectedOwnerId = renderPass.id;
@@ -698,7 +763,10 @@ namespace ShaderInjectorGUI
 		}
 		ImGui::EndChild();
 		if (selectedIndex >= bindings.size())
+		{
+			ImGui::TreePop();
 			return;
+		}
 
 		auto& binding = bindings[selectedIndex];
 		ImGui::PushID(outputs ? "LogicalOutputProperties" : "LogicalInputProperties");
@@ -924,6 +992,7 @@ namespace ShaderInjectorGUI
 			ImGui::Checkbox("Optional", &binding.optional);
 		}
 		ImGui::PopID();
+		ImGui::TreePop();
 	}
 
 	void UI_RenderPasses()
@@ -1277,7 +1346,10 @@ namespace ShaderInjectorGUI
 			gSelectedLogicalOutputOwnerId,
 			gSelectedLogicalOutputIndex);
 
-		ImGui::SeparatorText("Disk Shader Resources");
+		if (ImGui::TreeNodeEx(
+			"Disk Shader Resources##RenderPassDiskShaderResources",
+			ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Framed))
+		{
 
 		if (ImGui::Button("Refresh DDS Resources"))
 			DatabaseShaderResources::RefreshShaderResources();
@@ -1414,6 +1486,9 @@ namespace ShaderInjectorGUI
 		if (shaderResources.empty())
 			ImGui::TextUnformatted("Drop .dds files into ShaderInjector/ShaderResources, then refresh.");
 
+			ImGui::TreePop();
+		}
+
 		ImGui::TextUnformatted("Track Resource Bindings");
 		ImGui::SameLine();
 		ImGui::Checkbox("##RenderPassTrackResourceBindings", &renderPass->trackResourceBindings);
@@ -1545,6 +1620,44 @@ namespace ShaderInjectorGUI
 		const ModifiedShader::PackageDisk* selectedModifiedShader = DatabaseRenderPasses::ResolveModifiedShader(*renderPass);
 		if (renderPass->executionMode == RenderPass::ExecutionMode::Automatic)
 			ApplyAutomaticExecutionMode(*renderPass, selectedModifiedShader);
+
+		if (ImGui::TreeNodeEx(
+			"Inherited Game Bindings##RenderPassInheritedGameBindings",
+			ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Framed))
+		{
+			if (selectedModifiedShader)
+			{
+				ImGui::TextWrapped(
+					"Source: %s",
+					DatabaseModifiedShaders::DisplayName(*selectedModifiedShader).c_str());
+				const InheritedBindingSummary inheritedSummary =
+					SummarizeInheritedBindings(selectedModifiedShader);
+				ImGui::Text(
+					"Reflected: %llu shader resources, %llu constant buffers",
+					static_cast<unsigned long long>(inheritedSummary.shaderResourceCount),
+					static_cast<unsigned long long>(inheritedSummary.constantBufferCount));
+			}
+			else
+			{
+				ImGui::TextWrapped("Select an event that resolves to a Modified Shader to inherit its game bindings.");
+			}
+
+			ImGui::TextUnformatted("Shader Textures / Resources");
+			ImGui::SameLine();
+			ImGui::Checkbox(
+				"##RenderPassInheritShaderResources",
+				&renderPass->inheritedGameBindings.shaderResources);
+
+			ImGui::TextUnformatted("Constant Buffers / Root Constants");
+			ImGui::SameLine();
+			ImGui::Checkbox(
+				"##RenderPassInheritConstantBuffers",
+				&renderPass->inheritedGameBindings.constantBuffers);
+			ImGui::TextWrapped(
+				"Inherited bindings use the values active on the linked game draw or dispatch. Save the Render Pass after changing these options.");
+			ImGui::TreePop();
+		}
+
 		const bool mipChainPass = renderPass->type == RenderPass::RenderPassType::MipChain;
 		const RenderPass::LogicalResourceBindingDisk* mipRuntimeSource = RenderPass::FindMipChainRuntimeSource(*renderPass);
 		const bool replacementPass = RenderPass::IsReplacementPass(renderPass->type);
@@ -1786,22 +1899,8 @@ namespace ShaderInjectorGUI
 
 		if (ImGui::Button("Delete##RenderPass"))
 		{
-			const std::string deletedName = renderPass->name;
-
-			if (DatabaseRenderPasses::DeleteRenderPass(renderPass->id))
-			{
-				gSelectedRenderPassId.clear();
-				gRenderPassNameBufferId.clear();
-				WriteToRuntimeLogSuccess("Deleted Render Pass: " + deletedName);
-			}
-			else
-			{
-				WriteToRuntimeLogError("Failed to delete Render Pass: " + deletedName);
-			}
-
-			ImGui::Unindent(indentSpace);
-			ImGui::Unindent(indentSpace);
-			return;
+			gRenderPassPendingDeletionId = renderPass->id;
+			ImGui::OpenPopup("Delete Render Pass?");
 		}
 
 		ImGui::SameLine();
@@ -1809,6 +1908,74 @@ namespace ShaderInjectorGUI
 		if (ImGui::Button("Open Folder##SelectedRenderPass") && !ShaderInjectorIO::OpenDirectory(renderPass->packageDirectory))
 		{
 			WriteToRuntimeLogError("Could not open Render Pass package folder: " + renderPass->packageDirectory);
+		}
+
+		bool deletedRenderPass = false;
+		if (ImGui::IsPopupOpen("Delete Render Pass?"))
+		{
+			const ImGuiViewport* viewport = ImGui::GetMainViewport();
+			ImGui::SetNextWindowPos(viewport->WorkPos);
+			ImGui::SetNextWindowSize(viewport->WorkSize);
+		}
+
+		if (ImGui::BeginPopupModal(
+			"Delete Render Pass?",
+			nullptr,
+			ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse))
+		{
+			RenderPass::RenderPassDisk* pendingRenderPass =
+				DatabaseRenderPasses::FindRenderPassById(gRenderPassPendingDeletionId);
+			const std::string pendingName = pendingRenderPass
+				? (pendingRenderPass->name.empty() ? pendingRenderPass->id : pendingRenderPass->name)
+				: gRenderPassPendingDeletionId;
+			const ImVec2 available = ImGui::GetContentRegionAvail();
+			const float promptWidth = (std::min)(520.0f, available.x);
+			const float promptHeight = 150.0f;
+			ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (std::max)(0.0f, (available.x - promptWidth) * 0.5f));
+			ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (std::max)(0.0f, (available.y - promptHeight) * 0.5f));
+			ImGui::BeginGroup();
+			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + promptWidth);
+			ImGui::Text("Delete '%s'?", pendingName.c_str());
+			ImGui::Spacing();
+			ImGui::TextWrapped("This permanently removes the Render Pass package folder and every file inside it. This action cannot be undone.");
+			ImGui::PopTextWrapPos();
+			ImGui::Spacing();
+
+			ImGui::BeginDisabled(!pendingRenderPass);
+			if (ImGui::Button("Delete Render Pass", ImVec2(170.0f, 0.0f)))
+			{
+				if (DatabaseRenderPasses::DeleteRenderPass(gRenderPassPendingDeletionId))
+				{
+					gSelectedRenderPassId.clear();
+					gRenderPassNameBufferId.clear();
+					gRenderPassPendingDeletionId.clear();
+					WriteToRuntimeLogSuccess("Deleted Render Pass: " + pendingName);
+					deletedRenderPass = true;
+					ImGui::CloseCurrentPopup();
+				}
+				else
+				{
+					WriteToRuntimeLogError("Failed to delete Render Pass: " + pendingName);
+				}
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+
+			if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+			{
+				gRenderPassPendingDeletionId.clear();
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::EndGroup();
+			ImGui::EndPopup();
+		}
+
+		if (deletedRenderPass)
+		{
+			ImGui::Unindent(indentSpace);
+			ImGui::Unindent(indentSpace);
+			return;
 		}
 
 		if (ImGui::TreeNodeEx("Info##RenderPassInfo"))

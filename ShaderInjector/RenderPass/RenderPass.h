@@ -11,7 +11,7 @@
 namespace RenderPass
 {
 	inline constexpr const char* formatName = "ShaderInjector.RenderPass";
-	inline constexpr int currentSchemaVersion = 7;
+	inline constexpr int currentSchemaVersion = 8;
 	inline constexpr const char* timingBefore = "Before";
 	inline constexpr const char* timingAfter = "After";
 
@@ -216,6 +216,20 @@ namespace RenderPass
 			registerSpace)
 	};
 
+	struct InheritedGameBindingsDisk
+	{
+		// Preserve the resource contract of the Modified Shader that anchors this
+		// pass. The two categories can be disabled independently for deliberately
+		// self-contained passes.
+		bool shaderResources = true;
+		bool constantBuffers = true;
+
+		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
+			InheritedGameBindingsDisk,
+			shaderResources,
+			constantBuffers)
+	};
+
 	enum class EventType
 	{
 		ModifiedShader,
@@ -261,6 +275,7 @@ namespace RenderPass
 		uint32_t sourceTextureRegisterSpace = 0;
 		bool trackResourceBindings = true;
 		uint32_t maximumTrackedDescriptors = 64;
+		InheritedGameBindingsDisk inheritedGameBindings;
 		std::vector<ShaderResourceReferenceDisk> shaderResources;
 		std::string vertexShaderSourceFile;
 		std::string fragmentShaderSourceFile;
@@ -305,6 +320,7 @@ namespace RenderPass
 			sourceTextureRegisterSpace,
 			trackResourceBindings,
 			maximumTrackedDescriptors,
+			inheritedGameBindings,
 			shaderResources,
 			vertexShaderSourceFile,
 			fragmentShaderSourceFile,
