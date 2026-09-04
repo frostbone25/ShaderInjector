@@ -11,7 +11,6 @@
 
 //custom
 #include "ShaderInjectorGUI.h"
-#include "IO/SystemInfoLogger.h"
 #include "VTableIndex.h"
 #include "HookD3D12RenderPass.h"
 #include "HookD3D12Resources.h"
@@ -72,32 +71,6 @@ namespace HookD3D12
 		checkD3D12CreateDeviceHookInstalled = true;
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12Install->InstallD3D12CreateDeviceHook: D3D12CreateDevice hook installed");
 		return true;
-	}
-
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| HOOK D3D12 CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| HOOK D3D12 CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| HOOK D3D12 CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
-	HRESULT WINAPI Hook_CreateDeviceD3D12(IUnknown* pAdapter, D3D_FEATURE_LEVEL MinimumFeatureLevel, REFIID riid, void** ppDevice)
-	{
-		HRESULT createDeviceResult = Original_CreateDeviceD3D12(pAdapter, MinimumFeatureLevel, riid, ppDevice);
-
-		if (SUCCEEDED(createDeviceResult) && ppDevice && *ppDevice)
-		{
-			ID3D12Device* device = nullptr;
-			IUnknown* unknown = reinterpret_cast<IUnknown*>(*ppDevice);
-
-			if (SUCCEEDED(unknown->QueryInterface(IID_PPV_ARGS(&device))))
-			{
-				InstallPipelineHooksForDevice(device);
-				InstallRenderPassResourceHooksForDevice(device);
-				SystemInfoLogger::LogD3D12DeviceInfo(device);
-				ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12Install->Hook_CreateDeviceD3D12: D3D12CreateDevice captured device and installed pipeline hooks");
-				device->Release();
-			}
-		}
-
-		return createDeviceResult;
 	}
 
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL PIPELINE HOOKS |||||||||||||||||||||||||||||||||||||||||||||||||||||

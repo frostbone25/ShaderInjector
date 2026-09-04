@@ -724,6 +724,9 @@ namespace RenderPassRuntime
 							? ShaderResource::TextureDimension::Texture2DArray
 							: ShaderResource::TextureDimension::Texture2D);
 					outTexture.description.format = description.Format;
+					outTexture.description.shaderViewFormat = metadata.resourceFormat
+						? static_cast<DXGI_FORMAT>(metadata.resourceFormat)
+						: description.Format;
 					outTexture.description.width = static_cast<uint32_t>((std::min)(
 						description.Width,
 						static_cast<UINT64>((std::numeric_limits<uint32_t>::max)())));
@@ -768,6 +771,7 @@ namespace RenderPassRuntime
 			reference.mipLevels = texture.description.mipLevels;
 			reference.sampleCount = texture.description.sampleCount;
 			reference.fallbackFormat = texture.description.format;
+			reference.fallbackShaderViewFormat = texture.description.shaderViewFormat;
 			return reference;
 		}
 
@@ -1008,6 +1012,8 @@ namespace RenderPassRuntime
 					referenceExtent.height = output.resourceHeight;
 				if (referenceExtent.fallbackFormat == DXGI_FORMAT_UNKNOWN && output.resourceFormat)
 					referenceExtent.fallbackFormat = static_cast<DXGI_FORMAT>(output.resourceFormat);
+				if (referenceExtent.fallbackShaderViewFormat == DXGI_FORMAT_UNKNOWN && output.resourceFormat)
+					referenceExtent.fallbackShaderViewFormat = static_cast<DXGI_FORMAT>(output.resourceFormat);
 			}
 
 			if (referenceExtent.fallbackFormat == DXGI_FORMAT_UNKNOWN)
@@ -1020,6 +1026,8 @@ namespace RenderPassRuntime
 					{
 						referenceExtent.fallbackFormat =
 							pipelineOutputState.renderTargetFormats[renderTargetIndex];
+						referenceExtent.fallbackShaderViewFormat =
+							referenceExtent.fallbackFormat;
 						break;
 					}
 				}
@@ -2020,6 +2028,7 @@ namespace RenderPassRuntime
 			for (const RenderPass::LogicalResourceBindingDisk& input : renderPass.inputs)
 			{
 				if (input.origin != ShaderResource::ResourceOrigin::Runtime || input.optional ||
+					input.temporalView == ShaderResource::TemporalView::Previous ||
 					input.resourceId.empty() ||
 					unavailableRuntimeResources.find(input.resourceId) == unavailableRuntimeResources.end())
 				{
@@ -2032,7 +2041,8 @@ namespace RenderPassRuntime
 				break;
 			}
 			if (!runtimeTextureReferenceBuilt && !renderPass.runtimeResources.empty() &&
-				passOperation != RenderPass::PassOperation::Copy)
+				passOperation != RenderPass::PassOperation::Copy &&
+				passOperation != RenderPass::PassOperation::TemporalHistory)
 			{
 				runtimeTextureReference = BuildRuntimeTextureReferenceExtent(state, targetIt->second.outputState);
 				runtimeTextureReferenceBuilt = true;
@@ -2049,7 +2059,9 @@ namespace RenderPassRuntime
 			const RenderPass::LogicalResourceBindingDisk* copySourceBinding = nullptr;
 			RenderPassTexturePool::TextureView copySourceTexture;
 			bool copySourceReady = dependenciesReady;
-			if (dependenciesReady && passOperation == RenderPass::PassOperation::Copy)
+			if (dependenciesReady &&
+				(passOperation == RenderPass::PassOperation::Copy ||
+					passOperation == RenderPass::PassOperation::TemporalHistory))
 			{
 				copySourceBinding = FindCopyInput(renderPass);
 				if (!copySourceBinding)
@@ -2165,7 +2177,8 @@ namespace RenderPassRuntime
 						: PerformanceMetrics::Counter::MipPassFailed);
 				}
 			}
-			else if (passOperation == RenderPass::PassOperation::Copy)
+			else if (passOperation == RenderPass::PassOperation::Copy ||
+				passOperation == RenderPass::PassOperation::TemporalHistory)
 			{
 				executionAttempted = true;
 				RenderPassTexturePool::TextureView destinationTexture;

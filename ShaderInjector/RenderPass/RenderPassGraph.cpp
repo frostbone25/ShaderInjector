@@ -38,21 +38,23 @@ namespace RenderPassGraph
 				return renderPass.type == RenderPass::RenderPassType::Custom &&
 					(node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
 						node.executionMode == RenderPass::ExecutionMode::Compute);
-				case RenderPass::PassOperation::MipChain:
-					return renderPass.type == RenderPass::RenderPassType::MipChain &&
-						(node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
+			case RenderPass::PassOperation::MipChain:
+				return renderPass.type == RenderPass::RenderPassType::MipChain &&
+					(node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
+						node.executionMode == RenderPass::ExecutionMode::Compute);
+			case RenderPass::PassOperation::ReplaceOriginal:
+				return (renderPass.type == RenderPass::RenderPassType::ReplacementPixelShader &&
+						node.executionMode == RenderPass::ExecutionMode::FullscreenPixel) ||
+					(renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader &&
 							node.executionMode == RenderPass::ExecutionMode::Compute);
-				case RenderPass::PassOperation::ReplaceOriginal:
-					return (renderPass.type == RenderPass::RenderPassType::ReplacementPixelShader &&
-							node.executionMode == RenderPass::ExecutionMode::FullscreenPixel) ||
-						(renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader &&
-							node.executionMode == RenderPass::ExecutionMode::Compute);
-				case RenderPass::PassOperation::Copy:
-					return renderPass.type == RenderPass::RenderPassType::Custom;
-				case RenderPass::PassOperation::Resolve:
-				case RenderPass::PassOperation::Automatic:
-				default:
-					return false;
+			case RenderPass::PassOperation::Copy:
+				return renderPass.type == RenderPass::RenderPassType::Custom;
+			case RenderPass::PassOperation::TemporalHistory:
+				return renderPass.type == RenderPass::RenderPassType::TemporalHistory;
+			case RenderPass::PassOperation::Resolve:
+			case RenderPass::PassOperation::Automatic:
+			default:
+				return false;
 			}
 		}
 
@@ -277,7 +279,8 @@ namespace RenderPassGraph
 				});
 			const bool requiresShaderInput = node.operation == RenderPass::PassOperation::Downsample ||
 				node.operation == RenderPass::PassOperation::UpsampleChain;
-			const bool requiresCopyInput = node.operation == RenderPass::PassOperation::Copy;
+			const bool requiresCopyInput = node.operation == RenderPass::PassOperation::Copy ||
+				node.operation == RenderPass::PassOperation::TemporalHistory;
 			const bool hasShaderOutput = node.executionMode == RenderPass::ExecutionMode::Compute
 				? hasUnorderedAccessOutput
 				: hasRenderTargetOutput;
@@ -374,8 +377,28 @@ namespace RenderPassGraph
 					compilation.diagnostics.push_back(node.error);
 					continue;
 				}
-				if (producerIt->second == renderPassIndex &&
-					input.temporalView != ShaderResource::TemporalView::Previous)
+				if (input.temporalView == ShaderResource::TemporalView::Previous)
+				{
+					const auto historyDefinition = std::find_if(
+						producerPass.runtimeResources.begin(),
+						producerPass.runtimeResources.end(),
+						[&](const RenderPass::RuntimeResourceDefinitionDisk& definition)
+						{
+							return definition.id == input.resourceId;
+						});
+					if (historyDefinition == producerPass.runtimeResources.end() ||
+						historyDefinition->texture.lifetime != ShaderResource::ResourceLifetime::History)
+					{
+						node.valid = false;
+						node.error = "Previous-frame input requires a History runtime texture: " +
+							input.resourceId + ".";
+						compilation.diagnostics.push_back(node.error);
+					}
+					// Previous-frame data has no dependency on this frame's producer. This
+					// deliberately permits consumers to execute before the history update.
+					continue;
+				}
+				if (producerIt->second == renderPassIndex)
 				{
 					node.valid = false;
 					node.error = "A pass cannot sample its current runtime output: " + input.resourceId + ".";

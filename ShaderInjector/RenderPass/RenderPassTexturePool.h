@@ -22,12 +22,14 @@ namespace RenderPassTexturePool
 		uint32_t mipLevels = 1;
 		uint32_t sampleCount = 1;
 		DXGI_FORMAT fallbackFormat = DXGI_FORMAT_UNKNOWN;
+		DXGI_FORMAT fallbackShaderViewFormat = DXGI_FORMAT_UNKNOWN;
 	};
 
 	struct ResolvedTextureDescription
 	{
 		ShaderResource::TextureDimension dimension = ShaderResource::TextureDimension::Unknown;
 		DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+		DXGI_FORMAT shaderViewFormat = DXGI_FORMAT_UNKNOWN;
 		uint32_t width = 0;
 		uint32_t height = 0;
 		uint32_t depth = 1;

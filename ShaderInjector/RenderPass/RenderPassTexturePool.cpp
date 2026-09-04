@@ -73,6 +73,7 @@ namespace RenderPassTexturePool
 		{
 			return left.dimension == right.dimension &&
 				left.format == right.format &&
+				left.shaderViewFormat == right.shaderViewFormat &&
 				left.width == right.width &&
 				left.height == right.height &&
 				left.depth == right.depth &&
@@ -110,6 +111,10 @@ namespace RenderPassTexturePool
 				: (source.format
 					? static_cast<DXGI_FORMAT>(source.format)
 					: referenceExtent.fallbackFormat);
+			outDescription.shaderViewFormat = source.matchReferenceTexture &&
+				referenceExtent.fallbackShaderViewFormat != DXGI_FORMAT_UNKNOWN
+				? referenceExtent.fallbackShaderViewFormat
+				: outDescription.format;
 			outDescription.depth = source.matchReferenceTexture
 				? (std::max)(1u, referenceExtent.depth)
 				: (std::max)(1u, source.depth);
@@ -242,7 +247,7 @@ namespace RenderPassTexturePool
 			D3D12_SHADER_RESOURCE_VIEW_DESC& view)
 		{
 			view = {};
-			view.Format = description.format;
+			view.Format = description.shaderViewFormat;
 			view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 			switch (description.dimension)
 			{
@@ -351,7 +356,7 @@ namespace RenderPassTexturePool
 			TextureVersion& outVersion,
 			std::string& outError)
 		{
-			D3D12_FEATURE_DATA_FORMAT_SUPPORT formatSupport{ description.format };
+			D3D12_FEATURE_DATA_FORMAT_SUPPORT formatSupport{ description.shaderViewFormat };
 			const D3D12_FORMAT_SUPPORT1 requiredDimensionSupport =
 				description.dimension == ShaderResource::TextureDimension::Texture3D
 					? D3D12_FORMAT_SUPPORT1_TEXTURE3D
@@ -706,7 +711,9 @@ namespace RenderPassTexturePool
 				cacheEntry.referenceExtent.arraySize == referenceExtent.arraySize &&
 				cacheEntry.referenceExtent.mipLevels == referenceExtent.mipLevels &&
 				cacheEntry.referenceExtent.sampleCount == referenceExtent.sampleCount &&
-				cacheEntry.referenceExtent.fallbackFormat == referenceExtent.fallbackFormat)
+				cacheEntry.referenceExtent.fallbackFormat == referenceExtent.fallbackFormat &&
+				cacheEntry.referenceExtent.fallbackShaderViewFormat ==
+					referenceExtent.fallbackShaderViewFormat)
 			{
 				outError = cacheEntry.error;
 				return cacheEntry.succeeded;
@@ -896,6 +903,7 @@ namespace RenderPassTexturePool
 			explicitExtent.width = nextWidth;
 			explicitExtent.height = nextHeight;
 			explicitExtent.fallbackFormat = destination.format;
+			explicitExtent.fallbackShaderViewFormat = destination.shaderViewFormat;
 			if (!EnsureTextureLocked(device.Get(), definition, explicitExtent, outError))
 				return false;
 			const auto textureIt = gTextures.find(intermediate.id);

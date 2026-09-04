@@ -25,6 +25,9 @@
     <Filter Include="HookD3D12">
       <UniqueIdentifier>{fa2f2729-9f9a-4521-9c96-254df584e783}</UniqueIdentifier>
     </Filter>
+	<Filter Include="D3D12">
+	  <UniqueIdentifier>{b75e292b-f3b1-4fbe-a6af-9e93bd0c51f8}</UniqueIdentifier>
+	</Filter>
     <Filter Include="Database">
       <UniqueIdentifier>{9300037b-c2ee-45ec-b087-72b538b736c1}</UniqueIdentifier>
     </Filter>
@@ -123,6 +126,18 @@
     <ClInclude Include="HookD3D12\HookD3D12.h">
       <Filter>HookD3D12</Filter>
     </ClInclude>
+	<ClInclude Include="HookD3D12\D3D12\HookD3D12HookHandlers.h">
+	  <Filter>D3D12</Filter>
+	</ClInclude>
+	<ClInclude Include="HookD3D12\D3D12\HookD3D12RuntimeState.h">
+	  <Filter>D3D12</Filter>
+	</ClInclude>
+	<ClInclude Include="HookD3D12\D3D12\HookD3D12ExecutionHookHelpers.h">
+	  <Filter>D3D12</Filter>
+	</ClInclude>
+	<ClInclude Include="HookD3D12\D3D12\HookD3D12SwapChainHookHandlers.h">
+	  <Filter>D3D12</Filter>
+	</ClInclude>
     <ClInclude Include="HookD3D12\HookD3D12OverlayStartup.h">
       <Filter>HookD3D12</Filter>
     </ClInclude>
@@ -302,6 +317,81 @@
     <ClCompile Include="HookD3D12\HookD3D12.cpp">
       <Filter>HookD3D12</Filter>
     </ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CopyDescriptors.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateDescriptorHeap.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateDeviceD3D12.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreatePipelineState.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateResource.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateRootSignature.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateSwapChain.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateViews.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_Dispatch.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_Draw.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_ExecuteCommandListsD3D12.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_ExecuteIndirect.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_InputAssembler.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_OMSetRenderTargets.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_PipelineLibrary.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_PresentD3D12.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_RasterizerState.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_ResetGraphicsCommandList.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_ResizeBuffersD3D12.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetDescriptorHeaps.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetPipelineState.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRoot32BitConstants.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootDescriptors.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootDescriptorTable.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
+	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootSignature.cpp">
+	  <Filter>D3D12</Filter>
+	</ClCompile>
     <ClCompile Include="HookD3D12\HookD3D12Install.cpp">
       <Filter>HookD3D12</Filter>
     </ClCompile>
@@ -330,12 +420,6 @@
       <Filter>HookD3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\HookD3D12ReplacementTemplates.cpp">
-      <Filter>HookD3D12</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12\HookD3D12Resources.cpp">
-      <Filter>HookD3D12</Filter>
-    </ClCompile>
-    <ClCompile Include="HookD3D12\HookD3D12RootSignature.cpp">
       <Filter>HookD3D12</Filter>
     </ClCompile>
     <ClCompile Include="GUI\ShaderInjectorGUI.cpp">

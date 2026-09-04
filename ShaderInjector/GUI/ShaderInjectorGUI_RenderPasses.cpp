@@ -48,6 +48,41 @@ namespace ShaderInjectorGUI
 	static size_t gSelectedLogicalInputIndex = 0;
 	static std::string gSelectedLogicalOutputOwnerId;
 	static size_t gSelectedLogicalOutputIndex = 0;
+	static std::string gSelectedSamplerOwnerId;
+	static size_t gSelectedSamplerIndex = 0;
+
+	struct NamedUnsignedValue
+	{
+		uint32_t value = 0;
+		const char* name = "";
+	};
+
+	template <size_t OptionCount>
+	bool UI_NamedUnsignedCombo(
+		const char* id,
+		uint32_t& value,
+		const NamedUnsignedValue (&options)[OptionCount])
+	{
+		const auto selectedIt = std::find_if(std::begin(options), std::end(options), [&](const auto& option)
+		{
+			return option.value == value;
+		});
+		const char* preview = selectedIt == std::end(options) ? "Unknown" : selectedIt->name;
+		bool changed = false;
+		if (ImGui::BeginCombo(id, preview))
+		{
+			for (const NamedUnsignedValue& option : options)
+			{
+				if (ImGui::Selectable(option.name, option.value == value))
+				{
+					value = option.value;
+					changed = true;
+				}
+			}
+			ImGui::EndCombo();
+		}
+		return changed;
+	}
 
 	struct MipSourceBindingOption
 	{
@@ -251,6 +286,12 @@ namespace ShaderInjectorGUI
 			case RenderPass::ResourceAccess::ShaderResource:
 			default: return "Shader Resource";
 		}
+	}
+
+	bool IsTextureCopyOperation(RenderPass::PassOperation operation)
+	{
+		return operation == RenderPass::PassOperation::Copy ||
+			operation == RenderPass::PassOperation::TemporalHistory;
 	}
 
 	const char* DispatchModeName(RenderPass::DispatchMode mode)
@@ -468,8 +509,7 @@ namespace ShaderInjectorGUI
 		{
 			const bool computePass =
 				RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute;
-			const bool copyPass =
-				RenderPass::ResolvePassOperation(renderPass) == RenderPass::PassOperation::Copy;
+			const bool copyPass = IsTextureCopyOperation(RenderPass::ResolvePassOperation(renderPass));
 			RenderPass::RuntimeResourceDefinitionDisk resource{};
 			resource.id = NextRuntimeResourceId(renderPass);
 			resource.name = "Runtime Texture " + std::to_string(renderPass.runtimeResources.size() + 1);
@@ -696,16 +736,17 @@ namespace ShaderInjectorGUI
 		{
 			RenderPass::LogicalResourceBindingDisk binding{};
 			const RenderPass::PassOperation passOperation = RenderPass::ResolvePassOperation(renderPass);
-			binding.origin = !outputs && passOperation == RenderPass::PassOperation::Copy
+			const bool copyPass = IsTextureCopyOperation(passOperation);
+			binding.origin = !outputs && copyPass
 				? ShaderResource::ResourceOrigin::Game
 				: ShaderResource::ResourceOrigin::Runtime;
 			binding.access = outputs
-				? (passOperation == RenderPass::PassOperation::Copy
+				? (copyPass
 					? RenderPass::ResourceAccess::CopyDestination
 					: (RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute
 					? RenderPass::ResourceAccess::UnorderedAccess
 					: RenderPass::ResourceAccess::RenderTarget))
-				: (passOperation == RenderPass::PassOperation::Copy
+				: (copyPass
 					? RenderPass::ResourceAccess::CopySource
 					: RenderPass::ResourceAccess::ShaderResource);
 			binding.hlslName = outputs
@@ -771,7 +812,7 @@ namespace ShaderInjectorGUI
 		auto& binding = bindings[selectedIndex];
 		ImGui::PushID(outputs ? "LogicalOutputProperties" : "LogicalInputProperties");
 		const std::vector<ShaderResource::CatalogEntry> catalog = ShaderResourceCatalog::GetSnapshot();
-		if (!outputs && RenderPass::ResolvePassOperation(renderPass) == RenderPass::PassOperation::Copy)
+		if (!outputs && IsTextureCopyOperation(RenderPass::ResolvePassOperation(renderPass)))
 		{
 			ImGui::TextUnformatted("Origin");
 			ImGui::SameLine();
@@ -925,7 +966,9 @@ namespace ShaderInjectorGUI
 				: std::size(inputAccesses);
 			if (outputs)
 			{
-				if (RenderPass::ResolvePassOperation(renderPass) == RenderPass::PassOperation::Copy)
+				const RenderPass::PassOperation operation = RenderPass::ResolvePassOperation(renderPass);
+				if (operation == RenderPass::PassOperation::Copy ||
+					operation == RenderPass::PassOperation::TemporalHistory)
 				{
 					choices = copyOutputAccesses;
 					choiceCount = std::size(copyOutputAccesses);
@@ -992,6 +1035,183 @@ namespace ShaderInjectorGUI
 			ImGui::Checkbox("Optional", &binding.optional);
 		}
 		ImGui::PopID();
+		ImGui::TreePop();
+	}
+
+	void UI_RenderPassSamplers(RenderPass::RenderPassDisk& renderPass)
+	{
+		const std::string sectionLabel =
+			"Sampler States: " + std::to_string(renderPass.samplers.size()) +
+			"###RenderPassSamplerStates";
+		if (!ImGui::TreeNodeEx(
+			sectionLabel.c_str(),
+			ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Framed))
+		{
+			return;
+		}
+
+		if (gSelectedSamplerOwnerId != renderPass.id)
+		{
+			gSelectedSamplerOwnerId = renderPass.id;
+			gSelectedSamplerIndex = 0;
+		}
+
+		if (ImGui::Button("Add##RenderPassSampler"))
+		{
+			RenderPass::SamplerStateDisk sampler{};
+			for (const RenderPass::SamplerStateDisk& existing : renderPass.samplers)
+				sampler.shaderRegister = (std::max)(sampler.shaderRegister, existing.shaderRegister + 1);
+			sampler.hlslName = "SI_Sampler" + std::to_string(sampler.shaderRegister);
+			renderPass.samplers.push_back(std::move(sampler));
+			gSelectedSamplerIndex = renderPass.samplers.size() - 1;
+		}
+		ImGui::SameLine();
+		const bool hasSelectedSampler = gSelectedSamplerIndex < renderPass.samplers.size();
+		ImGui::BeginDisabled(!hasSelectedSampler);
+		if (ImGui::Button("Remove##RenderPassSampler"))
+		{
+			renderPass.samplers.erase(renderPass.samplers.begin() + gSelectedSamplerIndex);
+			if (gSelectedSamplerIndex >= renderPass.samplers.size() && gSelectedSamplerIndex > 0)
+				--gSelectedSamplerIndex;
+		}
+		ImGui::EndDisabled();
+
+		if (ImGui::BeginChild("RenderPassSamplerList", ImVec2(0.0f, 120.0f), ImGuiChildFlags_Borders))
+		{
+			for (size_t samplerIndex = 0; samplerIndex < renderPass.samplers.size(); ++samplerIndex)
+			{
+				const RenderPass::SamplerStateDisk& sampler = renderPass.samplers[samplerIndex];
+				const std::string label = "s" + std::to_string(sampler.shaderRegister) +
+					", space" + std::to_string(sampler.registerSpace) + ": " +
+					(sampler.hlslName.empty() ? "Sampler" : sampler.hlslName) +
+					"##RenderPassSampler" + std::to_string(samplerIndex);
+				if (ImGui::Selectable(label.c_str(), gSelectedSamplerIndex == samplerIndex))
+					gSelectedSamplerIndex = samplerIndex;
+			}
+		}
+		ImGui::EndChild();
+
+		if (gSelectedSamplerIndex < renderPass.samplers.size())
+		{
+			RenderPass::SamplerStateDisk& sampler = renderPass.samplers[gSelectedSamplerIndex];
+			ImGui::PushID("SelectedRenderPassSampler");
+
+			char hlslName[128]{};
+			strncpy_s(hlslName, sampler.hlslName.c_str(), _TRUNCATE);
+			ImGui::TextUnformatted("HLSL Sampler Name");
+			ImGui::SameLine();
+			if (ImGui::InputText("##HlslSamplerName", hlslName, sizeof(hlslName)))
+				sampler.hlslName = hlslName;
+
+			int shaderRegister = static_cast<int>(sampler.shaderRegister);
+			int registerSpace = static_cast<int>(sampler.registerSpace);
+			ImGui::TextUnformatted("Sampler Register");
+			ImGui::SameLine();
+			if (ImGui::DragInt("##SamplerRegister", &shaderRegister, 1.0f, 0, 2047))
+				sampler.shaderRegister = static_cast<uint32_t>((std::max)(0, shaderRegister));
+			ImGui::TextUnformatted("Register Space");
+			ImGui::SameLine();
+			if (ImGui::DragInt("##SamplerRegisterSpace", &registerSpace, 1.0f, 0, 4095))
+				sampler.registerSpace = static_cast<uint32_t>((std::max)(0, registerSpace));
+
+			constexpr NamedUnsignedValue filterOptions[] = {
+				{ D3D12_FILTER_MIN_MAG_MIP_POINT, "Min/Mag/Mip Point" },
+				{ D3D12_FILTER_MIN_MAG_POINT_MIP_LINEAR, "Min/Mag Point, Mip Linear" },
+				{ D3D12_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT, "Min Point, Mag Linear, Mip Point" },
+				{ D3D12_FILTER_MIN_POINT_MAG_MIP_LINEAR, "Min Point, Mag/Mip Linear" },
+				{ D3D12_FILTER_MIN_LINEAR_MAG_MIP_POINT, "Min Linear, Mag/Mip Point" },
+				{ D3D12_FILTER_MIN_LINEAR_MAG_POINT_MIP_LINEAR, "Min Linear, Mag Point, Mip Linear" },
+				{ D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT, "Min/Mag Linear, Mip Point" },
+				{ D3D12_FILTER_MIN_MAG_MIP_LINEAR, "Min/Mag/Mip Linear" },
+				{ D3D12_FILTER_ANISOTROPIC, "Anisotropic" },
+				{ D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT, "Comparison Point" },
+				{ D3D12_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR, "Comparison Linear" },
+				{ D3D12_FILTER_COMPARISON_ANISOTROPIC, "Comparison Anisotropic" },
+				{ D3D12_FILTER_MINIMUM_MIN_MAG_MIP_LINEAR, "Minimum Linear" },
+				{ D3D12_FILTER_MAXIMUM_MIN_MAG_MIP_LINEAR, "Maximum Linear" },
+			};
+			ImGui::TextUnformatted("Filter");
+			ImGui::SameLine();
+			UI_NamedUnsignedCombo("##SamplerFilter", sampler.filter, filterOptions);
+
+			constexpr NamedUnsignedValue addressOptions[] = {
+				{ D3D12_TEXTURE_ADDRESS_MODE_WRAP, "Wrap" },
+				{ D3D12_TEXTURE_ADDRESS_MODE_MIRROR, "Mirror" },
+				{ D3D12_TEXTURE_ADDRESS_MODE_CLAMP, "Clamp" },
+				{ D3D12_TEXTURE_ADDRESS_MODE_BORDER, "Border" },
+				{ D3D12_TEXTURE_ADDRESS_MODE_MIRROR_ONCE, "Mirror Once" },
+			};
+			ImGui::TextUnformatted("Address U");
+			ImGui::SameLine();
+			UI_NamedUnsignedCombo("##SamplerAddressU", sampler.addressU, addressOptions);
+			ImGui::TextUnformatted("Address V");
+			ImGui::SameLine();
+			UI_NamedUnsignedCombo("##SamplerAddressV", sampler.addressV, addressOptions);
+			ImGui::TextUnformatted("Address W");
+			ImGui::SameLine();
+			UI_NamedUnsignedCombo("##SamplerAddressW", sampler.addressW, addressOptions);
+
+			ImGui::TextUnformatted("Mip LOD Bias");
+			ImGui::SameLine();
+			ImGui::DragFloat("##SamplerMipLodBias", &sampler.mipLodBias, 0.05f, -16.0f, 16.0f);
+			int maximumAnisotropy = static_cast<int>(sampler.maximumAnisotropy);
+			ImGui::TextUnformatted("Maximum Anisotropy");
+			ImGui::SameLine();
+			if (ImGui::DragInt("##SamplerMaximumAnisotropy", &maximumAnisotropy, 1.0f, 1, 16))
+				sampler.maximumAnisotropy = static_cast<uint32_t>((std::clamp)(maximumAnisotropy, 1, 16));
+
+			if (ImGui::Checkbox("Comparison Sampler", &sampler.comparisonSampler))
+			{
+				sampler.filter = sampler.comparisonSampler
+					? D3D12_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR
+					: D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+			}
+			if (sampler.comparisonSampler)
+			{
+				constexpr NamedUnsignedValue comparisonOptions[] = {
+					{ D3D12_COMPARISON_FUNC_NEVER, "Never" },
+					{ D3D12_COMPARISON_FUNC_LESS, "Less" },
+					{ D3D12_COMPARISON_FUNC_EQUAL, "Equal" },
+					{ D3D12_COMPARISON_FUNC_LESS_EQUAL, "Less Equal" },
+					{ D3D12_COMPARISON_FUNC_GREATER, "Greater" },
+					{ D3D12_COMPARISON_FUNC_NOT_EQUAL, "Not Equal" },
+					{ D3D12_COMPARISON_FUNC_GREATER_EQUAL, "Greater Equal" },
+					{ D3D12_COMPARISON_FUNC_ALWAYS, "Always" },
+				};
+				ImGui::TextUnformatted("Comparison Function");
+				ImGui::SameLine();
+				UI_NamedUnsignedCombo(
+					"##SamplerComparisonFunction",
+					sampler.comparisonFunction,
+					comparisonOptions);
+			}
+
+			ImGui::TextUnformatted("Border Color");
+			ImGui::SameLine();
+			ImGui::ColorEdit4("##SamplerBorderColor", sampler.borderColor.data());
+			ImGui::TextUnformatted("Minimum LOD");
+			ImGui::SameLine();
+			ImGui::DragFloat("##SamplerMinimumLod", &sampler.minimumLod, 0.1f, 0.0f, 32.0f);
+			bool unboundedMaximumLod = sampler.maximumLod >= D3D12_FLOAT32_MAX * 0.5f;
+			if (ImGui::Checkbox("Unbounded Maximum LOD", &unboundedMaximumLod))
+			{
+				sampler.maximumLod = unboundedMaximumLod
+					? D3D12_FLOAT32_MAX
+					: (std::max)(sampler.minimumLod, 16.0f);
+			}
+			if (!unboundedMaximumLod)
+			{
+				ImGui::TextUnformatted("Maximum LOD");
+				ImGui::SameLine();
+				if (ImGui::DragFloat("##SamplerMaximumLod", &sampler.maximumLod, 0.1f, 0.0f, 32.0f))
+					sampler.maximumLod = (std::max)(sampler.minimumLod, sampler.maximumLod);
+			}
+
+			ImGui::TextWrapped(
+				"The selected s-register must exist in a dynamic sampler table in the linked game root signature. D3D12 static samplers cannot be replaced.");
+			ImGui::PopID();
+		}
+
 		ImGui::TreePop();
 	}
 
@@ -1172,6 +1392,7 @@ namespace ShaderInjectorGUI
 			const RenderPass::RenderPassType typeOptions[] = {
 				RenderPass::RenderPassType::Custom,
 				RenderPass::RenderPassType::MipChain,
+				RenderPass::RenderPassType::TemporalHistory,
 				RenderPass::RenderPassType::ReplacementPixelShader,
 				RenderPass::RenderPassType::ReplacementComputeShader,
 			};
@@ -1202,6 +1423,10 @@ namespace ShaderInjectorGUI
 							DatabaseRenderPasses::ResolveModifiedShader(*renderPass);
 						ApplyDefaultMipSourceBinding(*renderPass, modifiedShader);
 						ApplyAutomaticExecutionMode(*renderPass, modifiedShader);
+					}
+					else if (typeOption == RenderPass::RenderPassType::TemporalHistory)
+					{
+						RenderPass::ConfigureTemporalHistoryPass(*renderPass);
 					}
 				}
 			}
@@ -1489,6 +1714,13 @@ namespace ShaderInjectorGUI
 			ImGui::TreePop();
 		}
 
+		const RenderPass::PassOperation resourceOperation = RenderPass::ResolvePassOperation(*renderPass);
+		if (resourceOperation != RenderPass::PassOperation::Copy &&
+			resourceOperation != RenderPass::PassOperation::TemporalHistory)
+		{
+			UI_RenderPassSamplers(*renderPass);
+		}
+
 		ImGui::TextUnformatted("Track Resource Bindings");
 		ImGui::SameLine();
 		ImGui::Checkbox("##RenderPassTrackResourceBindings", &renderPass->trackResourceBindings);
@@ -1659,6 +1891,7 @@ namespace ShaderInjectorGUI
 		}
 
 		const bool mipChainPass = renderPass->type == RenderPass::RenderPassType::MipChain;
+		const bool temporalHistoryPass = renderPass->type == RenderPass::RenderPassType::TemporalHistory;
 		const RenderPass::LogicalResourceBindingDisk* mipRuntimeSource = RenderPass::FindMipChainRuntimeSource(*renderPass);
 		const bool replacementPass = RenderPass::IsReplacementPass(renderPass->type);
 		const bool directMipChainEvent = mipChainPass && !mipRuntimeSource &&
@@ -1697,6 +1930,12 @@ namespace ShaderInjectorGUI
 		else if (!renderPass->event.id.empty() && !selectedModifiedShader)
 		{
 			ImGui::TextWrapped("The selected event chain does not currently resolve to an available Modified Shader.");
+		}
+		if (temporalHistoryPass)
+		{
+			ImGui::TextWrapped(
+				"History Output: %s. Bind this Runtime resource from earlier passes with Temporal View set to Previous.",
+				RenderPass::TemporalHistoryResourceId(*renderPass).c_str());
 		}
 
 		if (mipRuntimeSource)
@@ -1788,7 +2027,8 @@ namespace ShaderInjectorGUI
 			RenderPass::ResolveExecutionMode(*renderPass) == RenderPass::ExecutionMode::Compute;
 		const bool customComputePass = computeShaderPass && !replacementComputePass;
 		const RenderPass::PassOperation resolvedOperation = RenderPass::ResolvePassOperation(*renderPass);
-		const bool copyPass = resolvedOperation == RenderPass::PassOperation::Copy;
+		const bool copyPass = resolvedOperation == RenderPass::PassOperation::Copy ||
+			resolvedOperation == RenderPass::PassOperation::TemporalHistory;
 		if (!copyPass)
 		{
 		const char* shaderSectionLabel = "Fullscreen Fragment Shader";

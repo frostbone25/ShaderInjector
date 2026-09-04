@@ -1,6 +1,7 @@
 #include "RenderPass/RenderPass.h"
 
 #include <algorithm>
+#include <iterator>
 #include <utility>
 
 #include "Hash.h"
@@ -13,6 +14,7 @@ namespace RenderPass
 		switch (type)
 		{
 			case RenderPassType::MipChain: return "MipChain";
+			case RenderPassType::TemporalHistory: return "Temporal History";
 			case RenderPassType::ReplacementPixelShader: return "Replacement Pixel Shader";
 			case RenderPassType::ReplacementComputeShader: return "Replacement Compute Shader";
 			case RenderPassType::Custom:
@@ -41,6 +43,7 @@ namespace RenderPass
 			case PassOperation::Downsample: return "Downsample";
 			case PassOperation::UpsampleChain: return "Upsample Chain";
 			case PassOperation::Copy: return "Copy";
+			case PassOperation::TemporalHistory: return "Temporal History Copy";
 			case PassOperation::Resolve: return "Resolve";
 			case PassOperation::Automatic:
 			default: return "Automatic";
@@ -63,6 +66,7 @@ namespace RenderPass
 		switch (renderPass.type)
 		{
 			case RenderPassType::MipChain: return PassOperation::MipChain;
+			case RenderPassType::TemporalHistory: return PassOperation::TemporalHistory;
 			case RenderPassType::ReplacementPixelShader:
 			case RenderPassType::ReplacementComputeShader: return PassOperation::ReplaceOriginal;
 			case RenderPassType::Custom:
@@ -88,13 +92,68 @@ namespace RenderPass
 		return renderPass.id + ":MipChain";
 	}
 
+	std::string TemporalHistoryResourceId(const RenderPassDisk& renderPass)
+	{
+		return renderPass.id + ":History";
+	}
+
+	void ConfigureTemporalHistoryPass(RenderPassDisk& renderPass)
+	{
+		if (renderPass.type != RenderPassType::TemporalHistory)
+			return;
+
+		renderPass.operation = PassOperation::Automatic;
+		const bool createdSource = renderPass.inputs.empty();
+		if (createdSource)
+			renderPass.inputs.emplace_back();
+		renderPass.inputs.resize(1);
+		LogicalResourceBindingDisk& source = renderPass.inputs.front();
+		source.access = ResourceAccess::CopySource;
+		if (createdSource || source.origin == ShaderResource::ResourceOrigin::Disk)
+			source.origin = ShaderResource::ResourceOrigin::Game;
+
+		const std::string historyResourceId = TemporalHistoryResourceId(renderPass);
+		auto definitionIt = std::find_if(
+			renderPass.runtimeResources.begin(),
+			renderPass.runtimeResources.end(),
+			[&](const RuntimeResourceDefinitionDisk& definition)
+			{
+				return definition.id == historyResourceId;
+			});
+		if (definitionIt == renderPass.runtimeResources.end())
+		{
+			RuntimeResourceDefinitionDisk definition{};
+			definition.id = historyResourceId;
+			renderPass.runtimeResources.push_back(std::move(definition));
+			definitionIt = std::prev(renderPass.runtimeResources.end());
+		}
+		definitionIt->name = renderPass.name.empty()
+			? "Temporal History"
+			: renderPass.name + " History";
+		definitionIt->texture.matchReferenceTexture = true;
+		definitionIt->texture.lifetime = ShaderResource::ResourceLifetime::History;
+		definitionIt->texture.allowRenderTarget = false;
+		definitionIt->texture.allowUnorderedAccess = false;
+
+		renderPass.outputs.resize(1);
+		LogicalResourceBindingDisk& destination = renderPass.outputs.front();
+		destination.resourceId = historyResourceId;
+		if (destination.hlslName.empty())
+			destination.hlslName = "SI_TemporalHistory";
+		destination.origin = ShaderResource::ResourceOrigin::Runtime;
+		destination.access = ResourceAccess::CopyDestination;
+		destination.temporalView = ShaderResource::TemporalView::Current;
+	}
+
 	void NormalizeExecutionResources(RenderPassDisk& renderPass)
 	{
-		if (renderPass.type != RenderPassType::Custom)
+		ConfigureTemporalHistoryPass(renderPass);
+		if (renderPass.type != RenderPassType::Custom &&
+			renderPass.type != RenderPassType::TemporalHistory)
 			return;
 
 		const PassOperation operation = ResolvePassOperation(renderPass);
-		if (operation == PassOperation::Copy)
+		if (operation == PassOperation::Copy || operation == PassOperation::TemporalHistory)
 		{
 			for (LogicalResourceBindingDisk& input : renderPass.inputs)
 				input.access = ResourceAccess::CopySource;

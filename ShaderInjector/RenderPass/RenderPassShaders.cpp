@@ -319,8 +319,23 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					return output.origin == ShaderResource::ResourceOrigin::Runtime &&
 						output.access == RenderPass::ResourceAccess::UnorderedAccess;
 				});
-			if (renderPass.shaderResources.empty() && !hasRuntimeInputs && !hasRuntimeOutputs)
+			if (renderPass.shaderResources.empty() && renderPass.samplers.empty() &&
+				!hasRuntimeInputs && !hasRuntimeOutputs)
 				return;
+			if (!renderPass.samplers.empty())
+				source << "// Injector-owned sampler states configured on this Render Pass.\n";
+			for (size_t samplerIndex = 0; samplerIndex < renderPass.samplers.size(); ++samplerIndex)
+			{
+				const RenderPass::SamplerStateDisk& sampler = renderPass.samplers[samplerIndex];
+				const std::string fallback = "Sampler_" + std::to_string(sampler.shaderRegister);
+				std::string identifier = SanitizeIdentifier(sampler.hlslName, fallback);
+				const std::string baseIdentifier = identifier;
+				for (uint32_t suffix = 2; !usedIdentifiers.insert(identifier).second; ++suffix)
+					identifier = baseIdentifier + "_" + std::to_string(suffix);
+				source << (sampler.comparisonSampler ? "SamplerComparisonState " : "SamplerState ")
+					<< identifier << " : register(s" << sampler.shaderRegister
+					<< ", space" << sampler.registerSpace << ");\n";
+			}
 			if (!renderPass.shaderResources.empty())
 				source << "// Injector-owned DDS textures configured on this Render Pass.\n";
 			for (const RenderPass::ShaderResourceReferenceDisk& resource : renderPass.shaderResources)
@@ -421,6 +436,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const ShaderAnalysis::ResourceBindingDisk& resource)
 		{
 			const D3D_SHADER_INPUT_TYPE inputType = static_cast<D3D_SHADER_INPUT_TYPE>(resource.type);
+			if (inputType == D3D_SIT_SAMPLER)
+			{
+				return std::any_of(renderPass.samplers.begin(), renderPass.samplers.end(), [&](const auto& sampler)
+				{
+					return sampler.shaderRegister == resource.bindPoint &&
+						sampler.registerSpace == resource.registerSpace;
+				});
+			}
 			if (inputType == D3D_SIT_TEXTURE)
 			{
 				return std::any_of(renderPass.shaderResources.begin(), renderPass.shaderResources.end(), [&](const auto& injected)

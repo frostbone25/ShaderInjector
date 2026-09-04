@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -11,7 +12,7 @@
 namespace RenderPass
 {
 	inline constexpr const char* formatName = "ShaderInjector.RenderPass";
-	inline constexpr int currentSchemaVersion = 8;
+	inline constexpr int currentSchemaVersion = 9;
 	inline constexpr const char* timingBefore = "Before";
 	inline constexpr const char* timingAfter = "After";
 
@@ -19,6 +20,7 @@ namespace RenderPass
 	{
 		Custom,
 		MipChain,
+		TemporalHistory,
 		ReplacementPixelShader,
 		ReplacementComputeShader,
 	};
@@ -27,6 +29,7 @@ namespace RenderPass
 	{
 		{ RenderPassType::Custom, "Custom" },
 		{ RenderPassType::MipChain, "MipChain" },
+		{ RenderPassType::TemporalHistory, "TemporalHistory" },
 		{ RenderPassType::ReplacementPixelShader, "ReplacementPixelShader" },
 		{ RenderPassType::ReplacementComputeShader, "ReplacementComputeShader" },
 	})
@@ -54,6 +57,7 @@ namespace RenderPass
 		Downsample,
 		UpsampleChain,
 		Copy,
+		TemporalHistory,
 		Resolve,
 	};
 
@@ -66,6 +70,7 @@ namespace RenderPass
 		{ PassOperation::Downsample, "Downsample" },
 		{ PassOperation::UpsampleChain, "UpsampleChain" },
 		{ PassOperation::Copy, "Copy" },
+		{ PassOperation::TemporalHistory, "TemporalHistory" },
 		{ PassOperation::Resolve, "Resolve" },
 	})
 
@@ -216,6 +221,41 @@ namespace RenderPass
 			registerSpace)
 	};
 
+	struct SamplerStateDisk
+	{
+		std::string hlslName = "SI_Sampler";
+		uint32_t shaderRegister = 0;
+		uint32_t registerSpace = 0;
+		uint32_t filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+		uint32_t addressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+		uint32_t addressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+		uint32_t addressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+		float mipLodBias = 0.0f;
+		uint32_t maximumAnisotropy = 1;
+		uint32_t comparisonFunction = D3D12_COMPARISON_FUNC_ALWAYS;
+		std::array<float, 4> borderColor{ 0.0f, 0.0f, 0.0f, 0.0f };
+		float minimumLod = 0.0f;
+		float maximumLod = D3D12_FLOAT32_MAX;
+		bool comparisonSampler = false;
+
+		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
+			SamplerStateDisk,
+			hlslName,
+			shaderRegister,
+			registerSpace,
+			filter,
+			addressU,
+			addressV,
+			addressW,
+			mipLodBias,
+			maximumAnisotropy,
+			comparisonFunction,
+			borderColor,
+			minimumLod,
+			maximumLod,
+			comparisonSampler)
+	};
+
 	struct InheritedGameBindingsDisk
 	{
 		// Preserve the resource contract of the Modified Shader that anchors this
@@ -277,6 +317,7 @@ namespace RenderPass
 		uint32_t maximumTrackedDescriptors = 64;
 		InheritedGameBindingsDisk inheritedGameBindings;
 		std::vector<ShaderResourceReferenceDisk> shaderResources;
+		std::vector<SamplerStateDisk> samplers;
 		std::string vertexShaderSourceFile;
 		std::string fragmentShaderSourceFile;
 		std::string vertexShaderCompiledBlobFile;
@@ -322,6 +363,7 @@ namespace RenderPass
 			maximumTrackedDescriptors,
 			inheritedGameBindings,
 			shaderResources,
+			samplers,
 			vertexShaderSourceFile,
 			fragmentShaderSourceFile,
 			vertexShaderCompiledBlobFile,
@@ -400,6 +442,8 @@ namespace RenderPass
 	PassOperation ResolvePassOperation(const RenderPassDisk& renderPass);
 	const LogicalResourceBindingDisk* FindMipChainRuntimeSource(const RenderPassDisk& renderPass);
 	std::string MipChainOutputResourceId(const RenderPassDisk& renderPass);
+	std::string TemporalHistoryResourceId(const RenderPassDisk& renderPass);
+	void ConfigureTemporalHistoryPass(RenderPassDisk& renderPass);
 	void NormalizeExecutionResources(RenderPassDisk& renderPass);
 	bool HasShaderTemplate(const RenderPassDisk& renderPass);
 	bool HasCompiledShaders(const RenderPassDisk& renderPass);

@@ -34,6 +34,7 @@ namespace ShaderResourceRuntime
 		// tables through descriptors that the registry observed the game initialize.
 		constexpr UINT MaximumAutoPreservedUnboundedDescriptors = 4096;
 		constexpr UINT DefaultDescriptorPageCapacity = 8192;
+		constexpr UINT DefaultSamplerPageCapacity = 2048;
 
 		struct TextureGpu
 		{
@@ -79,6 +80,7 @@ namespace ShaderResourceRuntime
 		struct DescriptorExecutionSlot
 		{
 			std::vector<DescriptorHeapPage> pages;
+			std::vector<DescriptorHeapPage> samplerPages;
 			ComPtr<ID3D12Fence> retirementFence;
 			UINT64 retirementFenceValue = 0;
 			bool recorded = false;
@@ -97,6 +99,7 @@ namespace ShaderResourceRuntime
 		{
 			ComPtr<ID3D12Device> device;
 			UINT descriptorIncrementSize = 0;
+			UINT samplerDescriptorIncrementSize = 0;
 			ID3D12RootSignature* cachedRootSignature = nullptr;
 			uint32_t cachedMaximumTrackedDescriptors = 0;
 			std::vector<RenderPassResourceRegistry::DescriptorTableLayout> layouts;
@@ -190,6 +193,8 @@ namespace ShaderResourceRuntime
 
 			for (DescriptorHeapPage& page : selectedSlot->pages)
 				page.usedDescriptors = 0;
+			for (DescriptorHeapPage& page : selectedSlot->samplerPages)
+				page.usedDescriptors = 0;
 			selectedSlot->recorded = true;
 			selectedSlot->submitted = false;
 			if (commandListSlot.recordedExecutionSlots.empty())
@@ -202,21 +207,33 @@ namespace ShaderResourceRuntime
 		bool AcquireDescriptorAllocation(
 			CommandListSlot& commandListSlot,
 			ID3D12Device* device,
+			D3D12_DESCRIPTOR_HEAP_TYPE heapType,
 			UINT descriptorCount,
 			DescriptorAllocation& outAllocation,
 			std::string& outError)
 		{
 			outAllocation = {};
-			if (!device || !descriptorCount)
+			if (!device || !descriptorCount ||
+				(heapType != D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV &&
+					heapType != D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER))
 			{
-				outError = "Shader-resource descriptor allocation is empty.";
+				outError = "Shader-resource descriptor allocation is invalid.";
+				return false;
+			}
+			if (heapType == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER &&
+				descriptorCount > DefaultSamplerPageCapacity)
+			{
+				outError = "Sampler descriptor allocation exceeds the shader-visible D3D12 sampler-heap limit.";
 				return false;
 			}
 
 			std::lock_guard<std::mutex> lock(gCommandListSlotMutex);
 			DescriptorExecutionSlot* executionSlot = AcquireExecutionSlotLocked(commandListSlot);
+			std::vector<DescriptorHeapPage>& pages = heapType == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER
+				? executionSlot->samplerPages
+				: executionSlot->pages;
 			DescriptorHeapPage* selectedPage = nullptr;
-			for (DescriptorHeapPage& page : executionSlot->pages)
+			for (DescriptorHeapPage& page : pages)
 			{
 				if (page.capacity - page.usedDescriptors >= descriptorCount)
 				{
@@ -228,8 +245,12 @@ namespace ShaderResourceRuntime
 			if (!selectedPage)
 			{
 				D3D12_DESCRIPTOR_HEAP_DESC heapDescription{};
-				heapDescription.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-				heapDescription.NumDescriptors = (std::max)(descriptorCount, DefaultDescriptorPageCapacity);
+				heapDescription.Type = heapType;
+				heapDescription.NumDescriptors = (std::max)(
+					descriptorCount,
+					heapType == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER
+						? DefaultSamplerPageCapacity
+						: DefaultDescriptorPageCapacity);
 				heapDescription.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 				DescriptorHeapPage page{};
 				const HRESULT result = device->CreateDescriptorHeap(
@@ -237,18 +258,20 @@ namespace ShaderResourceRuntime
 					IID_PPV_ARGS(&page.heap));
 				if (FAILED(result) || !page.heap)
 				{
-					outError = "Shader-resource descriptor heap creation failed with " +
+					outError = std::string(heapType == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER
+						? "Sampler descriptor heap creation failed with "
+						: "Shader-resource descriptor heap creation failed with ") +
 						StringHelper::FormatHRESULT(result);
 					return false;
 				}
 				page.capacity = heapDescription.NumDescriptors;
-				executionSlot->pages.push_back(std::move(page));
-				selectedPage = &executionSlot->pages.back();
+				pages.push_back(std::move(page));
+				selectedPage = &pages.back();
 			}
 
 			const UINT rangeOffset = selectedPage->usedDescriptors;
 			selectedPage->usedDescriptors += descriptorCount;
-			const UINT increment = commandListSlot.descriptorIncrementSize;
+			const UINT increment = device->GetDescriptorHandleIncrementSize(heapType);
 			outAllocation.heap = selectedPage->heap.Get();
 			outAllocation.cpuStart = selectedPage->heap->GetCPUDescriptorHandleForHeapStart();
 			outAllocation.cpuStart.ptr += static_cast<SIZE_T>(rangeOffset) * increment;
@@ -713,6 +736,7 @@ namespace ShaderResourceRuntime
 					output.access == RenderPass::ResourceAccess::UnorderedAccess;
 			});
 		const bool hasDescriptorOverrides = !renderPass.shaderResources.empty() ||
+			!renderPass.samplers.empty() ||
 			hasRuntimeShaderResource || hasRuntimeUnorderedAccess;
 		const bool hasInheritedBindings = renderPass.inheritedGameBindings.shaderResources ||
 			renderPass.inheritedGameBindings.constantBuffers;
@@ -765,7 +789,11 @@ namespace ShaderResourceRuntime
 		}
 
 		slot.activeTables.clear();
+		const bool requiresResourceHeap = !renderPass.shaderResources.empty() ||
+			hasRuntimeShaderResource || hasRuntimeUnorderedAccess;
+		const bool requiresSamplerHeap = !renderPass.samplers.empty();
 		UINT totalDescriptors = 0;
+		UINT totalSamplerDescriptors = 0;
 		for (const auto& binding : gameState.rootBindings)
 		{
 			if (binding.type != RenderPassMipChain::RootArgumentType::DescriptorTable)
@@ -786,7 +814,8 @@ namespace ShaderResourceRuntime
 
 			UINT descriptorCount = layoutIt->descriptorCount;
 			if (layoutIt->containsUnboundedRange &&
-				layoutIt->heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+				(layoutIt->heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV ||
+					layoutIt->heapType == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER))
 			{
 				const UINT64 availableDescriptorCount64 =
 					(heapBytes - byteOffset) / sourceHeap->descriptorIncrementSize;
@@ -818,6 +847,11 @@ namespace ShaderResourceRuntime
 			table.originalCpu = { sourceHeap->cpuStart.ptr + byteOffset };
 			if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
 			{
+				if (!requiresResourceHeap)
+				{
+					slot.activeTables.push_back(table);
+					continue;
+				}
 				if (table.descriptorCount > UINT_MAX - totalDescriptors)
 				{
 					outError = "Shader-resource descriptor-table clone exceeds D3D12 limits.";
@@ -826,42 +860,94 @@ namespace ShaderResourceRuntime
 				table.customOffset = totalDescriptors;
 				totalDescriptors += table.descriptorCount;
 			}
+			else if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)
+			{
+				if (!requiresSamplerHeap)
+				{
+					slot.activeTables.push_back(table);
+					continue;
+				}
+				if (table.descriptorCount > UINT_MAX - totalSamplerDescriptors)
+				{
+					outError = "Sampler descriptor-table clone exceeds D3D12 limits.";
+					return false;
+				}
+				table.customOffset = totalSamplerDescriptors;
+				totalSamplerDescriptors += table.descriptorCount;
+			}
 			slot.activeTables.push_back(table);
 		}
-		if (!totalDescriptors)
+		if (requiresResourceHeap && !totalDescriptors)
 		{
 			outError = "No CBV/SRV/UAV descriptor table is active.";
+			return false;
+		}
+		if (requiresSamplerHeap && !totalSamplerDescriptors)
+		{
+			outError = "No dynamic sampler descriptor table is active. Static samplers cannot be overridden.";
 			return false;
 		}
 
 		if (!slot.descriptorIncrementSize)
 			slot.descriptorIncrementSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		if (!slot.samplerDescriptorIncrementSize)
+			slot.samplerDescriptorIncrementSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
 		DescriptorAllocation descriptorAllocation{};
-		if (!AcquireDescriptorAllocation(
+		if (requiresResourceHeap && totalDescriptors && !AcquireDescriptorAllocation(
 			slot,
 			device,
+			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
 			totalDescriptors,
 			descriptorAllocation,
 			outError))
 		{
 			return false;
 		}
+		DescriptorAllocation samplerAllocation{};
+		if (requiresSamplerHeap && totalSamplerDescriptors && !AcquireDescriptorAllocation(
+			slot,
+			device,
+			D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
+			totalSamplerDescriptors,
+			samplerAllocation,
+			outError))
+		{
+			return false;
+		}
 		const UINT increment = slot.descriptorIncrementSize;
+		const UINT samplerIncrement = slot.samplerDescriptorIncrementSize;
 		const D3D12_CPU_DESCRIPTOR_HANDLE cpuStart = descriptorAllocation.cpuStart;
 		const D3D12_GPU_DESCRIPTOR_HANDLE gpuStart = descriptorAllocation.gpuStart;
+		const D3D12_CPU_DESCRIPTOR_HANDLE samplerCpuStart = samplerAllocation.cpuStart;
+		const D3D12_GPU_DESCRIPTOR_HANDLE samplerGpuStart = samplerAllocation.gpuStart;
 		for (const ActiveTable& table : slot.activeTables)
 		{
-			if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+			if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV && descriptorAllocation.heap)
 				device->CopyDescriptorsSimple(table.descriptorCount,
 					{ cpuStart.ptr + static_cast<SIZE_T>(table.customOffset) * increment }, table.originalCpu,
 					D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+			else if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER && samplerAllocation.heap)
+				device->CopyDescriptorsSimple(table.descriptorCount,
+					{ samplerCpuStart.ptr + static_cast<SIZE_T>(table.customOffset) * samplerIncrement },
+					table.originalCpu,
+					D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
 		}
 
-		const auto bindDescriptor = [&](D3D12_DESCRIPTOR_RANGE_TYPE rangeType,
+		const auto resolveDescriptorDestination = [&](D3D12_DESCRIPTOR_RANGE_TYPE rangeType,
 			uint32_t shaderRegister,
 			uint32_t registerSpace,
-			D3D12_CPU_DESCRIPTOR_HANDLE sourceDescriptor) -> bool
+			D3D12_CPU_DESCRIPTOR_HANDLE& outDestination) -> bool
 		{
+			const bool samplerDescriptor = rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+			const D3D12_DESCRIPTOR_HEAP_TYPE requiredHeapType = samplerDescriptor
+				? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER
+				: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+			const char registerPrefix = samplerDescriptor
+				? 's'
+				: (rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_UAV ? 'u' : 't');
+			const char* bindingName = samplerDescriptor
+				? "sampler"
+				: (rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_UAV ? "UAV" : "SRV");
 			const uint64_t bindingKey = (static_cast<uint64_t>(rangeType) << 56) |
 				((static_cast<uint64_t>(registerSpace) & 0x0FFFFFFFull) << 28) |
 				(static_cast<uint64_t>(shaderRegister) & 0x0FFFFFFFull);
@@ -881,8 +967,7 @@ namespace ShaderResourceRuntime
 					computePipeline ? D3D12_SHADER_VISIBILITY_ALL : D3D12_SHADER_VISIBILITY_PIXEL,
 					locations))
 				{
-					const char registerPrefix = rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_UAV ? 'u' : 't';
-					outError = "No " + std::string(rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_UAV ? "UAV" : "SRV") +
+					outError = "No " + std::string(bindingName) +
 						" root binding exists for " + registerPrefix + std::to_string(shaderRegister) +
 						", space" + std::to_string(registerSpace) + ".";
 					return false;
@@ -897,6 +982,7 @@ namespace ShaderResourceRuntime
 				const auto tableIt = std::find_if(slot.activeTables.begin(), slot.activeTables.end(), [&](const auto& table)
 				{
 					return table.rootParameterIndex == candidate.rootParameterIndex &&
+						table.heapType == requiredHeapType &&
 						candidate.tableOffset < table.descriptorCount;
 				});
 				if (tableIt != slot.activeTables.end())
@@ -908,19 +994,45 @@ namespace ShaderResourceRuntime
 			}
 			if (!location || !activeTable)
 			{
-				const char registerPrefix = rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_UAV ? 'u' : 't';
-				outError = "No compatible active " +
-					std::string(rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_UAV ? "UAV" : "SRV") +
+				outError = "No compatible active " + std::string(bindingName) +
 					" table exists for " + registerPrefix + std::to_string(shaderRegister) + ", space" +
 					std::to_string(registerSpace) + " on this draw or dispatch.";
 				return false;
 			}
 			const UINT descriptorOffset = activeTable->customOffset + location->tableOffset;
+			const D3D12_CPU_DESCRIPTOR_HANDLE destinationStart = samplerDescriptor
+				? samplerCpuStart
+				: cpuStart;
+			const UINT destinationIncrement = samplerDescriptor ? samplerIncrement : increment;
+			outDestination = {
+				destinationStart.ptr + static_cast<SIZE_T>(descriptorOffset) * destinationIncrement
+			};
+			return true;
+		};
+
+		const auto bindDescriptor = [&](D3D12_DESCRIPTOR_RANGE_TYPE rangeType,
+			uint32_t shaderRegister,
+			uint32_t registerSpace,
+			D3D12_CPU_DESCRIPTOR_HANDLE sourceDescriptor) -> bool
+		{
+			D3D12_CPU_DESCRIPTOR_HANDLE destination{};
+			if (!resolveDescriptorDestination(
+				rangeType,
+				shaderRegister,
+				registerSpace,
+				destination))
+			{
+				return false;
+			}
+
+			const D3D12_DESCRIPTOR_HEAP_TYPE heapType = rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER
+				? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER
+				: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 			device->CopyDescriptorsSimple(
 				1,
-				{ cpuStart.ptr + static_cast<SIZE_T>(descriptorOffset) * increment },
+				destination,
 				sourceDescriptor,
-				D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+				heapType);
 			return true;
 		};
 
@@ -1030,16 +1142,70 @@ namespace ShaderResourceRuntime
 			}
 		}
 
-		ID3D12DescriptorHeap* samplerHeap = nullptr;
+		for (const RenderPass::SamplerStateDisk& sampler : renderPass.samplers)
+		{
+			D3D12_CPU_DESCRIPTOR_HANDLE destination{};
+			if (!resolveDescriptorDestination(
+				D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER,
+				sampler.shaderRegister,
+				sampler.registerSpace,
+				destination))
+			{
+				return false;
+			}
+
+			D3D12_SAMPLER_DESC description{};
+			description.Filter = static_cast<D3D12_FILTER>(sampler.filter);
+			description.AddressU = static_cast<D3D12_TEXTURE_ADDRESS_MODE>(sampler.addressU);
+			description.AddressV = static_cast<D3D12_TEXTURE_ADDRESS_MODE>(sampler.addressV);
+			description.AddressW = static_cast<D3D12_TEXTURE_ADDRESS_MODE>(sampler.addressW);
+			description.MipLODBias = sampler.mipLodBias;
+			description.MaxAnisotropy = (std::clamp)(sampler.maximumAnisotropy, 1u, 16u);
+			description.ComparisonFunc =
+				static_cast<D3D12_COMPARISON_FUNC>(sampler.comparisonFunction);
+			std::copy(sampler.borderColor.begin(), sampler.borderColor.end(), description.BorderColor);
+			description.MinLOD = sampler.minimumLod;
+			description.MaxLOD = (std::max)(sampler.minimumLod, sampler.maximumLod);
+			device->CreateSampler(&description, destination);
+		}
+
+		ID3D12DescriptorHeap* originalResourceHeap = nullptr;
+		ID3D12DescriptorHeap* originalSamplerHeap = nullptr;
 		for (const auto& heap : gameState.descriptorHeaps)
-			if (heap.type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER) samplerHeap = heap.heap;
-		ID3D12DescriptorHeap* heaps[] = { descriptorAllocation.heap, samplerHeap };
-		commandList->SetDescriptorHeaps(samplerHeap ? 2u : 1u, heaps);
+		{
+			if (heap.type == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+				originalResourceHeap = heap.heap;
+			else if (heap.type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)
+				originalSamplerHeap = heap.heap;
+		}
+		ID3D12DescriptorHeap* resourceHeap = descriptorAllocation.heap
+			? descriptorAllocation.heap
+			: originalResourceHeap;
+		ID3D12DescriptorHeap* samplerHeap = samplerAllocation.heap
+			? samplerAllocation.heap
+			: originalSamplerHeap;
+		std::array<ID3D12DescriptorHeap*, 2> heaps{};
+		UINT heapCount = 0;
+		if (resourceHeap)
+			heaps[heapCount++] = resourceHeap;
+		if (samplerHeap)
+			heaps[heapCount++] = samplerHeap;
+		commandList->SetDescriptorHeaps(heapCount, heapCount ? heaps.data() : nullptr);
 		for (const ActiveTable& table : slot.activeTables)
 		{
-			const D3D12_GPU_DESCRIPTOR_HANDLE handle = table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
-				? D3D12_GPU_DESCRIPTOR_HANDLE{ gpuStart.ptr + static_cast<UINT64>(table.customOffset) * increment }
-				: table.originalGpu;
+			D3D12_GPU_DESCRIPTOR_HANDLE handle = table.originalGpu;
+			if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV && descriptorAllocation.heap)
+			{
+				handle = {
+					gpuStart.ptr + static_cast<UINT64>(table.customOffset) * increment
+				};
+			}
+			else if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER && samplerAllocation.heap)
+			{
+				handle = {
+					samplerGpuStart.ptr + static_cast<UINT64>(table.customOffset) * samplerIncrement
+				};
+			}
 			if (computePipeline)
 				commandList->SetComputeRootDescriptorTable(table.rootParameterIndex, handle);
 			else

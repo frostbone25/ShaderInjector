@@ -424,6 +424,16 @@ namespace DatabaseRenderPasses
 			if (!resourceBindings.insert(bindingKey).second)
 				return false;
 		}
+		std::unordered_set<std::string> samplerBindings;
+		for (const RenderPass::SamplerStateDisk& sampler : renderPass->samplers)
+		{
+			if (sampler.hlslName.empty())
+				return false;
+			const std::string bindingKey = std::to_string(sampler.shaderRegister) + ':' +
+				std::to_string(sampler.registerSpace);
+			if (!samplerBindings.insert(bindingKey).second)
+				return false;
+		}
 
 		if (!MoveRenderPassPackageToCurrentName(*renderPass))
 			return false;
