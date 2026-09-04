@@ -128,6 +128,10 @@ namespace DatabaseModifiedShaders
 			if (!ModifiedShader::LoadJson(jsonPath, package))
 				continue;
 
+			// Compiler targets are injector-wide settings. Override package metadata in
+			// memory so existing packages follow the selected profile on recompile.
+			package.shaderProfile = StringHelper::ShaderProfileForType(package.shaderType);
+
 			if (package.id.empty() || package.shaderType == ShaderTarget::Unknown ||
 				package.shaderProfile.empty() || package.shaderEntryPoint.empty() ||
 				package.sourcePath.empty() || !ShaderInjectorIO::FileExists(package.sourcePath) ||
@@ -277,6 +281,10 @@ namespace DatabaseModifiedShaders
 			return false;
 		}
 
+		modifiedShader->shaderProfile = StringHelper::ShaderProfileForType(modifiedShader->shaderType);
+		if (modifiedShader->shaderProfile.empty())
+			return false;
+
 		std::string compiledBlobPath = modifiedShader->compiledBlobPath;
 
 		if (!ShaderInjectorIO::CompileSourceToDXILBlob(
@@ -290,6 +298,9 @@ namespace DatabaseModifiedShaders
 
 		modifiedShader->compiledBlob.clear();
 
-		return ShaderInjectorIO::LoadDXILBlobFromDisk(compiledBlobPath, modifiedShader->compiledBlob) && !modifiedShader->compiledBlob.empty();
+		if (!ShaderInjectorIO::LoadDXILBlobFromDisk(compiledBlobPath, modifiedShader->compiledBlob) || modifiedShader->compiledBlob.empty())
+			return false;
+
+		return ModifiedShader::WriteJson(*modifiedShader);
 	}
 }

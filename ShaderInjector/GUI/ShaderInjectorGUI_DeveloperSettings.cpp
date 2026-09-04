@@ -28,6 +28,85 @@
 #include "GUI/ShaderInjectorGUITooltips.h"
 #include "Keycodes.h"
 #include "ShaderInjectorVersion.h"
+#include "ShaderModelDetector.h"
+
+namespace
+{
+	struct ShaderModelOption
+	{
+		Globals::ShaderModel value;
+		const char* label;
+	};
+
+	constexpr ShaderModelOption shaderModelOptions[] =
+	{
+		{ Globals::ShaderModel::ShaderModel5_0, "Shader Model 5.0 (DXBC)" },
+		{ Globals::ShaderModel::ShaderModel5_1, "Shader Model 5.1 (DXBC)" },
+		{ Globals::ShaderModel::ShaderModel6_0, "Shader Model 6.0 (DXIL)" },
+		{ Globals::ShaderModel::ShaderModel6_1, "Shader Model 6.1 (DXIL)" },
+		{ Globals::ShaderModel::ShaderModel6_2, "Shader Model 6.2 (DXIL)" },
+		{ Globals::ShaderModel::ShaderModel6_3, "Shader Model 6.3 (DXIL)" },
+		{ Globals::ShaderModel::ShaderModel6_4, "Shader Model 6.4 (DXIL)" },
+		{ Globals::ShaderModel::ShaderModel6_5, "Shader Model 6.5 (DXIL)" },
+		{ Globals::ShaderModel::ShaderModel6_6, "Shader Model 6.6 (DXIL)" },
+	};
+
+	bool DrawShaderModelCombo(const char* label, Globals::ShaderModel& shaderModel)
+	{
+		const char* preview = shaderModelOptions[8].label;
+		for (const ShaderModelOption& option : shaderModelOptions)
+		{
+			if (option.value == shaderModel)
+			{
+				preview = option.label;
+				break;
+			}
+		}
+
+		bool changed = false;
+		ImGui::SetNextItemWidth(220.0f * Globals::gShaderInjectorGUIScale);
+		if (ImGui::BeginCombo(label, preview))
+		{
+			for (const ShaderModelOption& option : shaderModelOptions)
+			{
+				const bool selected = shaderModel == option.value;
+				if (ImGui::Selectable(option.label, selected))
+				{
+					shaderModel = option.value;
+					changed = true;
+				}
+
+				if (selected)
+					ImGui::SetItemDefaultFocus();
+			}
+
+			ImGui::EndCombo();
+		}
+
+		return changed;
+	}
+
+	void DrawShaderModelSetting(
+		const char* label,
+		ShaderTarget::ShaderType shaderType,
+		Globals::ShaderModel& configuredShaderModel)
+	{
+		Globals::ShaderModel displayedShaderModel = ShaderModelDetector::GetEffectiveShaderModel(shaderType, configuredShaderModel);
+		Globals::ShaderModel detectedShaderModel = configuredShaderModel;
+		const bool modelDetected = ShaderModelDetector::TryGetDetectedShaderModel(shaderType, detectedShaderModel);
+
+		ImGui::BeginDisabled(Globals::gAutoDetectShaderModels);
+		if (DrawShaderModelCombo(label, displayedShaderModel) && !Globals::gAutoDetectShaderModels)
+			configuredShaderModel = displayedShaderModel;
+		ImGui::EndDisabled();
+
+		if (Globals::gAutoDetectShaderModels)
+		{
+			ImGui::SameLine();
+			ImGui::TextDisabled("(%s)", modelDetected ? "detected" : "fallback");
+		}
+	}
+}
 
 namespace ShaderInjectorGUI
 {
@@ -139,6 +218,30 @@ namespace ShaderInjectorGUI
 		}
 	}
 
+	void UI_ShaderCompilerSettings()
+	{
+		ImGui::Checkbox("Automatically Detect Shader Models", &Globals::gAutoDetectShaderModels);
+		DrawShaderModelSetting("Vertex Shader", ShaderTarget::VertexShader, Globals::gVertexShaderModel);
+		DrawShaderModelSetting("Hull Shader", ShaderTarget::HullShader, Globals::gHullShaderModel);
+		DrawShaderModelSetting("Domain Shader", ShaderTarget::DomainShader, Globals::gDomainShaderModel);
+		DrawShaderModelSetting("Geometry Shader", ShaderTarget::GeometryShader, Globals::gGeometryShaderModel);
+		DrawShaderModelSetting("Pixel Shader", ShaderTarget::PixelShader, Globals::gPixelShaderModel);
+		DrawShaderModelSetting("Compute Shader", ShaderTarget::ComputeShader, Globals::gComputeShaderModel);
+
+		if (ImGui::Button("Apply Shader Levels"))
+		{
+			if (ShaderInjectorIO::RecompileAndReloadInternalShaders())
+			{
+				HookD3D12::InvalidateShaderMarkerPSOs();
+				WriteToRuntimeLogSuccess("Applied shader levels and reloaded internal marker shaders.");
+			}
+			else
+			{
+				WriteToRuntimeLogError("Could not compile and reload the internal marker shaders.");
+			}
+		}
+	}
+
 	void UI_DeveloperSettings()
 	{
 		if (ImGui::CollapsingHeader("Developer Settings"))
@@ -148,6 +251,13 @@ namespace ShaderInjectorGUI
 
 			if (ImGui::BeginTabBar("##DeveloperSettingsTabs"))
 			{
+				if (ImGui::BeginTabItem("Shader Compiler"))
+				{
+					HookD3D12::ClearShaderMarkers();
+					UI_ShaderCompilerSettings();
+					ImGui::EndTabItem();
+				}
+
 				if (ImGui::BeginTabItem("Shader Inspector"))
 				{
 					ImGui::InputTextMultiline("##DeveloperSettingsNote",

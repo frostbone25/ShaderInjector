@@ -8,6 +8,7 @@
 
 //custom
 #include "Hash.h"
+#include "ShaderModelDetector.h"
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderInjectorGUI.h"
 #include "HookD3D12.h"
@@ -522,6 +523,7 @@ namespace HookD3D12
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, D3D12_SHADER_BYTECODE>*>(ptr);
 					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
 					{
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::VertexShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.vsHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.vsSize = subobj->payload.BytecodeLength;
 						info.vsBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
@@ -535,6 +537,7 @@ namespace HookD3D12
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, D3D12_SHADER_BYTECODE>*>(ptr);
 					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
 					{
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::PixelShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.psHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.psSize = subobj->payload.BytecodeLength;
 						info.psBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
@@ -548,6 +551,7 @@ namespace HookD3D12
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, D3D12_SHADER_BYTECODE>*>(ptr);
 					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
 					{
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::GeometryShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.gsHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.gsSize = subobj->payload.BytecodeLength;
 						info.gsBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
@@ -561,6 +565,7 @@ namespace HookD3D12
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, D3D12_SHADER_BYTECODE>*>(ptr);
 					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
 					{
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::HullShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.hsHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.hsSize = subobj->payload.BytecodeLength;
 						info.hsBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
@@ -574,6 +579,7 @@ namespace HookD3D12
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, D3D12_SHADER_BYTECODE>*>(ptr);
 					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
 					{
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::DomainShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.dsHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.dsSize = subobj->payload.BytecodeLength;
 						info.dsBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
@@ -587,6 +593,7 @@ namespace HookD3D12
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS, D3D12_SHADER_BYTECODE>*>(ptr);
 					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
 					{
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::ComputeShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.csHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
 						info.csSize = subobj->payload.BytecodeLength;
 						info.csBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);

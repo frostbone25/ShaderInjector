@@ -8,6 +8,7 @@
 #include "RenderPass/RenderPassRuntime.h"
 #include "RenderPass/RenderPassShaders.h"
 #include "IO/ShaderInjectorIO.h"
+#include "StringHelper.h"
 
 namespace DatabaseRenderPasses
 {
@@ -350,6 +351,8 @@ namespace DatabaseRenderPasses
 		RenderPass::RenderPassDisk renderPass{};
 		renderPass.id = identity.id;
 		renderPass.name = identity.name;
+		renderPass.vertexShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::VertexShader);
+		renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::PixelShader);
 		const std::string fileStem = ShaderInjectorIO::SanitizeFileStem(renderPass.name);
 		renderPass.packageDirectory = ShaderInjectorIO::JoinPath(
 			ShaderInjectorIO::GetRenderPassesDirectory(),
@@ -511,8 +514,12 @@ namespace DatabaseRenderPasses
 			return false;
 		}
 
-		if (!RenderPassShaders::CompileShaders(*renderPass, outError))
+		if (!RenderPassShaders::CompileShaders(*renderPass, outError) || !RenderPass::WriteJson(*renderPass))
+		{
+			if (outError.empty())
+				outError = "Compiled Render Pass shader settings could not be saved.";
 			return false;
+		}
 
 		PublishRuntimeConfiguration();
 		return true;

@@ -78,6 +78,7 @@ namespace ShaderInjectorGUI
 
 	//===================== developer settings =====================
 	void UI_DeveloperSettings();
+	void UI_ShaderCompilerSettings();
 	void UI_RenderDoc();
 	void UI_AdapterInfo();
 	void UI_D3D12PipelineInfo();

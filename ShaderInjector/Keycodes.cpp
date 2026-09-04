@@ -1,5 +1,7 @@
 #include "Keycodes.h"
 
+#include <utility>
+
 namespace Keycodes
 {
 	std::string KeycodeToString(int keycode)
@@ -199,5 +201,27 @@ namespace Keycodes
 
 			default:  return "Unknown";
 		}
+	}
+
+	const std::vector<KeycodeOption>& SelectableKeycodes()
+	{
+		static const std::vector<KeycodeOption> keycodes = []
+		{
+			std::vector<KeycodeOption> result;
+			result.reserve(160);
+
+			// The input hook consumes keyboard messages. Mouse virtual keys are omitted
+			// so every option shown here is actionable through that same path.
+			for (int value = 8; value <= 254; ++value)
+			{
+				std::string name = KeycodeToString(value);
+				if (name != "Unknown")
+					result.push_back({ value, std::move(name) });
+			}
+
+			return result;
+		}();
+
+		return keycodes;
 	}
 }

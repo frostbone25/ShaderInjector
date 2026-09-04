@@ -90,7 +90,7 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	//compile "error" pixel shader
 	bool nullPixelShaderCompiled = ShaderInjectorIO::CompileSourceToDXILBlob(
 		errorPixelShaderPath, //NOTE: this NEEDS to be an .hlsl source shader text file
-		"ps_6_6", //target profile, for rebirth ps_6_6 is what I found in renderdoc
+		StringHelper::ShaderProfileForType(ShaderTarget::PixelShader),
 		"main", //name of the function within the shader to execute
 		errorPixelShaderBlobPath); //output blob file path
 

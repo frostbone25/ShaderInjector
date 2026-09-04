@@ -10,6 +10,7 @@
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderResource/DatabaseShaderResources.h"
 #include "ShaderResource/ShaderResourceCatalog.h"
+#include "StringHelper.h"
 
 namespace RenderPassShaders
 {
@@ -708,12 +709,6 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			return source.str();
 		}
 
-		std::string VertexProfileFromPixelProfile(const std::string& pixelProfile)
-		{
-			if (pixelProfile.rfind("ps_", 0) == 0)
-				return "vs_" + pixelProfile.substr(3);
-			return "vs_6_6";
-		}
 	}
 
 	bool CreateShaderTemplate(
@@ -778,10 +773,9 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			(pixelReplacement ? replacementPixelBlobFile : (mipChain ? mipChainFragmentBlobFile :
 			(downsample ? downsampleFragmentBlobFile :
 			(upsampleChain ? upsampleFragmentBlobFile : fragmentBlobFile)))));
-		renderPass.fragmentShaderProfile = computePass
-			? (modifiedShader.shaderProfile.empty() ? "cs_6_6" : modifiedShader.shaderProfile)
-			: (modifiedShader.shaderProfile.empty() ? "ps_6_6" : modifiedShader.shaderProfile);
-		renderPass.vertexShaderProfile = VertexProfileFromPixelProfile(renderPass.fragmentShaderProfile);
+		renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(
+			computePass ? ShaderTarget::ComputeShader : ShaderTarget::PixelShader);
+		renderPass.vertexShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::VertexShader);
 		renderPass.vertexShaderEntryPoint = "main";
 		renderPass.fragmentShaderEntryPoint = "main";
 		RenderPass::ResolveShaderPaths(renderPass);
@@ -814,6 +808,11 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			outError = "Render Pass shader source files are missing.";
 			return false;
 		}
+
+		const bool computePass = RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute;
+		renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(
+			computePass ? ShaderTarget::ComputeShader : ShaderTarget::PixelShader);
+		renderPass.vertexShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::VertexShader);
 
 		std::string vertexBlobPath = renderPass.vertexShaderCompiledBlobPath;
 		if (!vertexBlobPath.empty() && !ShaderInjectorIO::CompileSourceToDXILBlob(

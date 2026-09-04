@@ -226,6 +226,7 @@
     <ClInclude Include="ShaderConfiguration\DatabaseShaderConfigurations.h" />
     <ClInclude Include="ShaderConfiguration\ShaderConfiguration.h" />
     <ClInclude Include="ShaderInjectorVersion.h" />
+	<ClInclude Include="ShaderModelDetector.h" />
     <ClInclude Include="ShaderTarget\DatabaseShaderTargets.h" />
     <ClInclude Include="ShaderTarget\ShaderTarget.h" />
     <ClInclude Include="ShaderTemplates.h" />
@@ -323,6 +324,7 @@
     <ClCompile Include="ShaderConfiguration\ShaderConfiguration.cpp" />
     <ClCompile Include="ShaderDiscovery.cpp" />
     <ClCompile Include="ShaderAutomaticDiscovery.cpp" />
+	<ClCompile Include="ShaderModelDetector.cpp" />
     <ClCompile Include="ShaderTarget\DatabaseShaderTargets.cpp" />
     <ClCompile Include="ShaderTarget\ShaderTarget.cpp" />
     <ClCompile Include="ShaderTarget\ShaderTargetSimilarity.cpp" />

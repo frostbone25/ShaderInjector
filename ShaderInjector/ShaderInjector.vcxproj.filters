@@ -102,6 +102,9 @@
     <ClInclude Include="ShaderTemplates.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+	<ClInclude Include="ShaderModelDetector.h">
+	  <Filter>Header Files</Filter>
+	</ClInclude>
     <ClInclude Include="FPSCounter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -293,6 +296,9 @@
     <ClCompile Include="ShaderAutomaticDiscovery.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+	<ClCompile Include="ShaderModelDetector.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
     <ClCompile Include="ShaderTemplates.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

@@ -1,9 +1,16 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace Keycodes
 {
+	struct KeycodeOption
+	{
+		int value = 0;
+		std::string name;
+	};
+
 	//mouse buttons
 	static int Keycodes_LeftMouse = 1; //0x01 Left mouse button
 	static int Keycodes_RightMouse = 2; //0x02 Right mouse button
@@ -192,4 +199,5 @@ namespace Keycodes
 	static int Keycodes_IME_Process = 229; //0xE5 IME PROCESS key
 
 	std::string KeycodeToString(int keycode);
+	const std::vector<KeycodeOption>& SelectableKeycodes();
 }

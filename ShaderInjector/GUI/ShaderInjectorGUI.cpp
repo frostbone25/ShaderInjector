@@ -29,6 +29,37 @@
 #include "Keycodes.h"
 #include "ShaderInjectorVersion.h"
 
+namespace
+{
+	bool DrawKeycodeCombo(const char* label, int& keycode)
+	{
+		const std::string preview = Keycodes::KeycodeToString(keycode) + " (" + std::to_string(keycode) + ")";
+		bool changed = false;
+
+		ImGui::SetNextItemWidth(220.0f * Globals::gShaderInjectorGUIScale);
+		if (ImGui::BeginCombo(label, preview.c_str()))
+		{
+			for (const Keycodes::KeycodeOption& option : Keycodes::SelectableKeycodes())
+			{
+				const bool selected = keycode == option.value;
+				const std::string optionLabel = option.name + " (" + std::to_string(option.value) + ")";
+				if (ImGui::Selectable(optionLabel.c_str(), selected))
+				{
+					keycode = option.value;
+					changed = true;
+				}
+
+				if (selected)
+					ImGui::SetItemDefaultFocus();
+			}
+
+			ImGui::EndCombo();
+		}
+
+		return changed;
+	}
+}
+
 namespace ShaderInjectorGUI
 {
 	std::string runtimeLogText;
@@ -63,11 +94,8 @@ namespace ShaderInjectorGUI
 			if (context.fpsCounterActive)
 				ImGui::Text("FPS: %.1f (%.4fms)", context.fps, context.frameTimeMs);
 
-			const std::string toggleInjectorKeyText = Keycodes::KeycodeToString(Globals::keyToggleShaderInjector) + " (" + std::to_string(Globals::keyToggleShaderInjector) + ")";
-			const std::string toggleMenuKeyText = Keycodes::KeycodeToString(Globals::keyOpenShaderInjectorGUI) + " (" + std::to_string(Globals::keyOpenShaderInjectorGUI) + ")";
-
-			ImGui::Text("Toggle Injector: Press %s", toggleInjectorKeyText.c_str());
-			ImGui::Text("Toggle Menu: Press %s", toggleMenuKeyText.c_str());
+			DrawKeycodeCombo("Toggle Injector", Globals::keyToggleShaderInjector);
+			DrawKeycodeCombo("Toggle Menu", Globals::keyOpenShaderInjectorGUI);
 
 			ImGui::SetNextItemWidth(140.0f * Globals::gShaderInjectorGUIScale);
 
@@ -77,8 +105,18 @@ namespace ShaderInjectorGUI
 			if (ImGui::IsItemDeactivatedAfterEdit() && !ShaderInjectorIO::WriteInjectorMenuScale(Globals::gShaderInjectorGUIScale))
 				WriteToRuntimeLogError("Could not save MenuScale to ShaderInjector.ini.");
 
-			if (ImGui::Button("Edit Injector Settings", ImVec2(-FLT_MIN, 0)) && !ShaderInjectorIO::OpenFile( ShaderInjectorIO::GetInjectorSettingsPath()))
+			const float settingsButtonWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+			if (ImGui::Button("Edit Injector Settings", ImVec2(settingsButtonWidth, 0)) && !ShaderInjectorIO::OpenFile(ShaderInjectorIO::GetInjectorSettingsPath()))
 				WriteToRuntimeLogError("Could not open ShaderInjector.ini.");
+
+			ImGui::SameLine();
+			if (ImGui::Button("Save Injector Settings", ImVec2(settingsButtonWidth, 0)))
+			{
+				if (ShaderInjectorIO::WriteInjectorSettings())
+					WriteToRuntimeLogSuccess("Saved ShaderInjector.ini.");
+				else
+					WriteToRuntimeLogError("Could not save ShaderInjector.ini.");
+			}
 
 			ImGui::Spacing();
 

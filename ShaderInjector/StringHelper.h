@@ -5,6 +5,7 @@
 #include <string>
 
 //custom 
+#include "Globals.h"
 #include "ShaderTarget/ShaderTarget.h"
 
 namespace StringHelper
@@ -42,6 +43,10 @@ namespace StringHelper
 	std::string ExecutablePathFromCommandLine(const std::string& commandLine);
 
 	std::string ShaderTypeToString(ShaderTarget::ShaderType shaderType);
+
+	bool IsValidShaderModel(Globals::ShaderModel shaderModel);
+	Globals::ShaderModel ShaderModelFromValue(int value, Globals::ShaderModel fallback);
+	std::string ShaderModelToString(Globals::ShaderModel shaderModel);
 
 	std::string ShaderProfileForType(ShaderTarget::ShaderType shaderType);
 }

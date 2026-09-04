@@ -8,11 +8,15 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <mutex>
+#include <new>
+#include <unordered_map>
 #include <vector>
 
 #if defined(_WIN32)
 	#include <Windows.h>
+	#include <d3dcompiler.h>
 	#include <shellapi.h>
 #endif
 
@@ -66,6 +70,35 @@ namespace ShaderInjectorIO
 			{
 				return defaultValue;
 			}
+		}
+
+		void PopulateInjectorSettings(ini::IniFile& injectorSettingsINI)
+		{
+			injectorSettingsINI["InjectorSettings"]["OpenMenuKey"] = Globals::keyOpenShaderInjectorGUI;
+			injectorSettingsINI["InjectorSettings"]["ToggleInjectorKey"] = Globals::keyToggleShaderInjector;
+			injectorSettingsINI["InjectorSettings"]["InjectorEnabled"] = Globals::gShaderInjectorEnabled;
+			injectorSettingsINI["InjectorSettings"]["MenuOpen"] = Globals::gShowShaderInjectorGUI;
+			injectorSettingsINI["InjectorSettings"]["MenuScale"] = static_cast<double>(Globals::gShaderInjectorGUIScale);
+
+			injectorSettingsINI["ShaderCompiler"]["VertexShaderModel"] = static_cast<int>(Globals::gVertexShaderModel);
+			injectorSettingsINI["ShaderCompiler"]["AutoDetectShaderModels"] = Globals::gAutoDetectShaderModels;
+			injectorSettingsINI["ShaderCompiler"]["HullShaderModel"] = static_cast<int>(Globals::gHullShaderModel);
+			injectorSettingsINI["ShaderCompiler"]["DomainShaderModel"] = static_cast<int>(Globals::gDomainShaderModel);
+			injectorSettingsINI["ShaderCompiler"]["GeometryShaderModel"] = static_cast<int>(Globals::gGeometryShaderModel);
+			injectorSettingsINI["ShaderCompiler"]["PixelShaderModel"] = static_cast<int>(Globals::gPixelShaderModel);
+			injectorSettingsINI["ShaderCompiler"]["ComputeShaderModel"] = static_cast<int>(Globals::gComputeShaderModel);
+
+			injectorSettingsINI["RenderDoc"]["Enabled"] = Globals::gRenderDocIntegrationEnabled;
+			injectorSettingsINI["RenderDoc"]["AutoAttach"] = Globals::gRenderDocAutoAttachEnabled;
+			injectorSettingsINI["Logging"]["PerformanceTelemetry"] = Globals::gPerformanceTelemetryEnabled;
+			injectorSettingsINI["ShaderDiscovery"]["Mode"] = static_cast<int>(Globals::gShaderDiscoveryMode);
+			injectorSettingsINI["ShaderDiscovery"]["WorkerThreads"] = Globals::gShaderDiscoveryWorkerThreads;
+			injectorSettingsINI["ShaderDiscovery"]["WorkerThreadPriority"] = Globals::gShaderDiscoveryWorkerThreadPriority;
+			injectorSettingsINI["ShaderDiscovery"]["FrameJobBudget"] = Globals::gShaderDiscoveryFrameJobBudget;
+			injectorSettingsINI["ShaderDiscovery"]["PendingAnalysisLimit"] = Globals::gShaderDiscoveryPendingAnalysisLimit;
+			injectorSettingsINI["ShaderDiscovery"]["QueuedShaderLimit"] = Globals::gShaderDiscoveryQueuedShaderLimit;
+			injectorSettingsINI["ShaderDiscovery"]["MinimumSimilarityScore"] = Globals::gShaderDiscoveryMinimumSimilarityScore;
+			injectorSettingsINI["ShaderDiscovery"]["SimilarityAmbiguityMargin"] = Globals::gShaderDiscoverySimilarityAmbiguityMargin;
 		}
 	}
 
@@ -671,20 +704,205 @@ namespace ShaderInjectorIO
 		return diagnostics;
 	}
 
-	//given raw HLSL human readable shader source code, compile it into a shader blob
+	namespace
+	{
+		bool UsesLegacyShaderCompiler(const std::string& shaderProfile)
+		{
+			return shaderProfile.size() >= 6 && shaderProfile[3] == '5' && shaderProfile[4] == '_';
+		}
+
+#if defined(_WIN32)
+		class LegacyShaderIncludeHandler final : public ID3DInclude
+		{
+		public:
+			LegacyShaderIncludeHandler(FileSystem::path sourceDirectory, FileSystem::path sharedIncludesDirectory)
+				: sourceDirectory_(std::move(sourceDirectory)), sharedIncludesDirectory_(std::move(sharedIncludesDirectory))
+			{
+			}
+
+			~LegacyShaderIncludeHandler()
+			{
+				for (const auto& openFile : openFileDirectories_)
+					delete[] static_cast<const char*>(openFile.first);
+			}
+
+			HRESULT STDMETHODCALLTYPE Open(
+				D3D_INCLUDE_TYPE,
+				LPCSTR fileName,
+				LPCVOID parentData,
+				LPCVOID* outData,
+				UINT* outBytes) override
+			{
+				if (!fileName || !outData || !outBytes)
+					return E_INVALIDARG;
+
+				std::vector<FileSystem::path> candidates;
+				const FileSystem::path includePath = PathFromUtf8(fileName);
+				if (includePath.is_absolute())
+				{
+					candidates.push_back(includePath);
+				}
+				else
+				{
+					const auto parentIt = openFileDirectories_.find(parentData);
+					if (parentIt != openFileDirectories_.end())
+						candidates.push_back(parentIt->second / includePath);
+					candidates.push_back(sourceDirectory_ / includePath);
+					candidates.push_back(sharedIncludesDirectory_ / includePath);
+				}
+
+				for (const FileSystem::path& candidate : candidates)
+				{
+					std::ifstream file(candidate, std::ios::binary | std::ios::ate);
+					if (!file.is_open())
+						continue;
+
+					const std::streamsize fileSize = file.tellg();
+					if (fileSize < 0 || static_cast<uint64_t>(fileSize) > (std::numeric_limits<UINT>::max)())
+						continue;
+
+					file.seekg(0, std::ios::beg);
+					char* data = new (std::nothrow) char[fileSize > 0 ? static_cast<size_t>(fileSize) : 1u];
+					if (!data)
+						return E_OUTOFMEMORY;
+
+					if (fileSize > 0 && !file.read(data, fileSize))
+					{
+						delete[] data;
+						continue;
+					}
+
+					*outData = data;
+					*outBytes = static_cast<UINT>(fileSize);
+					openFileDirectories_[data] = candidate.parent_path();
+					return S_OK;
+				}
+
+				return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+			}
+
+			HRESULT STDMETHODCALLTYPE Close(LPCVOID data) override
+			{
+				openFileDirectories_.erase(data);
+				delete[] static_cast<const char*>(data);
+				return S_OK;
+			}
+
+		private:
+			FileSystem::path sourceDirectory_;
+			FileSystem::path sharedIncludesDirectory_;
+			std::unordered_map<LPCVOID, FileSystem::path> openFileDirectories_;
+		};
+
+		using CompileFromFileFunction = HRESULT(WINAPI*)(
+			LPCWSTR,
+			const D3D_SHADER_MACRO*,
+			ID3DInclude*,
+			LPCSTR,
+			LPCSTR,
+			UINT,
+			UINT,
+			ID3DBlob**,
+			ID3DBlob**);
+
+		bool CompileShaderModel5(
+			const std::string& shaderSourceFilePath,
+			const std::string& shaderProfile,
+			const std::string& entryPoint,
+			const std::string& outputPath,
+			std::string& outDiagnostics,
+			std::string& outError)
+		{
+			outDiagnostics.clear();
+			outError.clear();
+
+			constexpr const wchar_t* compilerNames[] =
+			{
+				L"d3dcompiler_47.dll",
+				L"d3dcompiler_46.dll",
+				L"d3dcompiler_45.dll",
+				L"d3dcompiler_44.dll",
+				L"d3dcompiler_43.dll",
+			};
+
+			HMODULE compilerModule = nullptr;
+			CompileFromFileFunction compileFromFile = nullptr;
+			for (const wchar_t* compilerName : compilerNames)
+			{
+				compilerModule = LoadLibraryW(compilerName);
+				if (!compilerModule)
+					continue;
+
+				compileFromFile = reinterpret_cast<CompileFromFileFunction>(GetProcAddress(compilerModule, "D3DCompileFromFile"));
+				if (compileFromFile)
+					break;
+
+				FreeLibrary(compilerModule);
+				compilerModule = nullptr;
+			}
+
+			if (!compilerModule || !compileFromFile)
+			{
+				outError = "No compatible d3dcompiler DLL exposing D3DCompileFromFile was found.";
+				return false;
+			}
+
+			LegacyShaderIncludeHandler includeHandler(
+				PathFromUtf8(DirectoryFromPath(shaderSourceFilePath)),
+				PathFromUtf8(GetModifiedShadersIncludesDirectory()));
+			ID3DBlob* shaderBlob = nullptr;
+			ID3DBlob* errorBlob = nullptr;
+			const std::wstring sourcePath = PathFromUtf8(shaderSourceFilePath).wstring();
+			const HRESULT result = compileFromFile(
+				sourcePath.c_str(),
+				nullptr,
+				&includeHandler,
+				entryPoint.c_str(),
+				shaderProfile.c_str(),
+				D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3,
+				0,
+				&shaderBlob,
+				&errorBlob);
+
+			if (errorBlob && errorBlob->GetBufferPointer() && errorBlob->GetBufferSize() > 0)
+			{
+				outDiagnostics.assign(
+					static_cast<const char*>(errorBlob->GetBufferPointer()),
+					errorBlob->GetBufferSize());
+				const size_t lastContentCharacter = outDiagnostics.find_last_not_of("\0 \t\r\n");
+				outDiagnostics.erase(lastContentCharacter == std::string::npos ? 0 : lastContentCharacter + 1);
+				constexpr size_t maximumDiagnosticsLength = 4000;
+				if (outDiagnostics.size() > maximumDiagnosticsLength)
+					outDiagnostics = outDiagnostics.substr(0, maximumDiagnosticsLength) + "\n... (truncated)";
+			}
+
+			if (errorBlob)
+				errorBlob->Release();
+
+			bool succeeded = SUCCEEDED(result) && shaderBlob && shaderBlob->GetBufferPointer() && shaderBlob->GetBufferSize() > 0;
+			if (succeeded)
+			{
+				succeeded = WriteBinaryFile(outputPath, shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize());
+				if (!succeeded)
+					outError = "Could not write the compiled shader blob: " + outputPath;
+			}
+			else
+				outError = "D3DCompileFromFile failed: " + StringHelper::FormatHRESULT(result);
+
+			if (shaderBlob)
+				shaderBlob->Release();
+			FreeLibrary(compilerModule);
+			return succeeded;
+		}
+#endif
+	}
+
+	// Given HLSL source, compile SM5 profiles to DXBC and SM6 profiles to DXIL.
 	bool CompileSourceToDXILBlob(const std::string& shaderSourceFilePath, const std::string& shaderProfile, const std::string& entryPoint, std::string& outBlobPath)
 	{
 		if (!FileExists(shaderSourceFilePath))
 		{
 			WriteToLogFileError("ShaderInjectorIO->CompileSourceToDXILBlob: error! shader source file not found! " + shaderSourceFilePath);
-			return false;
-		}
-
-		const std::string dxcPath = GetToolPathDXC();
-
-		if (!FileExists(dxcPath))
-		{
-			WriteToLogFileError("ShaderInjectorIO->CompileSourceToDXILBlob: DXC executable was not found: " + dxcPath);
 			return false;
 		}
 
@@ -700,39 +918,74 @@ namespace ShaderInjectorIO
 		DeleteFileIfExists(temporaryBlobPath);
 		DeleteFileIfExists(compilerOutputPath);
 
-		const std::string shaderSourceDirectory = DirectoryFromPath(shaderSourceFilePath);
-		const std::string modifiedShaderIncludesDirectory = GetModifiedShadersIncludesDirectory();
-		std::vector<std::string> dxcArguments =
+		std::string compilerDiagnostics;
+		if (UsesLegacyShaderCompiler(shaderProfile))
 		{
-			"-T", shaderProfile,
-			"-E", entryPoint,
-			"-I", shaderSourceDirectory,
-			"-I", modifiedShaderIncludesDirectory,
-			shaderSourceFilePath,
-			"-Fo", temporaryBlobPath
-		};
-
-		const ProcessRunner::ProcessResult processResult = ProcessRunner::Run(dxcPath, dxcArguments, compilerOutputPath);
-
-		const std::string compilerDiagnostics = ReadCompilerDiagnostics(compilerOutputPath);
-		DeleteFileIfExists(compilerOutputPath);
-
-		if (!processResult.Succeeded())
-		{
-			DeleteFileIfExists(temporaryBlobPath);
-			ShaderInjectorGUI::WriteToRuntimeLogError(
-				"ShaderInjectorIO->CompileSourceToDXILBlob: DXC failed (exit=" +
-				std::to_string(processResult.exitCode) + "): " + processResult.errorMessage);
-
-			if (!compilerDiagnostics.empty())
+#if defined(_WIN32)
+			std::string compilerError;
+			if (!CompileShaderModel5(
+				shaderSourceFilePath,
+				shaderProfile,
+				entryPoint,
+				temporaryBlobPath,
+				compilerDiagnostics,
+				compilerError))
+			{
+				DeleteFileIfExists(temporaryBlobPath);
 				ShaderInjectorGUI::WriteToRuntimeLogError(
-					"ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath +
-					" reported:\n" + compilerDiagnostics);
-
+					"ShaderInjectorIO->CompileSourceToDXILBlob: legacy compiler failed: " + compilerError);
+				if (!compilerDiagnostics.empty())
+					ShaderInjectorGUI::WriteToRuntimeLogError(
+						"ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath +
+						" reported:\n" + compilerDiagnostics);
+				return false;
+			}
+#else
+			ShaderInjectorGUI::WriteToRuntimeLogError(
+				"ShaderInjectorIO->CompileSourceToDXILBlob: Shader Model 5 compilation is unavailable on this platform.");
 			return false;
+#endif
+		}
+		else
+		{
+			const std::string dxcPath = GetToolPathDXC();
+			if (!FileExists(dxcPath))
+			{
+				WriteToLogFileError("ShaderInjectorIO->CompileSourceToDXILBlob: DXC executable was not found: " + dxcPath);
+				return false;
+			}
+
+			const std::string shaderSourceDirectory = DirectoryFromPath(shaderSourceFilePath);
+			const std::string modifiedShaderIncludesDirectory = GetModifiedShadersIncludesDirectory();
+			const std::vector<std::string> dxcArguments =
+			{
+				"-T", shaderProfile,
+				"-E", entryPoint,
+				"-I", shaderSourceDirectory,
+				"-I", modifiedShaderIncludesDirectory,
+				shaderSourceFilePath,
+				"-Fo", temporaryBlobPath
+			};
+
+			const ProcessRunner::ProcessResult processResult = ProcessRunner::Run(dxcPath, dxcArguments, compilerOutputPath);
+			compilerDiagnostics = ReadCompilerDiagnostics(compilerOutputPath);
+			DeleteFileIfExists(compilerOutputPath);
+
+			if (!processResult.Succeeded())
+			{
+				DeleteFileIfExists(temporaryBlobPath);
+				ShaderInjectorGUI::WriteToRuntimeLogError(
+					"ShaderInjectorIO->CompileSourceToDXILBlob: DXC failed (exit=" +
+					std::to_string(processResult.exitCode) + "): " + processResult.errorMessage);
+				if (!compilerDiagnostics.empty())
+					ShaderInjectorGUI::WriteToRuntimeLogError(
+						"ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath +
+						" reported:\n" + compilerDiagnostics);
+				return false;
+			}
 		}
 
-		//a compile can succeed and still warn about something that explains an unexpected result in game.
+		// A compile can succeed and still warn about something that explains an unexpected result in game.
 		if (!compilerDiagnostics.empty())
 			ShaderInjectorGUI::WriteToRuntimeLogWarning(
 				"ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath +
@@ -740,7 +993,7 @@ namespace ShaderInjectorIO
 
 		if (!FileExists(temporaryBlobPath))
 		{
-			WriteToLogFileError("ShaderInjectorIO->CompileSourceToDXILBlob: DXC reported success but did not create " + temporaryBlobPath);
+			WriteToLogFileError("ShaderInjectorIO->CompileSourceToDXILBlob: shader compiler reported success but did not create " + temporaryBlobPath);
 			return false;
 		}
 
@@ -861,6 +1114,66 @@ namespace ShaderInjectorIO
 		return WriteInternalShaderSourceCodeToDisk(GetInternalMarkerComputeShaderSourceCodeFilePath(), ShaderTemplates::internalMarkerComputeShaderSourceCode);
 	}
 
+	bool RecompileAndReloadInternalShaders()
+	{
+		const bool markerPixelSourceWritten = WriteInternalMarkerPixelShaderSourceCodeToDisk();
+		const bool nullPixelSourceWritten = WriteInternalNullPixelShaderSourceCodeToDisk();
+		const bool markerComputeSourceWritten = WriteInternalMarkerComputeShaderSourceCodeToDisk();
+		if (!markerPixelSourceWritten || !nullPixelSourceWritten || !markerComputeSourceWritten)
+		{
+			WriteToLogFileError("ShaderInjectorIO->RecompileAndReloadInternalShaders: failed to write one or more internal shader sources");
+			return false;
+		}
+
+		std::string markerPixelBlobPath = GetInternalMarkerPixelShaderBlobFilePath();
+		std::string nullPixelBlobPath = GetInternalNullPixelShaderBlobFilePath();
+		std::string markerComputeBlobPath = GetInternalMarkerComputeShaderBlobFilePath();
+		const std::string pixelShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::PixelShader);
+		const std::string computeShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::ComputeShader);
+
+		const bool markerPixelCompiled = CompileSourceToDXILBlob(
+			GetInternalMarkerPixelShaderSourceCodeFilePath(), pixelShaderProfile, "main", markerPixelBlobPath);
+		const bool nullPixelCompiled = CompileSourceToDXILBlob(
+			GetInternalNullPixelShaderSourceCodeFilePath(), pixelShaderProfile, "main", nullPixelBlobPath);
+		const bool markerComputeCompiled = CompileSourceToDXILBlob(
+			GetInternalMarkerComputeShaderSourceCodeFilePath(), computeShaderProfile, "main", markerComputeBlobPath);
+
+		if (!markerPixelCompiled || !nullPixelCompiled || !markerComputeCompiled)
+		{
+			WriteToLogFileError(
+				"ShaderInjectorIO->RecompileAndReloadInternalShaders: compilation failed"
+				" pixelProfile=" + pixelShaderProfile +
+				" computeProfile=" + computeShaderProfile);
+			return false;
+		}
+
+		std::vector<uint8_t> markerPixelShaderBlob;
+		std::vector<uint8_t> nullPixelShaderBlob;
+		std::vector<uint8_t> markerComputeShaderBlob;
+		const bool markerPixelLoaded = LoadDXILBlobFromDisk(markerPixelBlobPath, markerPixelShaderBlob);
+		const bool nullPixelLoaded = LoadDXILBlobFromDisk(nullPixelBlobPath, nullPixelShaderBlob);
+		const bool markerComputeLoaded = LoadDXILBlobFromDisk(markerComputeBlobPath, markerComputeShaderBlob);
+
+		if (!markerPixelLoaded || markerPixelShaderBlob.empty() ||
+			!nullPixelLoaded || nullPixelShaderBlob.empty() ||
+			!markerComputeLoaded || markerComputeShaderBlob.empty())
+		{
+			WriteToLogFileError("ShaderInjectorIO->RecompileAndReloadInternalShaders: failed to load one or more compiled internal shaders");
+			return false;
+		}
+
+		// Replace the live blobs only after every compile and load succeeds. This
+		// keeps a failed profile change from leaving marker stages out of sync.
+		Globals::markerPixelShaderBlob.swap(markerPixelShaderBlob);
+		Globals::nullPixelShaderBlob.swap(nullPixelShaderBlob);
+		Globals::markerComputeShaderBlob.swap(markerComputeShaderBlob);
+		WriteToLogFileSuccess(
+			"ShaderInjectorIO->RecompileAndReloadInternalShaders: applied internal shaders"
+			" pixelProfile=" + pixelShaderProfile +
+			" computeProfile=" + computeShaderProfile);
+		return true;
+	}
+
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INJECTOR SETTINGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INJECTOR SETTINGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INJECTOR SETTINGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -897,6 +1210,13 @@ namespace ShaderInjectorIO
 			int shaderDiscoveryQueuedShaderLimit = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "QueuedShaderLimit", Globals::gShaderDiscoveryQueuedShaderLimit);
 			double shaderDiscoveryMinimumSimilarityScore = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "MinimumSimilarityScore", Globals::gShaderDiscoveryMinimumSimilarityScore);
 			double shaderDiscoverySimilarityAmbiguityMargin = ReadIniValueOrDefault(injectorSettingsINI, "ShaderDiscovery", "SimilarityAmbiguityMargin", Globals::gShaderDiscoverySimilarityAmbiguityMargin);
+			int vertexShaderModel = ReadIniValueOrDefault(injectorSettingsINI, "ShaderCompiler", "VertexShaderModel", static_cast<int>(Globals::gVertexShaderModel));
+			bool autoDetectShaderModels = ReadIniValueOrDefault(injectorSettingsINI, "ShaderCompiler", "AutoDetectShaderModels", Globals::gAutoDetectShaderModels);
+			int hullShaderModel = ReadIniValueOrDefault(injectorSettingsINI, "ShaderCompiler", "HullShaderModel", static_cast<int>(Globals::gHullShaderModel));
+			int domainShaderModel = ReadIniValueOrDefault(injectorSettingsINI, "ShaderCompiler", "DomainShaderModel", static_cast<int>(Globals::gDomainShaderModel));
+			int geometryShaderModel = ReadIniValueOrDefault(injectorSettingsINI, "ShaderCompiler", "GeometryShaderModel", static_cast<int>(Globals::gGeometryShaderModel));
+			int pixelShaderModel = ReadIniValueOrDefault(injectorSettingsINI, "ShaderCompiler", "PixelShaderModel", static_cast<int>(Globals::gPixelShaderModel));
+			int computeShaderModel = ReadIniValueOrDefault(injectorSettingsINI, "ShaderCompiler", "ComputeShaderModel", static_cast<int>(Globals::gComputeShaderModel));
 
 			Globals::keyOpenShaderInjectorGUI = keyOpenShaderInjectorGUI;
 			Globals::keyToggleShaderInjector = keyToggleShaderInjector;
@@ -914,6 +1234,13 @@ namespace ShaderInjectorIO
 			Globals::gShaderDiscoveryQueuedShaderLimit = (std::clamp)(shaderDiscoveryQueuedShaderLimit, 1024, 65536);
 			Globals::gShaderDiscoveryMinimumSimilarityScore = (std::clamp)(shaderDiscoveryMinimumSimilarityScore, 0.0, 1.0);
 			Globals::gShaderDiscoverySimilarityAmbiguityMargin = (std::clamp)(shaderDiscoverySimilarityAmbiguityMargin, 0.0, 1.0);
+			Globals::gAutoDetectShaderModels = autoDetectShaderModels;
+			Globals::gVertexShaderModel = StringHelper::ShaderModelFromValue(vertexShaderModel, Globals::gVertexShaderModel);
+			Globals::gHullShaderModel = StringHelper::ShaderModelFromValue(hullShaderModel, Globals::gHullShaderModel);
+			Globals::gDomainShaderModel = StringHelper::ShaderModelFromValue(domainShaderModel, Globals::gDomainShaderModel);
+			Globals::gGeometryShaderModel = StringHelper::ShaderModelFromValue(geometryShaderModel, Globals::gGeometryShaderModel);
+			Globals::gPixelShaderModel = StringHelper::ShaderModelFromValue(pixelShaderModel, Globals::gPixelShaderModel);
+			Globals::gComputeShaderModel = StringHelper::ShaderModelFromValue(computeShaderModel, Globals::gComputeShaderModel);
 
 			WriteToLogFile(
 				"ShaderInjectorIO->ReadInjectorSettings: parsed injector settings"
@@ -927,7 +1254,14 @@ namespace ShaderInjectorIO
 				" discoveryPendingAnalysisLimit=" + std::to_string(Globals::gShaderDiscoveryPendingAnalysisLimit) +
 				" discoveryQueuedShaderLimit=" + std::to_string(Globals::gShaderDiscoveryQueuedShaderLimit) +
 				" discoveryMinimumSimilarityScore=" + std::to_string(Globals::gShaderDiscoveryMinimumSimilarityScore) +
-				" discoverySimilarityAmbiguityMargin=" + std::to_string(Globals::gShaderDiscoverySimilarityAmbiguityMargin));
+				" discoverySimilarityAmbiguityMargin=" + std::to_string(Globals::gShaderDiscoverySimilarityAmbiguityMargin) +
+				" autoDetectShaderModels=" + std::to_string(Globals::gAutoDetectShaderModels) +
+				" vertexShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::VertexShader) +
+				" hullShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::HullShader) +
+				" domainShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::DomainShader) +
+				" geometryShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::GeometryShader) +
+				" pixelShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::PixelShader) +
+				" computeShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::ComputeShader));
 		}
 		catch (...)
 		{
@@ -949,22 +1283,7 @@ namespace ShaderInjectorIO
 		}
 
 		ini::IniFile injectorSettingsINI;
-		injectorSettingsINI["InjectorSettings"]["OpenMenuKey"] = Globals::keyOpenShaderInjectorGUI;
-		injectorSettingsINI["InjectorSettings"]["ToggleInjectorKey"] = Globals::keyToggleShaderInjector;
-		injectorSettingsINI["InjectorSettings"]["InjectorEnabled"] = Globals::gShaderInjectorEnabled;
-		injectorSettingsINI["InjectorSettings"]["MenuOpen"] = Globals::gShowShaderInjectorGUI;
-		injectorSettingsINI["InjectorSettings"]["MenuScale"] = static_cast<double>(Globals::gShaderInjectorGUIScale);
-		injectorSettingsINI["RenderDoc"]["Enabled"] = Globals::gRenderDocIntegrationEnabled;
-		injectorSettingsINI["RenderDoc"]["AutoAttach"] = Globals::gRenderDocAutoAttachEnabled;
-		injectorSettingsINI["Logging"]["PerformanceTelemetry"] = Globals::gPerformanceTelemetryEnabled;
-		injectorSettingsINI["ShaderDiscovery"]["Mode"] = static_cast<int>(Globals::gShaderDiscoveryMode);
-		injectorSettingsINI["ShaderDiscovery"]["WorkerThreads"] = Globals::gShaderDiscoveryWorkerThreads;
-		injectorSettingsINI["ShaderDiscovery"]["WorkerThreadPriority"] = Globals::gShaderDiscoveryWorkerThreadPriority;
-		injectorSettingsINI["ShaderDiscovery"]["FrameJobBudget"] = Globals::gShaderDiscoveryFrameJobBudget;
-		injectorSettingsINI["ShaderDiscovery"]["PendingAnalysisLimit"] = Globals::gShaderDiscoveryPendingAnalysisLimit;
-		injectorSettingsINI["ShaderDiscovery"]["QueuedShaderLimit"] = Globals::gShaderDiscoveryQueuedShaderLimit;
-		injectorSettingsINI["ShaderDiscovery"]["MinimumSimilarityScore"] = Globals::gShaderDiscoveryMinimumSimilarityScore;
-		injectorSettingsINI["ShaderDiscovery"]["SimilarityAmbiguityMargin"] = Globals::gShaderDiscoverySimilarityAmbiguityMargin;
+		PopulateInjectorSettings(injectorSettingsINI);
 
 		std::ofstream file(PathFromUtf8(injectorSettingsPath), std::ios::out | std::ios::trunc);
 
@@ -979,6 +1298,37 @@ namespace ShaderInjectorIO
 		file.close();
 
 		WriteToLogFile("ShaderInjectorIO->CreateInjectorSettings: new injector settings created. ");
+	}
+
+	bool WriteInjectorSettings()
+	{
+		const std::string injectorSettingsPath = GetInjectorSettingsPath();
+
+		try
+		{
+			ini::IniFile injectorSettingsINI;
+			if (FileExists(injectorSettingsPath))
+				injectorSettingsINI.load(injectorSettingsPath);
+
+			PopulateInjectorSettings(injectorSettingsINI);
+
+			std::ofstream file(PathFromUtf8(injectorSettingsPath), std::ios::out | std::ios::trunc);
+			if (!file.is_open())
+			{
+				WriteToLogFileError("ShaderInjectorIO->WriteInjectorSettings: failed to open injector settings: " + injectorSettingsPath);
+				return false;
+			}
+
+			injectorSettingsINI.encode(file);
+			file.close();
+			WriteToLogFile("ShaderInjectorIO->WriteInjectorSettings: saved injector settings");
+			return true;
+		}
+		catch (...)
+		{
+			WriteToLogFileError("ShaderInjectorIO->WriteInjectorSettings: failed to update injector settings");
+			return false;
+		}
 	}
 
 	bool WriteInjectorMenuScale(float menuScale)
@@ -1127,13 +1477,13 @@ namespace ShaderInjectorIO
 
 		bool internalMarkerPixelShaderBlobResult = CompileSourceToDXILBlob(
 			GetInternalMarkerPixelShaderSourceCodeFilePath(),
-			"ps_6_6", //target profile, for rebirth ps_6_6 is what I found in renderdoc
+			StringHelper::ShaderProfileForType(ShaderTarget::PixelShader),
 			"main", //name of the function within the shader to execute
 			internalMarkerPixelShaderBlobPath); //output blob file path
 
 		bool internalMarkerComputeShaderBlobResult = CompileSourceToDXILBlob(
 			GetInternalMarkerComputeShaderSourceCodeFilePath(),
-			"cs_6_6", //target profile, for rebirth cs_6_6 is what I found in renderdoc
+			StringHelper::ShaderProfileForType(ShaderTarget::ComputeShader),
 			"main", //name of the function within the shader to execute
 			internalMarkerComputeShaderBlobPath); //output blob file path
 

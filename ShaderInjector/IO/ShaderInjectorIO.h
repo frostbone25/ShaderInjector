@@ -94,10 +94,12 @@ namespace ShaderInjectorIO
 	bool WriteInternalMarkerPixelShaderSourceCodeToDisk();
 	bool WriteInternalNullPixelShaderSourceCodeToDisk();
 	bool WriteInternalMarkerComputeShaderSourceCodeToDisk();
+	bool RecompileAndReloadInternalShaders();
 
 	//injector settings
 	bool ReadInjectorSettings();
 	void CreateInjectorSettings();
+	bool WriteInjectorSettings();
 	bool WriteInjectorMenuScale(float menuScale);
 
 	//initalize

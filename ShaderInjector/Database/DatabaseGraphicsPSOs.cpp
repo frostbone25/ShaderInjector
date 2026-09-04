@@ -7,6 +7,7 @@
 #include "Hash.h"
 #include "HookD3D12PipelineRegistry.h"
 #include "ShaderAutomaticDiscovery.h"
+#include "ShaderModelDetector.h"
 
 namespace HookD3D12
 {
@@ -26,6 +27,7 @@ namespace HookD3D12
 
 		if (pipelineDescription->VS.pShaderBytecode && pipelineDescription->VS.BytecodeLength) //VERTEX SHADER
 		{
+			ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::VertexShader, pipelineDescription->VS.pShaderBytecode, pipelineDescription->VS.BytecodeLength);
 			capturedPipeline.vsHash = Hash::HashMemory(pipelineDescription->VS.pShaderBytecode, pipelineDescription->VS.BytecodeLength);
 			capturedPipeline.vsSize = pipelineDescription->VS.BytecodeLength;
 			capturedPipeline.vsBytecode.assign((const uint8_t*)pipelineDescription->VS.pShaderBytecode, (const uint8_t*)pipelineDescription->VS.pShaderBytecode + pipelineDescription->VS.BytecodeLength);
@@ -33,6 +35,7 @@ namespace HookD3D12
 
 		if (pipelineDescription->PS.pShaderBytecode && pipelineDescription->PS.BytecodeLength) //PIXEL SHADER
 		{
+			ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::PixelShader, pipelineDescription->PS.pShaderBytecode, pipelineDescription->PS.BytecodeLength);
 			capturedPipeline.psHash = Hash::HashMemory(pipelineDescription->PS.pShaderBytecode, pipelineDescription->PS.BytecodeLength);
 			capturedPipeline.psSize = pipelineDescription->PS.BytecodeLength;
 			capturedPipeline.psBytecode.assign((const uint8_t*)pipelineDescription->PS.pShaderBytecode, (const uint8_t*)pipelineDescription->PS.pShaderBytecode + pipelineDescription->PS.BytecodeLength);
@@ -40,6 +43,7 @@ namespace HookD3D12
 
 		if (pipelineDescription->GS.pShaderBytecode && pipelineDescription->GS.BytecodeLength) //GEOMETRY SHADER
 		{
+			ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::GeometryShader, pipelineDescription->GS.pShaderBytecode, pipelineDescription->GS.BytecodeLength);
 			capturedPipeline.gsHash = Hash::HashMemory(pipelineDescription->GS.pShaderBytecode, pipelineDescription->GS.BytecodeLength);
 			capturedPipeline.gsSize = pipelineDescription->GS.BytecodeLength;
 			capturedPipeline.gsBytecode.assign((const uint8_t*)pipelineDescription->GS.pShaderBytecode, (const uint8_t*)pipelineDescription->GS.pShaderBytecode + pipelineDescription->GS.BytecodeLength);
@@ -47,6 +51,7 @@ namespace HookD3D12
 
 		if (pipelineDescription->HS.pShaderBytecode && pipelineDescription->HS.BytecodeLength) //HULL SHADER
 		{
+			ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::HullShader, pipelineDescription->HS.pShaderBytecode, pipelineDescription->HS.BytecodeLength);
 			capturedPipeline.hsHash = Hash::HashMemory(pipelineDescription->HS.pShaderBytecode, pipelineDescription->HS.BytecodeLength);
 			capturedPipeline.hsSize = pipelineDescription->HS.BytecodeLength;
 			capturedPipeline.hsBytecode.assign((const uint8_t*)pipelineDescription->HS.pShaderBytecode, (const uint8_t*)pipelineDescription->HS.pShaderBytecode + pipelineDescription->HS.BytecodeLength);
@@ -54,6 +59,7 @@ namespace HookD3D12
 
 		if (pipelineDescription->DS.pShaderBytecode && pipelineDescription->DS.BytecodeLength) //DOMAIN SHADER
 		{
+			ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::DomainShader, pipelineDescription->DS.pShaderBytecode, pipelineDescription->DS.BytecodeLength);
 			capturedPipeline.dsHash = Hash::HashMemory(pipelineDescription->DS.pShaderBytecode, pipelineDescription->DS.BytecodeLength);
 			capturedPipeline.dsSize = pipelineDescription->DS.BytecodeLength;
 			capturedPipeline.dsBytecode.assign((const uint8_t*)pipelineDescription->DS.pShaderBytecode, (const uint8_t*)pipelineDescription->DS.pShaderBytecode + pipelineDescription->DS.BytecodeLength);
@@ -129,6 +135,7 @@ namespace HookD3D12
 
 		if (pipelineDescription->CS.pShaderBytecode && pipelineDescription->CS.BytecodeLength)
 		{
+			ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::ComputeShader, pipelineDescription->CS.pShaderBytecode, pipelineDescription->CS.BytecodeLength);
 			capturedPipeline.csHash = Hash::HashMemory(pipelineDescription->CS.pShaderBytecode, pipelineDescription->CS.BytecodeLength);
 			capturedPipeline.csSize = pipelineDescription->CS.BytecodeLength;
 			capturedPipeline.csBytecode.assign(

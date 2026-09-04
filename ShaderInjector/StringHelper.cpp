@@ -1,4 +1,5 @@
 #include "StringHelper.h"
+#include "ShaderModelDetector.h"
 
 #include <algorithm>
 #include <cctype>
@@ -243,17 +244,84 @@ namespace StringHelper
 		}
 	}
 
+	bool IsValidShaderModel(Globals::ShaderModel shaderModel)
+	{
+		switch (shaderModel)
+		{
+		case Globals::ShaderModel::ShaderModel5_0:
+		case Globals::ShaderModel::ShaderModel5_1:
+		case Globals::ShaderModel::ShaderModel6_0:
+		case Globals::ShaderModel::ShaderModel6_1:
+		case Globals::ShaderModel::ShaderModel6_2:
+		case Globals::ShaderModel::ShaderModel6_3:
+		case Globals::ShaderModel::ShaderModel6_4:
+		case Globals::ShaderModel::ShaderModel6_5:
+		case Globals::ShaderModel::ShaderModel6_6:
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	Globals::ShaderModel ShaderModelFromValue(int value, Globals::ShaderModel fallback)
+	{
+		const Globals::ShaderModel shaderModel = static_cast<Globals::ShaderModel>(value);
+		return IsValidShaderModel(shaderModel) ? shaderModel : fallback;
+	}
+
+	std::string ShaderModelToString(Globals::ShaderModel shaderModel)
+	{
+		switch (shaderModel)
+		{
+		case Globals::ShaderModel::ShaderModel5_0: return "5_0";
+		case Globals::ShaderModel::ShaderModel5_1: return "5_1";
+		case Globals::ShaderModel::ShaderModel6_0: return "6_0";
+		case Globals::ShaderModel::ShaderModel6_1: return "6_1";
+		case Globals::ShaderModel::ShaderModel6_2: return "6_2";
+		case Globals::ShaderModel::ShaderModel6_3: return "6_3";
+		case Globals::ShaderModel::ShaderModel6_4: return "6_4";
+		case Globals::ShaderModel::ShaderModel6_5: return "6_5";
+		case Globals::ShaderModel::ShaderModel6_6: return "6_6";
+		default: return "6_6";
+		}
+	}
+
 	std::string ShaderProfileForType(ShaderTarget::ShaderType shaderType)
 	{
+		const char* stagePrefix = nullptr;
+		Globals::ShaderModel shaderModel = Globals::ShaderModel::ShaderModel6_6;
+
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return "vs_6_6";
-		case ShaderTarget::HullShader: return "hs_6_6";
-		case ShaderTarget::DomainShader: return "ds_6_6";
-		case ShaderTarget::GeometryShader: return "gs_6_6";
-		case ShaderTarget::PixelShader: return "ps_6_6";
-		case ShaderTarget::ComputeShader: return "cs_6_6";
-		default: return "";
+		case ShaderTarget::VertexShader:
+			stagePrefix = "vs_";
+			shaderModel = Globals::gVertexShaderModel;
+			break;
+		case ShaderTarget::HullShader:
+			stagePrefix = "hs_";
+			shaderModel = Globals::gHullShaderModel;
+			break;
+		case ShaderTarget::DomainShader:
+			stagePrefix = "ds_";
+			shaderModel = Globals::gDomainShaderModel;
+			break;
+		case ShaderTarget::GeometryShader:
+			stagePrefix = "gs_";
+			shaderModel = Globals::gGeometryShaderModel;
+			break;
+		case ShaderTarget::PixelShader:
+			stagePrefix = "ps_";
+			shaderModel = Globals::gPixelShaderModel;
+			break;
+		case ShaderTarget::ComputeShader:
+			stagePrefix = "cs_";
+			shaderModel = Globals::gComputeShaderModel;
+			break;
+		default:
+			return {};
 		}
+
+		shaderModel = ShaderModelDetector::GetEffectiveShaderModel(shaderType, shaderModel);
+		return std::string(stagePrefix) + ShaderModelToString(shaderModel);
 	}
 }
