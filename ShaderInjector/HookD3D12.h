@@ -15,6 +15,7 @@ namespace HookD3D12
 	bool InstallD3D12CreateDeviceHook(HMODULE d3d12Module);
 	void InstallPipelineHooksForDevice(ID3D12Device* device);
 	void InstallCommandListHooksForCommandList(ID3D12GraphicsCommandList* commandList);
+	void InstallCommandQueueHooksForCommandQueue(ID3D12CommandQueue* commandQueue);
 	bool InstallSwapChainCompatibility(IDXGISwapChain3* swapChain, const char* compatibilitySource);
 	void RegisterSwapChainCommandQueue(IDXGISwapChain3* swapChain, IUnknown* creationDevice);
 	void SetRuntimeReady(bool ready);

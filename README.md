@@ -10,6 +10,8 @@ Shader Injector Mod for [FF7 Rebirth PC](https://store.steampowered.com/app/2909
 
 ---
 # Guides
+
+### [Experimental CrossOver support](tools/crossover/README.md)
 ### [Installation Guide](https://github.com/frostbone25/ShaderInjector/blob/main/INSTALL.md)
 ### [Update Guide](https://github.com/frostbone25/ShaderInjector/blob/main/UPDATE.md)
 ### [ShaderInjector.ini](https://github.com/frostbone25/ShaderInjector/blob/main/InjectorSettings.md)

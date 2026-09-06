@@ -58,6 +58,7 @@
 #include "HookD3D12OverlayStartup.h"
 #include "HookD3D12PipelineRegistry.h"
 #include "VTableIndex.h"
+#include "NativeVTableHooks.h"
 #include "StringHelper.h"
 
 #if defined _M_X64
@@ -1969,6 +1970,9 @@ namespace HookD3D12
 			return;
 		}
 
+		if (NativeVTableHooks::IsNativeObject(commandQueue))
+			InstallCommandQueueHooksForCommandQueue(commandQueue);
+
 		bool registeredNewBinding = false;
 		{
 			std::lock_guard<std::mutex> lock(gCommandQueueCaptureMutex);
@@ -2668,6 +2672,17 @@ namespace HookD3D12
 			return presentResult;
 		};
 
+		if (!Original_ExecuteCommandListsD3D12 || !Original_CreateGraphicsPipelineState ||
+			!Original_CreateComputePipelineState || !Original_CreateRootSignature ||
+			!Original_ResetGraphicsCommandList || !Original_SetPipelineState ||
+			!Original_SetComputeRootSignature || !Original_SetGraphicsRootSignature) {
+			static std::atomic<bool> loggedIncompleteHooks{ false };
+			if (!loggedIncompleteHooks.exchange(true, std::memory_order_relaxed)) {
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12: incomplete graphics hooks; forwarding Present without injector rendering");
+			}
+			return CallOriginalPresent();
+		}
+
 		if ((Flags & DXGI_PRESENT_TEST) != 0)
 			return CallOriginalPresent();
 
@@ -3173,6 +3188,17 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Hook_ExecuteCommandListsD3D12(ID3D12CommandQueue* _this, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists)
 	{
+		// Lists created before injector startup need shadows too. This captures
+		// their next Reset/recording; commands already recorded cannot be changed.
+		if (gRuntimeReady.load(std::memory_order_acquire) && NativeVTableHooks::IsNativeObject(_this) && ppCommandLists) {
+			for (UINT index = 0; index < NumCommandLists; ++index) {
+				ID3D12GraphicsCommandList* list = nullptr;
+				if (ppCommandLists[index] && SUCCEEDED(ppCommandLists[index]->QueryInterface(IID_PPV_ARGS(&list)))) {
+					InstallCommandListHooksForCommandList(list);
+					list->Release();
+				}
+			}
+		}
 		Original_ExecuteCommandListsD3D12(_this, NumCommandLists, ppCommandLists);
 		RememberDirectCommandQueue(_this);
 	}
