@@ -25,6 +25,8 @@ Verified on September 6, 2026 with CrossOver `26.3.0.39832`, an Apple M4 Max, Sh
 
 These observations establish startup and shader replacement for the recorded configuration, not long-session stability or support for every CrossOver release. The Windows build workflow checks the MSVC Release x64 project; Windows rendering behavior remains unverified.
 
+Later standalone runs with the PR build stalled at `Hooks->CleanupDummyObjects: destroying window...` before runtime initialization completed. Startup reliability remains an open draft-PR issue; the initial successful Rebirth run does not establish that every subsequent launch succeeds, and a frame-count result without injector initialization is not sufficient validation.
+
 For a runtime check, install the rebuilt DLL with the matching release's shader assets and the game-specific `dsound=native,builtin` override, back up and clear the game's driver shader cache, and inspect `ShaderInjector/Logs/ShaderInjector.log` after launch for native hook installation, overlay submission, and actual shader replacements. Merely loading the DLL or displaying the menu is insufficient.
 
 ## Build on macOS

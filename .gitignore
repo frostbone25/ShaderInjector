@@ -433,3 +433,6 @@ PDFs/
 
 # Cross-version discovery test suite (CMake out-of-tree build)
 Tests/CrossVersionDiscovery/build/
+
+# CrossOver MinGW build
+/build/crossover/
