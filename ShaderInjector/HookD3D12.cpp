@@ -2668,6 +2668,17 @@ namespace HookD3D12
 			return presentResult;
 		};
 
+		if (!Original_ExecuteCommandListsD3D12 || !Original_CreateGraphicsPipelineState ||
+			!Original_CreateComputePipelineState || !Original_CreateRootSignature ||
+			!Original_ResetGraphicsCommandList || !Original_SetPipelineState ||
+			!Original_SetComputeRootSignature || !Original_SetGraphicsRootSignature) {
+			static std::atomic<bool> loggedIncompleteHooks{ false };
+			if (!loggedIncompleteHooks.exchange(true, std::memory_order_relaxed)) {
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12: incomplete graphics hooks; forwarding Present without injector rendering");
+			}
+			return CallOriginalPresent();
+		}
+
 		if ((Flags & DXGI_PRESENT_TEST) != 0)
 			return CallOriginalPresent();
 
