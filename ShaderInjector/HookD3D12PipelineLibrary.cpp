@@ -2,7 +2,6 @@
 #include "HookD3D12.h"
 
 #include <string>
-#include <unordered_set>
 
 //3RD Party
 #include "MinHook.h"
@@ -11,11 +10,10 @@
 #include "ShaderInjectorGUI.h"
 #include "StringHelper.h"
 #include "VTableIndex.h"
+#include "NativeVTableHooks.h"
 
 namespace HookD3D12
 {
-	static std::unordered_set<ID3D12PipelineLibrary*> gHookedPipelineLibraries;
-
 	HRESULT __stdcall Hook_LoadGraphicsPipeline(ID3D12PipelineLibrary* library, LPCWSTR name, const D3D12_GRAPHICS_PIPELINE_STATE_DESC* desc, REFIID riid, void** ppPipelineState)
 	{
 		ScopedPipelineActivity pipelineActivity;
@@ -78,31 +76,21 @@ namespace HookD3D12
 		if (!pipelineLibrary)
 			return;
 
-		if (gHookedPipelineLibraries.find(pipelineLibrary) != gHookedPipelineLibraries.end())
-			return;
-
-		gHookedPipelineLibraries.insert(pipelineLibrary);
-
-		void** vtable = *(void***)(pipelineLibrary);
-
-		MH_CreateHook(vtable[VTableIndex::indexStorePipeline], Hook_StorePipeline, reinterpret_cast<void**>(&Original_StorePipeline));
-		MH_CreateHook(vtable[VTableIndex::indexLoadGraphicsPipeline], Hook_LoadGraphicsPipeline, reinterpret_cast<void**>(&Original_LoadGraphicsPipeline));
-		MH_CreateHook(vtable[VTableIndex::indexLoadComputePipeline], Hook_LoadComputePipeline, reinterpret_cast<void**>(&Original_LoadComputePipeline));
-		MH_CreateHook(vtable[VTableIndex::indexGetSerializedSize], Hook_GetSerializedSize, reinterpret_cast<void**>(&Original_GetSerializedSize));
-		MH_CreateHook(vtable[VTableIndex::indexSerialize], Hook_Serialize, reinterpret_cast<void**>(&Original_Serialize));
-
+		using NativeVTableHooks::Family;
+		bool installed = true;
+		installed &= NativeVTableHooks::Install(pipelineLibrary, Family::PipelineLibrary, VTableIndex::indexStorePipeline, Hook_StorePipeline, &Original_StorePipeline, "StorePipeline");
+		installed &= NativeVTableHooks::Install(pipelineLibrary, Family::PipelineLibrary, VTableIndex::indexLoadGraphicsPipeline, Hook_LoadGraphicsPipeline, &Original_LoadGraphicsPipeline, "LoadGraphicsPipeline");
+		installed &= NativeVTableHooks::Install(pipelineLibrary, Family::PipelineLibrary, VTableIndex::indexLoadComputePipeline, Hook_LoadComputePipeline, &Original_LoadComputePipeline, "LoadComputePipeline");
+		installed &= NativeVTableHooks::Install(pipelineLibrary, Family::PipelineLibrary, VTableIndex::indexGetSerializedSize, Hook_GetSerializedSize, &Original_GetSerializedSize, "GetSerializedSize");
+		installed &= NativeVTableHooks::Install(pipelineLibrary, Family::PipelineLibrary, VTableIndex::indexSerialize, Hook_Serialize, &Original_Serialize, "Serialize");
 		ID3D12PipelineLibrary1* pipelineLibrary1 = nullptr;
-
-		if (SUCCEEDED(pipelineLibrary->QueryInterface(IID_PPV_ARGS(&pipelineLibrary1))))
-		{
-			void** vtable1 = *(void***)(pipelineLibrary1);
-			MH_CreateHook(vtable1[VTableIndex::indexLoadPipeline], Hook_LoadPipeline, reinterpret_cast<void**>(&Original_LoadPipeline));
+		if (SUCCEEDED(pipelineLibrary->QueryInterface(IID_PPV_ARGS(&pipelineLibrary1)))) {
+			installed &= NativeVTableHooks::Install(pipelineLibrary1, Family::PipelineLibrary, VTableIndex::indexLoadPipeline, Hook_LoadPipeline, &Original_LoadPipeline, "LoadPipeline");
 			pipelineLibrary1->Release();
 		}
-
-		MH_EnableHook(MH_ALL_HOOKS);
-
-		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineLibrary->HookPipelineLibrary: Pipeline library hooks installed");
+		ShaderInjectorGUI::WriteToRuntimeLog(installed
+			? "HookD3D12PipelineLibrary->HookPipelineLibrary: Pipeline library hooks installed"
+			: "HookD3D12PipelineLibrary->HookPipelineLibrary: Pipeline library hook installation incomplete");
 	}
 
 	HRESULT __stdcall Hook_CreatePipelineLibrary(ID3D12Device1* device, const void* pLibraryBlob, SIZE_T blobLength, REFIID riid, void** ppPipelineLibrary)

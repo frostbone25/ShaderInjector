@@ -150,7 +150,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
       <ModuleDefinitionFile>$(ProjectDir)exports.def</ModuleDefinitionFile>
-      <AdditionalDependencies>d3d12.lib;dxgi.lib;$(ProjectDir)ExternalDependencies\MinHook_134\lib\libMinHook.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;ole32.lib;$(ProjectDir)ExternalDependencies\MinHook_134\lib\libMinHook.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ControlFlowGuard>Guard</ControlFlowGuard>
       <RandomizedBaseAddress>true</RandomizedBaseAddress>
       <DataExecutionPrevention>true</DataExecutionPrevention>
@@ -170,6 +170,8 @@
     <ClInclude Include="DatabaseGraphicsPSOs.h" />
     <ClInclude Include="Hash.h" />
     <ClInclude Include="HookD3D12.h" />
+    <ClInclude Include="NativeVTableHooks.h" />
+    <ClInclude Include="NativeD3DMetalLayouts.h" />
     <ClInclude Include="HookD3D12OverlayStartup.h" />
     <ClInclude Include="HookD3D12PipelineRegistry.h" />
     <ClInclude Include="HookD3D12PipelineUtils.h" />

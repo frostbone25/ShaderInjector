@@ -17,6 +17,7 @@
 #include "ShaderInjectorGUI.h"
 #include "StringHelper.h"
 #include "VTableIndex.h"
+#include "NativeVTableHooks.h"
 
 namespace Hooks
 {
@@ -435,11 +436,14 @@ namespace Hooks
 		}
 
 		//======================================== Hook_ExecuteCommandListsD3D12 ========================================
-		gExecuteCommandListsTarget = reinterpret_cast<LPVOID>(commandQueueVTable[VTableIndex::indexExecuteCommandLists]);
-		minHookStatus = MH_CreateHook(gExecuteCommandListsTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_ExecuteCommandListsD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_ExecuteCommandListsD3D12));
-
-		if (minHookStatus != MH_OK)
-			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook ExecuteCommandLists failed: %s", MH_StatusToString(minHookStatus)));
+		if (NativeVTableHooks::IsNativeObject(gDummyCommandQueue.Get())) {
+			HookD3D12::InstallCommandQueueHooksForCommandQueue(gDummyCommandQueue.Get());
+		} else {
+			gExecuteCommandListsTarget = reinterpret_cast<LPVOID>(commandQueueVTable[VTableIndex::indexExecuteCommandLists]);
+			minHookStatus = MH_CreateHook(gExecuteCommandListsTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_ExecuteCommandListsD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_ExecuteCommandListsD3D12));
+			if (minHookStatus != MH_OK)
+				ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook ExecuteCommandLists failed: %s", MH_StatusToString(minHookStatus)));
+		}
 
 		//======================================== Enable Hooks ========================================
 		//enable all hooks

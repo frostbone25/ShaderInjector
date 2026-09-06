@@ -45,6 +45,12 @@
     <ClInclude Include="HookD3D12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="NativeVTableHooks.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="NativeD3DMetalLayouts.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="HookD3D12OverlayStartup.h">
       <Filter>Header Files</Filter>
     </ClInclude>
