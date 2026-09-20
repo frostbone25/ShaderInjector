@@ -8,6 +8,14 @@
 
 namespace DatabaseRenderPasses
 {
+	struct RenderPassShaderBatchCompileResult
+	{
+		size_t compiledRenderPassCount = 0;
+		size_t failedRenderPassCount = 0;
+		size_t skippedRenderPassCount = 0;
+		std::vector<std::string> errors;
+	};
+
 	void RefreshRenderPasses();
 	void EnsureRenderPassesLoaded();
 	const std::vector<RenderPass::RenderPassDisk>& GetRenderPasses();
@@ -24,4 +32,5 @@ namespace DatabaseRenderPasses
 	bool DeleteRenderPass(const std::string& renderPassId);
 	bool CreateShaderTemplate(const std::string& renderPassId, std::string& outError);
 	bool CompileRenderPassShaders(const std::string& renderPassId, std::string& outError);
+	RenderPassShaderBatchCompileResult CompileAllRenderPassShaders();
 }

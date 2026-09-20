@@ -3,26 +3,11 @@
 #include <cstdint>
 #include <string>
 
+#include "Enum/RenderDocCaptureRequestResult.h"
+#include "Enum/RenderDocReplayUIRequestResult.h"
+
 namespace RenderDocIntegration
 {
-	enum class CaptureRequestResult
-	{
-		Queued,
-		Disabled,
-		Unavailable,
-		AlreadyCapturing,
-		TargetUnavailable,
-	};
-
-	enum class ReplayUiRequestResult
-	{
-		Launched,
-		AlreadyConnected,
-		Disabled,
-		Unavailable,
-		LaunchFailed,
-	};
-
 	void Initialize();
 	void Refresh();
 
@@ -30,10 +15,10 @@ namespace RenderDocIntegration
 	bool IsFrameCapturing();
 	bool IsTargetControlConnected();
 	bool WasLoadedByInjector();
-	CaptureRequestResult RequestFrameCapture(void* d3d12Device, void* windowHandle);
+	RenderDocCaptureRequestResult RequestFrameCapture(void* d3d12Device, void* windowHandle);
 	void PollCaptureStatus();
 	uint64_t GetCaptureRequestSequence();
-	ReplayUiRequestResult ConnectReplayUi();
+	RenderDocReplayUIRequestResult ConnectReplayUI();
 
 	std::string GetStatusText();
 	std::string GetApiVersionText();

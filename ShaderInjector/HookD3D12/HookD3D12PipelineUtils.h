@@ -68,6 +68,7 @@ namespace HookD3D12
 	std::string InputLayoutSignature(const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputElements);
 	std::string StreamOutputSignature(const std::vector<D3D12_SO_DECLARATION_ENTRY>& declarations, const std::vector<UINT>& strides);
 	std::string PipelineStreamSubobjectTypeSignature(const std::vector<uint8_t>& streamBlob);
+	uint64_t CanonicalPipelineFixedFunctionStateHash(const std::vector<uint8_t>& streamBlob);
 
 	void FillInputAndStreamOutputSignatures(ShaderTarget::ShaderTargetDisk& replacement, const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputElements, const std::vector<D3D12_SO_DECLARATION_ENTRY>& soDeclarations, const std::vector<UINT>& soStrides);
 	void FillGraphicsReplacementPortableState(ShaderTarget::ShaderTargetDisk& replacement, const GraphicsPipelineInfo& pipeline);

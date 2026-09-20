@@ -12,9 +12,11 @@
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 #include "ModifiedShader/DatabaseModifiedShaders.h"
+#include "ShaderTarget/DatabaseShaderTargets.h"
 #include "RenderPass/DatabaseRenderPasses.h"
 #include "RenderDoc/RenderDocIntegration.h"
 #include "ShaderInjectorVersion.h"
+#include "ShaderInjectorInternalResources.h"
 #include "IO/SystemInfoLogger.h"
 
 //||||||||||||||||||||||||||||||| ON ATTACH |||||||||||||||||||||||||||||||
@@ -26,18 +28,34 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 {
 	//IMPORTANT NOTE 1: The game's D3D12 device already exists before our proxy loads.
 
+	//since we proxy dsound dll, we should go ahead and load the real deal now
 	LoadRealDsoundDll();
 
-	//Read settings before initializing the optional RenderDoc bridge. Unless AutoAttach is
-	//explicitly enabled, initialization only detects an already injected RenderDoc module.
+	//||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||
+	//||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||
+	//||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||
+
+	//since we are currently starting with the new process again, check for a "current" log file
+	//it will become the "previous" log file to better retain any information about potential crashing/issues
 	ShaderInjectorIO::RotateLogFiles();
-	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: Shader Injector version " + std::string(SHADER_INJECTOR_VERSION_STRING));
+
+	//||||||||||||||||||||||||||||||| RENDERDOC |||||||||||||||||||||||||||||||
+	//||||||||||||||||||||||||||||||| RENDERDOC |||||||||||||||||||||||||||||||
+	//||||||||||||||||||||||||||||||| RENDERDOC |||||||||||||||||||||||||||||||
+
+	//read settings before initializing the optional RenderDoc bridge.
+	//unless AutoAttach is explicitly enabled, initialization only detects an already injected RenderDoc module.
 	ShaderInjectorIO::ReadInjectorSettings();
+	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: Shader Injector version " + std::string(SHADER_INJECTOR_VERSION_STRING));
+
 	RenderDocIntegration::Initialize();
 
-	// Initialize MinHook before the startup delay so an OptiScaler factory can
-	// be captured before it creates its frame-generation swap chain. No shader
-	// or rendering callbacks are enabled by this step alone.
+	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
+	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
+	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
+
+	//FIX: initialize MinHook before the startup delay so an OptiScaler factory can be captured before it creates its frame-generation swap chain.
+	//no shader or rendering callbacks are enabled by this step alone.
 	MH_STATUS minhookStatus = MH_Initialize();
 
 	if (minhookStatus != MH_OK)
@@ -47,6 +65,11 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	}
 
 	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: minhook initalized!");
+
+	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
+	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
+	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
+
 	Hooks::PrepareSwapChainCapture();
 
 	//NOTE TO SELF: not a fan of this, even though it helps...
@@ -66,6 +89,11 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	//collect modified shaders stored in "ShaderInjector/ModifiedShaders"
 	DatabaseModifiedShaders::RefreshModifiedShaders();
 
+	//load shader targets before installing the D3D12 hooks
+	//warm-cache games can bind important opaque PSOs immediately after hook installation
+	//publishing the targets here lets those first observations use the strongest available hash/template identity instead of relying only on a later recovery scan.
+	HookD3D12::RefreshLoadedShaderTargets();
+
 	//collect custom render-pass timing and resource-tracking definitions
 	DatabaseRenderPasses::RefreshRenderPasses();
 
@@ -74,79 +102,8 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	//NOTE 2: because this is on a seperate thread, popping a message box will not freeze the application!
 	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: dsound thread initalized!");
 
-	//||||||||||||||||||||||||||||||| NULL PIXEL SHADER |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| NULL PIXEL SHADER |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| NULL PIXEL SHADER |||||||||||||||||||||||||||||||
-	//prepare our "internal" shader resources for an error pixel shader (red)
-	//NOTE: I prefer at this point in time to just rewrite the shaders based off a code template in the codebase
-	//then compile them right at the start, that way we start fresh, just in case the users for whatever reason tamper with them (or move/delete them)
-
-	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: getting null shader...");
-
-	//collect source and blob path
-	std::string errorPixelShaderPath = ShaderInjectorIO::GetInternalNullPixelShaderSourceCodeFilePath();
-	std::string errorPixelShaderBlobPath = ShaderInjectorIO::GetInternalNullPixelShaderBlobFilePath();
-
-	//compile "error" pixel shader
-	bool nullPixelShaderCompiled = ShaderInjectorIO::CompileSourceToDXILBlob(
-		errorPixelShaderPath, //NOTE: this NEEDS to be an .hlsl source shader text file
-		StringHelper::ShaderProfileForType(ShaderTarget::PixelShader),
-		"main", //name of the function within the shader to execute
-		errorPixelShaderBlobPath); //output blob file path
-
-	if (nullPixelShaderCompiled)
-	{
-		//NOTE: 'nullShaderBlobPath' this NEEDS to be a DXIL compiled binary file
-		//'Globals::nullPixelShaderBlob' array to contain the data in memory
-		bool nullShaderLoaded = ShaderInjectorIO::LoadDXILBlobFromDisk(errorPixelShaderBlobPath, Globals::nullPixelShaderBlob);
-
-		if (!nullShaderLoaded || Globals::nullPixelShaderBlob.empty())
-		{
-			Globals::nullPixelShaderBlob.clear();
-			ShaderInjectorIO::WriteToLogFileError("dllmain->OnAttachDLL: failed to load null pixel shader blob: " + errorPixelShaderBlobPath);
-		}
-	}
-	else
-	{
-		Globals::nullPixelShaderBlob.clear();
-		ShaderInjectorIO::WriteToLogFileError("dllmain->OnAttachDLL: failed to compile null pixel shader: " + errorPixelShaderPath);
-	}
-
-	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: globals::nullPixelShaderBlob size " + std::to_string(Globals::nullPixelShaderBlob.size()));
-
-	//||||||||||||||||||||||||||||||| SELECTION MARKER PIXEL SHADER |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| SELECTION MARKER PIXEL SHADER |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| SELECTION MARKER PIXEL SHADER |||||||||||||||||||||||||||||||
-	//prepare our "internal" shader resources for a marker pixel shader (blue)
-	//NOTE: I prefer at this point in time to just rewrite the shaders based off a code template in the codebase
-	//then compile them right at the start, that way we start fresh, just in case the users for whatever reason tamper with them (or move/delete them)
-
-	std::string markerPixelShaderBlobPath = ShaderInjectorIO::GetInternalMarkerPixelShaderBlobFilePath();
-
-	bool markerPixelLoaded = ShaderInjectorIO::LoadDXILBlobFromDisk(markerPixelShaderBlobPath, Globals::markerPixelShaderBlob);
-
-	if (!markerPixelLoaded || Globals::markerPixelShaderBlob.empty())
-	{
-		Globals::markerPixelShaderBlob.clear();
-		ShaderInjectorIO::WriteToLogFileError("dllmain->OnAttachDLL: failed to load marker pixel shader blob: " + markerPixelShaderBlobPath);
-	}
-
-	//||||||||||||||||||||||||||||||| SELECTION MARKER COMPUTE SHADER |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| SELECTION MARKER COMPUTE SHADER |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| SELECTION MARKER COMPUTE SHADER |||||||||||||||||||||||||||||||
-
-	std::string markerComputeShaderBlobPath = ShaderInjectorIO::GetInternalMarkerComputeShaderBlobFilePath();
-
-	bool markerComputeLoaded = ShaderInjectorIO::LoadDXILBlobFromDisk(markerComputeShaderBlobPath, Globals::markerComputeShaderBlob);
-
-	if (!markerComputeLoaded || Globals::markerComputeShaderBlob.empty())
-	{
-		Globals::markerComputeShaderBlob.clear();
-		ShaderInjectorIO::WriteToLogFileError("dllmain->OnAttachDLL: failed to load marker compute shader blob: " + markerComputeShaderBlobPath);
-	}
-
-	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: globals::markerPixelShaderBlob size " + std::to_string(Globals::markerPixelShaderBlob.size()));
-	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: globals::markerComputeShaderBlob size " + std::to_string(Globals::markerComputeShaderBlob.size()));
+	//prepare, compile, and load the internal marker/null shaders before the D3D12 hooks can observe any game pipeline state.
+	ShaderInjectorInternalResources::Initialize();
 
 	//||||||||||||||||||||||||||||||| D3D12 CHECK |||||||||||||||||||||||||||||||
 	//||||||||||||||||||||||||||||||| D3D12 CHECK |||||||||||||||||||||||||||||||
@@ -165,6 +122,10 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	//NOTE: keep this comment around for sanity check please!
 	ShaderInjectorIO::WriteToLogFile(StringHelper::Format("dllmain->OnAttachDLL: d3d12.dll = %p", d3d12));
 
+	//||||||||||||||||||||||||||||||| D3D12 HOOKS |||||||||||||||||||||||||||||||
+	//||||||||||||||||||||||||||||||| D3D12 HOOKS |||||||||||||||||||||||||||||||
+	//||||||||||||||||||||||||||||||| D3D12 HOOKS |||||||||||||||||||||||||||||||
+
 	//this is where the real madness begins...
 	//hook into d3d12 device creation and start hooking into many of it's calls
 	HookD3D12::InstallD3D12CreateDeviceHook(d3d12);
@@ -181,6 +142,7 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 //||||||||||||||||||||||||||||||| DLL MAIN |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| DLL MAIN |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| DLL MAIN |||||||||||||||||||||||||||||||
+//ref - https://learn.microsoft.com/en-us/windows/win32/dlls/dllmain
 
 //hModule: handle to DLL module
 //reason: reason for calling function
@@ -192,6 +154,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
 		//||||||||||||||||||||||||||||||| DLL ATTACHMENT |||||||||||||||||||||||||||||||
 		//||||||||||||||||||||||||||||||| DLL ATTACHMENT |||||||||||||||||||||||||||||||
 		//||||||||||||||||||||||||||||||| DLL ATTACHMENT |||||||||||||||||||||||||||||||
+		//DLL is being loaded into the virtual address space of the current process as a result of the process starting up or as a result of a call to LoadLibrary.
 		case DLL_PROCESS_ATTACH:
 			DisableThreadLibraryCalls(hModule);
 
@@ -235,6 +198,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
 		//||||||||||||||||||||||||||||||| DLL DETATCHMENT |||||||||||||||||||||||||||||||
 		//||||||||||||||||||||||||||||||| DLL DETATCHMENT |||||||||||||||||||||||||||||||
 		//||||||||||||||||||||||||||||||| DLL DETATCHMENT |||||||||||||||||||||||||||||||
+		//The DLL is being unloaded from the virtual address space of the calling process because it was loaded unsuccessfully or the reference count has reached zero (the processes has either terminated or called FreeLibrary one time for each time it called LoadLibrary).
 		case DLL_PROCESS_DETACH:
 
 			FreeRealDsoundDll();

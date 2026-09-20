@@ -1,4 +1,7 @@
 #include "RenderPass/RenderPassRuntime.h"
+#include "Enum/EnumStrings.h"
+#include "Enum/RenderPassRuntimeRootBindingType.h"
+#include "Enum/RenderPassRuntimeTrackingModeFlag.h"
 
 #include <algorithm>
 #include <array>
@@ -52,10 +55,17 @@ namespace RenderPassRuntime
 			ExecutionBoundary rootBoundary = ExecutionBoundary::Before;
 		};
 
+		struct RequiredGameInput
+		{
+			const RenderPass::RenderPassDisk* renderPass = nullptr;
+			const RenderPass::LogicalResourceBindingDisk* input = nullptr;
+		};
+
 		struct ModifiedShaderExecutionPlan
 		{
 			std::array<std::vector<const RenderPass::RenderPassDisk*>, 2> executionOrders;
 			std::array<std::vector<const RenderPass::RenderPassDisk*>, 2> mipChainOrders;
+			std::array<std::vector<RequiredGameInput>, 2> requiredGameInputs;
 			uint32_t graphicsBoundaryMask = 0;
 			uint32_t computeBoundaryMask = 0;
 			bool hasRuntimeResources = false;
@@ -93,15 +103,6 @@ namespace RenderPassRuntime
 			D3D12_GPU_DESCRIPTOR_HANDLE gpuStart{};
 		};
 
-		enum class RootBindingType : uint8_t
-		{
-			None,
-			DescriptorTable,
-			ConstantBufferView,
-			ShaderResourceView,
-			UnorderedAccessView,
-			Constants
-		};
 
 		struct RootBindingState
 		{
@@ -191,15 +192,6 @@ namespace RenderPassRuntime
 		std::unordered_map<std::string, RenderPass::RuntimeDiagnostics> gDiagnosticsByRenderPassId;
 		std::unordered_set<std::string> gPendingResourceSnapshotIds;
 
-		enum TrackingModeFlag : uint32_t
-		{
-			TrackingEnabled = 1u << 0,
-			ResourceTrackingEnabled = 1u << 1,
-			DescriptorRegistryTrackingEnabled = 1u << 2,
-			GraphicsStateTrackingEnabled = 1u << 3,
-			DescriptorTableTrackingEnabled = 1u << 4,
-			RootBindingTrackingEnabled = 1u << 5
-		};
 
 		void RefreshTrackingModeFlags()
 		{
@@ -373,18 +365,6 @@ namespace RenderPassRuntime
 			}
 		}
 
-		const char* RootBindingTypeName(RootBindingType type)
-		{
-			switch (type)
-			{
-				case RootBindingType::DescriptorTable: return "Descriptor Table";
-				case RootBindingType::ConstantBufferView: return "CBV";
-				case RootBindingType::ShaderResourceView: return "SRV";
-				case RootBindingType::UnorderedAccessView: return "UAV";
-				case RootBindingType::Constants: return "Root Constants";
-				default: return "";
-			}
-		}
 
 		RenderPass::ResourceBindingDiagnostic BuildRootBindingDiagnostic(
 			const RootBindingState& rootBinding,
@@ -757,6 +737,38 @@ namespace RenderPassRuntime
 				binding.shaderRegister,
 				binding.registerSpace);
 			return false;
+		}
+
+		bool RequiredGameInputsAreAvailable(
+			const std::vector<RequiredGameInput>& requiredInputs,
+			const CommandListRenderState& state,
+			bool computePipeline)
+		{
+			// A modified shader can back several PSOs or execute with different root
+			// tables. Only the invocation that exposes every required game texture is
+			// eligible for this graph. Rejecting incompatible invocations here avoids
+			// allocating outputs and walking the rest of a dependent pass chain merely
+			// to produce the same missing-resource failures every frame.
+			for (const RequiredGameInput& requirement : requiredInputs)
+			{
+				if (!requirement.renderPass || !requirement.input)
+					continue;
+
+				RenderPassTexturePool::TextureView texture;
+				std::string ignoredError;
+				if (!ResolveGameTexture(
+					*requirement.renderPass,
+					*requirement.input,
+					state,
+					computePipeline,
+					texture,
+					ignoredError))
+				{
+					return false;
+				}
+			}
+
+			return true;
 		}
 
 		RenderPassTexturePool::ReferenceExtent BuildTextureReference(
@@ -1191,9 +1203,32 @@ namespace RenderPassRuntime
 					{
 						if (renderPassIndex < configuration.renderPasses.size())
 						{
-							plan.executionOrders[boundaryIndex].push_back(&configuration.renderPasses[renderPassIndex]);
+							const RenderPass::RenderPassDisk* renderPass = &configuration.renderPasses[renderPassIndex];
+							plan.executionOrders[boundaryIndex].push_back(renderPass);
 							plan.hasRuntimeResources = plan.hasRuntimeResources ||
-								!configuration.renderPasses[renderPassIndex].runtimeResources.empty();
+								!renderPass->runtimeResources.empty();
+
+							for (const RenderPass::LogicalResourceBindingDisk& input : renderPass->inputs)
+							{
+								if (input.origin != ShaderResource::ResourceOrigin::Game || input.optional)
+									continue;
+
+								auto& requiredInputs = plan.requiredGameInputs[boundaryIndex];
+								const bool alreadyRequired = std::any_of(
+									requiredInputs.begin(),
+									requiredInputs.end(),
+									[&](const RequiredGameInput& existing)
+									{
+										return existing.input &&
+											existing.input->gameResourceViewType == input.gameResourceViewType &&
+											existing.input->shaderRegister == input.shaderRegister &&
+											existing.input->registerSpace == input.registerSpace &&
+											existing.renderPass &&
+											existing.renderPass->maximumTrackedDescriptors == renderPass->maximumTrackedDescriptors;
+									});
+								if (!alreadyRequired)
+									requiredInputs.push_back({ renderPass, &input });
+							}
 						}
 					}
 					for (size_t renderPassIndex : compiledPlanEntry.second.mipChainOrders[boundaryIndex])
@@ -1216,6 +1251,7 @@ namespace RenderPassRuntime
 
 	void PublishRenderPassConfigurations(const std::vector<RenderPass::RenderPassDisk>& renderPasses)
 	{
+		RenderPassReplacement::InvalidateFailedPipelines();
 		RenderPassTexturePool::PublishConfigurations(renderPasses);
 		auto snapshot = std::make_unique<RenderPassConfigurationSnapshot>();
 		snapshot->renderPasses = renderPasses;
@@ -1507,6 +1543,7 @@ namespace RenderPassRuntime
 
 	void CommitShaderTargetBindingUpdate()
 	{
+		RenderPassReplacement::InvalidateFailedPipelines();
 		std::lock_guard<std::mutex> lock(gConfigurationPublishMutex);
 		auto snapshot = std::make_unique<const ShaderTargetBindingMap>(gPendingShaderTargetBindings);
 		const ShaderTargetBindingMap* snapshotPointer = snapshot.get();
@@ -1978,6 +2015,11 @@ namespace RenderPassRuntime
 		const std::vector<const RenderPass::RenderPassDisk*>& executionOrder =
 			executionPlan->executionOrders[boundaryIndex];
 		if (executionOrder.empty())
+			return;
+		if (!RequiredGameInputsAreAvailable(
+			executionPlan->requiredGameInputs[boundaryIndex],
+			state,
+			computePipeline))
 			return;
 		RenderPassTexturePool::ScopedInputTextureOverrides inputTextureOverrides;
 
@@ -2620,6 +2662,9 @@ namespace RenderPassRuntime
 					unavailableRuntimeResources.insert(output.resourceId);
 			}
 
+			if (executionSucceeded)
+				RenderPassTexturePool::MarkPassOutputsWritten(renderPass);
+
 			const size_t renderPassIndex = static_cast<size_t>(
 				renderPassPointer - configuration->renderPasses.data());
 			RuntimeCounters& counters = *configuration->runtimeCounters[renderPassIndex];
@@ -2832,6 +2877,8 @@ namespace RenderPassRuntime
 	{
 		if (!Globals::gPerformanceTelemetryEnabled)
 			return;
+		RenderPassTexturePool::LogPerformanceStatistics();
+		ShaderResourceRuntime::LogPerformanceStatistics();
 
 		const RenderPassResourceRegistry::RegistryStatistics registryStatistics =
 			RenderPassResourceRegistry::GetStatistics();

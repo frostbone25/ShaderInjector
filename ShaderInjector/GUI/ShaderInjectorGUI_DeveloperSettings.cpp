@@ -28,7 +28,10 @@
 #include "GUI/ShaderInjectorGUITooltips.h"
 #include "Keycodes.h"
 #include "ShaderInjectorVersion.h"
+#include "ShaderInjectorInternalResources.h"
 #include "ShaderModelDetector.h"
+#include "Enum/RenderDocCaptureRequestResult.h"
+#include "Enum/RenderDocReplayUIRequestResult.h"
 
 namespace
 {
@@ -64,12 +67,15 @@ namespace
 		}
 
 		bool changed = false;
+
 		ImGui::SetNextItemWidth(220.0f * Globals::gShaderInjectorGUIScale);
+
 		if (ImGui::BeginCombo(label, preview))
 		{
 			for (const ShaderModelOption& option : shaderModelOptions)
 			{
 				const bool selected = shaderModel == option.value;
+
 				if (ImGui::Selectable(option.label, selected))
 				{
 					shaderModel = option.value;
@@ -96,8 +102,10 @@ namespace
 		const bool modelDetected = ShaderModelDetector::TryGetDetectedShaderModel(shaderType, detectedShaderModel);
 
 		ImGui::BeginDisabled(Globals::gAutoDetectShaderModels);
+
 		if (DrawShaderModelCombo(label, displayedShaderModel) && !Globals::gAutoDetectShaderModels)
 			configuredShaderModel = displayedShaderModel;
+
 		ImGui::EndDisabled();
 
 		if (Globals::gAutoDetectShaderModels)
@@ -154,23 +162,23 @@ namespace ShaderInjectorGUI
 		{
 			if (ImGui::Button(renderDocAvailable ? "Connect RenderDoc UI" : "Attach RenderDoc"))
 			{
-				const RenderDocIntegration::ReplayUiRequestResult result = RenderDocIntegration::ConnectReplayUi();
+				const RenderDocReplayUIRequestResult result = RenderDocIntegration::ConnectReplayUI();
 
 				switch (result)
 				{
-					case RenderDocIntegration::ReplayUiRequestResult::Launched:
+					case RenderDocReplayUIRequestResult::Launched:
 						WriteToRuntimeLogSuccess("RenderDoc Replay UI launched and requested target control connection.");
 						break;
-					case RenderDocIntegration::ReplayUiRequestResult::AlreadyConnected:
+					case RenderDocReplayUIRequestResult::AlreadyConnected:
 						WriteToRuntimeLogSuccess("RenderDoc target control is already connected.");
 						break;
-					case RenderDocIntegration::ReplayUiRequestResult::Disabled:
+					case RenderDocReplayUIRequestResult::Disabled:
 						WriteToRuntimeLogWarning("RenderDoc integration is disabled in ShaderInjector.ini.");
 						break;
-					case RenderDocIntegration::ReplayUiRequestResult::Unavailable:
+					case RenderDocReplayUIRequestResult::Unavailable:
 						WriteToRuntimeLogError("RenderDoc installation could not be found or loaded.");
 						break;
-					case RenderDocIntegration::ReplayUiRequestResult::LaunchFailed:
+					case RenderDocReplayUIRequestResult::LaunchFailed:
 					default:
 						WriteToRuntimeLogError("RenderDoc Replay UI failed to launch.");
 						break;
@@ -184,23 +192,23 @@ namespace ShaderInjectorGUI
 
 		if (ImGui::Button("RenderDoc Frame Capture"))
 		{
-			const RenderDocIntegration::CaptureRequestResult result = RenderDocIntegration::RequestFrameCapture(nullptr, Globals::mainWindow);
+			const RenderDocCaptureRequestResult result = RenderDocIntegration::RequestFrameCapture(nullptr, Globals::mainWindow);
 
 			switch (result)
 			{
-				case RenderDocIntegration::CaptureRequestResult::Queued:
+				case RenderDocCaptureRequestResult::Queued:
 					WriteToRuntimeLogSuccess("RenderDoc frame capture queued for the next Present.");
 					break;
-				case RenderDocIntegration::CaptureRequestResult::AlreadyCapturing:
+				case RenderDocCaptureRequestResult::AlreadyCapturing:
 					WriteToRuntimeLogWarning("RenderDoc is already capturing a frame.");
 					break;
-				case RenderDocIntegration::CaptureRequestResult::Disabled:
+				case RenderDocCaptureRequestResult::Disabled:
 					WriteToRuntimeLogWarning("RenderDoc integration is disabled in ShaderInjector.ini.");
 					break;
-				case RenderDocIntegration::CaptureRequestResult::TargetUnavailable:
+				case RenderDocCaptureRequestResult::TargetUnavailable:
 					WriteToRuntimeLogError("The game D3D12 device or window is not ready for capture.");
 					break;
-				case RenderDocIntegration::CaptureRequestResult::Unavailable:
+				case RenderDocCaptureRequestResult::Unavailable:
 				default:
 					WriteToRuntimeLogError("RenderDoc is not attached to this process.");
 					break;
@@ -230,7 +238,7 @@ namespace ShaderInjectorGUI
 
 		if (ImGui::Button("Apply Shader Levels"))
 		{
-			if (ShaderInjectorIO::RecompileAndReloadInternalShaders())
+			if (ShaderInjectorInternalResources::RecompileAndReload())
 			{
 				HookD3D12::InvalidateShaderMarkerPSOs();
 				WriteToRuntimeLogSuccess("Applied shader levels and reloaded internal marker shaders.");
@@ -390,19 +398,19 @@ namespace ShaderInjectorGUI
 		if (ImGui::CollapsingHeader(headerText.c_str()))
 		{
 			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::psHash, &HookD3D12::GraphicsPipelineInfo::psSize, &HookD3D12::GraphicsPipelineInfo::psBytecode>(
-				"Pixel Shaders", "GraphicsPS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PSOPendingRebuild::SourceList::Graphics, true, true, &HookD3D12::GraphicsPipelineInfo::psDisabled, &HookD3D12::GraphicsPipelineInfo::psoWithoutPS);
+				"Pixel Shaders", "GraphicsPS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PipelineSourceList::Graphics, true, true, &HookD3D12::GraphicsPipelineInfo::psDisabled, &HookD3D12::GraphicsPipelineInfo::psoWithoutPS);
 
 			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::vsHash, &HookD3D12::GraphicsPipelineInfo::vsSize, &HookD3D12::GraphicsPipelineInfo::vsBytecode>(
-				"Vertex Shaders", "GraphicsVS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::VertexShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, HookD3D12::PSOPendingRebuild::SourceList::Graphics, false, true, nullptr, nullptr);
+				"Vertex Shaders", "GraphicsVS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::VertexShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
 
 			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::gsHash, &HookD3D12::GraphicsPipelineInfo::gsSize, &HookD3D12::GraphicsPipelineInfo::gsBytecode>(
-				"Geometry Shaders", "GraphicsGS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::GeometryShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, HookD3D12::PSOPendingRebuild::SourceList::Graphics, false, true, nullptr, nullptr);
+				"Geometry Shaders", "GraphicsGS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::GeometryShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
 
 			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::hsHash, &HookD3D12::GraphicsPipelineInfo::hsSize, &HookD3D12::GraphicsPipelineInfo::hsBytecode>(
-				"Hull Shaders", "GraphicsHS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::HullShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, HookD3D12::PSOPendingRebuild::SourceList::Graphics, false, true, nullptr, nullptr);
+				"Hull Shaders", "GraphicsHS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::HullShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
 
 			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::dsHash, &HookD3D12::GraphicsPipelineInfo::dsSize, &HookD3D12::GraphicsPipelineInfo::dsBytecode>(
-				"Domain Shaders", "GraphicsDS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::DomainShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, HookD3D12::PSOPendingRebuild::SourceList::Graphics, false, true, nullptr, nullptr);
+				"Domain Shaders", "GraphicsDS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::DomainShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
 		}
 	}
 	*/
@@ -418,22 +426,22 @@ namespace ShaderInjectorGUI
 		if (ImGui::CollapsingHeader(headerText.c_str()))
 		{
 			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::psHash, &HookD3D12::PipelineStateInfo::psSize, &HookD3D12::PipelineStateInfo::psBytecode>(
-				"Pixel Shaders", "StreamPS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PSOPendingRebuild::SourceList::Stream, true, false, &HookD3D12::PipelineStateInfo::psDisabled, &HookD3D12::PipelineStateInfo::psoWithoutPS);
+				"Pixel Shaders", "StreamPS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PipelineSourceList::Stream, true, false, &HookD3D12::PipelineStateInfo::psDisabled, &HookD3D12::PipelineStateInfo::psoWithoutPS);
 
 			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::csHash, &HookD3D12::PipelineStateInfo::csSize, &HookD3D12::PipelineStateInfo::csBytecode>(
-				"Compute Shaders", "StreamCS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::ComputeShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS, HookD3D12::PSOPendingRebuild::SourceList::Stream, true, false, &HookD3D12::PipelineStateInfo::csDisabled, &HookD3D12::PipelineStateInfo::psoWithoutCS);
+				"Compute Shaders", "StreamCS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::ComputeShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS, HookD3D12::PipelineSourceList::Stream, true, false, &HookD3D12::PipelineStateInfo::csDisabled, &HookD3D12::PipelineStateInfo::psoWithoutCS);
 
 			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::vsHash, &HookD3D12::PipelineStateInfo::vsSize, &HookD3D12::PipelineStateInfo::vsBytecode>(
-				"Vertex Shaders", "StreamVS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::VertexShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, HookD3D12::PSOPendingRebuild::SourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::vsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutVS);
+				"Vertex Shaders", "StreamVS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::VertexShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::vsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutVS);
 
 			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::gsHash, &HookD3D12::PipelineStateInfo::gsSize, &HookD3D12::PipelineStateInfo::gsBytecode>(
-				"Geometry Shaders", "StreamGS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::GeometryShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, HookD3D12::PSOPendingRebuild::SourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::gsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutGS);
+				"Geometry Shaders", "StreamGS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::GeometryShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::gsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutGS);
 
 			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::hsHash, &HookD3D12::PipelineStateInfo::hsSize, &HookD3D12::PipelineStateInfo::hsBytecode>(
-				"Hull Shaders", "StreamHS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::HullShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, HookD3D12::PSOPendingRebuild::SourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::hsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutHS);
+				"Hull Shaders", "StreamHS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::HullShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::hsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutHS);
 
 			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::dsHash, &HookD3D12::PipelineStateInfo::dsSize, &HookD3D12::PipelineStateInfo::dsBytecode>(
-				"Domain Shaders", "StreamDS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::DomainShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, HookD3D12::PSOPendingRebuild::SourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::dsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutDS);
+				"Domain Shaders", "StreamDS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::DomainShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::dsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutDS);
 		}
 		else
 		{
@@ -450,7 +458,7 @@ namespace ShaderInjectorGUI
 		std::vector<PipelineT>& pipelines,
 		ShaderTarget::ShaderType shaderType,
 		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE subobjectType,
-		HookD3D12::PSOPendingRebuild::SourceList pendingSource,
+		HookD3D12::PipelineSourceList pendingSource,
 		bool allowMarkerToggle,
 		bool disableActions,
 		bool PipelineT::* disabledMember,
@@ -498,6 +506,13 @@ namespace ShaderInjectorGUI
 					if (leftSize != rightSize)
 						return leftSize > rightSize;
 				}
+				else if (sortMode == 2)
+				{
+					// The vector position is the pipeline index used by the capture and
+					// rebuild systems, so preserve its natural ascending order here.
+					if (a != b)
+						return a < b;
+				}
 				else
 				{
 					const uint64_t leftHash = left.*HashMember;
@@ -522,7 +537,12 @@ namespace ShaderInjectorGUI
 		std::string lengthSortLabel = std::string("Bytecode Length##") + idPrefix;
 		ImGui::RadioButton(lengthSortLabel.c_str(), &sortMode, 1);
 
-		std::string childLabel = std::string("ShaderList##") + idPrefix;
+		ImGui::SameLine();
+
+		std::string pipelineIndexSortLabel = std::string("Pipeline Index##") + idPrefix;
+		ImGui::RadioButton(pipelineIndexSortLabel.c_str(), &sortMode, 2);
+
+			std::string childLabel = std::string("ShaderList##") + idPrefix;
 
 		if (ImGui::BeginChild(childLabel.c_str(), ImVec2(0, 180), ImGuiChildFlags_Borders))
 		{

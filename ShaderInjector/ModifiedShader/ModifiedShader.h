@@ -52,12 +52,15 @@ namespace ModifiedShader
 		std::vector<TargetDisk> targets;
 		std::string notes;
 
-		// Runtime-only resolved paths. They are normalized before JSON is written.
+		//runtime-only resolved paths. 
+		//they are normalized before JSON is written.
 		std::string packageDirectory;
 		std::string jsonPath;
 		std::string sourcePath;
 		std::string compiledBlobPath;
 		std::vector<uint8_t> compiledBlob;
+		ShaderAnalysis::ShaderAnalysisDisk compiledShaderAnalysis;
+		bool compiledShaderInterfaceCompatible = true;
 
 		bool MatchesShader(uint64_t shaderHash, const ShaderAnalysis::ShaderAnalysisDisk& analysis) const;
 		double CalculateSimilarityScore(const PackageDisk& other) const;

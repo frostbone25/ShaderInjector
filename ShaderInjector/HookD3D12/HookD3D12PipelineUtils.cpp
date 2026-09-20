@@ -2,6 +2,7 @@
 #include "HookD3D12PipelineUtils.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cstdio>
 #include <sstream>
 #include <dxgi1_6.h>
@@ -39,6 +40,61 @@ namespace HookD3D12
 	std::string HashStructText(const void* data, size_t size)
 	{
 		return data && size ? Hash::FormatHash(Hash::HashMemory(data, size)) : "";
+	}
+
+	uint64_t CanonicalPipelineFixedFunctionStateHash(const std::vector<uint8_t>& streamBlob)
+	{
+		if (streamBlob.empty())
+			return 0;
+
+		std::vector<uint8_t> canonicalStream = streamBlob;
+		uint8_t* streamPosition = canonicalStream.data();
+		uint8_t* streamEnd = streamPosition + canonicalStream.size();
+		while (streamPosition < streamEnd)
+		{
+			if (streamPosition + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE) > streamEnd)
+				return 0;
+
+			const auto type = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(streamPosition);
+			const UINT typeIndex = static_cast<UINT>(type);
+			if (typeIndex >= ARRAYSIZE(kSubobjectSizes) || kSubobjectSizes[typeIndex] == 0)
+				return 0;
+
+			const size_t subobjectSize = kSubobjectSizes[typeIndex];
+			if (streamPosition + subobjectSize > streamEnd)
+				return 0;
+
+			// Pointer-bearing payloads and the driver cache are process-local. Removing
+			// them leaves the blend/raster/depth/formats/topology state that identifies
+			// distinct PSO variants of the same shader.
+			switch (type)
+			{
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_STREAM_OUTPUT:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CACHED_PSO:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS:
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS:
+					std::memset(
+						streamPosition + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE),
+						0,
+						subobjectSize - sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE));
+					break;
+				default:
+					break;
+			}
+
+			streamPosition += subobjectSize;
+		}
+
+		return Hash::HashMemory(canonicalStream.data(), canonicalStream.size());
 	}
 
 	std::string JoinUIntValues(const UINT* values, UINT count)
@@ -179,6 +235,10 @@ namespace HookD3D12
 		FillInputAndStreamOutputSignatures(replacement, pipeline.inputElements, pipeline.soDeclarations, pipeline.soStrides);
 		replacement.pipelineStreamLength = pipeline.streamBlob.empty() ? "" : std::to_string(pipeline.streamBlob.size());
 		replacement.pipelineStreamSubobjectTypes = PipelineStreamSubobjectTypeSignature(pipeline.streamBlob);
+		const uint64_t fixedFunctionStateHash = CanonicalPipelineFixedFunctionStateHash(pipeline.streamBlob);
+		replacement.pipelineFixedFunctionStateHash = fixedFunctionStateHash
+			? Hash::FormatHash(fixedFunctionStateHash)
+			: "";
 
 		const uint8_t* ptr = pipeline.streamBlob.empty() ? nullptr : pipeline.streamBlob.data();
 		const uint8_t* end = ptr ? ptr + pipeline.streamBlob.size() : nullptr;

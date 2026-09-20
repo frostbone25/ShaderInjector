@@ -1267,6 +1267,34 @@ namespace ShaderInjectorGUI
 			}
 		}
 
+		const bool hasRenderPassShaderTemplates = std::any_of(
+			renderPasses.begin(),
+			renderPasses.end(),
+			[](const RenderPass::RenderPassDisk& renderPass)
+			{
+				return RenderPass::HasShaderTemplate(renderPass);
+			});
+		ImGui::BeginDisabled(!hasRenderPassShaderTemplates);
+		if (ImGui::Button("Recompile All##RenderPasses"))
+		{
+			const DatabaseRenderPasses::RenderPassShaderBatchCompileResult result =
+				DatabaseRenderPasses::CompileAllRenderPassShaders();
+			const std::string summary =
+				"Recompile All Render Pass Shaders: compiled=" +
+				std::to_string(result.compiledRenderPassCount) +
+				" failed=" + std::to_string(result.failedRenderPassCount) +
+				" skippedWithoutTemplate=" + std::to_string(result.skippedRenderPassCount);
+
+			for (const std::string& error : result.errors)
+				WriteToRuntimeLogError("Could not compile Render Pass shaders: " + error);
+
+			if (result.failedRenderPassCount == 0)
+				WriteToRuntimeLogSuccess(summary);
+			else
+				WriteToRuntimeLogError(summary);
+		}
+		ImGui::EndDisabled();
+
 		const std::vector<RenderPass::RenderPassDisk>& refreshedRenderPasses = DatabaseRenderPasses::GetRenderPasses();
 		RenderPassGraph::Compilation renderPassGraph;
 		const std::vector<const RenderPass::RenderPassDisk*> executionOrderedRenderPasses =

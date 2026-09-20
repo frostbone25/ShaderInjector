@@ -1145,9 +1145,9 @@ namespace RenderPassMipChain
 				{
 					return layout.rootParameterIndex == binding.rootParameterIndex;
 				});
-				if (layoutIt == layouts.end() || layoutIt->containsUnboundedRange)
+				if (layoutIt == layouts.end())
 				{
-					outError = "An active target descriptor table is unbounded or could not be described safely.";
+					outError = "An active target descriptor table could not be described safely.";
 					return false;
 				}
 
@@ -1162,19 +1162,23 @@ namespace RenderPassMipChain
 					return false;
 				}
 
-			const UINT64 tableByteOffset = binding.value - sourceHeap->gpuStart.ptr;
-				const UINT64 tableByteSize = static_cast<UINT64>(layoutIt->descriptorCount) * sourceHeap->descriptorIncrementSize;
+				const UINT64 tableByteOffset = binding.value - sourceHeap->gpuStart.ptr;
 				const UINT64 heapByteSize = static_cast<UINT64>(sourceHeap->descriptorCount) * sourceHeap->descriptorIncrementSize;
-				if (tableByteOffset + tableByteSize > heapByteSize)
-				{
-					outError = "An active graphics descriptor table extends beyond its bound heap.";
-					return false;
-				}
+				const UINT64 availableDescriptorCount64 =
+					(heapByteSize - tableByteOffset) / sourceHeap->descriptorIncrementSize;
+				const UINT availableDescriptorCount = static_cast<UINT>((std::min)(
+					availableDescriptorCount64,
+					static_cast<UINT64>(UINT_MAX)));
 
 				ActiveDescriptorTable table{};
 				table.rootParameterIndex = binding.rootParameterIndex;
 				table.heapType = layoutIt->heapType;
-				table.descriptorCount = layoutIt->descriptorCount;
+				// Unbounded tables are represented by maximumTrackedDescriptors in the
+				// root-signature layout. The live heap can legitimately contain fewer
+				// descriptors after this table's base. Clone only that valid intersection;
+				// reserving the synthetic maximum would leave stale descriptors in the
+				// reusable heap and can make later draws sample unrelated resources.
+				table.descriptorCount = (std::min)(layoutIt->descriptorCount, availableDescriptorCount);
 				table.originalGpuHandle = { binding.value };
 				table.originalCpuHandle = { sourceHeap->cpuStart.ptr + tableByteOffset };
 				if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
@@ -1216,11 +1220,14 @@ namespace RenderPassMipChain
 			{
 				if (table.heapType != D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
 					continue;
-				device->CopyDescriptorsSimple(
-					table.descriptorCount,
-					{ customCpuStart.ptr + static_cast<SIZE_T>(table.customHeapOffset) * increment },
-					table.originalCpuHandle,
-					D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+				if (table.descriptorCount)
+				{
+					device->CopyDescriptorsSimple(
+						table.descriptorCount,
+						{ customCpuStart.ptr + static_cast<SIZE_T>(table.customHeapOffset) * increment },
+						table.originalCpuHandle,
+						D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+				}
 			}
 
 			for (const ResolvedMipPass* mipPass : successfulPasses)

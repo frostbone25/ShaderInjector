@@ -73,6 +73,13 @@ namespace RenderPassTexturePool
 		const std::string& resourceId,
 		ShaderResource::TemporalView temporalView,
 		TextureView& outTexture);
+	// A previous-frame input has no producer on the first frame. A typed null SRV
+	// reads zero without inventing a current-frame dependency or a GPU allocation.
+	bool GetHistoryBootstrapTexture(
+		ID3D12Device* device,
+		const std::string& resourceId,
+		TextureView& outTexture);
+	void MarkPassOutputsWritten(const RenderPass::RenderPassDisk& renderPass);
 
 	void PublishConfigurations(const std::vector<RenderPass::RenderPassDisk>& renderPasses);
 	bool EnsurePassResources(
@@ -93,5 +100,6 @@ namespace RenderPassTexturePool
 		std::vector<TextureView>& outStageTargets,
 		std::string& outError);
 	void AdvanceFrame();
+	void LogPerformanceStatistics();
 	void ReleaseResources();
 }

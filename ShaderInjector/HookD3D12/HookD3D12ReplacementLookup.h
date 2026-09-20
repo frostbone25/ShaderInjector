@@ -13,9 +13,29 @@ namespace HookD3D12
 {
 	bool GetPipelineCachedBlobInfo(ID3D12PipelineState* pipelineState, uint64_t& outHash, SIZE_T& outSize, std::vector<uint8_t>* outBytes = nullptr);
 	bool SupportsCachedBlobContentMatching(SIZE_T cachedBlobSize);
+	bool SupportsCachedBlobMetadataMatching(SIZE_T cachedBlobSize);
 	void ResetCachedBlobContentLookup();
+	bool MatchPersistedCachedBlobContent(
+		const std::string& persistedBlobPath,
+		const std::string& persistedBlobLength,
+		const std::vector<uint8_t>& currentBlob,
+		double& outMatchingRatio,
+		size_t& outLongestMatchingRun);
+	bool PersistedPipelineEntryTargetsShader(
+		const ShaderTarget::ShaderTargetDisk& replacement,
+		const ShaderTarget::ShaderTargetDisk& pipelineEntry);
+	bool PersistedPipelineEntryTargetsShader(
+		const ShaderTarget::ShaderTargetDisk& replacement,
+		const ShaderTarget::ShaderPipelineTemplateDisk& pipelineEntry);
+	bool PersistedPipelineStreamsAreEquivalent(
+		const std::string& firstStreamPath,
+		const std::string& secondStreamPath);
 	bool ReplacementHasCachedBlobHash(const ShaderTarget::ShaderTargetDisk& replacement, uint64_t cachedBlobHash);
 	int FindEnabledShaderTargetByCachedBlob(uint64_t cachedBlobHash);
+	int FindEnabledShaderTargetByCachedBlobMetadata(
+		SIZE_T cachedBlobSize,
+		uint64_t rootSignatureHash,
+		bool computePipeline);
 	int FindEnabledShaderTargetByCachedBlobContent(
 		const std::vector<uint8_t>& cachedBlob,
 		double& outMatchingRatio,

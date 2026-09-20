@@ -25,9 +25,9 @@
     <Filter Include="HookD3D12">
       <UniqueIdentifier>{fa2f2729-9f9a-4521-9c96-254df584e783}</UniqueIdentifier>
     </Filter>
-	<Filter Include="D3D12">
-	  <UniqueIdentifier>{b75e292b-f3b1-4fbe-a6af-9e93bd0c51f8}</UniqueIdentifier>
-	</Filter>
+    <Filter Include="D3D12">
+      <UniqueIdentifier>{b75e292b-f3b1-4fbe-a6af-9e93bd0c51f8}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Database">
       <UniqueIdentifier>{9300037b-c2ee-45ec-b087-72b538b736c1}</UniqueIdentifier>
     </Filter>
@@ -54,6 +54,12 @@
     </Filter>
     <Filter Include="ShaderConfiguration">
       <UniqueIdentifier>{7804e50d-561f-48d6-a3e2-09af47e8da1f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Enum">
+      <UniqueIdentifier>{ecad7bf4-4991-4423-92cb-f09fc151c85a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="DDS">
+      <UniqueIdentifier>{7d91b3fa-69b1-4634-9c11-00fcfa6126f3}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -96,15 +102,18 @@
     <ClInclude Include="ShaderInjectorVersion.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ShaderInjectorInternalResources.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="JsonHelper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ShaderTemplates.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-	<ClInclude Include="ShaderModelDetector.h">
-	  <Filter>Header Files</Filter>
-	</ClInclude>
+    <ClInclude Include="ShaderModelDetector.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="FPSCounter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -129,18 +138,18 @@
     <ClInclude Include="HookD3D12\HookD3D12.h">
       <Filter>HookD3D12</Filter>
     </ClInclude>
-	<ClInclude Include="HookD3D12\D3D12\HookD3D12HookHandlers.h">
-	  <Filter>D3D12</Filter>
-	</ClInclude>
-	<ClInclude Include="HookD3D12\D3D12\HookD3D12RuntimeState.h">
-	  <Filter>D3D12</Filter>
-	</ClInclude>
-	<ClInclude Include="HookD3D12\D3D12\HookD3D12ExecutionHookHelpers.h">
-	  <Filter>D3D12</Filter>
-	</ClInclude>
-	<ClInclude Include="HookD3D12\D3D12\HookD3D12SwapChainHookHandlers.h">
-	  <Filter>D3D12</Filter>
-	</ClInclude>
+    <ClInclude Include="HookD3D12\D3D12\HookD3D12HookHandlers.h">
+      <Filter>D3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\D3D12\HookD3D12RuntimeState.h">
+      <Filter>D3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\D3D12\HookD3D12ExecutionHookHelpers.h">
+      <Filter>D3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\D3D12\HookD3D12SwapChainHookHandlers.h">
+      <Filter>D3D12</Filter>
+    </ClInclude>
     <ClInclude Include="HookD3D12\HookD3D12OverlayStartup.h">
       <Filter>HookD3D12</Filter>
     </ClInclude>
@@ -207,8 +216,32 @@
     <ClInclude Include="ShaderResource\ShaderResourceCatalog.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ShaderResource\ShaderResourceDDS.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="DDS\DDSMetadata.h">
+      <Filter>DDS</Filter>
+    </ClInclude>
+    <ClInclude Include="DDS\DDSImage.h">
+      <Filter>DDS</Filter>
+    </ClInclude>
+    <ClInclude Include="DDS\DDSPixelFormat.h">
+      <Filter>DDS</Filter>
+    </ClInclude>
+    <ClInclude Include="DDS\DDSHeader.h">
+      <Filter>DDS</Filter>
+    </ClInclude>
+    <ClInclude Include="DDS\DDSHeaderDx10.h">
+      <Filter>DDS</Filter>
+    </ClInclude>
+    <ClInclude Include="DDS\DDSConstants.h">
+      <Filter>DDS</Filter>
+    </ClInclude>
+    <ClInclude Include="DDS\DDSLegacyFormat.h">
+      <Filter>DDS</Filter>
+    </ClInclude>
+    <ClInclude Include="DDS\DDSHeaderParser.h">
+      <Filter>DDS</Filter>
+    </ClInclude>
+    <ClInclude Include="DDS\DDS.h">
+      <Filter>DDS</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\ShaderResourceRuntime.h">
       <Filter>Header Files</Filter>
@@ -225,6 +258,36 @@
     <ClInclude Include="ShaderConfiguration\ShaderConfiguration.h">
       <Filter>ShaderConfiguration</Filter>
     </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ShaderConfigurationConstants.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\PropertyDisk.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\DocumentDisk.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\SourceLine.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ParsedDefine.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ConfigurationMetadata.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ApplyResult.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\PendingWrite.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ShaderConfigurationInternal.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\DatabaseShaderConfigurationsInternal.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
     <ClInclude Include="ShaderConfiguration\DatabaseShaderConfigurations.h">
       <Filter>ShaderConfiguration</Filter>
     </ClInclude>
@@ -235,6 +298,9 @@
       <Filter>IO</Filter>
     </ClInclude>
     <ClInclude Include="ModifiedShader\DatabaseModifiedShaders.h">
+      <Filter>ModifiedShader</Filter>
+    </ClInclude>
+    <ClInclude Include="ModifiedShader\DatabaseModifiedShadersInternal.h">
       <Filter>ModifiedShader</Filter>
     </ClInclude>
     <ClInclude Include="ModifiedShader\ModifiedShader.h">
@@ -249,9 +315,132 @@
     <ClInclude Include="ShaderTarget\ShaderTarget.h">
       <Filter>ShaderTarget</Filter>
     </ClInclude>
+    <ClInclude Include="ShaderTarget\ShaderTargetInternal.h">
+      <Filter>ShaderTarget</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderTarget\ShaderTargetDisk.h">
+      <Filter>ShaderTarget</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderTarget\ShaderPipelineTemplateDisk.h">
+      <Filter>ShaderTarget</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderTarget\ShaderPipelineStreamMetadataDisk.h">
+      <Filter>ShaderTarget</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderTarget\ShaderInputElementDisk.h">
+      <Filter>ShaderTarget</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderTarget\ShaderStreamOutputDeclarationDisk.h">
+      <Filter>ShaderTarget</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderDocAvailability.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderDocCaptureRequestResult.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderDocReplayUIRequestResult.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\EnumStrings.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\ShaderTargetApplyResult.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\ShaderAutomaticDiscoveryPipelineSource.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassGraphVisitState.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassRuntimeRootBindingType.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassRuntimeTrackingModeFlag.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\ShaderDiscoveryMode.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\ShaderModel.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\PixelShaderSelectionStyle.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\ShaderSignaturePacking.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RegistryHive.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\PerformanceMetricsCounter.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\PerformanceMetricsTiming.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassRenderPassType.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassExecutionMode.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassPassOperation.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassDispatchMode.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassViewportMode.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassResourceAccess.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassGameResourceViewType.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassEventType.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassGraphBoundary.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassRuntimeExecutionBoundary.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\RenderPassMipChainRootArgumentType.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\ShaderResourceTextureDimension.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\ShaderResourceResourceOrigin.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\ShaderResourceResourceLifetime.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\ShaderResourceResolutionMode.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\ShaderResourceTemporalView.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\ShaderType.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
+    <ClInclude Include="Enum\PipelineSourceList.h">
+      <Filter>Enum</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderInjectorInternalResources.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="dsound_proxy.cpp">
@@ -296,9 +485,9 @@
     <ClCompile Include="ShaderAutomaticDiscovery.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-	<ClCompile Include="ShaderModelDetector.cpp">
-	  <Filter>Source Files</Filter>
-	</ClCompile>
+    <ClCompile Include="ShaderModelDetector.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ShaderTemplates.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -314,6 +503,9 @@
     <ClCompile Include="StringHelper.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Enum\EnumStrings.cpp">
+      <Filter>Enum</Filter>
+    </ClCompile>
     <ClCompile Include="Database\DatabaseGraphicsPSOs.cpp">
       <Filter>Database</Filter>
     </ClCompile>
@@ -323,81 +515,81 @@
     <ClCompile Include="HookD3D12\HookD3D12.cpp">
       <Filter>HookD3D12</Filter>
     </ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CopyDescriptors.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateDescriptorHeap.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateDeviceD3D12.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreatePipelineState.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateResource.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateRootSignature.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateSwapChain.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateViews.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_Dispatch.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_Draw.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_ExecuteCommandListsD3D12.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_ExecuteIndirect.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_InputAssembler.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_OMSetRenderTargets.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_PipelineLibrary.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_PresentD3D12.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_RasterizerState.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_ResetGraphicsCommandList.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_ResizeBuffersD3D12.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetDescriptorHeaps.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetPipelineState.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRoot32BitConstants.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootDescriptors.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootDescriptorTable.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
-	<ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootSignature.cpp">
-	  <Filter>D3D12</Filter>
-	</ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CopyDescriptors.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateDescriptorHeap.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateDeviceD3D12.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreatePipelineState.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateResource.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateRootSignature.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateSwapChain.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateViews.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_Dispatch.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_Draw.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_ExecuteCommandListsD3D12.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_ExecuteIndirect.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_InputAssembler.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_OMSetRenderTargets.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_PipelineLibrary.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_PresentD3D12.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_RasterizerState.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_ResetGraphicsCommandList.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_ResizeBuffersD3D12.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetDescriptorHeaps.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetPipelineState.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRoot32BitConstants.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootDescriptors.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootDescriptorTable.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootSignature.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
     <ClCompile Include="HookD3D12\HookD3D12Install.cpp">
       <Filter>HookD3D12</Filter>
     </ClCompile>
@@ -464,8 +656,14 @@
     <ClCompile Include="ShaderResource\DatabaseShaderResources.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ShaderResource\ShaderResourceDDS.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DDS\DDSLegacyFormat.cpp">
+      <Filter>DDS</Filter>
+    </ClCompile>
+    <ClCompile Include="DDS\DDSHeaderParser.cpp">
+      <Filter>DDS</Filter>
+    </ClCompile>
+    <ClCompile Include="DDS\DDS.cpp">
+      <Filter>DDS</Filter>
     </ClCompile>
     <ClCompile Include="ShaderResource\ShaderResourceRuntime.cpp">
       <Filter>Source Files</Filter>
@@ -491,9 +689,9 @@
     <ClCompile Include="GUI\ShaderInjectorGUI_RenderPasses.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
-	<ClCompile Include="GUI\ShaderInjectorGUI_ShaderResources.cpp">
-	  <Filter>GUI</Filter>
-	</ClCompile>
+    <ClCompile Include="GUI\ShaderInjectorGUI_ShaderResources.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
     <ClCompile Include="GUI\ShaderInjectorGUI_RuntimeLogs.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
@@ -509,7 +707,46 @@
     <ClCompile Include="IO\ShaderInjectorIO.cpp">
       <Filter>IO</Filter>
     </ClCompile>
+    <ClCompile Include="IO\ShaderInjectorIO_Directories.cpp">
+      <Filter>IO</Filter>
+    </ClCompile>
+    <ClCompile Include="IO\ShaderInjectorIO_Logs.cpp">
+      <Filter>IO</Filter>
+    </ClCompile>
+    <ClCompile Include="IO\ShaderInjectorIO_InternalResources.cpp">
+      <Filter>IO</Filter>
+    </ClCompile>
+    <ClCompile Include="IO\ShaderInjectorIO_Initialization.cpp">
+      <Filter>IO</Filter>
+    </ClCompile>
+    <ClCompile Include="IO\ShaderInjectorIO_Settings.cpp">
+      <Filter>IO</Filter>
+    </ClCompile>
+    <ClCompile Include="IO\ShaderInjectorIO_Shader.cpp">
+      <Filter>IO</Filter>
+    </ClCompile>
     <ClCompile Include="ShaderConfiguration\ShaderConfiguration.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\ShaderConfigurationSourceParsing.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\ShaderConfigurationValues.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\ShaderConfigurationNumeric.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\ShaderConfigurationNormalization.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\ShaderConfigurationParsing.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\ShaderConfigurationRewriting.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\DatabaseShaderConfigurationsApply.cpp">
       <Filter>ShaderConfiguration</Filter>
     </ClCompile>
     <ClCompile Include="ShaderConfiguration\DatabaseShaderConfigurations.cpp">
@@ -524,6 +761,12 @@
     <ClCompile Include="ModifiedShader\DatabaseModifiedShaders.cpp">
       <Filter>ModifiedShader</Filter>
     </ClCompile>
+    <ClCompile Include="ModifiedShader\DatabaseModifiedShadersCompilation.cpp">
+      <Filter>ModifiedShader</Filter>
+    </ClCompile>
+    <ClCompile Include="ModifiedShader\DatabaseModifiedShadersPackages.cpp">
+      <Filter>ModifiedShader</Filter>
+    </ClCompile>
     <ClCompile Include="ModifiedShader\ModifiedShader.cpp">
       <Filter>ModifiedShader</Filter>
     </ClCompile>
@@ -533,7 +776,19 @@
     <ClCompile Include="ShaderTarget\DatabaseShaderTargets.cpp">
       <Filter>ShaderTarget</Filter>
     </ClCompile>
-    <ClCompile Include="ShaderTarget\ShaderTarget.cpp">
+    <ClCompile Include="ShaderTarget\DatabaseShaderTargetsActions.cpp">
+      <Filter>ShaderTarget</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderTarget\ShaderTargetSerialization.cpp">
+      <Filter>ShaderTarget</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderTarget\ShaderTargetPaths.cpp">
+      <Filter>ShaderTarget</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderTarget\ShaderTargetIO.cpp">
+      <Filter>ShaderTarget</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderTarget\ShaderTargetMetadataIO.cpp">
       <Filter>ShaderTarget</Filter>
     </ClCompile>
     <ClCompile Include="ShaderTarget\ShaderTargetSimilarity.cpp">

@@ -1,4 +1,5 @@
 #pragma once
+#include "Enum/RenderPassMipChainRootArgumentType.h"
 
 #include <cstdint>
 #include <string>
@@ -21,14 +22,6 @@ namespace RenderPassMipChain
 		D3D12_GPU_DESCRIPTOR_HANDLE gpuStart{};
 	};
 
-	enum class RootArgumentType : uint8_t
-	{
-		DescriptorTable,
-		ConstantBufferView,
-		ShaderResourceView,
-		UnorderedAccessView,
-		Constants
-	};
 
 	struct RootArgumentSnapshot
 	{

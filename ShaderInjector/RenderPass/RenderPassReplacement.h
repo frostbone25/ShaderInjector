@@ -12,5 +12,6 @@ namespace RenderPassReplacement
 		const RenderPass::RenderPassDisk& renderPass,
 		ID3D12PipelineState* originalPipelineState,
 		std::string& outError);
+	void InvalidateFailedPipelines();
 	void ReleaseResources();
 }

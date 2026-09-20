@@ -9,46 +9,8 @@
 
 namespace RenderPass
 {
-	const char* TypeName(RenderPassType type)
-	{
-		switch (type)
-		{
-			case RenderPassType::MipChain: return "MipChain";
-			case RenderPassType::TemporalHistory: return "Temporal History";
-			case RenderPassType::ReplacementPixelShader: return "Replacement Pixel Shader";
-			case RenderPassType::ReplacementComputeShader: return "Replacement Compute Shader";
-			case RenderPassType::Custom:
-			default: return "Custom";
-		}
-	}
 
-	const char* ExecutionModeName(ExecutionMode mode)
-	{
-		switch (mode)
-		{
-			case ExecutionMode::FullscreenPixel: return "Fullscreen Pixel";
-			case ExecutionMode::Compute: return "Compute";
-			case ExecutionMode::Automatic:
-			default: return "Automatic";
-		}
-	}
 
-	const char* PassOperationName(PassOperation operation)
-	{
-		switch (operation)
-		{
-			case PassOperation::Custom: return "Custom";
-			case PassOperation::ReplaceOriginal: return "Replace Original";
-			case PassOperation::MipChain: return "Mip Chain";
-			case PassOperation::Downsample: return "Downsample";
-			case PassOperation::UpsampleChain: return "Upsample Chain";
-			case PassOperation::Copy: return "Copy";
-			case PassOperation::TemporalHistory: return "Temporal History Copy";
-			case PassOperation::Resolve: return "Resolve";
-			case PassOperation::Automatic:
-			default: return "Automatic";
-		}
-	}
 
 	ExecutionMode ResolveExecutionMode(const RenderPassDisk& renderPass)
 	{
@@ -227,15 +189,6 @@ namespace RenderPass
 		}
 	}
 
-	const char* EventTypeName(EventType type)
-	{
-		switch (type)
-		{
-			case EventType::RenderPass: return "Render Pass";
-			case EventType::ModifiedShader:
-			default: return "Modified Shader";
-		}
-	}
 
 	bool IsTimingValid(const std::string& timing)
 	{

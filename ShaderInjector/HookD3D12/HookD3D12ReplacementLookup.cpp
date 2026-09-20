@@ -7,6 +7,7 @@
 //custom
 #include "Hash.h"
 #include "ShaderTarget/DatabaseShaderTargets.h"
+#include "HookD3D12PipelineUtils.h"
 #include "HookD3D12ReplacementTemplates.h"
 #include "ShaderDiscovery.h"
 #include "IO/ShaderInjectorIO.h"
@@ -15,9 +16,12 @@ namespace HookD3D12
 {
 	namespace
 	{
-		// Tiny driver cache records can be mostly common bookkeeping with only a few
-		// identifying bytes. Do not infer identity from those opaque records.
-		constexpr size_t minimumContentMatchSize = 4096;
+		// Very small driver cache records can be mostly common bookkeeping with only
+		// a few identifying bytes. Records at or above 2 KiB still have to satisfy the
+		// strict byte-ratio, stable-run, and cross-target ambiguity checks below. This
+		// includes compact persisted graphics PSOs that would otherwise never recover
+		// on a warm-cache launch.
+		constexpr size_t minimumContentMatchSize = 2048;
 		constexpr double minimumMatchingByteRatio = 0.98;
 		constexpr double minimumStableRunRatio = 0.50;
 		constexpr double ambiguityRatioMargin = 0.002;
@@ -29,6 +33,97 @@ namespace HookD3D12
 		};
 
 		std::unordered_map<std::string, std::vector<uint8_t>> gCachedBlobSidecars;
+		std::unordered_map<std::string, uint64_t> gPipelineStreamSidecarHashes;
+
+		uint64_t SerializedShaderHashForType(
+			const ShaderTarget::ShaderTargetDisk& pipelineEntry,
+			ShaderTarget::ShaderType shaderType)
+		{
+			switch (shaderType)
+			{
+				case ShaderTarget::VertexShader: return Hash::ParseHashText(pipelineEntry.vsHash);
+				case ShaderTarget::HullShader: return Hash::ParseHashText(pipelineEntry.hsHash);
+				case ShaderTarget::DomainShader: return Hash::ParseHashText(pipelineEntry.dsHash);
+				case ShaderTarget::GeometryShader: return Hash::ParseHashText(pipelineEntry.gsHash);
+				case ShaderTarget::PixelShader: return Hash::ParseHashText(pipelineEntry.psHash);
+				case ShaderTarget::ComputeShader: return Hash::ParseHashText(pipelineEntry.csHash);
+				default: return 0;
+			}
+		}
+
+		uint64_t SerializedShaderHashForType(
+			const ShaderTarget::ShaderPipelineTemplateDisk& pipelineEntry,
+			ShaderTarget::ShaderType shaderType)
+		{
+			switch (shaderType)
+			{
+				case ShaderTarget::VertexShader: return Hash::ParseHashText(pipelineEntry.vsHash);
+				case ShaderTarget::HullShader: return Hash::ParseHashText(pipelineEntry.hsHash);
+				case ShaderTarget::DomainShader: return Hash::ParseHashText(pipelineEntry.dsHash);
+				case ShaderTarget::GeometryShader: return Hash::ParseHashText(pipelineEntry.gsHash);
+				case ShaderTarget::PixelShader: return Hash::ParseHashText(pipelineEntry.psHash);
+				case ShaderTarget::ComputeShader: return Hash::ParseHashText(pipelineEntry.csHash);
+				default: return 0;
+			}
+		}
+
+		bool TargetContainsSerializedShaderHash(
+			const ShaderTarget::ShaderTargetDisk& replacement,
+			uint64_t shaderHash)
+		{
+			if (!shaderHash)
+				return false;
+
+			if (Hash::ParseHashText(replacement.originalShaderBytecodeHash) == shaderHash)
+				return true;
+
+			return std::any_of(
+				replacement.shaderBytecodeHashAliases.begin(),
+				replacement.shaderBytecodeHashAliases.end(),
+				[shaderHash](const std::string& aliasHash)
+				{
+					return Hash::ParseHashText(aliasHash) == shaderHash;
+				});
+		}
+
+		bool CachedBlobHashMatches(
+			const std::string& primaryHash,
+			const std::vector<std::string>& hashAliases,
+			uint64_t cachedBlobHash)
+		{
+			if (!cachedBlobHash)
+				return false;
+			if (Hash::ParseHashText(primaryHash) == cachedBlobHash)
+				return true;
+			return std::any_of(
+				hashAliases.begin(),
+				hashAliases.end(),
+				[cachedBlobHash](const std::string& hashAlias)
+				{
+					return Hash::ParseHashText(hashAlias) == cachedBlobHash;
+				});
+		}
+
+		uint64_t CanonicalPipelineStreamSidecarHash(const std::string& path)
+		{
+			if (path.empty())
+				return 0;
+
+			const auto cachedHash = gPipelineStreamSidecarHashes.find(path);
+			if (cachedHash != gPipelineStreamSidecarHashes.end())
+				return cachedHash->second;
+
+			std::vector<uint8_t> streamBlob;
+			if (!ShaderInjectorIO::LoadDXILBlobFromDisk(path, streamBlob) || streamBlob.empty())
+			{
+				gPipelineStreamSidecarHashes.emplace(path, 0);
+				return 0;
+			}
+
+			const uint64_t streamHash = CanonicalPipelineFixedFunctionStateHash(streamBlob);
+			gPipelineStreamSidecarHashes.emplace(path, streamHash);
+			return streamHash;
+		}
 
 		struct CapturedShaderKey
 		{
@@ -193,37 +288,209 @@ namespace HookD3D12
 			const std::vector<uint8_t>& currentBlob)
 		{
 			CachedBlobContentMatch match{};
-			if (persistedBlob.size() != currentBlob.size() || persistedBlob.size() < minimumContentMatchSize)
-				return match;
-
-			size_t matchingBytes = 0;
-			size_t currentMatchingRun = 0;
-
-			for (size_t byteIndex = 0; byteIndex < persistedBlob.size(); ++byteIndex)
+			const size_t smallerSize = (std::min)(persistedBlob.size(), currentBlob.size());
+			const size_t largerSize = (std::max)(persistedBlob.size(), currentBlob.size());
+			if (smallerSize < minimumContentMatchSize || largerSize == 0 ||
+				static_cast<double>(smallerSize) / static_cast<double>(largerSize) < minimumMatchingByteRatio)
 			{
-				if (persistedBlob[byteIndex] != currentBlob[byteIndex])
-				{
-					currentMatchingRun = 0;
-					continue;
-				}
-
-				++matchingBytes;
-				++currentMatchingRun;
-				match.longestMatchingRun = (std::max)(match.longestMatchingRun, currentMatchingRun);
+				return match;
 			}
 
-			match.matchingRatio = static_cast<double>(matchingBytes) / static_cast<double>(persistedBlob.size());
+			const auto compareAligned = [&](size_t persistedOffset, size_t currentOffset, size_t byteCount)
+			{
+				CachedBlobContentMatch candidate{};
+				size_t matchingBytes = 0;
+				size_t currentMatchingRun = 0;
+				for (size_t byteIndex = 0; byteIndex < byteCount; ++byteIndex)
+				{
+					if (persistedBlob[persistedOffset + byteIndex] != currentBlob[currentOffset + byteIndex])
+					{
+						currentMatchingRun = 0;
+						continue;
+					}
+					++matchingBytes;
+					++currentMatchingRun;
+					candidate.longestMatchingRun = (std::max)(candidate.longestMatchingRun, currentMatchingRun);
+				}
+				candidate.matchingRatio = static_cast<double>(matchingBytes) / static_cast<double>(largerSize);
+				return candidate;
+			};
+
+			const auto keepBetter = [&](const CachedBlobContentMatch& candidate)
+			{
+				if (candidate.matchingRatio > match.matchingRatio ||
+					(candidate.matchingRatio == match.matchingRatio &&
+						candidate.longestMatchingRun > match.longestMatchingRun))
+					match = candidate;
+			};
+
+			// A warmed driver cache can add or remove a small envelope around otherwise
+			// identical pipeline data. Check front and back alignment, then one changed
+			// middle region. The larger blob remains the denominator, so the normal 98%
+			// threshold strictly bounds how much envelope variance is accepted.
+			keepBetter(compareAligned(0, 0, smallerSize));
+			keepBetter(compareAligned(
+				persistedBlob.size() - smallerSize,
+				currentBlob.size() - smallerSize,
+				smallerSize));
+
+			// A driver may wrap the stable payload at both ends, so neither front nor
+			// back alignment necessarily lines up. Locate a few anchors from the saved
+			// payload within the narrow shift permitted by the 98% threshold, then score
+			// the entire resulting overlap. This stays linear over a small search window
+			// instead of performing an unrestricted edit-distance comparison.
+			constexpr size_t anchorSize = 32;
+			if (persistedBlob.size() >= anchorSize && currentBlob.size() >= anchorSize)
+			{
+				const size_t maximumShift =
+					static_cast<size_t>(static_cast<double>(largerSize) * (1.0 - minimumMatchingByteRatio)) + 1;
+				const size_t anchorOffsets[] =
+				{
+					persistedBlob.size() / 4,
+					persistedBlob.size() / 2,
+					(persistedBlob.size() * 3) / 4,
+				};
+
+				for (size_t anchorOffset : anchorOffsets)
+				{
+					anchorOffset = (std::min)(anchorOffset, persistedBlob.size() - anchorSize);
+					const size_t searchStart = anchorOffset > maximumShift ? anchorOffset - maximumShift : 0;
+					const size_t searchLastStart = (std::min)(
+						currentBlob.size() - anchorSize,
+						anchorOffset + maximumShift);
+					if (searchStart > searchLastStart)
+						continue;
+
+					auto searchPosition = currentBlob.begin() + searchStart;
+					const auto searchEnd = currentBlob.begin() + searchLastStart + anchorSize;
+					while (searchPosition < searchEnd)
+					{
+						const auto found = std::search(
+							searchPosition,
+							searchEnd,
+							persistedBlob.begin() + anchorOffset,
+							persistedBlob.begin() + anchorOffset + anchorSize);
+						if (found == searchEnd)
+							break;
+
+						const size_t currentAnchorOffset = static_cast<size_t>(found - currentBlob.begin());
+						const size_t persistedOffset = currentAnchorOffset < anchorOffset
+							? anchorOffset - currentAnchorOffset
+							: 0;
+						const size_t currentOffset = currentAnchorOffset > anchorOffset
+							? currentAnchorOffset - anchorOffset
+							: 0;
+						const size_t overlapSize = (std::min)(
+							persistedBlob.size() - persistedOffset,
+							currentBlob.size() - currentOffset);
+						keepBetter(compareAligned(persistedOffset, currentOffset, overlapSize));
+						searchPosition = found + 1;
+					}
+				}
+			}
+
+			size_t matchingPrefix = 0;
+			while (matchingPrefix < smallerSize &&
+				persistedBlob[matchingPrefix] == currentBlob[matchingPrefix])
+				++matchingPrefix;
+
+			size_t matchingSuffix = 0;
+			while (matchingSuffix < smallerSize - matchingPrefix &&
+				persistedBlob[persistedBlob.size() - 1 - matchingSuffix] ==
+					currentBlob[currentBlob.size() - 1 - matchingSuffix])
+			{
+				++matchingSuffix;
+			}
+
+			CachedBlobContentMatch splitMatch{};
+			splitMatch.matchingRatio = static_cast<double>(matchingPrefix + matchingSuffix) /
+				static_cast<double>(largerSize);
+			splitMatch.longestMatchingRun = (std::max)(matchingPrefix, matchingSuffix);
+			keepBetter(splitMatch);
 			return match;
 		}
 
-		bool CachedBlobLengthMatches(const std::string& serializedLength, size_t currentBlobSize)
+		bool CachedBlobLengthsCanMatch(size_t persistedBlobSize, size_t currentBlobSize)
 		{
+			const size_t smallerSize = (std::min)(persistedBlobSize, currentBlobSize);
+			const size_t largerSize = (std::max)(persistedBlobSize, currentBlobSize);
+			return smallerSize >= minimumContentMatchSize && largerSize > 0 &&
+				static_cast<double>(smallerSize) / static_cast<double>(largerSize) >= minimumMatchingByteRatio;
+		}
+
+		bool TryParseCachedBlobLength(const std::string& serializedLength, size_t& outLength)
+		{
+			outLength = 0;
 			if (serializedLength.empty())
 				return false;
 
 			char* parseEnd = nullptr;
 			const unsigned long long parsedLength = _strtoui64(serializedLength.c_str(), &parseEnd, 10);
-			return parseEnd != serializedLength.c_str() && *parseEnd == '\0' && parsedLength == currentBlobSize;
+			if (parseEnd == serializedLength.c_str() || *parseEnd != '\0' || parsedLength > SIZE_MAX)
+				return false;
+			outLength = static_cast<size_t>(parsedLength);
+			return true;
+		}
+
+		bool CachedBlobLengthCanMatch(const std::string& serializedLength, size_t currentBlobSize)
+		{
+			size_t persistedBlobSize = 0;
+			return TryParseCachedBlobLength(serializedLength, persistedBlobSize) &&
+				CachedBlobLengthsCanMatch(persistedBlobSize, currentBlobSize);
+		}
+
+		bool CachedBlobMetadataMatches(
+			const ShaderTarget::ShaderTargetDisk& replacement,
+			SIZE_T cachedBlobSize,
+			uint64_t rootSignatureHash)
+		{
+			if (!cachedBlobSize || !rootSignatureHash)
+				return false;
+
+			const auto entryMatches = [&](const std::string& length, const std::string& rootHash)
+			{
+				size_t parsedLength = 0;
+				return TryParseCachedBlobLength(length, parsedLength) &&
+					parsedLength == cachedBlobSize &&
+					Hash::ParseHashText(rootHash) == rootSignatureHash;
+			};
+
+			std::vector<std::string> matchingPipelineStreamPaths;
+			if (PersistedPipelineEntryTargetsShader(replacement, replacement) &&
+				entryMatches(replacement.pipelineCachedBlobLength, replacement.rootSignatureHash))
+			{
+				matchingPipelineStreamPaths.push_back(replacement.pipelineStreamBlobPath);
+			}
+			for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
+			{
+				if (PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate) &&
+					entryMatches(pipelineTemplate.pipelineCachedBlobLength, pipelineTemplate.rootSignatureHash))
+				{
+					matchingPipelineStreamPaths.push_back(pipelineTemplate.pipelineStreamBlobPath);
+				}
+			}
+
+			if (matchingPipelineStreamPaths.empty())
+				return false;
+			if (matchingPipelineStreamPaths.size() == 1)
+				return true;
+
+			// Root signature and cache length can be shared by multiple fixed-function
+			// variants of the same shader. Permit metadata recovery only when all matching
+			// entries serialize the same pipeline stream; otherwise the cache bytes are
+			// required to select the correct raster/depth/blend state.
+			uint64_t matchingPipelineStreamHash = 0;
+			for (const std::string& pipelineStreamPath : matchingPipelineStreamPaths)
+			{
+				const uint64_t pipelineStreamHash = CanonicalPipelineStreamSidecarHash(pipelineStreamPath);
+				if (!pipelineStreamHash)
+					return false;
+				if (!matchingPipelineStreamHash)
+					matchingPipelineStreamHash = pipelineStreamHash;
+				else if (matchingPipelineStreamHash != pipelineStreamHash)
+					return false;
+			}
+			return true;
 		}
 
 		CachedBlobContentMatch BestCachedBlobContentMatch(
@@ -237,10 +504,21 @@ namespace HookD3D12
 				// Driver cache sidecars can be large and a target may contain many templates.
 				// Length metadata lets us reject almost every candidate without loading it
 				// from disk or comparing it byte-by-byte on the render thread.
-				if (!CachedBlobLengthMatches(serializedLength, currentBlob.size()))
+				if (!CachedBlobLengthCanMatch(serializedLength, currentBlob.size()))
 					return;
 
-				const CachedBlobContentMatch match = CompareCachedBlobContent(LoadCachedBlobSidecar(path), currentBlob);
+				double matchingRatio = 0.0;
+				size_t longestMatchingRun = 0;
+				if (!MatchPersistedCachedBlobContent(
+					path,
+					serializedLength,
+					currentBlob,
+					matchingRatio,
+					longestMatchingRun))
+				{
+					return;
+				}
+				const CachedBlobContentMatch match{ matchingRatio, longestMatchingRun };
 				if (match.matchingRatio > bestMatch.matchingRatio ||
 					(match.matchingRatio == bestMatch.matchingRatio && match.longestMatchingRun > bestMatch.longestMatchingRun))
 				{
@@ -248,9 +526,13 @@ namespace HookD3D12
 				}
 			};
 
-			considerPath(replacement.pipelineCachedBlobPath, replacement.pipelineCachedBlobLength);
+			if (PersistedPipelineEntryTargetsShader(replacement, replacement))
+				considerPath(replacement.pipelineCachedBlobPath, replacement.pipelineCachedBlobLength);
 			for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
-				considerPath(pipelineTemplate.pipelineCachedBlobPath, pipelineTemplate.pipelineCachedBlobLength);
+			{
+				if (PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate))
+					considerPath(pipelineTemplate.pipelineCachedBlobPath, pipelineTemplate.pipelineCachedBlobLength);
+			}
 
 			return bestMatch;
 		}
@@ -259,9 +541,66 @@ namespace HookD3D12
 	void ResetCachedBlobContentLookup()
 	{
 		gCachedBlobSidecars.clear();
+		gPipelineStreamSidecarHashes.clear();
 		gCapturedShaderLocations.clear();
 		gIndexedGraphicsPipelineCount = 0;
 		gIndexedStreamPipelineCount = 0;
+	}
+
+	bool PersistedPipelineEntryTargetsShader(
+		const ShaderTarget::ShaderTargetDisk& replacement,
+		const ShaderTarget::ShaderTargetDisk& pipelineEntry)
+	{
+		return TargetContainsSerializedShaderHash(
+			replacement,
+			SerializedShaderHashForType(pipelineEntry, replacement.shaderType));
+	}
+
+	bool PersistedPipelineEntryTargetsShader(
+		const ShaderTarget::ShaderTargetDisk& replacement,
+		const ShaderTarget::ShaderPipelineTemplateDisk& pipelineEntry)
+	{
+		return TargetContainsSerializedShaderHash(
+			replacement,
+			SerializedShaderHashForType(pipelineEntry, replacement.shaderType));
+	}
+
+	bool PersistedPipelineStreamsAreEquivalent(
+		const std::string& firstStreamPath,
+		const std::string& secondStreamPath)
+	{
+		const uint64_t firstHash = CanonicalPipelineStreamSidecarHash(firstStreamPath);
+		return firstHash != 0 && firstHash == CanonicalPipelineStreamSidecarHash(secondStreamPath);
+	}
+
+	bool MatchPersistedCachedBlobContent(
+		const std::string& persistedBlobPath,
+		const std::string& persistedBlobLength,
+		const std::vector<uint8_t>& currentBlob,
+		double& outMatchingRatio,
+		size_t& outLongestMatchingRun)
+	{
+		outMatchingRatio = 0.0;
+		outLongestMatchingRun = 0;
+		if (persistedBlobPath.empty() ||
+			!CachedBlobLengthCanMatch(persistedBlobLength, currentBlob.size()))
+		{
+			return false;
+		}
+
+		const std::vector<uint8_t>& persistedBlob = LoadCachedBlobSidecar(persistedBlobPath);
+		const CachedBlobContentMatch match = CompareCachedBlobContent(persistedBlob, currentBlob);
+		const size_t largerSize = (std::max)(persistedBlob.size(), currentBlob.size());
+		const size_t minimumStableRun = static_cast<size_t>(largerSize * minimumStableRunRatio);
+		if (match.matchingRatio < minimumMatchingByteRatio ||
+			match.longestMatchingRun < minimumStableRun)
+		{
+			return false;
+		}
+
+		outMatchingRatio = match.matchingRatio;
+		outLongestMatchingRun = match.longestMatchingRun;
+		return true;
 	}
 
 	bool GetPipelineCachedBlobInfo(ID3D12PipelineState* pipelineState, uint64_t& outHash, SIZE_T& outSize, std::vector<uint8_t>* outBytes)
@@ -302,7 +641,63 @@ namespace HookD3D12
 
 	bool SupportsCachedBlobContentMatching(SIZE_T cachedBlobSize)
 	{
-		return cachedBlobSize >= minimumContentMatchSize;
+		if (cachedBlobSize < minimumContentMatchSize)
+			return false;
+
+		// The content matcher permits only the tiny size delta that could still meet
+		// its strict identity threshold. Do this metadata-only check before querying
+		// the driver for another blob or spending a rebuild slot.
+		for (const auto& target : gLoadedShaderTargets)
+		{
+			if (!IsShaderTargetEffectivelyEnabled(target))
+				continue;
+			if (PersistedPipelineEntryTargetsShader(target, target) &&
+				CachedBlobLengthCanMatch(target.pipelineCachedBlobLength, cachedBlobSize))
+			{
+				return true;
+			}
+			for (const auto& pipelineTemplate : target.pipelineTemplates)
+			{
+				if (PersistedPipelineEntryTargetsShader(target, pipelineTemplate) &&
+					CachedBlobLengthCanMatch(pipelineTemplate.pipelineCachedBlobLength, cachedBlobSize))
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	bool SupportsCachedBlobMetadataMatching(SIZE_T cachedBlobSize)
+	{
+		if (!cachedBlobSize)
+			return false;
+
+		for (const ShaderTarget::ShaderTargetDisk& target : gLoadedShaderTargets)
+		{
+			if (!IsShaderTargetEffectivelyEnabled(target))
+				continue;
+
+			size_t serializedLength = 0;
+			if (PersistedPipelineEntryTargetsShader(target, target) &&
+				TryParseCachedBlobLength(target.pipelineCachedBlobLength, serializedLength) &&
+				serializedLength == cachedBlobSize)
+			{
+				return true;
+			}
+
+			for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : target.pipelineTemplates)
+			{
+				if (PersistedPipelineEntryTargetsShader(target, pipelineTemplate) &&
+					TryParseCachedBlobLength(pipelineTemplate.pipelineCachedBlobLength, serializedLength) &&
+					serializedLength == cachedBlobSize)
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	bool ReplacementHasCachedBlobHash(const ShaderTarget::ShaderTargetDisk& replacement, uint64_t cachedBlobHash)
@@ -310,13 +705,25 @@ namespace HookD3D12
 		if (!cachedBlobHash)
 			return false;
 
-		if (Hash::ParseHashText(replacement.pipelineCachedBlobHash) == cachedBlobHash)
+		if (PersistedPipelineEntryTargetsShader(replacement, replacement) &&
+			CachedBlobHashMatches(
+				replacement.pipelineCachedBlobHash,
+				replacement.pipelineCachedBlobHashAliases,
+				cachedBlobHash))
+		{
 			return true;
+		}
 
 		for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
 		{
-			if (Hash::ParseHashText(pipelineTemplate.pipelineCachedBlobHash) == cachedBlobHash)
+			if (PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate) &&
+				CachedBlobHashMatches(
+					pipelineTemplate.pipelineCachedBlobHash,
+					pipelineTemplate.pipelineCachedBlobHashAliases,
+					cachedBlobHash))
+			{
 				return true;
+			}
 		}
 
 		return false;
@@ -339,6 +746,39 @@ namespace HookD3D12
 		}
 
 		return -1;
+	}
+
+	int FindEnabledShaderTargetByCachedBlobMetadata(
+		SIZE_T cachedBlobSize,
+		uint64_t rootSignatureHash,
+		bool computePipeline)
+	{
+		if (!cachedBlobSize || !rootSignatureHash)
+			return -1;
+
+		int matchedReplacementIndex = -1;
+		for (int replacementIndex = 0;
+			replacementIndex < static_cast<int>(gLoadedShaderTargets.size());
+			++replacementIndex)
+		{
+			const ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
+			if (!IsShaderTargetEffectivelyEnabled(replacement))
+				continue;
+			const bool replacementIsCompute = replacement.shaderType == ShaderTarget::ComputeShader;
+			if (replacementIsCompute != computePipeline ||
+				!CachedBlobMetadataMatches(replacement, cachedBlobSize, rootSignatureHash))
+			{
+				continue;
+			}
+
+			// Cache length and root signature are a guarded recovery identity, not a
+			// globally unique key. Refuse an ambiguous pair rather than replacing an
+			// unrelated PSO that happens to share both pieces of metadata.
+			if (matchedReplacementIndex >= 0)
+				return -1;
+			matchedReplacementIndex = replacementIndex;
+		}
+		return matchedReplacementIndex;
 	}
 
 	int FindEnabledShaderTargetByCachedBlobContent(

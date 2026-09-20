@@ -31,6 +31,10 @@ namespace HookD3D12
 		ShaderTarget::ShaderTargetDisk& replacement,
 		ShaderTarget::ShaderType shaderType,
 		uint64_t shaderHash);
+	bool PersistObservedPipelineCacheAlias(
+		ShaderTarget::ShaderTargetDisk& replacement,
+		const std::string& pipelineTemplateName,
+		uint64_t cachedBlobHash);
 	bool SelectPersistedPipelineTemplateForUncaptured(
 		const ShaderTarget::ShaderTargetDisk& replacement,
 		const UncapturedPipelineStateInfo& uncaptured,

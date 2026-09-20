@@ -37,12 +37,14 @@ namespace
 		bool changed = false;
 
 		ImGui::SetNextItemWidth(220.0f * Globals::gShaderInjectorGUIScale);
+
 		if (ImGui::BeginCombo(label, preview.c_str()))
 		{
 			for (const Keycodes::KeycodeOption& option : Keycodes::SelectableKeycodes())
 			{
 				const bool selected = keycode == option.value;
 				const std::string optionLabel = option.name + " (" + std::to_string(option.value) + ")";
+
 				if (ImGui::Selectable(optionLabel.c_str(), selected))
 				{
 					keycode = option.value;
@@ -106,6 +108,7 @@ namespace ShaderInjectorGUI
 				WriteToRuntimeLogError("Could not save MenuScale to ShaderInjector.ini.");
 
 			const float settingsButtonWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+
 			if (ImGui::Button("Edit Injector Settings", ImVec2(settingsButtonWidth, 0)) && !ShaderInjectorIO::OpenFile(ShaderInjectorIO::GetInjectorSettingsPath()))
 				WriteToRuntimeLogError("Could not open ShaderInjector.ini.");
 

@@ -215,6 +215,7 @@ namespace Keycodes
 			for (int value = 8; value <= 254; ++value)
 			{
 				std::string name = KeycodeToString(value);
+
 				if (name != "Unknown")
 					result.push_back({ value, std::move(name) });
 			}

@@ -21,6 +21,21 @@ namespace HookD3D12
 {
 	namespace
 	{
+		uint64_t GraphicsShaderHashForType(
+			const GraphicsPipelineInfo& pipeline,
+			ShaderTarget::ShaderType shaderType)
+		{
+			switch (shaderType)
+			{
+				case ShaderTarget::VertexShader: return pipeline.vsHash;
+				case ShaderTarget::HullShader: return pipeline.hsHash;
+				case ShaderTarget::DomainShader: return pipeline.dsHash;
+				case ShaderTarget::GeometryShader: return pipeline.gsHash;
+				case ShaderTarget::PixelShader: return pipeline.psHash;
+				default: return 0;
+			}
+		}
+
 		bool CreateShaderTarget(
 			const std::string& sourceList,
 			int pipelineIndex,
@@ -41,6 +56,17 @@ namespace HookD3D12
 				return false;
 			}
 
+			const bool pipelineContainsRequestedShader =
+				(graphicsInfo && GraphicsShaderHashForType(*graphicsInfo, shaderType) == shaderHash) ||
+				(streamInfo && StreamPipelineHasShaderHash(*streamInfo, shaderType, shaderHash));
+			if (!pipelineContainsRequestedShader)
+			{
+				ShaderInjectorGUI::WriteToRuntimeLogError(
+					"HookD3D12ReplacementCreation->CreateReplacementShaderTemplate: refusing mismatched pipeline for " +
+					StringHelper::ShaderTypeToString(shaderType) + " " + Hash::FormatHash(shaderHash));
+				return false;
+			}
+
 			const ULONGLONG creationStartTick = GetTickCount64();
 			const std::string hashText = Hash::FormatHash(shaderHash);
 			const std::string shaderTypeText = StringHelper::ShaderTypeToString(shaderType);
@@ -57,7 +83,7 @@ namespace HookD3D12
 			}
 
 			ShaderTarget::ShaderTargetDisk replacement{};
-			replacement.schemaVersion = 5;
+			replacement.schemaVersion = 6;
 			// Replacements remain enabled unless the user explicitly disables them.
 			// Matching safety is enforced by exact hashes and verified blob content.
 			replacement.enabled = true;

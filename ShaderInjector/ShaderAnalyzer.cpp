@@ -42,11 +42,13 @@ namespace ShaderAnalyzer
 		std::string FourCCText(uint32_t kind)
 		{
 			std::string text(4, ' ');
+
 			for (size_t index = 0; index < text.size(); ++index)
 			{
 				const char character = static_cast<char>((kind >> (index * 8)) & 0xff);
 				text[index] = character >= 32 && character <= 126 ? character : '?';
 			}
+
 			return text;
 		}
 
@@ -303,6 +305,7 @@ namespace ShaderAnalyzer
 					{
 						const size_t nameStart = trimmedLine.find('@');
 						const size_t nameEnd = nameStart == std::string::npos ? std::string::npos : trimmedLine.find('(', nameStart + 1);
+
 						if (nameStart != std::string::npos && nameEnd != std::string::npos)
 							analysis.entryFunctionName = trimmedLine.substr(nameStart + 1, nameEnd - nameStart - 1);
 					}
@@ -343,6 +346,7 @@ namespace ShaderAnalyzer
 				static_cast<size_t>((std::numeric_limits<uint32_t>::max)())));
 
 			std::ostringstream canonicalInstructions;
+
 			for (const std::string& instruction : normalizedInstructions)
 				canonicalInstructions << instruction << '\n';
 

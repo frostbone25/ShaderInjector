@@ -1,4 +1,5 @@
 #include "ShaderAutomaticDiscovery.h"
+#include "Enum/ShaderAutomaticDiscoveryPipelineSource.h"
 
 #include <deque>
 #include <vector>
@@ -21,6 +22,7 @@
 #include "Hash.h"
 #include "HookD3D12.h"
 #include "HookD3D12PipelineUtils.h"
+#include "HookD3D12ReplacementTemplates.h"
 #include "ShaderAnalysis.h"
 #include "ShaderDiscovery.h"
 #include "GUI/ShaderInjectorGUI.h"
@@ -90,11 +92,6 @@ namespace ShaderAutomaticDiscovery
 			}
 		};
 
-		enum class PipelineSource
-		{
-			Graphics,
-			Stream,
-		};
 
 		struct QueuedShader
 		{
@@ -779,13 +776,30 @@ namespace ShaderAutomaticDiscovery
 			return true;
 		}
 
-		bool CopyGraphicsPipeline(ID3D12PipelineState* pipelineState, HookD3D12::GraphicsPipelineInfo& outPipeline)
+		bool CopyGraphicsPipeline(
+			ID3D12PipelineState* pipelineState,
+			ShaderTarget::ShaderType shaderType,
+			uint64_t shaderHash,
+			HookD3D12::GraphicsPipelineInfo& outPipeline)
 		{
 			std::lock_guard<std::mutex> lock(HookD3D12::gPipelineMutex);
 
 			for (const HookD3D12::GraphicsPipelineInfo& pipeline : HookD3D12::gGraphicsPipelines)
 			{
 				if (pipeline.pipelineState != pipelineState)
+					continue;
+
+				uint64_t pipelineShaderHash = 0;
+				switch (shaderType)
+				{
+					case ShaderTarget::VertexShader: pipelineShaderHash = pipeline.vsHash; break;
+					case ShaderTarget::HullShader: pipelineShaderHash = pipeline.hsHash; break;
+					case ShaderTarget::DomainShader: pipelineShaderHash = pipeline.dsHash; break;
+					case ShaderTarget::GeometryShader: pipelineShaderHash = pipeline.gsHash; break;
+					case ShaderTarget::PixelShader: pipelineShaderHash = pipeline.psHash; break;
+					default: break;
+				}
+				if (pipelineShaderHash != shaderHash)
 					continue;
 
 				outPipeline = pipeline;
@@ -801,13 +815,18 @@ namespace ShaderAutomaticDiscovery
 			return false;
 		}
 
-		bool CopyStreamPipeline(ID3D12PipelineState* pipelineState, HookD3D12::PipelineStateInfo& outPipeline)
+		bool CopyStreamPipeline(
+			ID3D12PipelineState* pipelineState,
+			ShaderTarget::ShaderType shaderType,
+			uint64_t shaderHash,
+			HookD3D12::PipelineStateInfo& outPipeline)
 		{
 			std::lock_guard<std::mutex> lock(HookD3D12::gPipelineMutex);
 
 			for (const HookD3D12::PipelineStateInfo& pipeline : HookD3D12::gPipelineStates)
 			{
-				if (pipeline.pipelineState != pipelineState)
+				if (pipeline.pipelineState != pipelineState ||
+					!HookD3D12::StreamPipelineHasShaderHash(pipeline, shaderType, shaderHash))
 					continue;
 
 				outPipeline = pipeline;
@@ -912,7 +931,8 @@ namespace ShaderAutomaticDiscovery
 			{
 				HookD3D12::GraphicsPipelineInfo pipeline{};
 
-				if (CopyGraphicsPipeline(queued.pipelineState.Get(), pipeline))
+				if (CopyGraphicsPipeline(
+					queued.pipelineState.Get(), queued.key.type, queued.key.hash, pipeline))
 				{
 					CreateTargetForMatch("Graphics", pipeline, queued, modifiedShaderId, shaderAnalysis);
 
@@ -924,7 +944,8 @@ namespace ShaderAutomaticDiscovery
 			{
 				HookD3D12::PipelineStateInfo pipeline{};
 
-				if (CopyStreamPipeline(queued.pipelineState.Get(), pipeline))
+				if (CopyStreamPipeline(
+					queued.pipelineState.Get(), queued.key.type, queued.key.hash, pipeline))
 				{
 					CreateTargetForMatch("Stream", pipeline, queued, modifiedShaderId, shaderAnalysis);
 

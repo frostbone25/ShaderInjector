@@ -1,17 +1,14 @@
 //ShaderInjectorIO.h
 #pragma once
+#include "Enum/ShaderSignaturePacking.h"
+#include "Enum/RegistryHive.h"
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
 namespace ShaderInjectorIO
 {
-	enum class RegistryHive
-	{
-		CurrentUser,
-		LocalMachine,
-	};
-
 	//string helpers
 	static const std::string extensionBIN = ".bin"; //binary shader bytecode dumps
 	static const std::string extensionHLSL = ".hlsl"; //shader source code
@@ -24,6 +21,8 @@ namespace ShaderInjectorIO
 	static const char* injectorSettingsName = "ShaderInjector.ini";
 
 	//generic IO
+	std::filesystem::path PathFromUtf8(const std::string& path);
+	std::string PathToUtf8(const std::filesystem::path& path);
 	bool PathExists(const std::string& path);
 	bool FileExists(const std::string& path);
 	void DeleteFileIfExists(const std::string& path);
@@ -51,6 +50,7 @@ namespace ShaderInjectorIO
 	//directories/paths
 	std::string GetGameDirectory();
 	std::string GetShaderInjectorDirectory();
+	std::string GetInternalDirectory();
 	std::string GetDumpsDirectory();
 	std::string GetUncapturedPSODirectory();
 	std::string GetLogsDirectory();
@@ -70,6 +70,7 @@ namespace ShaderInjectorIO
 	//logs
 	void RotateLogFiles();
 	void WriteToLogFile(const std::string& text);
+	void WriteToLogFileStatus(const std::string& text);
 	void WriteToLogFileError(const std::string& text);
 	void WriteToLogFileSuccess(const std::string& text);
 	void WriteToLogFileWarning(const std::string& text);
@@ -77,12 +78,17 @@ namespace ShaderInjectorIO
 	//shader
 	bool GenerateShaderTextDXIL(const std::string shaderBytecodeFilePath);
 	bool DumpShaderBytecode(const void* bytecode, size_t size, uint64_t hash, const std::string namePrefix, const std::string& directory);
-	bool CompileSourceToDXILBlob(const std::string& shaderSourceFilePath, const std::string& shaderProfile, const std::string& entryPoint, std::string& outBlobPath);
+	bool CompileSourceToDXILBlob(
+		const std::string& shaderSourceFilePath,
+		const std::string& shaderProfile,
+		const std::string& entryPoint,
+		std::string& outBlobPath,
+		ShaderSignaturePacking signaturePacking = ShaderSignaturePacking::PrefixStable);
 	bool LoadDXILBlobFromDisk(const std::string& shaderBlobFilePath, std::vector<uint8_t>& outBlob);
 
 	//shader internal resources
 	static const std::string internalMarkerPixelShaderName = "InternalMarkerPixelShader";
-	static const std::string internalNullPixelShaderName = "PixelShaderNull";
+	static const std::string internalNullPixelShaderName = "InternalNullPixelShader";
 	static const std::string internalMarkerComputeShaderName = "InternalMarkerComputeShader";
 	std::string GetInternalMarkerPixelShaderSourceCodeFilePath();
 	std::string GetInternalMarkerPixelShaderBlobFilePath();
@@ -94,7 +100,6 @@ namespace ShaderInjectorIO
 	bool WriteInternalMarkerPixelShaderSourceCodeToDisk();
 	bool WriteInternalNullPixelShaderSourceCodeToDisk();
 	bool WriteInternalMarkerComputeShaderSourceCodeToDisk();
-	bool RecompileAndReloadInternalShaders();
 
 	//injector settings
 	bool ReadInjectorSettings();

@@ -1,4 +1,5 @@
 #include "RenderPass/RenderPassGraph.h"
+#include "Enum/RenderPassGraphVisitState.h"
 
 #include <algorithm>
 #include <functional>
@@ -8,12 +9,6 @@ namespace RenderPassGraph
 {
 	namespace
 	{
-		enum class VisitState : uint8_t
-		{
-			Unvisited,
-			Visiting,
-			Complete,
-		};
 
 		void AddDependency(CompiledNode& node, size_t dependencyIndex)
 		{

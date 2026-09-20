@@ -1,4 +1,6 @@
 #pragma once
+#include "Enum/PipelineSourceList.h"
+#include "Enum/PixelShaderSelectionStyle.h"
 #include <cstdint>
 #include <dxgi.h>
 #include <d3d12.h>
@@ -6,6 +8,8 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <memory>
+#include <wrl/client.h>
 
 //custom
 #include "ShaderTarget/ShaderTarget.h"
@@ -27,12 +31,6 @@ namespace HookD3D12
 		REFIID interfaceId,
 		void** pipelineState);
 
-	enum class PixelShaderSelectionStyle
-	{
-		BluePixelShader = 0,
-		Hidden = 1,
-		None = 2,
-	};
 
 	struct D3D12PipelineInfo
 	{
@@ -158,6 +156,9 @@ namespace HookD3D12
 	struct UncapturedPipelineStateInfo
 	{
 		ID3D12PipelineState* pipelineState = nullptr;
+		// Keep the exact verified variant for render passes on warmed-cache runs.
+		std::shared_ptr<const PipelineStateInfo> rebuildTemplate;
+		Microsoft::WRL::ComPtr<ID3D12RootSignature> rebuildRootSignature;
 		uint64_t cachedBlobHash = 0;
 		SIZE_T cachedBlobSize = 0;
 		std::vector<uint8_t> cachedBlob;
@@ -172,6 +173,9 @@ namespace HookD3D12
 		uint8_t shaderTargetApplyFailureCount = 0;
 		bool shaderTargetApplyRetryQueued = false;
 	};
+
+	// Borrowed template; caller holds gPipelineMutex while using it.
+	const PipelineStateInfo* FindUncapturedRebuildTemplateLocked(ID3D12PipelineState* pipelineState);
 
 	struct FrameContext
 	{
@@ -199,8 +203,7 @@ namespace HookD3D12
 
 	struct PSOPendingRebuild
 	{
-		enum class SourceList { Graphics, Stream };
-		SourceList source;
+		PipelineSourceList source;
 		int index;
 		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetType;
 	};

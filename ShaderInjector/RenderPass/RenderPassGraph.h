@@ -1,4 +1,5 @@
 #pragma once
+#include "Enum/RenderPassGraphBoundary.h"
 
 #include <array>
 #include <cstddef>
@@ -13,11 +14,6 @@ namespace RenderPassGraph
 {
 	inline constexpr size_t invalidNodeIndex = static_cast<size_t>(-1);
 
-	enum class Boundary : uint8_t
-	{
-		Before,
-		After,
-	};
 
 	struct CompiledNode
 	{

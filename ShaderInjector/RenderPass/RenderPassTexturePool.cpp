@@ -28,6 +28,7 @@ namespace RenderPassTexturePool
 
 		struct TextureVersion
 		{
+			bool written = false;
 			ComPtr<ID3D12Resource> resource;
 			ComPtr<ID3D12DescriptorHeap> shaderViewHeap;
 			ComPtr<ID3D12DescriptorHeap> renderTargetViewHeap;
@@ -44,11 +45,18 @@ namespace RenderPassTexturePool
 			std::array<TextureVersion, 2> versions;
 			uint32_t versionCount = 0;
 			uint64_t generation = 0;
+			uint64_t allocationBytes = 0;
 		};
 
 		std::mutex gPoolMutex;
 		std::unordered_map<std::string, DefinitionRecord> gDefinitions;
 		std::unordered_map<std::string, TextureEntry> gTextures;
+		struct HistoryBootstrapTexture
+		{
+			ComPtr<ID3D12Device> device;
+			TextureView texture;
+		};
+		std::unordered_map<std::string, HistoryBootstrapTexture> gHistoryBootstrapTextures;
 		// Configuration and resolution changes are rare. Retaining replaced allocations
 		// avoids releasing a texture while an already-recorded game command list uses it.
 		std::vector<TextureEntry> gRetiredTextures;
@@ -63,6 +71,12 @@ namespace RenderPassTexturePool
 			TextureView texture;
 		};
 		thread_local std::vector<InputTextureOverride> gInputTextureOverrides;
+		thread_local size_t gExecutionScopeDepth = 0;
+		thread_local uint64_t gExecutionFrameIndex = 0;
+		uint64_t CurrentFrameIndex()
+		{
+			return gExecutionScopeDepth ? gExecutionFrameIndex : gFrameIndex.load(std::memory_order_acquire);
+		}
 		constexpr D3D12_RESOURCE_STATES shaderReadState =
 			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
 			D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
@@ -503,7 +517,7 @@ namespace RenderPassTexturePool
 			newEntry.versionCount = resolvedDescription.lifetime == ShaderResource::ResourceLifetime::History
 				? 2u
 				: 1u;
-			newEntry.generation = gTextureGeneration.fetch_add(1, std::memory_order_relaxed);
+			newEntry.generation = gTextureGeneration.load(std::memory_order_relaxed) + 1;
 			for (uint32_t versionIndex = 0; versionIndex < newEntry.versionCount; ++versionIndex)
 			{
 				const std::string resourceName = "Shader Injector Runtime: " +
@@ -520,6 +534,10 @@ namespace RenderPassTexturePool
 				}
 			}
 
+			const D3D12_RESOURCE_DESC allocationDescription = BuildD3D12Description(resolvedDescription);
+			newEntry.allocationBytes = device->GetResourceAllocationInfo(0, 1, &allocationDescription).SizeInBytes *
+				newEntry.versionCount;
+
 			if (textureIt != gTextures.end())
 			{
 				gRetiredTextures.push_back(std::move(textureIt->second));
@@ -530,6 +548,8 @@ namespace RenderPassTexturePool
 				textureIt = gTextures.emplace(resourceId, std::move(newEntry)).first;
 			}
 
+			// Publish invalidation after the replacement is visible under the pool lock.
+			gTextureGeneration.store(textureIt->second.generation, std::memory_order_release);
 			const TextureEntry& activeEntry = textureIt->second;
 			ShaderResource::CatalogEntry catalogEntry{};
 			catalogEntry.id = resourceId;
@@ -573,13 +593,16 @@ namespace RenderPassTexturePool
 			if (entry.versionCount > 1)
 			{
 				const uint32_t currentIndex = static_cast<uint32_t>(
-					gFrameIndex.load(std::memory_order_acquire) % entry.versionCount);
+					CurrentFrameIndex() % entry.versionCount);
 				versionIndex = temporalView == ShaderResource::TemporalView::Previous
 					? (currentIndex + entry.versionCount - 1) % entry.versionCount
 					: currentIndex;
 			}
 
 			const TextureVersion& version = entry.versions[versionIndex];
+			if (temporalView == ShaderResource::TemporalView::Previous &&
+				entry.versionCount > 1 && !version.written)
+				return false;
 			outTexture.resource = version.resource;
 			outTexture.shaderViewHeap = version.shaderViewHeap;
 			outTexture.renderTargetViewHeap = version.renderTargetViewHeap;
@@ -596,11 +619,16 @@ namespace RenderPassTexturePool
 	ScopedInputTextureOverrides::ScopedInputTextureOverrides()
 		: previousCount(gInputTextureOverrides.size())
 	{
+		// Present may advance on another thread while this graph is recorded.
+		// Keep every input/output in this execution on the same history pair.
+		if (gExecutionScopeDepth++ == 0)
+			gExecutionFrameIndex = gFrameIndex.load(std::memory_order_acquire);
 	}
 
 	ScopedInputTextureOverrides::~ScopedInputTextureOverrides()
 	{
 		gInputTextureOverrides.resize(previousCount);
+		--gExecutionScopeDepth;
 	}
 
 	void OverrideInputTexture(
@@ -653,6 +681,7 @@ namespace RenderPassTexturePool
 
 		std::lock_guard<std::mutex> lock(gPoolMutex);
 		gDefinitions = std::move(definitions);
+		gHistoryBootstrapTextures.clear();
 		for (auto textureIt = gTextures.begin(); textureIt != gTextures.end();)
 		{
 			const auto definitionIt = gDefinitions.find(textureIt->first);
@@ -669,6 +698,71 @@ namespace RenderPassTexturePool
 		}
 		gConfigurationGeneration.fetch_add(1, std::memory_order_release);
 		gHasHistoryResources.store(hasHistoryResources, std::memory_order_release);
+	}
+
+	bool GetHistoryBootstrapTexture(
+		ID3D12Device* device,
+		const std::string& resourceId,
+		TextureView& outTexture)
+	{
+		outTexture = {};
+		if (!device)
+			return false;
+		std::lock_guard<std::mutex> lock(gPoolMutex);
+		const auto definition = gDefinitions.find(resourceId);
+		if (definition == gDefinitions.end() ||
+			definition->second.definition.texture.lifetime != ShaderResource::ResourceLifetime::History)
+			return false;
+		auto& bootstrap = gHistoryBootstrapTextures[resourceId];
+		if (bootstrap.device.Get() != device || !bootstrap.texture.shaderViewHeap)
+		{
+			const auto& source = definition->second.definition.texture;
+			TextureView texture;
+			texture.description.dimension = source.dimension;
+			texture.description.format = source.format
+				? static_cast<DXGI_FORMAT>(source.format) : DXGI_FORMAT_R32G32B32A32_FLOAT;
+			texture.description.shaderViewFormat = texture.description.format;
+			texture.description.width = texture.description.height = texture.description.depth = 1;
+			texture.description.arraySize = (std::max)(1u, source.arraySize);
+			texture.description.mipLevels = 1;
+			texture.description.sampleCount = (std::max)(1u, source.sampleCount);
+			D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+			BuildShaderResourceView(texture.description, view);
+			if (view.ViewDimension == D3D12_SRV_DIMENSION_UNKNOWN)
+				return false;
+			D3D12_DESCRIPTOR_HEAP_DESC heap{};
+			heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+			heap.NumDescriptors = 1;
+			if (FAILED(device->CreateDescriptorHeap(&heap, IID_PPV_ARGS(&texture.shaderViewHeap))))
+				return false;
+			texture.shaderResourceView = texture.shaderViewHeap->GetCPUDescriptorHandleForHeapStart();
+			device->CreateShaderResourceView(nullptr, &view, texture.shaderResourceView);
+			bootstrap = { device, std::move(texture) };
+			ShaderInjectorIO::WriteToLogFile(
+				"RenderPassTexturePool->GetHistoryBootstrapTexture: zero history for first use id=" + resourceId);
+		}
+		outTexture = bootstrap.texture;
+		return true;
+	}
+
+	void MarkPassOutputsWritten(const RenderPass::RenderPassDisk& renderPass)
+	{
+		const bool ownsHistory = std::any_of(renderPass.runtimeResources.begin(), renderPass.runtimeResources.end(),
+			[](const auto& definition) { return definition.texture.lifetime == ShaderResource::ResourceLifetime::History; });
+		if (!ownsHistory)
+			return;
+		std::lock_guard<std::mutex> lock(gPoolMutex);
+		const uint64_t frameIndex = CurrentFrameIndex();
+		for (const auto& output : renderPass.outputs)
+		{
+			if (output.origin != ShaderResource::ResourceOrigin::Runtime ||
+				output.temporalView != ShaderResource::TemporalView::Current)
+				continue;
+			const auto texture = gTextures.find(output.resourceId);
+			if (texture != gTextures.end() && texture->second.versionCount > 1 &&
+				texture->second.definition.ownerRenderPassId == renderPass.id)
+				texture->second.versions[frameIndex % texture->second.versionCount].written = true;
+		}
 	}
 
 	bool EnsurePassResources(
@@ -693,17 +787,26 @@ namespace RenderPassTexturePool
 			const RenderPass::RenderPassDisk* renderPass = nullptr;
 			ID3D12GraphicsCommandList* commandList = nullptr;
 			uint64_t configurationGeneration = 0;
+			uint64_t textureEpoch = 0;
 			ReferenceExtent referenceExtent;
 			bool succeeded = false;
 			std::string error;
 		};
-		thread_local std::array<ThreadCacheEntry, 8> cache{};
-		thread_local size_t nextCacheEntry = 0;
-		for (const ThreadCacheEntry& cacheEntry : cache)
+		thread_local std::unordered_map<const RenderPass::RenderPassDisk*, ThreadCacheEntry> cache;
+		thread_local uint64_t cachedConfigurationGeneration = 0;
+		if (cachedConfigurationGeneration != configurationGeneration)
 		{
+			cache.clear();
+			cachedConfigurationGeneration = configurationGeneration;
+		}
+		const auto cached = cache.find(&renderPass);
+		if (cached != cache.end())
+		{
+			const ThreadCacheEntry& cacheEntry = cached->second;
 			if (cacheEntry.renderPass == &renderPass &&
 				cacheEntry.commandList == commandList &&
 				cacheEntry.configurationGeneration == configurationGeneration &&
+				cacheEntry.textureEpoch == gTextureGeneration.load(std::memory_order_acquire) &&
 				cacheEntry.referenceExtent.width == referenceExtent.width &&
 				cacheEntry.referenceExtent.height == referenceExtent.height &&
 				cacheEntry.referenceExtent.dimension == referenceExtent.dimension &&
@@ -728,6 +831,7 @@ namespace RenderPassTexturePool
 		}
 
 		bool resourcesReady = true;
+		uint64_t textureEpoch = 0;
 		{
 			std::lock_guard<std::mutex> lock(gPoolMutex);
 			for (const RenderPass::RuntimeResourceDefinitionDisk& passDefinition : renderPass.runtimeResources)
@@ -746,16 +850,20 @@ namespace RenderPassTexturePool
 					break;
 				}
 			}
+			textureEpoch = gTextureGeneration.load(std::memory_order_relaxed);
 		}
 
-		cache[nextCacheEntry] = {
+		// Failed allocations are not permanent: a referenced texture may be produced
+		// later in this graph execution. Successful entries cover the whole graph,
+		// rather than evicting one another once a chain grows beyond eight passes.
+		if (resourcesReady) cache[&renderPass] = {
 			&renderPass,
 			commandList,
 			configurationGeneration,
+			textureEpoch,
 			referenceExtent,
 			resourcesReady,
 			outError };
-		nextCacheEntry = (nextCacheEntry + 1) % cache.size();
 		return resourcesReady;
 	}
 
@@ -767,25 +875,27 @@ namespace RenderPassTexturePool
 		outTexture = {};
 		struct ThreadTextureLookup
 		{
-			std::string resourceId;
-			ShaderResource::TemporalView temporalView = ShaderResource::TemporalView::Current;
-			uint64_t configurationGeneration = 0;
 			uint64_t textureEpoch = 0;
 			uint64_t frameIndex = 0;
 			bool frameSensitive = false;
 			TextureView texture;
 		};
-		thread_local std::array<ThreadTextureLookup, 16> cache{};
-		thread_local size_t nextCacheEntry = 0;
+		thread_local std::unordered_map<std::string, std::array<ThreadTextureLookup, 2>> cache;
+		thread_local uint64_t cachedConfigurationGeneration = 0;
 		const uint64_t configurationGeneration = gConfigurationGeneration.load(std::memory_order_acquire);
-		const uint64_t textureEpoch = gTextureGeneration.load(std::memory_order_acquire);
-		const uint64_t frameIndex = gFrameIndex.load(std::memory_order_acquire);
-		for (const ThreadTextureLookup& lookup : cache)
+		if (cachedConfigurationGeneration != configurationGeneration)
 		{
-			if (lookup.resourceId == resourceId &&
-				lookup.temporalView == temporalView &&
-				lookup.configurationGeneration == configurationGeneration &&
-				lookup.textureEpoch == textureEpoch &&
+			cache.clear();
+			cachedConfigurationGeneration = configurationGeneration;
+		}
+		const uint64_t textureEpoch = gTextureGeneration.load(std::memory_order_acquire);
+		const uint64_t frameIndex = CurrentFrameIndex();
+		const size_t temporalIndex = temporalView == ShaderResource::TemporalView::Previous ? 1 : 0;
+		const auto cached = cache.find(resourceId);
+		if (cached != cache.end())
+		{
+			const ThreadTextureLookup& lookup = cached->second[temporalIndex];
+			if (lookup.textureEpoch == textureEpoch &&
 				(!lookup.frameSensitive || lookup.frameIndex == frameIndex))
 			{
 				outTexture = lookup.texture;
@@ -799,15 +909,11 @@ namespace RenderPassTexturePool
 			return false;
 		if (!FillTextureViewLocked(textureIt->second, temporalView, outTexture))
 			return false;
-		cache[nextCacheEntry] = {
-			resourceId,
-			temporalView,
-			configurationGeneration,
-			textureEpoch,
+		cache[resourceId][temporalIndex] = {
+			gTextureGeneration.load(std::memory_order_relaxed),
 			frameIndex,
 			textureIt->second.versionCount > 1,
 			outTexture };
-		nextCacheEntry = (nextCacheEntry + 1) % cache.size();
 		return true;
 	}
 
@@ -933,10 +1039,28 @@ namespace RenderPassTexturePool
 	{
 		std::lock_guard<std::mutex> lock(gPoolMutex);
 		gDefinitions.clear();
+		gHistoryBootstrapTextures.clear();
 		gTextures.clear();
 		gRetiredTextures.clear();
 		gFrameIndex.store(0, std::memory_order_release);
 		gHasHistoryResources.store(false, std::memory_order_release);
 		gConfigurationGeneration.fetch_add(1, std::memory_order_release);
+	}
+
+	void LogPerformanceStatistics()
+	{
+		size_t liveTextures = 0, retiredTextures = 0;
+		uint64_t liveBytes = 0, retiredBytes = 0;
+		{
+			std::lock_guard<std::mutex> lock(gPoolMutex);
+			liveTextures = gTextures.size();
+			retiredTextures = gRetiredTextures.size();
+			for (const auto& texture : gTextures) liveBytes += texture.second.allocationBytes;
+			for (const auto& texture : gRetiredTextures) retiredBytes += texture.allocationBytes;
+		}
+		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+			"RenderPassTexturePool->Performance: liveTextures=%zu liveBytes=%llu retiredTextures=%zu retiredBytes=%llu",
+			liveTextures, static_cast<unsigned long long>(liveBytes),
+			retiredTextures, static_cast<unsigned long long>(retiredBytes)));
 	}
 }

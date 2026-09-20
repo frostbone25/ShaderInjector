@@ -1,10 +1,12 @@
 #include "DatabaseModifiedShaders.h"
+#include "DatabaseModifiedShadersInternal.h"
 
 #include <algorithm>
-#include <mutex>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
+#include "Globals.h"
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderDiscovery.h"
 #include "ShaderAutomaticDiscovery.h"
@@ -13,101 +15,12 @@
 namespace DatabaseModifiedShaders
 {
 	std::vector<ModifiedShader::PackageDisk> gModifiedShaders;
+
 	bool gModifiedShadersLoaded = false;
-
-	namespace
-	{
-		std::string JsonFileNameForStem(const std::string& fileStem)
-		{
-			return fileStem + "_Fingerprint" + ShaderInjectorIO::extensionJSON;
-		}
-
-		std::string SourceFileNameForStem(const std::string& fileStem)
-		{
-			return fileStem + "_Source" + ShaderInjectorIO::extensionHLSL;
-		}
-
-		std::string CompiledBlobFileNameForStem(const std::string& fileStem)
-		{
-			return fileStem + "_Compiled" + ShaderInjectorIO::extensionBLOB;
-		}
-
-		bool MoveExistingFileIfNeeded(const std::string& currentPath, const std::string& desiredPath, bool required)
-		{
-			if (ShaderInjectorIO::PathsEqual(currentPath, desiredPath))
-				return true;
-
-			if (!ShaderInjectorIO::FileExists(currentPath))
-				return !required;
-
-			if (ShaderInjectorIO::PathExists(desiredPath))
-				return false;
-
-			return ShaderInjectorIO::MovePath(currentPath, desiredPath);
-		}
-
-		bool MoveModifiedShaderPackageToName(ModifiedShader::PackageDisk& modifiedShader, const std::string& displayName)
-		{
-			const std::string fileStem = ShaderInjectorIO::SanitizeFileStem(displayName);
-			if (fileStem.empty())
-				return false;
-
-			const std::string oldDirectory = modifiedShader.packageDirectory;
-			if (oldDirectory.empty() || !ShaderInjectorIO::DirectoryExists(oldDirectory))
-				return false;
-
-			const std::string oldJsonPath = modifiedShader.jsonPath;
-			const std::string oldSourcePath = modifiedShader.sourcePath;
-			const std::string oldCompiledBlobPath = modifiedShader.compiledBlobPath;
-
-			const std::string desiredDirectory = ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetModifiedShadersDirectory(), fileStem);
-			const bool directoryAlreadyMatches = ShaderInjectorIO::PathsEqual(oldDirectory, desiredDirectory);
-			if (!directoryAlreadyMatches)
-			{
-				if (ShaderInjectorIO::PathExists(desiredDirectory))
-					return false;
-
-				if (!ShaderInjectorIO::MovePath(oldDirectory, desiredDirectory))
-					return false;
-			}
-
-			const std::string currentJsonPath = ShaderInjectorIO::JoinPath(desiredDirectory, ShaderInjectorIO::FileNameFromPath(oldJsonPath));
-			const std::string currentSourcePath = ShaderInjectorIO::JoinPath(desiredDirectory, ShaderInjectorIO::FileNameFromPath(oldSourcePath));
-			const std::string currentCompiledBlobPath = ShaderInjectorIO::JoinPath(desiredDirectory, ShaderInjectorIO::FileNameFromPath(oldCompiledBlobPath));
-
-			const std::string desiredJsonPath = ShaderInjectorIO::JoinPath(desiredDirectory, JsonFileNameForStem(fileStem));
-			const std::string desiredSourcePath = ShaderInjectorIO::JoinPath(desiredDirectory, SourceFileNameForStem(fileStem));
-			const std::string desiredCompiledBlobPath = ShaderInjectorIO::JoinPath(desiredDirectory, CompiledBlobFileNameForStem(fileStem));
-
-			if (!MoveExistingFileIfNeeded(currentSourcePath, desiredSourcePath, true))
-				return false;
-
-			if (!MoveExistingFileIfNeeded(currentCompiledBlobPath, desiredCompiledBlobPath, false))
-				return false;
-
-			modifiedShader.name = displayName;
-			modifiedShader.packageDirectory = desiredDirectory;
-			modifiedShader.sourceFile = ShaderInjectorIO::FileNameFromPath(desiredSourcePath);
-			modifiedShader.sourcePath = desiredSourcePath;
-			modifiedShader.compiledBlobFile = ShaderInjectorIO::FileNameFromPath(desiredCompiledBlobPath);
-			modifiedShader.compiledBlobPath = desiredCompiledBlobPath;
-			modifiedShader.jsonPath = desiredJsonPath;
-
-			if (!ShaderInjectorIO::PathsEqual(currentJsonPath, desiredJsonPath) && ShaderInjectorIO::PathExists(desiredJsonPath))
-				return false;
-
-			if (!ModifiedShader::WriteJson(modifiedShader))
-				return false;
-
-			if (!ShaderInjectorIO::PathsEqual(currentJsonPath, desiredJsonPath))
-				ShaderInjectorIO::DeleteFileIfExists(currentJsonPath);
-
-			return true;
-		}
-	}
 
 	void RefreshModifiedShaders()
 	{
+		//package data and discovery indexes must be rebuilt together so a refresh cannot leave discovery using fingerprints from a previous package list.
 		ShaderDiscovery::ResetRuntimeCache();
 		gModifiedShaders.clear();
 		gModifiedShadersLoaded = true;
@@ -116,7 +29,9 @@ namespace DatabaseModifiedShaders
 		ShaderInjectorIO::DirectoryCreate(modifiedShadersDirectory);
 
 		std::vector<std::string> jsonPaths;
+
 		ShaderInjectorIO::CollectFilesByExtension(modifiedShadersDirectory, ShaderInjectorIO::extensionJSON, jsonPaths, true, true);
+
 		std::sort(jsonPaths.begin(), jsonPaths.end());
 
 		std::unordered_set<std::string> loadedIds;
@@ -128,8 +43,8 @@ namespace DatabaseModifiedShaders
 			if (!ModifiedShader::LoadJson(jsonPath, package))
 				continue;
 
-			// Compiler targets are injector-wide settings. Override package metadata in
-			// memory so existing packages follow the selected profile on recompile.
+			//compiler targets are injector-wide settings.
+			//override package metadata in memory so existing packages follow the selected profile on recompile.
 			package.shaderProfile = StringHelper::ShaderProfileForType(package.shaderType);
 
 			if (package.id.empty() || package.shaderType == ShaderTarget::Unknown ||
@@ -141,6 +56,7 @@ namespace DatabaseModifiedShaders
 				continue;
 			}
 
+			//a package ID may appear in multiple JSON files, but only one package can be active under that ID in the runtime database.
 			if (!loadedIds.insert(package.id).second)
 			{
 				ShaderInjectorIO::WriteToLogFileWarning("DatabaseModifiedShaders->RefreshModifiedShaders: duplicate package id " + package.id);
@@ -148,7 +64,18 @@ namespace DatabaseModifiedShaders
 			}
 
 			if (ShaderInjectorIO::FileExists(package.compiledBlobPath))
+			{
 				ShaderInjectorIO::LoadDXILBlobFromDisk(package.compiledBlobPath, package.compiledBlob);
+				Detail::AnalyzeCompiledBlob(package.compiledBlob, package.compiledShaderAnalysis);
+				package.compiledShaderInterfaceCompatible = Detail::ShaderInterfaceMatchesAnyPackageTarget(package, package.compiledShaderAnalysis);
+
+				if (!package.compiledShaderInterfaceCompatible)
+				{
+					//repair an existing blob only when its reflected interface disagrees with every analyzed target in this package.
+					ShaderInjectorIO::WriteToLogFileWarning("DatabaseModifiedShaders->RefreshModifiedShaders: repairing incompatible compiled interface for " + package.id);
+					package.compiledShaderInterfaceCompatible = Detail::CompileModifiedShaderPackage(package);
+				}
+			}
 
 			gModifiedShaders.push_back(std::move(package));
 		}
@@ -162,7 +89,20 @@ namespace DatabaseModifiedShaders
 
 		ShaderAutomaticDiscovery::RefreshModifiedShaderIndex(gModifiedShaders);
 
-		ShaderInjectorIO::WriteToLogFile("DatabaseModifiedShaders->RefreshModifiedShaders: loaded packages=" + std::to_string(gModifiedShaders.size()));
+		const std::string countMessage = "DatabaseModifiedShaders->RefreshModifiedShaders: loaded packages=" + std::to_string(gModifiedShaders.size());
+
+		if (gModifiedShaders.empty())
+			ShaderInjectorIO::WriteToLogFileWarning(countMessage + " (no modified shaders found)");
+		else
+			ShaderInjectorIO::WriteToLogFileStatus(countMessage);
+
+		if (Globals::gLogModifiedShaderNames)
+		{
+			for (const ModifiedShader::PackageDisk& package : gModifiedShaders)
+			{
+				ShaderInjectorIO::WriteToLogFileStatus("DatabaseModifiedShaders->RefreshModifiedShaders: loaded name=\"" + (package.name.empty() ? package.id : package.name) + "\" id=" + package.id);
+			}
+		}
 	}
 
 	void EnsureModifiedShadersLoaded()
@@ -179,12 +119,17 @@ namespace DatabaseModifiedShaders
 
 	const ModifiedShader::PackageDisk* FindModifiedShaderById(const std::string& modifiedShaderId)
 	{
+		return Detail::FindMutableModifiedShaderById(modifiedShaderId);
+	}
+
+	ModifiedShader::PackageDisk* Detail::FindMutableModifiedShaderById(const std::string& modifiedShaderId)
+	{
 		if (modifiedShaderId.empty())
 			return nullptr;
 
 		EnsureModifiedShadersLoaded();
 
-		for (const ModifiedShader::PackageDisk& modifiedShader : gModifiedShaders)
+		for (ModifiedShader::PackageDisk& modifiedShader : gModifiedShaders)
 		{
 			if (modifiedShader.id == modifiedShaderId)
 				return &modifiedShader;
@@ -199,108 +144,5 @@ namespace DatabaseModifiedShaders
 			return modifiedShader.id;
 
 		return modifiedShader.name + " (" + modifiedShader.id + ")";
-	}
-
-	bool SetModifiedShaderEnabled(const std::string& modifiedShaderId, bool enabled)
-	{
-		EnsureModifiedShadersLoaded();
-
-		for (ModifiedShader::PackageDisk& modifiedShader : gModifiedShaders)
-		{
-			if (modifiedShader.id != modifiedShaderId)
-				continue;
-
-			modifiedShader.enabled = enabled;
-
-			if (!ModifiedShader::WriteJson(modifiedShader))
-				return false;
-
-			RefreshModifiedShaders();
-			return true;
-		}
-
-		return false;
-	}
-
-	bool SetModifiedShaderName(const std::string& modifiedShaderId, const std::string& name)
-	{
-		const std::string displayName = StringHelper::TrimWhitespace(name);
-		if (displayName.empty())
-			return false;
-
-		EnsureModifiedShadersLoaded();
-
-		for (ModifiedShader::PackageDisk& modifiedShader : gModifiedShaders)
-		{
-			if (modifiedShader.id != modifiedShaderId)
-				continue;
-
-			if (!MoveModifiedShaderPackageToName(modifiedShader, displayName))
-				return false;
-
-			RefreshModifiedShaders();
-			return true;
-		}
-
-		return false;
-	}
-
-	bool DeleteModifiedShader(const std::string& modifiedShaderId)
-	{
-		const ModifiedShader::PackageDisk* modifiedShader = FindModifiedShaderById(modifiedShaderId);
-
-		if (!modifiedShader || modifiedShader->packageDirectory.empty())
-			return false;
-
-		const std::string packageDirectory = modifiedShader->packageDirectory;
-
-		if (!ShaderInjectorIO::DeleteDirectoryRecursively(packageDirectory))
-			return false;
-
-		RefreshModifiedShaders();
-		return true;
-	}
-
-	bool CompileModifiedShader(const std::string& modifiedShaderId)
-	{
-		EnsureModifiedShadersLoaded();
-
-		ModifiedShader::PackageDisk* modifiedShader = nullptr;
-
-		for (ModifiedShader::PackageDisk& candidate : gModifiedShaders)
-		{
-			if (candidate.id == modifiedShaderId)
-			{
-				modifiedShader = &candidate;
-				break;
-			}
-		}
-
-		if (!modifiedShader || modifiedShader->sourcePath.empty() || modifiedShader->compiledBlobPath.empty())
-		{
-			return false;
-		}
-
-		modifiedShader->shaderProfile = StringHelper::ShaderProfileForType(modifiedShader->shaderType);
-		if (modifiedShader->shaderProfile.empty())
-			return false;
-
-		std::string compiledBlobPath = modifiedShader->compiledBlobPath;
-
-		if (!ShaderInjectorIO::CompileSourceToDXILBlob(
-			modifiedShader->sourcePath,
-			modifiedShader->shaderProfile,
-			modifiedShader->shaderEntryPoint,
-			compiledBlobPath))
-		{
-			return false;
-		}
-
-		modifiedShader->compiledBlob.clear();
-
-		if (!ShaderInjectorIO::LoadDXILBlobFromDisk(compiledBlobPath, modifiedShader->compiledBlob) || modifiedShader->compiledBlob.empty())
-			return false;
-
-		return ModifiedShader::WriteJson(*modifiedShader);
 	}
 }

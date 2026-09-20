@@ -1,4 +1,9 @@
 #pragma once
+#include "Enum/ShaderResourceTextureDimension.h"
+#include "Enum/ShaderResourceResourceOrigin.h"
+#include "Enum/ShaderResourceResourceLifetime.h"
+#include "Enum/ShaderResourceResolutionMode.h"
+#include "Enum/ShaderResourceTemporalView.h"
 
 #include <cstdint>
 #include <string>
@@ -8,82 +13,6 @@
 
 namespace ShaderResource
 {
-	enum class TextureDimension : uint8_t
-	{
-		Unknown,
-		Texture2D,
-		Texture2DArray,
-		TextureCube,
-		TextureCubeArray,
-		Texture3D,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(TextureDimension,
-	{
-		{ TextureDimension::Unknown, "Unknown" },
-		{ TextureDimension::Texture2D, "Texture2D" },
-		{ TextureDimension::Texture2DArray, "Texture2DArray" },
-		{ TextureDimension::TextureCube, "TextureCube" },
-		{ TextureDimension::TextureCubeArray, "TextureCubeArray" },
-		{ TextureDimension::Texture3D, "Texture3D" },
-	})
-
-	enum class ResourceOrigin : uint8_t
-	{
-		Disk,
-		Game,
-		Runtime,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(ResourceOrigin,
-	{
-		{ ResourceOrigin::Disk, "Disk" },
-		{ ResourceOrigin::Game, "Game" },
-		{ ResourceOrigin::Runtime, "Runtime" },
-	})
-
-	enum class ResourceLifetime : uint8_t
-	{
-		Immutable,
-		Transient,
-		Persistent,
-		History,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(ResourceLifetime,
-	{
-		{ ResourceLifetime::Immutable, "Immutable" },
-		{ ResourceLifetime::Transient, "Transient" },
-		{ ResourceLifetime::Persistent, "Persistent" },
-		{ ResourceLifetime::History, "History" },
-	})
-
-	enum class ResolutionMode : uint8_t
-	{
-		Inherit,
-		DownscalePowerOfTwo,
-		Explicit,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(ResolutionMode,
-	{
-		{ ResolutionMode::Inherit, "Inherit" },
-		{ ResolutionMode::DownscalePowerOfTwo, "DownscalePowerOfTwo" },
-		{ ResolutionMode::Explicit, "Explicit" },
-	})
-
-	enum class TemporalView : uint8_t
-	{
-		Current,
-		Previous,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(TemporalView,
-	{
-		{ TemporalView::Current, "Current" },
-		{ TemporalView::Previous, "Previous" },
-	})
-
 	struct ResolutionPolicyDisk
 	{
 		ResolutionMode mode = ResolutionMode::Inherit;
@@ -128,33 +57,9 @@ namespace ShaderResource
 			allowUnorderedAccess)
 	};
 
-	inline const char* TextureDimensionName(TextureDimension dimension)
-	{
-		switch (dimension)
-		{
-			case TextureDimension::Texture2D: return "Texture2D";
-			case TextureDimension::Texture2DArray: return "Texture2DArray";
-			case TextureDimension::TextureCube: return "TextureCube";
-			case TextureDimension::TextureCubeArray: return "TextureCubeArray";
-			case TextureDimension::Texture3D: return "Texture3D";
-			case TextureDimension::Unknown:
-			default: return "Unknown";
-		}
-	}
+	const char* TextureDimensionName(TextureDimension dimension);
 
-	inline const char* TextureHlslTypeName(TextureDimension dimension)
-	{
-		switch (dimension)
-		{
-			case TextureDimension::Texture2DArray: return "Texture2DArray<float4>";
-			case TextureDimension::TextureCube: return "TextureCube<float4>";
-			case TextureDimension::TextureCubeArray: return "TextureCubeArray<float4>";
-			case TextureDimension::Texture3D: return "Texture3D<float4>";
-			case TextureDimension::Texture2D:
-			case TextureDimension::Unknown:
-			default: return "Texture2D<float4>";
-		}
-	}
+	const char* TextureHlslTypeName(TextureDimension dimension);
 
 	struct TextureDisk
 	{

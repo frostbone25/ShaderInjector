@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -49,10 +50,12 @@ namespace RenderPassResourceRegistry
 		// Fixed metadata pages keep unrelated command-recording threads from
 		// contending while retaining cache-friendly linear descriptor copies.
 		constexpr size_t DescriptorPageSize = 512;
+		constexpr UINT MaximumExactDescriptorRangeScan = 16;
 
 		struct DescriptorPage
 		{
 			std::array<DescriptorRecord, DescriptorPageSize> descriptors;
+			std::array<std::atomic<const RenderPass::ResourceBindingDiagnostic*>, DescriptorPageSize> descriptorIdentities{};
 			std::atomic<uint32_t> trackedDescriptorCount{ 0 };
 		};
 
@@ -110,7 +113,7 @@ namespace RenderPassResourceRegistry
 			SIZE_T sourceFirstDescriptor = 0;
 		};
 
-		DescriptorRecord CreateDescriptorMetadata(RenderPass::ResourceBindingDiagnostic binding)
+		void NormalizeDescriptorMetadata(RenderPass::ResourceBindingDiagnostic& binding)
 		{
 			// Handles and table locations belong to the descriptor slot, not the
 			// immutable view metadata. Excluding them allows identical views copied to
@@ -118,6 +121,81 @@ namespace RenderPassResourceRegistry
 			binding.cpuDescriptorHandle = 0;
 			binding.gpuDescriptorHandle = 0;
 			binding.descriptorIndex = UINT32_MAX;
+		}
+
+		bool DescriptorMetadataMatches(
+			const RenderPass::ResourceBindingDiagnostic& left,
+			const RenderPass::ResourceBindingDiagnostic& right)
+		{
+			return std::tie(
+				left.pipeline,
+				left.bindingType,
+				left.rootParameterIndex,
+				left.gpuAddress,
+				left.descriptorHeapType,
+				left.descriptorCount,
+				left.descriptorViewDimension,
+				left.descriptorMostDetailedMip,
+				left.descriptorMipLevels,
+				left.descriptorShader4ComponentMapping,
+				left.descriptorPlaneSlice,
+				left.descriptorResourceMinLodClamp,
+				left.shaderRegister,
+				left.registerSpace,
+				left.destinationOffset,
+				left.resourcePointer,
+				left.resourceName,
+				left.resourceDimension,
+				left.resourceWidth,
+				left.resourceHeight,
+				left.resourceDepthOrArraySize,
+				left.resourceMipLevels,
+				left.resourceFormat,
+				left.resourceSampleCount,
+				left.resourceSampleQuality,
+				left.bufferOffset,
+				left.bufferSize,
+				left.firstElement,
+				left.elementCount,
+				left.structureByteStride,
+				left.rootConstants) ==
+				std::tie(
+					right.pipeline,
+					right.bindingType,
+					right.rootParameterIndex,
+					right.gpuAddress,
+					right.descriptorHeapType,
+					right.descriptorCount,
+					right.descriptorViewDimension,
+					right.descriptorMostDetailedMip,
+					right.descriptorMipLevels,
+					right.descriptorShader4ComponentMapping,
+					right.descriptorPlaneSlice,
+					right.descriptorResourceMinLodClamp,
+					right.shaderRegister,
+					right.registerSpace,
+					right.destinationOffset,
+					right.resourcePointer,
+					right.resourceName,
+					right.resourceDimension,
+					right.resourceWidth,
+					right.resourceHeight,
+					right.resourceDepthOrArraySize,
+					right.resourceMipLevels,
+					right.resourceFormat,
+					right.resourceSampleCount,
+					right.resourceSampleQuality,
+					right.bufferOffset,
+					right.bufferSize,
+					right.firstElement,
+					right.elementCount,
+					right.structureByteStride,
+					right.rootConstants);
+		}
+
+		DescriptorRecord CreateDescriptorMetadata(RenderPass::ResourceBindingDiagnostic binding)
+		{
+			NormalizeDescriptorMetadata(binding);
 
 			const auto* metadata =
 				new RenderPass::ResourceBindingDiagnostic(std::move(binding));
@@ -289,16 +367,32 @@ namespace RenderPassResourceRegistry
 				std::memory_order_acquire);
 		}
 
+		const RenderPass::ResourceBindingDiagnostic* ReadPageDescriptorIdentity(
+			const DescriptorPage& page,
+			size_t pageOffset)
+		{
+			return page.descriptorIdentities[pageOffset].load(std::memory_order_acquire);
+		}
+
 		void SetPageDescriptor(
 			DescriptorHeapRecord& heap,
 			DescriptorPage& page,
 			size_t pageOffset,
 			DescriptorRecord record)
 		{
+			// Games commonly replay the same descriptor copies every frame. Avoid the
+			// substantially more expensive atomic shared-owner exchange when this slot
+			// already contains the requested immutable metadata record.
+			const RenderPass::ResourceBindingDiagnostic* newIdentity = record.get();
+			if (ReadPageDescriptorIdentity(page, pageOffset) == newIdentity)
+			{
+				return;
+			}
 			DescriptorRecord previous = std::atomic_exchange_explicit(
 				&page.descriptors[pageOffset],
 				record,
 				std::memory_order_acq_rel);
+			page.descriptorIdentities[pageOffset].store(newIdentity, std::memory_order_release);
 			if (previous == record)
 				return;
 			const bool wasTracked = previous != nullptr;
@@ -428,6 +522,11 @@ namespace RenderPassResourceRegistry
 			D3D12_CPU_DESCRIPTOR_HANDLE destination,
 			RenderPass::ResourceBindingDiagnostic binding)
 		{
+			NormalizeDescriptorMetadata(binding);
+			const DescriptorRecord existingRecord = ReadDescriptorRecord(destination.ptr);
+			if (existingRecord && DescriptorMetadataMatches(*existingRecord, binding))
+				return;
+
 			DescriptorRecord record = CreateDescriptorMetadata(std::move(binding));
 			const std::shared_ptr<DescriptorHeapRecord> heap = FindDescriptorHeap(destination.ptr);
 			if (heap)
@@ -584,6 +683,26 @@ namespace RenderPassResourceRegistry
 				if (!heap->active.load(std::memory_order_relaxed) ||
 					!heap->trackedDescriptorCount.load(std::memory_order_relaxed))
 					return false;
+
+				// Most D3D12 descriptor traffic consists of one-slot copies. A page-level
+				// test produces a false positive for every other slot on a populated page,
+				// forcing shared_ptr exchanges hundreds of thousands of times per frame.
+				// Small ranges are cheap enough to test exactly and can bypass propagation
+				// unless the source or destination slot genuinely carries metadata.
+				if (descriptorCount <= MaximumExactDescriptorRangeScan)
+				{
+					for (UINT descriptorOffset = 0; descriptorOffset < descriptorCount; ++descriptorOffset)
+					{
+						const SIZE_T descriptorIndex = firstDescriptor + descriptorOffset;
+						const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
+						const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
+						DescriptorPage* page = GetDescriptorPage(*heap, pageIndex, false);
+						if (page && ReadPageDescriptorIdentity(*page, pageOffset))
+							return true;
+					}
+					return false;
+				}
+
 				const SIZE_T lastDescriptor = firstDescriptor + descriptorCount - 1;
 				const size_t firstPage = static_cast<size_t>(firstDescriptor / DescriptorPageSize);
 				const size_t lastPage = static_cast<size_t>(lastDescriptor / DescriptorPageSize);
@@ -816,6 +935,15 @@ namespace RenderPassResourceRegistry
 				{
 					for (UINT descriptorIndex = 0; descriptorIndex < descriptorsOnPages; ++descriptorIndex)
 					{
+						const RenderPass::ResourceBindingDiagnostic* sourceIdentity = sourcePageHasDescriptors
+							? ReadPageDescriptorIdentity(*sourcePage, sourcePageOffset + descriptorIndex)
+							: nullptr;
+						if (ReadPageDescriptorIdentity(
+								*destinationPage,
+								destinationPageOffset + descriptorIndex) == sourceIdentity)
+						{
+							continue;
+						}
 						const DescriptorRecord sourceRecord = sourcePageHasDescriptors
 							? ReadPageDescriptor(*sourcePage, sourcePageOffset + descriptorIndex)
 							: nullptr;

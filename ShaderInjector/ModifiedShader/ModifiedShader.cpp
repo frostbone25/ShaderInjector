@@ -9,32 +9,29 @@
 
 namespace ModifiedShader
 {
-	namespace
+	double HashCollectionSimilarity(const std::vector<std::string>& left, const std::vector<std::string>& right)
 	{
-		double HashCollectionSimilarity(const std::vector<std::string>& left, const std::vector<std::string>& right)
+		if (left.empty() && right.empty())
+			return 1.0;
+
+		const std::unordered_set<std::string> leftHashes(left.begin(), left.end());
+		const std::unordered_set<std::string> rightHashes(right.begin(), right.end());
+		std::unordered_set<std::string> combinedHashes = leftHashes;
+		combinedHashes.insert(rightHashes.begin(), rightHashes.end());
+		size_t sharedHashCount = 0;
+
+		for (const std::string& hash : rightHashes)
 		{
-			if (left.empty() && right.empty())
-				return 1.0;
-
-			const std::unordered_set<std::string> leftHashes(left.begin(), left.end());
-			const std::unordered_set<std::string> rightHashes(right.begin(), right.end());
-			std::unordered_set<std::string> combinedHashes = leftHashes;
-			combinedHashes.insert(rightHashes.begin(), rightHashes.end());
-			size_t sharedHashCount = 0;
-
-			for (const std::string& hash : rightHashes)
-			{
-				if (leftHashes.find(hash) != leftHashes.end())
-					++sharedHashCount;
-			}
-
-			return combinedHashes.empty() ? 1.0 : static_cast<double>(sharedHashCount) / static_cast<double>(combinedHashes.size());
+			if (leftHashes.find(hash) != leftHashes.end())
+				++sharedHashCount;
 		}
 
-		bool AnalysesHaveSameStrictIdentity(const ShaderAnalysis::ShaderAnalysisDisk& left, const ShaderAnalysis::ShaderAnalysisDisk& right)
-		{
-			return left.succeeded && right.succeeded && !left.crossVersionIdentityHash.empty() && left.crossVersionIdentityHash == right.crossVersionIdentityHash;
-		}
+		return combinedHashes.empty() ? 1.0 : static_cast<double>(sharedHashCount) / static_cast<double>(combinedHashes.size());
+	}
+
+	bool AnalysesHaveSameStrictIdentity(const ShaderAnalysis::ShaderAnalysisDisk& left, const ShaderAnalysis::ShaderAnalysisDisk& right)
+	{
+		return left.succeeded && right.succeeded && !left.crossVersionIdentityHash.empty() && left.crossVersionIdentityHash == right.crossVersionIdentityHash;
 	}
 
 	bool TargetDisk::MatchesShader(uint64_t shaderHash, const ShaderAnalysis::ShaderAnalysisDisk& analysis) const

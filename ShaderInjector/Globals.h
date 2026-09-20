@@ -1,32 +1,12 @@
 #pragma once
+#include "Enum/ShaderDiscoveryMode.h"
+#include "Enum/ShaderModel.h"
 
 #include <windows.h>
 #include <vector>
 
 namespace Globals
 {
-	enum class ShaderDiscoveryMode
-	{
-		HashLookup = 0,
-		ShaderAnalysis = 1,
-	};
-
-	// Shader profiles are configured per stage because a game can use different
-	// target levels for graphics and compute workloads. Values mirror the
-	// familiar profile suffixes so the serialized INI remains readable.
-	enum class ShaderModel
-	{
-		ShaderModel5_0 = 50,
-		ShaderModel5_1 = 51,
-		ShaderModel6_0 = 60,
-		ShaderModel6_1 = 61,
-		ShaderModel6_2 = 62,
-		ShaderModel6_3 = 63,
-		ShaderModel6_4 = 64,
-		ShaderModel6_5 = 65,
-		ShaderModel6_6 = 66,
-	};
-
 	// Handle to our DLL module
 	extern HMODULE mainModule;
 
@@ -48,6 +28,12 @@ namespace Globals
 	// High-frequency counters and five-second performance reports. Disabled by
 	// default unless explicitly requested for profiling.
 	extern bool gPerformanceTelemetryEnabled;
+	// Logging controls. Informational messages can be disabled independently
+	// from errors, warnings, and successful operation messages.
+	extern bool gDisableLogs;
+	extern bool gVerboseLog;
+	// List loaded package names during database refresh, independently of VerboseLog.
+	extern bool gLogModifiedShaderNames;
 	// When enabled, compiler profiles follow the dominant shader model observed
 	// in original game PSOs. The per-stage values below remain manual fallbacks.
 	extern bool gAutoDetectShaderModels;

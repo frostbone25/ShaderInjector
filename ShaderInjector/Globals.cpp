@@ -13,16 +13,16 @@
 
 namespace Globals
 {
-	// Handle to our DLL module
+	//handle to our DLL module
 	HMODULE mainModule = nullptr;
 
-	// Main game window handle
+	//main game window handle
 	HWND mainWindow = nullptr;
 
-	// Key to open/close the ImGui menu
+	//key to open/close the ImGui menu
 	int keyOpenShaderInjectorGUI = VK_INSERT;
 
-	// Key to enable/disable shader injection
+	//key to enable/disable shader injection
 	int keyToggleShaderInjector = VK_DELETE;
 
 	bool gShowShaderInjectorGUI = true;
@@ -30,6 +30,9 @@ namespace Globals
 	bool gRenderDocIntegrationEnabled = false;
 	bool gRenderDocAutoAttachEnabled = false;
 	bool gPerformanceTelemetryEnabled = false;
+	bool gDisableLogs = false;
+	bool gVerboseLog = true;
+	bool gLogModifiedShaderNames = true;
 	bool gAutoDetectShaderModels = true;
 
 	float gShaderInjectorGUIScale = 1.0f;

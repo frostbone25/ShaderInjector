@@ -1,6 +1,7 @@
 #include "RenderPass/RenderPassReplacement.h"
 
 #include <array>
+#include <atomic>
 #include <mutex>
 #include <unordered_map>
 
@@ -16,6 +17,15 @@ namespace RenderPassReplacement
 	{
 		std::mutex gCacheMutex;
 		std::unordered_map<std::string, ID3D12PipelineState*> gPipelineCache;
+		std::atomic<uint64_t> gPipelineAvailabilityGeneration{ 1 };
+
+		struct PipelineFailure
+		{
+			uint64_t generation = 0;
+			std::string error;
+		};
+
+		std::unordered_map<std::string, PipelineFailure> gPipelineFailures;
 
 		struct ThreadPipelineLookup
 		{
@@ -23,38 +33,53 @@ namespace RenderPassReplacement
 			ID3D12PipelineState* originalPipelineState = nullptr;
 			uint64_t shaderBlobHash = 0;
 			ID3D12PipelineState* replacementPipelineState = nullptr;
+			std::string error;
 		};
 
-		thread_local std::array<ThreadPipelineLookup, 16> gThreadPipelineLookups;
-		thread_local size_t gNextThreadPipelineLookup = 0;
+		thread_local std::unordered_map<const RenderPass::RenderPassDisk*, ThreadPipelineLookup> gThreadPipelineLookups;
+		thread_local uint64_t gThreadPipelineGeneration = 0;
 
-		ID3D12PipelineState* FindThreadPipeline(
+		const ThreadPipelineLookup* FindThreadPipeline(
 			const RenderPass::RenderPassDisk& renderPass,
 			ID3D12PipelineState* originalPipelineState)
 		{
-			for (const ThreadPipelineLookup& lookup : gThreadPipelineLookups)
+			const uint64_t generation = gPipelineAvailabilityGeneration.load(std::memory_order_acquire);
+
+			if (generation != gThreadPipelineGeneration)
 			{
+				gThreadPipelineLookups.clear();
+				gThreadPipelineGeneration = generation;
+			}
+
+			const auto cached = gThreadPipelineLookups.find(&renderPass);
+
+			if (cached != gThreadPipelineLookups.end())
+			{
+				const ThreadPipelineLookup& lookup = cached->second;
+
 				if (lookup.renderPass == &renderPass &&
 					lookup.originalPipelineState == originalPipelineState &&
 					lookup.shaderBlobHash == renderPass.fragmentShaderBlobHash)
 				{
-					return lookup.replacementPipelineState;
+					return &lookup;
 				}
 			}
+
 			return nullptr;
 		}
 
 		void CacheThreadPipeline(
 			const RenderPass::RenderPassDisk& renderPass,
 			ID3D12PipelineState* originalPipelineState,
-			ID3D12PipelineState* replacementPipelineState)
+			ID3D12PipelineState* replacementPipelineState,
+			const std::string& error = {})
 		{
-			gThreadPipelineLookups[gNextThreadPipelineLookup] = {
+			gThreadPipelineLookups[&renderPass] = {
 				&renderPass,
 				originalPipelineState,
 				renderPass.fragmentShaderBlobHash,
-				replacementPipelineState };
-			gNextThreadPipelineLookup = (gNextThreadPipelineLookup + 1) % gThreadPipelineLookups.size();
+				replacementPipelineState,
+				error };
 		}
 
 		std::string CacheKey(const RenderPass::RenderPassDisk& renderPass, ID3D12PipelineState* original)
@@ -72,6 +97,7 @@ namespace RenderPassReplacement
 			{
 				if (pipeline.pipelineState != original)
 					continue;
+
 				D3D12_GRAPHICS_PIPELINE_STATE_DESC description = pipeline.originalDesc;
 				description.VS = { pipeline.vsBytecode.empty() ? nullptr : pipeline.vsBytecode.data(), pipeline.vsBytecode.size() };
 				description.PS = { renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size() };
@@ -89,10 +115,13 @@ namespace RenderPassReplacement
 				const HRESULT result = HookD3D12::Original_CreateGraphicsPipelineState
 					? HookD3D12::Original_CreateGraphicsPipelineState(HookD3D12::GetCapturedDevice(), &description, IID_PPV_ARGS(&replacement))
 					: E_NOINTERFACE;
+
 				if (FAILED(result) || !replacement)
 					outError = "Replacement pixel PSO creation failed with " + StringHelper::FormatHRESULT(result);
+
 				return replacement;
 			}
+
 			return nullptr;
 		}
 
@@ -101,10 +130,23 @@ namespace RenderPassReplacement
 			ID3D12PipelineState* original,
 			std::string& outError)
 		{
-			for (HookD3D12::PipelineStateInfo& pipeline : HookD3D12::gPipelineStates)
+			const HookD3D12::PipelineStateInfo* rebuildTemplate = nullptr;
+
+			for (const auto& pipeline : HookD3D12::gPipelineStates)
 			{
-				if (pipeline.pipelineState != original || pipeline.streamBlob.empty())
-					continue;
+				if (pipeline.pipelineState == original && !pipeline.streamBlob.empty())
+				{
+					rebuildTemplate = &pipeline;
+					break;
+				}
+			}
+
+			if (!rebuildTemplate)
+				rebuildTemplate = HookD3D12::FindUncapturedRebuildTemplateLocked(original);
+
+			if (rebuildTemplate && !rebuildTemplate->streamBlob.empty())
+			{
+				const auto& pipeline = *rebuildTemplate;
 				const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetType =
 					RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute
 					? D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS
@@ -114,6 +156,7 @@ namespace RenderPassReplacement
 				uint8_t* end = cursor + stream.size();
 				bool targetPatched = false;
 				bool missingViewInstancingState = false;
+
 				const auto originalShader = [&](D3D12_PIPELINE_STATE_SUBOBJECT_TYPE type) -> const std::vector<uint8_t>*
 				{
 					switch (type)
@@ -129,21 +172,29 @@ namespace RenderPassReplacement
 						default: return nullptr;
 					}
 				};
+
 				while (cursor < end)
 				{
 					if (cursor + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE) > end)
 						break;
+
 					const auto type = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(cursor);
 					const UINT typeIndex = static_cast<UINT>(type);
+
 					if (typeIndex >= ARRAYSIZE(HookD3D12::kSubobjectSizes) || !HookD3D12::kSubobjectSizes[typeIndex])
 						break;
+
 					const size_t subobjectSize = HookD3D12::kSubobjectSizes[typeIndex];
+
 					if (cursor + subobjectSize > end)
 						break;
+
 					void* payload = cursor + sizeof(void*);
+
 					if (const std::vector<uint8_t>* originalBytecode = originalShader(type))
 					{
 						auto* bytecode = static_cast<D3D12_SHADER_BYTECODE*>(payload);
+
 						if (type == targetType)
 						{
 							*bytecode = { renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size() };
@@ -172,6 +223,7 @@ namespace RenderPassReplacement
 					else if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING)
 					{
 						auto* viewInstancing = static_cast<D3D12_VIEW_INSTANCING_DESC*>(payload);
+
 						if (!pipeline.hasViewInstancing && viewInstancing->ViewInstanceCount)
 							missingViewInstancingState = true;
 						else if (pipeline.hasViewInstancing)
@@ -181,26 +233,35 @@ namespace RenderPassReplacement
 							viewInstancing->Flags = pipeline.viewInstancingFlags;
 						}
 					}
+
 					cursor += subobjectSize;
 				}
+
 				if (!targetPatched || missingViewInstancingState)
 				{
 					if (missingViewInstancingState)
 						outError = "The stream PSO is missing durable view-instancing state.";
+
 					return nullptr;
 				}
+
 				ID3D12Device2* device = nullptr;
+
 				if (FAILED(HookD3D12::GetCapturedDevice()->QueryInterface(IID_PPV_ARGS(&device))) || !device)
 					return nullptr;
+
 				D3D12_PIPELINE_STATE_STREAM_DESC description{ stream.size(), stream.data() };
 				ID3D12PipelineState* replacement = nullptr;
 				HookD3D12::ScopedRenderPassInjection injectionScope;
 				const HRESULT result = HookD3D12::CreatePipelineStateInternal(device, &description, IID_PPV_ARGS(&replacement));
 				device->Release();
+
 				if (FAILED(result) || !replacement)
 					outError = "Replacement stream PSO creation failed with " + StringHelper::FormatHRESULT(result);
+
 				return replacement;
 			}
+
 			return nullptr;
 		}
 
@@ -213,6 +274,7 @@ namespace RenderPassReplacement
 			{
 				if (pipeline.pipelineState != original)
 					continue;
+
 				D3D12_COMPUTE_PIPELINE_STATE_DESC description = pipeline.originalDesc;
 				description.CS = { renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size() };
 				description.CachedPSO = {};
@@ -221,10 +283,13 @@ namespace RenderPassReplacement
 				const HRESULT result = HookD3D12::Original_CreateComputePipelineState
 					? HookD3D12::Original_CreateComputePipelineState(HookD3D12::GetCapturedDevice(), &description, IID_PPV_ARGS(&replacement))
 					: E_NOINTERFACE;
+
 				if (FAILED(result) || !replacement)
 					outError = "Replacement compute PSO creation failed with " + StringHelper::FormatHRESULT(result);
+
 				return replacement;
 			}
+
 			return nullptr;
 		}
 	}
@@ -235,20 +300,37 @@ namespace RenderPassReplacement
 		std::string& outError)
 	{
 		outError.clear();
+
 		if (!originalPipelineState || renderPass.fragmentShaderBlob.empty())
 		{
 			outError = "Render Pass is missing its target PSO or compiled shader.";
 			return nullptr;
 		}
-		if (ID3D12PipelineState* cachedPipeline = FindThreadPipeline(renderPass, originalPipelineState))
-			return cachedPipeline;
+
+		if (const auto* cachedPipeline = FindThreadPipeline(renderPass, originalPipelineState))
+		{
+			outError = cachedPipeline->error;
+			return cachedPipeline->replacementPipelineState;
+		}
+
 		const std::string key = CacheKey(renderPass, originalPipelineState);
 		std::lock_guard<std::mutex> cacheLock(gCacheMutex);
+		const uint64_t generation = gPipelineAvailabilityGeneration.load(std::memory_order_acquire);
 		const auto cachedIt = gPipelineCache.find(key);
+
 		if (cachedIt != gPipelineCache.end())
 		{
 			CacheThreadPipeline(renderPass, originalPipelineState, cachedIt->second);
 			return cachedIt->second;
+		}
+
+		const auto failed = gPipelineFailures.find(key);
+
+		if (failed != gPipelineFailures.end() && failed->second.generation == generation)
+		{
+			outError = failed->second.error;
+			CacheThreadPipeline(renderPass, originalPipelineState, nullptr, outError);
+			return nullptr;
 		}
 
 		std::lock_guard<std::mutex> pipelineLock(HookD3D12::gPipelineMutex);
@@ -256,25 +338,44 @@ namespace RenderPassReplacement
 			RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute
 				? BuildComputePipeline(renderPass, originalPipelineState, outError)
 				: BuildGraphicsPipeline(renderPass, originalPipelineState, outError);
+
 		if (!pipeline)
 			pipeline = BuildStreamPipeline(renderPass, originalPipelineState, outError);
+
 		if (!pipeline && outError.empty())
 			outError = "The target PSO has no captured rebuild template for this replacement pass.";
+
 		if (pipeline)
 		{
 			gPipelineCache.emplace(key, pipeline);
 			CacheThreadPipeline(renderPass, originalPipelineState, pipeline);
 		}
+		else
+		{
+			//repeated invalid-argument or missing-template failures are not new work.
+			//a package edit or newly published target invalidates this negative cache.
+			gPipelineFailures[key] = { generation, outError };
+			CacheThreadPipeline(renderPass, originalPipelineState, nullptr, outError);
+		}
+
 		return pipeline;
+	}
+
+	void InvalidateFailedPipelines()
+	{
+		gPipelineAvailabilityGeneration.fetch_add(1, std::memory_order_release);
 	}
 
 	void ReleaseResources()
 	{
 		std::lock_guard<std::mutex> lock(gCacheMutex);
+
 		for (auto& pipeline : gPipelineCache)
 			if (pipeline.second) pipeline.second->Release();
+
 		gPipelineCache.clear();
-		gThreadPipelineLookups = {};
-		gNextThreadPipelineLookup = 0;
+		gPipelineFailures.clear();
+		InvalidateFailedPipelines();
+		gThreadPipelineLookups.clear();
 	}
 }

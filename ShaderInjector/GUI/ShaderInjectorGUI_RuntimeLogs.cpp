@@ -46,17 +46,35 @@ namespace ShaderInjectorGUI
 
 	void WriteToRuntimeLogError(std::string text)
 	{
-		WriteToRuntimeLog("[ERROR] " + text);
+		{
+			std::lock_guard<std::mutex> lock(gRuntimeLogMutex);
+			runtimeLogText += "\n[ERROR] ";
+			runtimeLogText += text;
+		}
+
+		ShaderInjectorIO::WriteToLogFileError(text);
 	}
 
 	void WriteToRuntimeLogSuccess(std::string text)
 	{
-		WriteToRuntimeLog("[SUCCESS] " + text);
+		{
+			std::lock_guard<std::mutex> lock(gRuntimeLogMutex);
+			runtimeLogText += "\n[SUCCESS] ";
+			runtimeLogText += text;
+		}
+
+		ShaderInjectorIO::WriteToLogFileSuccess(text);
 	}
 
 	void WriteToRuntimeLogWarning(std::string text)
 	{
-		WriteToRuntimeLog("[WARNING] " + text);
+		{
+			std::lock_guard<std::mutex> lock(gRuntimeLogMutex);
+			runtimeLogText += "\n[WARNING] ";
+			runtimeLogText += text;
+		}
+
+		ShaderInjectorIO::WriteToLogFileWarning(text);
 	}
 
 	void ClearRuntimeLog()

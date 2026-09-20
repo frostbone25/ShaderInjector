@@ -99,7 +99,7 @@ namespace ShaderInjectorGUI
 		std::vector<PipelineT>& pipelines,
 		ShaderTarget::ShaderType shaderType,
 		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE subobjectType,
-		HookD3D12::PSOPendingRebuild::SourceList pendingSource,
+		HookD3D12::PipelineSourceList pendingSource,
 		bool allowMarkerToggle,
 		bool disableActions,
 		bool PipelineT::* disabledMember,

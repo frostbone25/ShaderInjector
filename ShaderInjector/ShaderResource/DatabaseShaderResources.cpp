@@ -6,16 +6,13 @@
 
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderResource/ShaderResourceCatalog.h"
-#include "ShaderResource/ShaderResourceDDS.h"
+#include "DDS/DDS.h"
 
 namespace DatabaseShaderResources
 {
-	namespace
-	{
-		std::vector<ShaderResource::TextureDisk> gShaderResources;
-		std::unordered_map<std::string, size_t> gShaderResourceIndices;
-		bool gShaderResourcesLoaded = false;
-	}
+	std::vector<ShaderResource::TextureDisk> gShaderResources;
+	std::unordered_map<std::string, size_t> gShaderResourceIndices;
+	bool gShaderResourcesLoaded = false;
 
 	void RefreshShaderResources()
 	{
@@ -28,11 +25,13 @@ namespace DatabaseShaderResources
 		std::vector<std::string> texturePaths;
 		ShaderInjectorIO::CollectFilesByExtension(rootDirectory, ".dds", texturePaths, true, true);
 		const std::filesystem::path rootPath = std::filesystem::u8path(rootDirectory);
+
 		for (const std::string& texturePath : texturePaths)
 		{
 			std::error_code error;
 			const std::filesystem::path path = std::filesystem::u8path(texturePath);
 			std::filesystem::path relativePath = std::filesystem::relative(path, rootPath, error);
+
 			if (error)
 				continue;
 
@@ -42,8 +41,9 @@ namespace DatabaseShaderResources
 			resource.fileName = path.filename().u8string();
 			resource.filePath = texturePath;
 
-			ShaderResourceDDS::Metadata metadata{};
-			if (ShaderResourceDDS::ReadMetadata(texturePath, metadata, resource.validationError))
+			DDS::Metadata metadata{};
+
+			if (DDS::ReadMetadata(texturePath, metadata, resource.validationError))
 			{
 				resource.dimension = metadata.dimension;
 				resource.width = metadata.width;
@@ -55,10 +55,9 @@ namespace DatabaseShaderResources
 			}
 			else
 			{
-				ShaderInjectorIO::WriteToLogFileWarning(
-					"DatabaseShaderResources->RefreshShaderResources: invalid DDS resource=" +
-					resource.id + " error=" + resource.validationError);
+				ShaderInjectorIO::WriteToLogFileWarning("DatabaseShaderResources->RefreshShaderResources: invalid DDS resource = " + resource.id + " error=" + resource.validationError);
 			}
+
 			gShaderResources.push_back(std::move(resource));
 		}
 
@@ -66,13 +65,14 @@ namespace DatabaseShaderResources
 		{
 			return left.id < right.id;
 		});
+
 		gShaderResourceIndices.reserve(gShaderResources.size());
+
 		for (size_t resourceIndex = 0; resourceIndex < gShaderResources.size(); ++resourceIndex)
 			gShaderResourceIndices.emplace(gShaderResources[resourceIndex].id, resourceIndex);
+
 		ShaderResourceCatalog::PublishDiskResources(gShaderResources);
-		ShaderInjectorIO::WriteToLogFile(
-			"DatabaseShaderResources->RefreshShaderResources: loaded DDS textures=" +
-			std::to_string(gShaderResources.size()));
+		ShaderInjectorIO::WriteToLogFile("DatabaseShaderResources->RefreshShaderResources: loaded DDS textures = " + std::to_string(gShaderResources.size()));
 	}
 
 	void EnsureShaderResourcesLoaded()

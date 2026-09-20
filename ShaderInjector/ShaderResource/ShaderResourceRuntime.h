@@ -34,4 +34,5 @@ namespace ShaderResourceRuntime
 		UINT commandListCount,
 		ID3D12CommandList* const* commandLists);
 	void ReleaseResources();
+	void LogPerformanceStatistics();
 }

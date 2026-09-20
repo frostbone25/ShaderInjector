@@ -214,11 +214,12 @@ namespace ShaderDiscovery
 			else
 			{
 				auto appendMissingField = [&](const char* fieldName)
-					{
-						if (!failureReason.empty())
-							failureReason += ", ";
-						failureReason += fieldName;
-					};
+				{
+					if (!failureReason.empty())
+						failureReason += ", ";
+
+					failureReason += fieldName;
+				};
 
 				if (candidateAnalysis.portableReflectionIdentityHash.empty())
 					appendMissingField("portableReflectionIdentityHash");
@@ -239,6 +240,7 @@ namespace ShaderDiscovery
 				Hash::FormatHash(shaderHash) +
 				" type=" + StringHelper::ShaderTypeToString(shaderType) +
 				": " + failureReason);
+
 			gAttemptedCandidates.insert(candidateKey);
 			return -1;
 		}
@@ -352,6 +354,7 @@ namespace ShaderDiscovery
 			"ShaderDiscovery->DiscoverEnabledReplacement: exact cross-version shader identity matched " +
 			Hash::FormatHash(shaderHash) + " -> " + replacements[matchingReplacementIndex].name +
 			" identity=" + candidateAnalysis.crossVersionIdentityHash);
+
 		return matchingReplacementIndex;
 	}
 

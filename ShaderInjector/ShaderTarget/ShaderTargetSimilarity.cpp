@@ -4,24 +4,21 @@
 
 namespace ShaderTarget
 {
-	namespace
-	{
-		#define DEFINE_COLLECTION_SCORE(Type) \
-			double Type::CalculateSimilarityScore(const std::vector<Type>& left, const std::vector<Type>& right) \
-			{ \
-				return SimilarityScore::CalculateCollectionSimilarityScore(left, right); \
-			}
+#define DEFINE_COLLECTION_SCORE(Type) \
+	double Type::CalculateSimilarityScore(const std::vector<Type>& left, const std::vector<Type>& right) \
+	{ \
+		return SimilarityScore::CalculateCollectionSimilarityScore(left, right); \
+	}
 
-		void AddStageIdentityScores(
-			SimilarityScore::WeightedAverage& score,
-			const std::string& leftHash,
-			const std::string& rightHash,
-			const std::string& leftLength,
-			const std::string& rightLength)
-		{
-			score.Add(SimilarityScore::Exact(leftHash, rightHash), 1.0);
-			score.Add(SimilarityScore::NumericString(leftLength, rightLength), 1.5);
-		}
+	void AddStageIdentityScores(
+		SimilarityScore::WeightedAverage& score,
+		const std::string& leftHash,
+		const std::string& rightHash,
+		const std::string& leftLength,
+		const std::string& rightLength)
+	{
+		score.Add(SimilarityScore::Exact(leftHash, rightHash), 1.0);
+		score.Add(SimilarityScore::NumericString(leftLength, rightLength), 1.5);
 	}
 
 	double ShaderPipelineTemplateDisk::CalculateSimilarityScore(const ShaderPipelineTemplateDisk& other) const
@@ -38,6 +35,18 @@ namespace ShaderTarget
 		AddStageIdentityScores(score, gsHash, other.gsHash, gsLength, other.gsLength);
 		AddStageIdentityScores(score, hsHash, other.hsHash, hsLength, other.hsLength);
 		AddStageIdentityScores(score, dsHash, other.dsHash, dsLength, other.dsLength);
+		score.Add(SimilarityScore::Exact(renderTargetFormat0, other.renderTargetFormat0), 3.0);
+		score.Add(SimilarityScore::Exact(renderTargetFormats, other.renderTargetFormats), 4.0);
+		score.Add(SimilarityScore::NumericString(numRenderTargets, other.numRenderTargets), 2.0);
+		score.Add(SimilarityScore::Exact(depthStencilFormat, other.depthStencilFormat), 4.0);
+		score.Add(SimilarityScore::Exact(primitiveTopologyType, other.primitiveTopologyType), 3.0);
+		score.Add(SimilarityScore::NumericString(sampleCount, other.sampleCount), 2.0);
+		score.Add(SimilarityScore::NumericString(sampleQuality, other.sampleQuality));
+		score.Add(SimilarityScore::Exact(sampleMask, other.sampleMask), 2.0);
+		score.Add(SimilarityScore::Exact(blendStateHash, other.blendStateHash), 3.0);
+		score.Add(SimilarityScore::Exact(rasterizerStateHash, other.rasterizerStateHash), 5.0);
+		score.Add(SimilarityScore::Exact(depthStencilStateHash, other.depthStencilStateHash), 5.0);
+		score.Add(SimilarityScore::Exact(pipelineFixedFunctionStateHash, other.pipelineFixedFunctionStateHash), 8.0);
 		score.Add(SimilarityScore::NumericString(pipelineStreamLength, other.pipelineStreamLength), 2.0);
 		score.Add(SimilarityScore::Exact(pipelineStreamSubobjectTypes, other.pipelineStreamSubobjectTypes), 4.0);
 		score.Add(SimilarityScore::NumericString(inputLayoutElementCount, other.inputLayoutElementCount), 2.0);
@@ -86,6 +95,7 @@ namespace ShaderTarget
 		score.Add(SimilarityScore::Exact(blendStateHash, other.blendStateHash), 3.0);
 		score.Add(SimilarityScore::Exact(rasterizerStateHash, other.rasterizerStateHash), 3.0);
 		score.Add(SimilarityScore::Exact(depthStencilStateHash, other.depthStencilStateHash), 3.0);
+		score.Add(SimilarityScore::Exact(pipelineFixedFunctionStateHash, other.pipelineFixedFunctionStateHash), 8.0);
 		score.Add(SimilarityScore::NumericString(pipelineStreamLength, other.pipelineStreamLength), 2.0);
 		score.Add(SimilarityScore::Exact(pipelineStreamSubobjectTypes, other.pipelineStreamSubobjectTypes), 4.0);
 		score.Add(SimilarityScore::NumericString(inputLayoutElementCount, other.inputLayoutElementCount), 2.0);
@@ -137,5 +147,5 @@ namespace ShaderTarget
 	}
 	DEFINE_COLLECTION_SCORE(ShaderPipelineStreamMetadataDisk)
 
-	#undef DEFINE_COLLECTION_SCORE
+#undef DEFINE_COLLECTION_SCORE
 }

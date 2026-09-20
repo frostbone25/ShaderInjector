@@ -1,7 +1,9 @@
 //dsound_proxy.cpp
 
-#define WIN32_LEAN_AND_MEAN // Exclude rarely-used stuff from Windows headers
-// Windows Header Files
+//exclude rarely-used stuff from Windows headers
+#define WIN32_LEAN_AND_MEAN
+
+//windows Header Files
 #include <windows.h>
 
 #include <cstdio>
@@ -68,7 +70,7 @@ static BOOL CALLBACK LoadRealDsoundDllOnce(PINIT_ONCE, PVOID, PVOID*)
 
 	if (g_realDsoundDll)
 	{
-		// Every exported proxy forwards to the system dsound.dll after our DLL is loaded.
+		//every exported proxy forwards to the system dsound.dll after our DLL is loaded.
 		gDirectSoundCaptureCreate = LoadExport<DirectSoundCaptureCreateFunction>("DirectSoundCaptureCreate");
 		gDirectSoundCaptureCreate8 = LoadExport<DirectSoundCaptureCreate8Function>("DirectSoundCaptureCreate8");
 		gDirectSoundCaptureEnumerateA = LoadExport<DirectSoundCaptureEnumerateAFunction>("DirectSoundCaptureEnumerateA");

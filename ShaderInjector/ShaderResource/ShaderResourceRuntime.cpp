@@ -20,7 +20,7 @@
 #include "RenderPass/RenderPassResourceRegistry.h"
 #include "RenderPass/RenderPassTexturePool.h"
 #include "ShaderResource/DatabaseShaderResources.h"
-#include "ShaderResource/ShaderResourceDDS.h"
+#include "DDS/DDS.h"
 #include "StringHelper.h"
 
 using Microsoft::WRL::ComPtr;
@@ -29,10 +29,6 @@ namespace ShaderResourceRuntime
 {
 	namespace
 	{
-		// Resource diagnostics intentionally inspect a small prefix, while an injected
-		// shader can legally index much farther into an unbounded range. Expand cloned
-		// tables through descriptors that the registry observed the game initialize.
-		constexpr UINT MaximumAutoPreservedUnboundedDescriptors = 4096;
 		constexpr UINT DefaultDescriptorPageCapacity = 8192;
 		constexpr UINT DefaultSamplerPageCapacity = 2048;
 
@@ -60,14 +56,6 @@ namespace ShaderResourceRuntime
 			UINT customOffset = 0;
 			D3D12_GPU_DESCRIPTOR_HANDLE originalGpu{};
 			D3D12_CPU_DESCRIPTOR_HANDLE originalCpu{};
-		};
-
-		struct UnboundedDescriptorSpan
-		{
-			SIZE_T cpuStart = 0;
-			UINT descriptorIncrementSize = 0;
-			UINT scannedDescriptorCount = 0;
-			UINT contiguousDescriptorCount = 0;
 		};
 
 		struct DescriptorHeapPage
@@ -112,8 +100,6 @@ namespace ShaderResourceRuntime
 			std::vector<std::unique_ptr<DescriptorExecutionSlot>> executionSlots;
 			std::vector<DescriptorExecutionSlot*> recordedExecutionSlots;
 			DescriptorExecutionSlot* currentExecutionSlot = nullptr;
-			std::array<UnboundedDescriptorSpan, 16> unboundedDescriptorSpans{};
-			size_t nextUnboundedDescriptorSpan = 0;
 			bool pendingRestore = false;
 		};
 
@@ -280,55 +266,6 @@ namespace ShaderResourceRuntime
 			return true;
 		}
 
-		UINT CountPreservedUnboundedDescriptors(
-			CommandListSlot& slot,
-			D3D12_CPU_DESCRIPTOR_HANDLE tableStart,
-			UINT descriptorIncrementSize,
-			UINT availableDescriptorCount,
-			UINT configuredDescriptorCount)
-		{
-			const UINT scanLimit = (std::min)(
-				availableDescriptorCount,
-				(std::max)(configuredDescriptorCount, MaximumAutoPreservedUnboundedDescriptors));
-			for (const UnboundedDescriptorSpan& cachedSpan : slot.unboundedDescriptorSpans)
-			{
-				if (cachedSpan.cpuStart != tableStart.ptr ||
-					cachedSpan.descriptorIncrementSize != descriptorIncrementSize)
-				{
-					continue;
-				}
-
-				const bool completeSpan =
-					cachedSpan.contiguousDescriptorCount < cachedSpan.scannedDescriptorCount;
-				if (completeSpan || cachedSpan.scannedDescriptorCount >= scanLimit)
-				{
-					return (std::min)(
-						availableDescriptorCount,
-						(std::max)(configuredDescriptorCount, cachedSpan.contiguousDescriptorCount));
-				}
-			}
-
-			const UINT contiguousDescriptorCount =
-				RenderPassResourceRegistry::CountContiguousDescriptors(
-					tableStart,
-					descriptorIncrementSize,
-					scanLimit);
-			if (contiguousDescriptorCount)
-			{
-				slot.unboundedDescriptorSpans[slot.nextUnboundedDescriptorSpan] = {
-					tableStart.ptr,
-					descriptorIncrementSize,
-					scanLimit,
-					contiguousDescriptorCount };
-				slot.nextUnboundedDescriptorSpan =
-					(slot.nextUnboundedDescriptorSpan + 1) % slot.unboundedDescriptorSpans.size();
-			}
-
-			return (std::min)(
-				availableDescriptorCount,
-				(std::max)(configuredDescriptorCount, contiguousDescriptorCount));
-		}
-
 		TextureGpu* GetOrCreateTexture(
 			ID3D12Device* device,
 			ID3D12GraphicsCommandList* commandList,
@@ -349,10 +286,10 @@ namespace ShaderResourceRuntime
 			if (cached.texture)
 				return &cached;
 
-			ShaderResourceDDS::Image image{};
-			if (!ShaderResourceDDS::Load(disk.filePath, image, outError))
+			DDS::Image image{};
+			if (!DDS::Load(disk.filePath, image, outError))
 				return nullptr;
-			const ShaderResourceDDS::Metadata& metadata = image.metadata;
+			const DDS::Metadata& metadata = image.metadata;
 			const bool texture3D = metadata.dimension == ShaderResource::TextureDimension::Texture3D;
 
 			D3D12_FEATURE_DATA_FORMAT_INFO formatInformation{};
@@ -770,6 +707,30 @@ namespace ShaderResourceRuntime
 		}
 		ID3D12Device* device = slot.device.Get();
 
+		// Resolve inputs before allocating/copying shader-visible tables. A missing
+		// dependency must not consume a new descriptor range on every failed draw.
+		thread_local std::vector<RenderPassTexturePool::TextureView> runtimeInputs;
+		runtimeInputs.clear();
+		runtimeInputs.resize(renderPass.inputs.size());
+		for (size_t inputIndex = 0; inputIndex < renderPass.inputs.size(); ++inputIndex)
+		{
+			const auto& input = renderPass.inputs[inputIndex];
+			if (input.origin != ShaderResource::ResourceOrigin::Runtime ||
+				input.access != RenderPass::ResourceAccess::ShaderResource)
+				continue;
+			auto& texture = runtimeInputs[inputIndex];
+			if (runtimeTextureOverride && runtimeTextureOverride->resourceId == input.resourceId)
+				texture.shaderResourceView = runtimeTextureOverride->shaderResourceView;
+			else if (!RenderPassTexturePool::GetInputTexture(input.resourceId, input.temporalView, texture) &&
+				input.temporalView == ShaderResource::TemporalView::Previous)
+				RenderPassTexturePool::GetHistoryBootstrapTexture(device, input.resourceId, texture);
+			if (!texture.shaderResourceView.ptr && !input.optional)
+			{
+				outError = "Runtime shader resource is unavailable: " + input.resourceId;
+				return false;
+			}
+		}
+
 		if (slot.cachedRootSignature != gameState.rootSignature ||
 			slot.cachedMaximumTrackedDescriptors != renderPass.maximumTrackedDescriptors)
 		{
@@ -822,12 +783,12 @@ namespace ShaderResourceRuntime
 				const UINT availableDescriptorCount = static_cast<UINT>((std::min)(
 					availableDescriptorCount64,
 					static_cast<UINT64>(UINT_MAX)));
-				descriptorCount = CountPreservedUnboundedDescriptors(
-					slot,
-					{ sourceHeap->cpuStart.ptr + byteOffset },
-					sourceHeap->descriptorIncrementSize,
-					availableDescriptorCount,
-					descriptorCount);
+				// GetDescriptorTableLayouts resolves an unbounded range using the pass's
+				// maximumTrackedDescriptors value. Keep that configured value as the hard
+				// copy limit. Expanding every table to thousands of contiguous game
+				// descriptors multiplies the work by every pass in a graph and exhausts
+				// shader-visible descriptor heaps on long or warmed-cache sessions.
+				descriptorCount = (std::min)(descriptorCount, availableDescriptorCount);
 			}
 			else
 			{
@@ -920,18 +881,43 @@ namespace ShaderResourceRuntime
 		const D3D12_GPU_DESCRIPTOR_HANDLE gpuStart = descriptorAllocation.gpuStart;
 		const D3D12_CPU_DESCRIPTOR_HANDLE samplerCpuStart = samplerAllocation.cpuStart;
 		const D3D12_GPU_DESCRIPTOR_HANDLE samplerGpuStart = samplerAllocation.gpuStart;
-		for (const ActiveTable& table : slot.activeTables)
+		thread_local std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> copySources;
+		thread_local std::vector<UINT> copySourceSizes;
+		const auto copyActiveTables = [&](D3D12_DESCRIPTOR_HEAP_TYPE heapType,
+			D3D12_CPU_DESCRIPTOR_HANDLE destination,
+			UINT destinationDescriptorCount)
 		{
-			if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV && descriptorAllocation.heap)
-				device->CopyDescriptorsSimple(table.descriptorCount,
-					{ cpuStart.ptr + static_cast<SIZE_T>(table.customOffset) * increment }, table.originalCpu,
-					D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-			else if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER && samplerAllocation.heap)
-				device->CopyDescriptorsSimple(table.descriptorCount,
-					{ samplerCpuStart.ptr + static_cast<SIZE_T>(table.customOffset) * samplerIncrement },
-					table.originalCpu,
-					D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
-		}
+			if (!destination.ptr || !destinationDescriptorCount)
+				return;
+
+			copySources.clear();
+			copySourceSizes.clear();
+			copySources.reserve(slot.activeTables.size());
+			copySourceSizes.reserve(slot.activeTables.size());
+			for (const ActiveTable& table : slot.activeTables)
+			{
+				if (table.heapType != heapType || !table.descriptorCount)
+					continue;
+				copySources.push_back(table.originalCpu);
+				copySourceSizes.push_back(table.descriptorCount);
+			}
+
+			if (!copySources.empty())
+			{
+				device->CopyDescriptors(
+					1,
+					&destination,
+					&destinationDescriptorCount,
+					static_cast<UINT>(copySources.size()),
+					copySources.data(),
+					copySourceSizes.data(),
+					heapType);
+			}
+		};
+		if (descriptorAllocation.heap)
+			copyActiveTables(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, cpuStart, totalDescriptors);
+		if (samplerAllocation.heap)
+			copyActiveTables(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, samplerCpuStart, totalSamplerDescriptors);
 
 		const auto resolveDescriptorDestination = [&](D3D12_DESCRIPTOR_RANGE_TYPE rangeType,
 			uint32_t shaderRegister,
@@ -1066,23 +1052,16 @@ namespace ShaderResourceRuntime
 			}
 		}
 
-		for (const RenderPass::LogicalResourceBindingDisk& input : renderPass.inputs)
+		for (size_t inputIndex = 0; inputIndex < renderPass.inputs.size(); ++inputIndex)
 		{
+			const auto& input = renderPass.inputs[inputIndex];
 			if (input.origin != ShaderResource::ResourceOrigin::Runtime ||
 				input.access != RenderPass::ResourceAccess::ShaderResource)
 			{
 				continue;
 			}
 
-			D3D12_CPU_DESCRIPTOR_HANDLE sourceDescriptor{};
-			if (runtimeTextureOverride && runtimeTextureOverride->resourceId == input.resourceId)
-				sourceDescriptor = runtimeTextureOverride->shaderResourceView;
-			else
-			{
-				RenderPassTexturePool::TextureView runtimeTexture;
-				if (RenderPassTexturePool::GetInputTexture(input.resourceId, input.temporalView, runtimeTexture))
-					sourceDescriptor = runtimeTexture.shaderResourceView;
-			}
+			const D3D12_CPU_DESCRIPTOR_HANDLE sourceDescriptor = runtimeInputs[inputIndex].shaderResourceView;
 
 			if (!sourceDescriptor.ptr)
 			{
@@ -1379,5 +1358,29 @@ namespace ShaderResourceRuntime
 		}
 		gCachedCommandList = nullptr;
 		gCachedCommandListSlot = nullptr;
+	}
+
+	void LogPerformanceStatistics()
+	{
+		size_t commandLists = 0, executionSlots = 0, blockedSlots = 0, heapPages = 0;
+		uint64_t descriptorCapacity = 0;
+		{
+			std::lock_guard<std::mutex> lock(gCommandListSlotMutex);
+			commandLists = gCommandListSlots.size();
+			for (const auto& commandList : gCommandListSlots)
+			{
+				executionSlots += commandList.second->executionSlots.size();
+				for (const auto& slot : commandList.second->executionSlots)
+				{
+					blockedSlots += slot->retirementBlocked ? 1 : 0;
+					heapPages += slot->pages.size() + slot->samplerPages.size();
+					for (const auto& page : slot->pages) descriptorCapacity += page.capacity;
+					for (const auto& page : slot->samplerPages) descriptorCapacity += page.capacity;
+				}
+			}
+		}
+		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
+			"ShaderResourceRuntime->Performance: commandLists=%zu executionSlots=%zu blockedSlots=%zu heapPages=%zu descriptorCapacity=%llu",
+			commandLists, executionSlots, blockedSlots, heapPages, static_cast<unsigned long long>(descriptorCapacity)));
 	}
 }

@@ -1,4 +1,12 @@
 #pragma once
+#include "Enum/RenderPassRenderPassType.h"
+#include "Enum/RenderPassExecutionMode.h"
+#include "Enum/RenderPassPassOperation.h"
+#include "Enum/RenderPassDispatchMode.h"
+#include "Enum/RenderPassViewportMode.h"
+#include "Enum/RenderPassResourceAccess.h"
+#include "Enum/RenderPassGameResourceViewType.h"
+#include "Enum/RenderPassEventType.h"
 
 #include <array>
 #include <cstdint>
@@ -15,125 +23,6 @@ namespace RenderPass
 	inline constexpr int currentSchemaVersion = 9;
 	inline constexpr const char* timingBefore = "Before";
 	inline constexpr const char* timingAfter = "After";
-
-	enum class RenderPassType
-	{
-		Custom,
-		MipChain,
-		TemporalHistory,
-		ReplacementPixelShader,
-		ReplacementComputeShader,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(RenderPassType,
-	{
-		{ RenderPassType::Custom, "Custom" },
-		{ RenderPassType::MipChain, "MipChain" },
-		{ RenderPassType::TemporalHistory, "TemporalHistory" },
-		{ RenderPassType::ReplacementPixelShader, "ReplacementPixelShader" },
-		{ RenderPassType::ReplacementComputeShader, "ReplacementComputeShader" },
-	})
-
-	enum class ExecutionMode
-	{
-		Automatic,
-		FullscreenPixel,
-		Compute,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(ExecutionMode,
-	{
-		{ ExecutionMode::Automatic, "Automatic" },
-		{ ExecutionMode::FullscreenPixel, "FullscreenPixel" },
-		{ ExecutionMode::Compute, "Compute" },
-	})
-
-	enum class PassOperation
-	{
-		Automatic,
-		Custom,
-		ReplaceOriginal,
-		MipChain,
-		Downsample,
-		UpsampleChain,
-		Copy,
-		TemporalHistory,
-		Resolve,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(PassOperation,
-	{
-		{ PassOperation::Automatic, "Automatic" },
-		{ PassOperation::Custom, "Custom" },
-		{ PassOperation::ReplaceOriginal, "ReplaceOriginal" },
-		{ PassOperation::MipChain, "MipChain" },
-		{ PassOperation::Downsample, "Downsample" },
-		{ PassOperation::UpsampleChain, "UpsampleChain" },
-		{ PassOperation::Copy, "Copy" },
-		{ PassOperation::TemporalHistory, "TemporalHistory" },
-		{ PassOperation::Resolve, "Resolve" },
-	})
-
-	enum class DispatchMode
-	{
-		InheritOriginal,
-		ScaleByResolution,
-		ExplicitThreadGroups,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(DispatchMode,
-	{
-		{ DispatchMode::InheritOriginal, "InheritOriginal" },
-		{ DispatchMode::ScaleByResolution, "ScaleByResolution" },
-		{ DispatchMode::ExplicitThreadGroups, "ExplicitThreadGroups" },
-	})
-
-	enum class ViewportMode
-	{
-		InheritOriginal,
-		MatchOutput,
-		Explicit,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(ViewportMode,
-	{
-		{ ViewportMode::InheritOriginal, "InheritOriginal" },
-		{ ViewportMode::MatchOutput, "MatchOutput" },
-		{ ViewportMode::Explicit, "Explicit" },
-	})
-
-	enum class ResourceAccess
-	{
-		ShaderResource,
-		UnorderedAccess,
-		RenderTarget,
-		DepthStencil,
-		CopySource,
-		CopyDestination,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(ResourceAccess,
-	{
-		{ ResourceAccess::ShaderResource, "ShaderResource" },
-		{ ResourceAccess::UnorderedAccess, "UnorderedAccess" },
-		{ ResourceAccess::RenderTarget, "RenderTarget" },
-		{ ResourceAccess::DepthStencil, "DepthStencil" },
-		{ ResourceAccess::CopySource, "CopySource" },
-		{ ResourceAccess::CopyDestination, "CopyDestination" },
-	})
-
-	enum class GameResourceViewType
-	{
-		ShaderResource,
-		UnorderedAccess,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(GameResourceViewType,
-	{
-		{ GameResourceViewType::ShaderResource, "ShaderResource" },
-		{ GameResourceViewType::UnorderedAccess, "UnorderedAccess" },
-	})
-
 	struct DispatchPolicyDisk
 	{
 		DispatchMode mode = DispatchMode::InheritOriginal;
@@ -270,17 +159,6 @@ namespace RenderPass
 			constantBuffers)
 	};
 
-	enum class EventType
-	{
-		ModifiedShader,
-		RenderPass,
-	};
-
-	NLOHMANN_JSON_SERIALIZE_ENUM(EventType,
-	{
-		{ EventType::ModifiedShader, "ModifiedShader" },
-		{ EventType::RenderPass, "RenderPass" },
-	})
 
 	struct EventReferenceDisk
 	{

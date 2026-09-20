@@ -524,4 +524,37 @@ namespace DatabaseRenderPasses
 		PublishRuntimeConfiguration();
 		return true;
 	}
+
+	RenderPassShaderBatchCompileResult CompileAllRenderPassShaders()
+	{
+		EnsureRenderPassesLoaded();
+		RenderPassShaderBatchCompileResult result{};
+
+		for (RenderPass::RenderPassDisk& renderPass : gRenderPasses)
+		{
+			RenderPass::ResolveShaderPaths(renderPass);
+			if (!RenderPass::HasShaderTemplate(renderPass))
+			{
+				++result.skippedRenderPassCount;
+				continue;
+			}
+
+			std::string error;
+			if (!RenderPassShaders::CompileShaders(renderPass, error) || !RenderPass::WriteJson(renderPass))
+			{
+				++result.failedRenderPassCount;
+				if (error.empty())
+					error = "Compiled Render Pass shader settings could not be saved.";
+				result.errors.push_back(renderPass.name + ": " + error);
+				continue;
+			}
+
+			++result.compiledRenderPassCount;
+		}
+
+		// Publish once after the batch so successfully loaded blobs become active
+		// without rebuilding the complete runtime configuration for every pass.
+		PublishRuntimeConfiguration();
+		return result;
+	}
 }

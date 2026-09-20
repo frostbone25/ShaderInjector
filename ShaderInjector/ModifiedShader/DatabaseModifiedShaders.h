@@ -24,4 +24,8 @@ namespace DatabaseModifiedShaders
 	bool DeleteModifiedShader(const std::string& modifiedShaderId);
 
 	bool CompileModifiedShader(const std::string& modifiedShaderId);
+
+	bool CompiledShaderMatchesTargetInterface(
+		const ModifiedShader::PackageDisk& modifiedShader,
+		const ShaderAnalysis::ShaderAnalysisDisk& targetAnalysis);
 }

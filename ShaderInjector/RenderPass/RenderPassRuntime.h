@@ -1,4 +1,5 @@
 #pragma once
+#include "Enum/RenderPassRuntimeExecutionBoundary.h"
 
 #include <cstdint>
 #include <string>
@@ -20,11 +21,6 @@ namespace RenderPassRuntime
 		UINT sampleQuality = 0;
 	};
 
-	enum class ExecutionBoundary
-	{
-		Before,
-		After,
-	};
 
 	void PublishRenderPassConfigurations(const std::vector<RenderPass::RenderPassDisk>& renderPasses);
 	bool HasEnabledRenderPasses();

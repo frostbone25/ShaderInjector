@@ -16,20 +16,28 @@ namespace HookD3D12
 	HRESULT STDMETHODCALLTYPE Handle_CreateDescriptorHeap(ID3D12Device* device, const D3D12_DESCRIPTOR_HEAP_DESC* description, REFIID interfaceId, void** descriptorHeapObject)
 	{
 		const HRESULT result = Original_CreateDescriptorHeap(device, description, interfaceId, descriptorHeapObject);
-		if (FAILED(result) || !device || !description || !descriptorHeapObject || !*descriptorHeapObject ||
-			IsInsideRenderPassInjection() || !RenderPassRuntime::IsDescriptorRegistryTrackingRequired())
+
+		if (FAILED(result) || 
+			!device || 
+			!description || 
+			!descriptorHeapObject ||
+			!*descriptorHeapObject ||
+			IsInsideRenderPassInjection() || 
+			!RenderPassRuntime::IsDescriptorRegistryTrackingRequired())
 		{
 			return result;
 		}
 
 		ID3D12DescriptorHeap* descriptorHeap = nullptr;
 		IUnknown* unknown = reinterpret_cast<IUnknown*>(*descriptorHeapObject);
+
 		if (SUCCEEDED(unknown->QueryInterface(IID_PPV_ARGS(&descriptorHeap))) && descriptorHeap)
 		{
 			const UINT descriptorIncrement = device->GetDescriptorHandleIncrementSize(description->Type);
 			RenderPassResourceRegistry::RegisterDescriptorHeap(descriptorHeap, descriptorIncrement, true);
 			descriptorHeap->Release();
 		}
+
 		return result;
 	}
 }

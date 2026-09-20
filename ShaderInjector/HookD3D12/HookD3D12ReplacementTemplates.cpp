@@ -2,6 +2,7 @@
 #include "HookD3D12ReplacementTemplates.h"
 
 #include <algorithm>
+#include <cmath>
 
 //custom
 #include "Hash.h"
@@ -73,14 +74,21 @@ namespace HookD3D12
 			}
 		}
 
-		if (replacement.pipelineStreamBlobPath.empty())
-			return;
+		if (!replacement.pipelineStreamBlobPath.empty())
+		{
+			PipelineStateInfo persistedPipeline{};
+			if (LoadPersistedStreamTemplateFromReplacement(replacement, persistedPipeline))
+				FillStreamReplacementPortableStateFromBlob(replacement, persistedPipeline);
+		}
 
-		PipelineStateInfo persistedPipeline{};
-		if (!LoadPersistedStreamTemplateFromReplacement(replacement, persistedPipeline))
-			return;
-
-		FillStreamReplacementPortableStateFromBlob(replacement, persistedPipeline);
+		for (ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
+		{
+			ShaderTarget::ShaderTargetDisk templateReplacement =
+				ReplacementWithPipelineTemplate(replacement, pipelineTemplate);
+			PipelineStateInfo templatePipeline{};
+			if (LoadPersistedStreamTemplateFromReplacement(templateReplacement, templatePipeline))
+				FillPipelineTemplateCommonState(pipelineTemplate, templatePipeline);
+		}
 	}
 
 	bool LoadPersistedStreamTemplateFromReplacement(const ShaderTarget::ShaderTargetDisk& replacement, PipelineStateInfo& outPipeline)
@@ -181,6 +189,21 @@ namespace HookD3D12
 		pipelineTemplate.streamOutputSignature = StreamOutputSignature(pipeline.soDeclarations, pipeline.soStrides);
 		pipelineTemplate.pipelineStreamLength = pipeline.streamBlob.empty() ? "" : std::to_string(pipeline.streamBlob.size());
 		pipelineTemplate.pipelineStreamSubobjectTypes = PipelineStreamSubobjectTypeSignature(pipeline.streamBlob);
+
+		ShaderTarget::ShaderTargetDisk portableState{};
+		FillStreamReplacementPortableStateFromBlob(portableState, pipeline);
+		pipelineTemplate.renderTargetFormat0 = portableState.renderTargetFormat0;
+		pipelineTemplate.renderTargetFormats = portableState.renderTargetFormats;
+		pipelineTemplate.numRenderTargets = portableState.numRenderTargets;
+		pipelineTemplate.depthStencilFormat = portableState.depthStencilFormat;
+		pipelineTemplate.primitiveTopologyType = portableState.primitiveTopologyType;
+		pipelineTemplate.sampleCount = portableState.sampleCount;
+		pipelineTemplate.sampleQuality = portableState.sampleQuality;
+		pipelineTemplate.sampleMask = portableState.sampleMask;
+		pipelineTemplate.blendStateHash = portableState.blendStateHash;
+		pipelineTemplate.rasterizerStateHash = portableState.rasterizerStateHash;
+		pipelineTemplate.depthStencilStateHash = portableState.depthStencilStateHash;
+		pipelineTemplate.pipelineFixedFunctionStateHash = portableState.pipelineFixedFunctionStateHash;
 	}
 
 	ShaderTarget::ShaderTargetDisk ReplacementWithPipelineTemplate(const ShaderTarget::ShaderTargetDisk& replacement, const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate)
@@ -190,6 +213,7 @@ namespace HookD3D12
 		templateReplacement.pipelineIndex = pipelineTemplate.pipelineIndex;
 		templateReplacement.psoPointer = pipelineTemplate.psoPointer;
 		templateReplacement.pipelineCachedBlobHash = pipelineTemplate.pipelineCachedBlobHash;
+		templateReplacement.pipelineCachedBlobHashAliases = pipelineTemplate.pipelineCachedBlobHashAliases;
 		templateReplacement.pipelineCachedBlobLength = pipelineTemplate.pipelineCachedBlobLength;
 		templateReplacement.pipelineCachedBlobPath = pipelineTemplate.pipelineCachedBlobPath;
 		templateReplacement.pipelineStreamBlobPath = pipelineTemplate.pipelineStreamBlobPath;
@@ -221,6 +245,18 @@ namespace HookD3D12
 		templateReplacement.dsLength = pipelineTemplate.dsLength;
 		templateReplacement.asLength = pipelineTemplate.asLength;
 		templateReplacement.msLength = pipelineTemplate.msLength;
+		templateReplacement.renderTargetFormat0 = pipelineTemplate.renderTargetFormat0;
+		templateReplacement.renderTargetFormats = pipelineTemplate.renderTargetFormats;
+		templateReplacement.numRenderTargets = pipelineTemplate.numRenderTargets;
+		templateReplacement.depthStencilFormat = pipelineTemplate.depthStencilFormat;
+		templateReplacement.primitiveTopologyType = pipelineTemplate.primitiveTopologyType;
+		templateReplacement.sampleCount = pipelineTemplate.sampleCount;
+		templateReplacement.sampleQuality = pipelineTemplate.sampleQuality;
+		templateReplacement.sampleMask = pipelineTemplate.sampleMask;
+		templateReplacement.blendStateHash = pipelineTemplate.blendStateHash;
+		templateReplacement.rasterizerStateHash = pipelineTemplate.rasterizerStateHash;
+		templateReplacement.depthStencilStateHash = pipelineTemplate.depthStencilStateHash;
+		templateReplacement.pipelineFixedFunctionStateHash = pipelineTemplate.pipelineFixedFunctionStateHash;
 		templateReplacement.pipelineStreamLength = pipelineTemplate.pipelineStreamLength;
 		templateReplacement.pipelineStreamSubobjectTypes = pipelineTemplate.pipelineStreamSubobjectTypes;
 		templateReplacement.inputLayoutElementCount = pipelineTemplate.inputLayoutElementCount;
@@ -240,6 +276,70 @@ namespace HookD3D12
 				matches++;
 		}
 		return matches;
+	}
+
+	bool PipelineTemplateHasSameRebuildIdentity(
+		const ShaderTarget::ShaderPipelineTemplateDisk& left,
+		const ShaderTarget::ShaderPipelineTemplateDisk& right)
+	{
+		if (left.pipelineFixedFunctionStateHash.empty() ||
+			left.pipelineFixedFunctionStateHash != right.pipelineFixedFunctionStateHash)
+		{
+			return false;
+		}
+
+		return left.vsHash == right.vsHash &&
+			left.psHash == right.psHash &&
+			left.csHash == right.csHash &&
+			left.gsHash == right.gsHash &&
+			left.hsHash == right.hsHash &&
+			left.dsHash == right.dsHash &&
+			left.asHash == right.asHash &&
+			left.msHash == right.msHash &&
+			left.inputLayoutSignature == right.inputLayoutSignature &&
+			left.streamOutputSignature == right.streamOutputSignature;
+	}
+
+	ShaderTarget::ShaderPipelineTemplateDisk TopLevelPipelineTemplate(
+		const ShaderTarget::ShaderTargetDisk& replacement)
+	{
+		ShaderTarget::ShaderPipelineTemplateDisk pipelineTemplate{};
+		pipelineTemplate.pipelineCachedBlobHash = replacement.pipelineCachedBlobHash;
+		pipelineTemplate.pipelineCachedBlobHashAliases = replacement.pipelineCachedBlobHashAliases;
+		pipelineTemplate.pipelineFixedFunctionStateHash = replacement.pipelineFixedFunctionStateHash;
+		pipelineTemplate.vsHash = replacement.vsHash;
+		pipelineTemplate.psHash = replacement.psHash;
+		pipelineTemplate.csHash = replacement.csHash;
+		pipelineTemplate.gsHash = replacement.gsHash;
+		pipelineTemplate.hsHash = replacement.hsHash;
+		pipelineTemplate.dsHash = replacement.dsHash;
+		pipelineTemplate.asHash = replacement.asHash;
+		pipelineTemplate.msHash = replacement.msHash;
+		pipelineTemplate.inputLayoutSignature = replacement.inputLayoutSignature;
+		pipelineTemplate.streamOutputSignature = replacement.streamOutputSignature;
+		return pipelineTemplate;
+	}
+
+	bool AddCachedBlobHashAlias(
+		const std::string& primaryHash,
+		std::vector<std::string>& hashAliases,
+		uint64_t cachedBlobHash)
+	{
+		if (!cachedBlobHash || Hash::ParseHashText(primaryHash) == cachedBlobHash)
+			return false;
+
+		const auto existingAlias = std::find_if(
+			hashAliases.begin(),
+			hashAliases.end(),
+			[cachedBlobHash](const std::string& hashAlias)
+			{
+				return Hash::ParseHashText(hashAlias) == cachedBlobHash;
+			});
+		if (existingAlias != hashAliases.end())
+			return false;
+
+		hashAliases.push_back(Hash::FormatHash(cachedBlobHash));
+		return true;
 	}
 
 	bool WriteStreamPipelineTemplateVariant(ShaderTarget::ShaderTargetDisk& replacement, const PipelineStateInfo& pipeline, int pipelineIndex, int templateIndex, bool& ok)
@@ -317,6 +417,22 @@ namespace HookD3D12
 			if (!StreamPipelineHasShaderHash(pipeline, shaderType, shaderHash))
 				continue;
 
+			ShaderTarget::ShaderPipelineTemplateDisk candidateTemplate{};
+			FillPipelineTemplateCommonState(candidateTemplate, pipeline);
+			const bool alreadyCaptured =
+				PipelineTemplateHasSameRebuildIdentity(
+					candidateTemplate,
+					TopLevelPipelineTemplate(replacement)) ||
+				std::any_of(
+					replacement.pipelineTemplates.begin(),
+					replacement.pipelineTemplates.end(),
+					[&candidateTemplate](const ShaderTarget::ShaderPipelineTemplateDisk& existingTemplate)
+					{
+						return PipelineTemplateHasSameRebuildIdentity(candidateTemplate, existingTemplate);
+					});
+			if (alreadyCaptured)
+				continue;
+
 			if (WriteStreamPipelineTemplateVariant(replacement, pipeline, i, templateIndex++, ok))
 				++capturedTemplateCount;
 		}
@@ -346,42 +462,47 @@ namespace HookD3D12
 			candidateTemplate.pipelineCachedBlobLength = std::to_string(cachedBlobSize);
 		}
 
-		for (const ShaderTarget::ShaderPipelineTemplateDisk& existingTemplate : replacement.pipelineTemplates)
+		auto persistLearnedCacheAlias = [&](const std::string& primaryHash, std::vector<std::string>& aliases, const std::string& variantName)
 		{
-			const bool candidateHasCachedIdentity = !candidateTemplate.pipelineCachedBlobHash.empty();
-			const bool existingHasCachedIdentity = !existingTemplate.pipelineCachedBlobHash.empty();
+			if (!AddCachedBlobHashAlias(primaryHash, aliases, cachedBlobHash))
+				return;
 
-			if (candidateHasCachedIdentity || existingHasCachedIdentity)
+			replacement.schemaVersion = 6;
+			if (!ShaderTarget::WriteShaderTargetJson(replacement))
 			{
-				// A cached PSO hash identifies the complete driver pipeline, including fixed-function
-				// state that is not represented by shader/input-layout metadata. Distinct hashes must
-				// remain distinct templates; otherwise light-volume cull/depth variants can collapse
-				// onto one persisted stream and render incorrectly on the next application run.
-				if (candidateHasCachedIdentity && existingHasCachedIdentity &&
-					existingTemplate.pipelineCachedBlobHash == candidateTemplate.pipelineCachedBlobHash)
-				{
-					return false;
-				}
+				aliases.pop_back();
+				ShaderInjectorGUI::WriteToRuntimeLogWarning(
+					"HookD3D12ReplacementTemplates->PersistAppliedStreamPipelineTemplate: failed to persist cache alias for " +
+					replacement.name + variantName);
+				return;
+			}
 
+			ShaderInjectorGUI::WriteToRuntimeLog(
+				"HookD3D12ReplacementTemplates->PersistAppliedStreamPipelineTemplate: learned cache alias " +
+				Hash::FormatHash(cachedBlobHash) + " for " + replacement.name + variantName);
+		};
+
+		const ShaderTarget::ShaderPipelineTemplateDisk topLevelTemplate =
+			TopLevelPipelineTemplate(replacement);
+		if (PipelineTemplateHasSameRebuildIdentity(candidateTemplate, topLevelTemplate))
+		{
+			persistLearnedCacheAlias(
+				replacement.pipelineCachedBlobHash,
+				replacement.pipelineCachedBlobHashAliases,
+				"");
+			return false;
+		}
+
+		for (ShaderTarget::ShaderPipelineTemplateDisk& existingTemplate : replacement.pipelineTemplates)
+		{
+			if (!PipelineTemplateHasSameRebuildIdentity(candidateTemplate, existingTemplate))
 				continue;
-			}
 
-			// Structural deduplication is only a fallback when neither pipeline supplied a
-			// reliable cached identity.
-			if (existingTemplate.pipelineStreamSubobjectTypes == candidateTemplate.pipelineStreamSubobjectTypes &&
-				existingTemplate.vsHash == candidateTemplate.vsHash &&
-				existingTemplate.psHash == candidateTemplate.psHash &&
-				existingTemplate.csHash == candidateTemplate.csHash &&
-				existingTemplate.gsHash == candidateTemplate.gsHash &&
-				existingTemplate.hsHash == candidateTemplate.hsHash &&
-				existingTemplate.dsHash == candidateTemplate.dsHash &&
-				existingTemplate.asHash == candidateTemplate.asHash &&
-				existingTemplate.msHash == candidateTemplate.msHash &&
-				existingTemplate.inputLayoutSignature == candidateTemplate.inputLayoutSignature &&
-				existingTemplate.streamOutputSignature == candidateTemplate.streamOutputSignature)
-			{
-				return false;
-			}
+			persistLearnedCacheAlias(
+				existingTemplate.pipelineCachedBlobHash,
+				existingTemplate.pipelineCachedBlobHashAliases,
+				"/" + existingTemplate.name);
+			return false;
 		}
 
 		bool ok = true;
@@ -389,7 +510,7 @@ namespace HookD3D12
 		if (!WriteStreamPipelineTemplateVariant(replacement, pipeline, pipelineIndex, templateIndex, ok))
 			return false;
 
-		replacement.schemaVersion = 5;
+		replacement.schemaVersion = 6;
 		ok = ShaderTarget::WriteShaderTargetJson(replacement) && ok;
 		if (!ok)
 		{
@@ -413,33 +534,13 @@ namespace HookD3D12
 		if (shaderHash == 0)
 			return false;
 
-		auto templateShaderHash = [shaderType](const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate)
-		{
-			switch (shaderType)
-			{
-				case ShaderTarget::VertexShader: return Hash::ParseHashText(pipelineTemplate.vsHash);
-				case ShaderTarget::HullShader: return Hash::ParseHashText(pipelineTemplate.hsHash);
-				case ShaderTarget::DomainShader: return Hash::ParseHashText(pipelineTemplate.dsHash);
-				case ShaderTarget::GeometryShader: return Hash::ParseHashText(pipelineTemplate.gsHash);
-				case ShaderTarget::PixelShader: return Hash::ParseHashText(pipelineTemplate.psHash);
-				case ShaderTarget::ComputeShader: return Hash::ParseHashText(pipelineTemplate.csHash);
-				default: return uint64_t{ 0 };
-			}
-		};
-
-		for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
-		{
-			if (templateShaderHash(pipelineTemplate) == shaderHash)
-				return false;
-		}
-
 		const size_t previousTemplateCount = replacement.pipelineTemplates.size();
 		bool writeSucceeded = true;
 		WriteMatchingStreamPipelineTemplateVariants(replacement, shaderType, shaderHash, writeSucceeded);
 		if (replacement.pipelineTemplates.size() == previousTemplateCount)
 			return false;
 
-		replacement.schemaVersion = 5;
+		replacement.schemaVersion = 6;
 		writeSucceeded = ShaderTarget::WriteShaderTargetJson(replacement) && writeSucceeded;
 		if (!writeSucceeded)
 		{
@@ -455,6 +556,49 @@ namespace HookD3D12
 		return true;
 	}
 
+	bool PersistObservedPipelineCacheAlias(
+		ShaderTarget::ShaderTargetDisk& replacement,
+		const std::string& pipelineTemplateName,
+		uint64_t cachedBlobHash)
+	{
+		std::string* primaryHash = &replacement.pipelineCachedBlobHash;
+		std::vector<std::string>* aliases = &replacement.pipelineCachedBlobHashAliases;
+		if (!pipelineTemplateName.empty())
+		{
+			auto pipelineTemplate = std::find_if(
+				replacement.pipelineTemplates.begin(),
+				replacement.pipelineTemplates.end(),
+				[&pipelineTemplateName](const ShaderTarget::ShaderPipelineTemplateDisk& candidate)
+				{
+					return candidate.name == pipelineTemplateName;
+				});
+			if (pipelineTemplate == replacement.pipelineTemplates.end())
+				return false;
+
+			primaryHash = &pipelineTemplate->pipelineCachedBlobHash;
+			aliases = &pipelineTemplate->pipelineCachedBlobHashAliases;
+		}
+
+		if (!AddCachedBlobHashAlias(*primaryHash, *aliases, cachedBlobHash))
+			return false;
+
+		replacement.schemaVersion = 6;
+		if (!ShaderTarget::WriteShaderTargetJson(replacement))
+		{
+			aliases->pop_back();
+			ShaderInjectorGUI::WriteToRuntimeLogWarning(
+				"HookD3D12ReplacementTemplates->PersistObservedPipelineCacheAlias: failed to persist " +
+				replacement.name);
+			return false;
+		}
+
+		ShaderInjectorGUI::WriteToRuntimeLog(
+			"HookD3D12ReplacementTemplates->PersistObservedPipelineCacheAlias: learned exact warm-cache identity " +
+			Hash::FormatHash(cachedBlobHash) + " for " + replacement.name +
+			(pipelineTemplateName.empty() ? "" : "/" + pipelineTemplateName));
+		return true;
+	}
+
 	bool SelectPersistedPipelineTemplateForUncaptured(
 		const ShaderTarget::ShaderTargetDisk& replacement,
 		const UncapturedPipelineStateInfo& uncaptured,
@@ -465,54 +609,213 @@ namespace HookD3D12
 		outTemplateReplacement = replacement;
 		outTemplateName.clear();
 		outMatchingBytes = 0;
-
-		if (replacement.pipelineTemplates.empty())
-			return true;
-
-		int bestIndex = -1;
-		SIZE_T bestMatchingBytes = 0;
-		int exactHashIndex = -1;
-
-		for (int i = 0; i < (int)replacement.pipelineTemplates.size(); ++i)
+		const bool topLevelEntryIsValid =
+			PersistedPipelineEntryTargetsShader(replacement, replacement);
+		const auto cacheHashMatches = [cachedBlobHash = uncaptured.cachedBlobHash](
+			const std::string& primaryHash,
+			const std::vector<std::string>& aliases)
 		{
-			const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate = replacement.pipelineTemplates[i];
-			const uint64_t templateHash = Hash::ParseHashText(pipelineTemplate.pipelineCachedBlobHash);
-			if (templateHash != 0 && templateHash == uncaptured.cachedBlobHash)
+			if (Hash::ParseHashText(primaryHash) == cachedBlobHash)
+				return true;
+			return std::any_of(
+				aliases.begin(),
+				aliases.end(),
+				[cachedBlobHash](const std::string& alias)
+				{
+					return Hash::ParseHashText(alias) == cachedBlobHash;
+				});
+		};
+
+		// Exact cache identities select both the target and its fixed-function variant.
+		if (topLevelEntryIsValid &&
+			cacheHashMatches(
+				replacement.pipelineCachedBlobHash,
+				replacement.pipelineCachedBlobHashAliases))
+		{
+			outMatchingBytes = uncaptured.cachedBlobSize;
+			return true;
+		}
+
+		for (int templateIndex = 0;
+			templateIndex < static_cast<int>(replacement.pipelineTemplates.size());
+			++templateIndex)
+		{
+			const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate =
+				replacement.pipelineTemplates[templateIndex];
+			if (!PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate) ||
+				!cacheHashMatches(
+					pipelineTemplate.pipelineCachedBlobHash,
+					pipelineTemplate.pipelineCachedBlobHashAliases))
 			{
-				exactHashIndex = i;
-				break;
+				continue;
 			}
 
-			if (pipelineTemplate.pipelineCachedBlobLength.empty() || uncaptured.cachedBlobSize == 0)
-				continue;
+			outTemplateReplacement = ReplacementWithPipelineTemplate(replacement, pipelineTemplate);
+			outTemplateName = pipelineTemplate.name;
+			outMatchingBytes = uncaptured.cachedBlobSize;
+			return true;
+		}
 
-			const SIZE_T templateSize = (SIZE_T)_strtoui64(pipelineTemplate.pipelineCachedBlobLength.c_str(), nullptr, 10);
-			if (templateSize != uncaptured.cachedBlobSize)
-				continue;
+		uint64_t observedRootSignatureHash = 0;
+		std::vector<uint8_t> observedRootSignatureBlob;
+		ID3D12RootSignature* observedRootSignature = replacement.shaderType == ShaderTarget::ComputeShader
+			? uncaptured.observedComputeRootSignature
+			: uncaptured.observedGraphicsRootSignature;
+		GetRootSignatureBlob(
+			observedRootSignature,
+			observedRootSignatureBlob,
+			observedRootSignatureHash);
 
-			SIZE_T matchingBytes = 1;
-			if (!uncaptured.cachedBlob.empty() && !pipelineTemplate.pipelineCachedBlobPath.empty())
+		const auto metadataMatches = [&](const std::string& serializedLength, const std::string& serializedRootHash)
+		{
+			if (!observedRootSignatureHash || serializedLength.empty())
+				return false;
+			char* parseEnd = nullptr;
+			const unsigned long long parsedLength = _strtoui64(serializedLength.c_str(), &parseEnd, 10);
+			return parseEnd != serializedLength.c_str() && *parseEnd == '\0' &&
+				parsedLength == uncaptured.cachedBlobSize &&
+				Hash::ParseHashText(serializedRootHash) == observedRootSignatureHash;
+		};
+
+		if (!uncaptured.cachedBlob.empty())
+		{
+			int bestTemplateIndex = -2; // -1 is the top-level entry.
+			double bestMatchingRatio = 0.0;
+			bool bestMatchIsAmbiguous = false;
+			const double oneByteRatio = 1.0 / static_cast<double>(uncaptured.cachedBlob.size());
+
+			auto pipelineStreamPathForIndex = [&](int templateIndex) -> const std::string&
 			{
-				std::vector<uint8_t> templateCachedBlob;
-				if (ShaderInjectorIO::LoadDXILBlobFromDisk(pipelineTemplate.pipelineCachedBlobPath, templateCachedBlob) && templateCachedBlob.size() == uncaptured.cachedBlob.size())
-					matchingBytes = CountMatchingBytes(templateCachedBlob, uncaptured.cachedBlob);
+				return templateIndex < 0
+					? replacement.pipelineStreamBlobPath
+					: replacement.pipelineTemplates[templateIndex].pipelineStreamBlobPath;
+			};
+
+			auto considerContentMatch = [&](int templateIndex, const std::string& blobPath, const std::string& blobLength)
+			{
+				double matchingRatio = 0.0;
+				size_t longestMatchingRun = 0;
+				if (!MatchPersistedCachedBlobContent(
+					blobPath,
+					blobLength,
+					uncaptured.cachedBlob,
+					matchingRatio,
+					longestMatchingRun))
+				{
+					return;
+				}
+
+				if (bestTemplateIndex == -2 || matchingRatio > bestMatchingRatio + oneByteRatio)
+				{
+					bestTemplateIndex = templateIndex;
+					bestMatchingRatio = matchingRatio;
+					bestMatchIsAmbiguous = false;
+					return;
+				}
+
+				if (std::abs(matchingRatio - bestMatchingRatio) <= oneByteRatio &&
+					!PersistedPipelineStreamsAreEquivalent(
+						pipelineStreamPathForIndex(bestTemplateIndex),
+						pipelineStreamPathForIndex(templateIndex)))
+				{
+					bestMatchIsAmbiguous = true;
+				}
+			};
+
+			if (topLevelEntryIsValid)
+			{
+				considerContentMatch(
+					-1,
+					replacement.pipelineCachedBlobPath,
+					replacement.pipelineCachedBlobLength);
 			}
 
-			if (matchingBytes > bestMatchingBytes)
+			for (int templateIndex = 0;
+				templateIndex < static_cast<int>(replacement.pipelineTemplates.size());
+				++templateIndex)
 			{
-				bestMatchingBytes = matchingBytes;
-				bestIndex = i;
+				const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate =
+					replacement.pipelineTemplates[templateIndex];
+				if (PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate))
+				{
+					considerContentMatch(
+						templateIndex,
+						pipelineTemplate.pipelineCachedBlobPath,
+						pipelineTemplate.pipelineCachedBlobLength);
+				}
+			}
+
+			if (bestTemplateIndex != -2 && !bestMatchIsAmbiguous)
+			{
+				outMatchingBytes = static_cast<SIZE_T>(
+					bestMatchingRatio * uncaptured.cachedBlob.size());
+				if (bestTemplateIndex >= 0)
+				{
+					const ShaderTarget::ShaderPipelineTemplateDisk& selectedTemplate =
+						replacement.pipelineTemplates[bestTemplateIndex];
+					outTemplateReplacement = ReplacementWithPipelineTemplate(replacement, selectedTemplate);
+					outTemplateName = selectedTemplate.name;
+				}
+				return true;
 			}
 		}
 
-		const int selectedIndex = exactHashIndex >= 0 ? exactHashIndex : bestIndex;
-		if (selectedIndex < 0)
-			return true;
+		// Metadata identifies a target only when every matching entry has the same
+		// canonical fixed-function state. This recovers pointer-only stream variants
+		// without guessing between genuinely different depth/raster/blend pipelines.
+		int metadataTemplateIndex = -2;
+		std::string metadataStreamPath;
+		bool metadataIsAmbiguous = false;
+		auto considerMetadataMatch = [&](int templateIndex, const std::string& length,
+			const std::string& rootHash, const std::string& streamPath)
+		{
+			if (!metadataMatches(length, rootHash))
+				return;
+			if (metadataTemplateIndex == -2)
+			{
+				metadataTemplateIndex = templateIndex;
+				metadataStreamPath = streamPath;
+				return;
+			}
+			if (!PersistedPipelineStreamsAreEquivalent(metadataStreamPath, streamPath))
+				metadataIsAmbiguous = true;
+		};
 
-		const ShaderTarget::ShaderPipelineTemplateDisk& selectedTemplate = replacement.pipelineTemplates[selectedIndex];
-		outTemplateReplacement = ReplacementWithPipelineTemplate(replacement, selectedTemplate);
-		outTemplateName = selectedTemplate.name;
-		outMatchingBytes = exactHashIndex >= 0 ? uncaptured.cachedBlobSize : bestMatchingBytes;
+		if (topLevelEntryIsValid)
+		{
+			considerMetadataMatch(
+				-1,
+				replacement.pipelineCachedBlobLength,
+				replacement.rootSignatureHash,
+				replacement.pipelineStreamBlobPath);
+		}
+		for (int templateIndex = 0;
+			templateIndex < static_cast<int>(replacement.pipelineTemplates.size());
+			++templateIndex)
+		{
+			const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate =
+				replacement.pipelineTemplates[templateIndex];
+			if (PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate))
+			{
+				considerMetadataMatch(
+					templateIndex,
+					pipelineTemplate.pipelineCachedBlobLength,
+					pipelineTemplate.rootSignatureHash,
+					pipelineTemplate.pipelineStreamBlobPath);
+			}
+		}
+
+		if (metadataTemplateIndex == -2 || metadataIsAmbiguous)
+			return false;
+
+		outMatchingBytes = uncaptured.cachedBlobSize;
+		if (metadataTemplateIndex >= 0)
+		{
+			const ShaderTarget::ShaderPipelineTemplateDisk& selectedTemplate =
+				replacement.pipelineTemplates[metadataTemplateIndex];
+			outTemplateReplacement = ReplacementWithPipelineTemplate(replacement, selectedTemplate);
+			outTemplateName = selectedTemplate.name;
+		}
 		return true;
 	}
 }

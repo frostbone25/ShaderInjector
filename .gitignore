@@ -435,4 +435,7 @@ PDFs/
 Tests/CrossVersionDiscovery/build/
 /ShaderInjector/Tests
 /ShaderInjector/x64/Tests
+/ShaderInjector/x64/Validation/
 ShaderInjector/DirectionalLightShadows_BounceExperiment.hlsl
+/ShaderInjector/.codex
+/ShaderInjector/Validation
