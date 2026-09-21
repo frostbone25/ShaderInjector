@@ -16,8 +16,7 @@
 
 namespace PerformanceMetrics
 {
-	namespace
-	{
+
 		constexpr size_t CounterCount = static_cast<size_t>(Counter::Count);
 		constexpr size_t TimingCount = static_cast<size_t>(Timing::Count);
 		constexpr double ReportIntervalSeconds = 5.0;
@@ -170,14 +169,14 @@ namespace PerformanceMetrics
 			{
 				std::lock_guard<std::mutex> lock(ThreadRegistryMutex());
 				metricThreadCount = ThreadRegistry().size();
+
 				for (const auto& thread : ThreadRegistry())
 				{
 					for (size_t counterIndex = 0; counterIndex < CounterCount; ++counterIndex)
 					{
-						counters[counterIndex] += thread->counters[counterIndex].exchange(
-							0,
-							std::memory_order_relaxed);
+						counters[counterIndex] += thread->counters[counterIndex].exchange(0, std::memory_order_relaxed);
 					}
+
 					for (size_t timingIndex = 0; timingIndex < TimingCount; ++timingIndex)
 					{
 						TimingAccumulator& source = thread->timings[timingIndex];
@@ -185,9 +184,7 @@ namespace PerformanceMetrics
 						destination.invocations += source.invocations.exchange(0, std::memory_order_relaxed);
 						destination.samples += source.samples.exchange(0, std::memory_order_relaxed);
 						destination.totalTicks += source.totalTicks.exchange(0, std::memory_order_relaxed);
-						destination.maximumTicks = (std::max)(
-							destination.maximumTicks,
-							source.maximumTicks.exchange(0, std::memory_order_relaxed));
+						destination.maximumTicks = (std::max)(destination.maximumTicks, source.maximumTicks.exchange(0, std::memory_order_relaxed));
 					}
 				}
 			}
@@ -205,22 +202,26 @@ namespace PerformanceMetrics
 				<< " presents=" << presents
 				<< " observedFPS=" << framesPerSecond
 				<< " metricThreads=" << metricThreadCount;
+
 			ShaderInjectorIO::WriteToLogFile(summary.str());
 
 			std::ostringstream counterLine;
 			counterLine << "PerformanceMetrics->Counters:";
+
 			for (size_t counterIndex = 0; counterIndex < CounterCount; ++counterIndex)
 			{
 				if (!counters[counterIndex] || counterIndex == static_cast<size_t>(Counter::Present))
 					continue;
-				counterLine << ' ' << CounterName(static_cast<Counter>(counterIndex))
-					<< '=' << counters[counterIndex];
+
+				counterLine << ' ' << CounterName(static_cast<Counter>(counterIndex)) << '=' << counters[counterIndex];
 			}
+
 			ShaderInjectorIO::WriteToLogFile(counterLine.str());
 
 			for (size_t timingIndex = 0; timingIndex < TimingCount; ++timingIndex)
 			{
 				const TimingSnapshot& timing = timings[timingIndex];
+
 				if (!timing.invocations)
 					continue;
 
@@ -246,12 +247,12 @@ namespace PerformanceMetrics
 				ShaderInjectorIO::WriteToLogFile(timingLine.str());
 			}
 		}
-	}
 
 	void Increment(Counter counter, uint64_t amount)
 	{
 		if (!Globals::gPerformanceTelemetryEnabled)
 			return;
+
 		CurrentThreadMetrics().counters[static_cast<size_t>(counter)].fetch_add(
 			amount,
 			std::memory_order_relaxed);
@@ -261,11 +262,12 @@ namespace PerformanceMetrics
 	{
 		if (!Globals::gPerformanceTelemetryEnabled)
 			return;
-		TimingAccumulator& accumulator =
-			CurrentThreadMetrics().timings[static_cast<size_t>(timing)];
+
+		TimingAccumulator& accumulator = CurrentThreadMetrics().timings[static_cast<size_t>(timing)];
 		accumulator_ = &accumulator;
 		const uint64_t sequence = accumulator.invocations.fetch_add(1, std::memory_order_relaxed);
 		sampled_ = sampleEvery <= 1 || sequence % sampleEvery == 0;
+
 		if (sampled_)
 			startTicks_ = QueryCounter();
 	}
@@ -286,12 +288,14 @@ namespace PerformanceMetrics
 	{
 		if (!Globals::gPerformanceTelemetryEnabled)
 			return false;
+
 		Increment(Counter::Present);
 		static std::atomic<uint64_t> lastReportTicks = 0;
 		static std::mutex reportMutex;
 
 		const uint64_t now = QueryCounter();
 		uint64_t last = lastReportTicks.load(std::memory_order_relaxed);
+
 		if (!last)
 		{
 			lastReportTicks.compare_exchange_strong(
@@ -302,15 +306,17 @@ namespace PerformanceMetrics
 			return false;
 		}
 
-		const uint64_t intervalTicks = static_cast<uint64_t>(
-			ReportIntervalSeconds * static_cast<double>(QueryFrequency()));
+		const uint64_t intervalTicks = static_cast<uint64_t>(ReportIntervalSeconds * static_cast<double>(QueryFrequency()));
+
 		if (now - last < intervalTicks || !reportMutex.try_lock())
 			return false;
 
 		std::lock_guard<std::mutex> reportLock(reportMutex, std::adopt_lock);
 		last = lastReportTicks.load(std::memory_order_relaxed);
+
 		if (now - last < intervalTicks)
 			return false;
+
 		lastReportTicks.store(now, std::memory_order_relaxed);
 		LogSnapshot(now - last);
 		return true;

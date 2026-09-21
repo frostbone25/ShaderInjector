@@ -1,4 +1,4 @@
-#include "HookD3D12HookHandlers.h"
+#include "../HookD3D12.h"
 
 #include "GUI/ShaderInjectorGUI.h"
 #include "IO/SystemInfoLogger.h"

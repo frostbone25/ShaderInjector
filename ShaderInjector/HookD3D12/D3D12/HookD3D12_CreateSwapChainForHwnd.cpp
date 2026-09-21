@@ -1,6 +1,6 @@
-#include "HookD3D12SwapChainHookHandlers.h"
+#include "../HookD3D12.h"
 
-namespace Hooks
+namespace HookD3D12
 {
 	HRESULT STDMETHODCALLTYPE Hook_CreateSwapChainForHwnd(IDXGIFactory2* factory, IUnknown* device, HWND window, const DXGI_SWAP_CHAIN_DESC1* description, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* fullscreenDescription, IDXGIOutput* restrictToOutput, IDXGISwapChain1** swapChain)
 	{

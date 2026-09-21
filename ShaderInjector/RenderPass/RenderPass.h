@@ -23,6 +23,7 @@ namespace RenderPass
 	inline constexpr int currentSchemaVersion = 9;
 	inline constexpr const char* timingBefore = "Before";
 	inline constexpr const char* timingAfter = "After";
+
 	struct DispatchPolicyDisk
 	{
 		DispatchMode mode = DispatchMode::InheritOriginal;

@@ -1,6 +1,6 @@
-#include "HookD3D12SwapChainHookHandlers.h"
+#include "../HookD3D12.h"
 
-namespace Hooks
+namespace HookD3D12
 {
 	HRESULT STDMETHODCALLTYPE Hook_CreateSwapChain(IDXGIFactory* factory, IUnknown* device, DXGI_SWAP_CHAIN_DESC* description, IDXGISwapChain** swapChain)
 	{

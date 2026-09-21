@@ -1,4 +1,4 @@
-#include "HookD3D12HookHandlers.h"
+#include "../HookD3D12.h"
 
 #include "Globals.h"
 #include "RenderPass/RenderPassRuntime.h"

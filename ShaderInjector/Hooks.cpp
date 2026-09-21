@@ -17,7 +17,6 @@
 #include "ShaderInjectorGUI.h"
 #include "StringHelper.h"
 #include "VTableIndex.h"
-#include "HookD3D12/D3D12/HookD3D12SwapChainHookHandlers.h"
 
 namespace Hooks
 {
@@ -37,6 +36,10 @@ namespace Hooks
 	static bool gOptiScalerCompatibilityEnabled = false;
 	static bool gObjectLocalSwapChainHooksEnabled = false;
 
+}
+
+namespace HookD3D12
+{
 	FunctionCreateSwapChain gOriginalCreateSwapChain = nullptr;
 	FunctionCreateSwapChainForHwnd gOriginalCreateSwapChainForHwnd = nullptr;
 
@@ -52,19 +55,23 @@ namespace Hooks
 
 		// D3D12 passes the presenting direct command queue as the factory's
 		// device argument. Preserve that exact association for overlay work.
-		HookD3D12::RegisterSwapChainCommandQueue(swapChain3.Get(), creationDevice);
+		RegisterSwapChainCommandQueue(swapChain3.Get(), creationDevice);
 
-		if (!gObjectLocalSwapChainHooksEnabled)
+		if (!Hooks::gObjectLocalSwapChainHooksEnabled)
 			return;
 
-		const char* compatibilitySource = gOptiScalerCompatibilityEnabled ? "OptiScaler" : "RenderDoc";
+		const char* compatibilitySource = Hooks::gOptiScalerCompatibilityEnabled ? "OptiScaler" : "RenderDoc";
 
-		if (HookD3D12::InstallSwapChainCompatibility(swapChain3.Get(), compatibilitySource))
+		if (InstallSwapChainCompatibility(swapChain3.Get(), compatibilitySource))
 		{
-			ShaderInjectorIO::WriteToLogFile(StringHelper::Format("Hooks->CaptureCreatedSwapChain: captured %s swapChain=%p", compatibilitySource, swapChain3.Get()));
+			ShaderInjectorIO::WriteToLogFile(StringHelper::Format("HookD3D12->CaptureCreatedSwapChain: captured %s swapChain=%p", compatibilitySource, swapChain3.Get()));
 		}
 	}
 
+}
+
+namespace Hooks
+{
 	bool PrepareSwapChainCapture()
 	{
 		const std::string optiScalerSettingsPath = ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetGameDirectory(), "OptiScaler.ini");
@@ -85,7 +92,7 @@ namespace Hooks
 		void* createSwapChainTarget = factoryVTable[VTableIndex::indexCreateSwapChain];
 		void* createSwapChainForHwndTarget = factoryVTable[VTableIndex::indexCreateSwapChainForHwnd];
 
-		MH_STATUS createHwndStatus = MH_CreateHook(createSwapChainForHwndTarget, reinterpret_cast<void*>(&Hook_CreateSwapChainForHwnd), reinterpret_cast<void**>(&gOriginalCreateSwapChainForHwnd));
+		MH_STATUS createHwndStatus = MH_CreateHook(createSwapChainForHwndTarget, reinterpret_cast<void*>(&HookD3D12::Hook_CreateSwapChainForHwnd), reinterpret_cast<void**>(&HookD3D12::gOriginalCreateSwapChainForHwnd));
 		MH_STATUS enableHwndStatus = createHwndStatus == MH_OK ? MH_EnableHook(createSwapChainForHwndTarget) : createHwndStatus;
 
 		if (createHwndStatus != MH_OK || (enableHwndStatus != MH_OK && enableHwndStatus != MH_ERROR_ENABLED))
@@ -94,7 +101,7 @@ namespace Hooks
 			return false;
 		}
 
-		MH_STATUS createLegacyStatus = MH_CreateHook(createSwapChainTarget, reinterpret_cast<void*>(&Hook_CreateSwapChain), reinterpret_cast<void**>(&gOriginalCreateSwapChain));
+		MH_STATUS createLegacyStatus = MH_CreateHook(createSwapChainTarget, reinterpret_cast<void*>(&HookD3D12::Hook_CreateSwapChain), reinterpret_cast<void**>(&HookD3D12::gOriginalCreateSwapChain));
 		MH_STATUS enableLegacyStatus = createLegacyStatus == MH_OK ? MH_EnableHook(createSwapChainTarget) : createLegacyStatus;
 
 		if (createLegacyStatus != MH_OK || (enableLegacyStatus != MH_OK && enableLegacyStatus != MH_ERROR_ENABLED))

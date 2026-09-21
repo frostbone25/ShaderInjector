@@ -20,6 +20,7 @@ namespace ShaderResourceCatalog
 	void PublishDiskResources(const std::vector<ShaderResource::TextureDisk>& resources)
 	{
 		std::lock_guard<std::mutex> lock(gCatalogMutex);
+
 		for (auto resourceIt = gCatalog.begin(); resourceIt != gCatalog.end();)
 		{
 			if (resourceIt->second.origin == ShaderResource::ResourceOrigin::Disk)
@@ -51,6 +52,7 @@ namespace ShaderResourceCatalog
 	{
 		if (entry.id.empty())
 			return;
+
 		std::lock_guard<std::mutex> lock(gCatalogMutex);
 		gCatalog[CatalogKey(entry.origin, entry.id)] = entry;
 	}
@@ -63,9 +65,12 @@ namespace ShaderResourceCatalog
 	{
 		std::lock_guard<std::mutex> lock(gCatalogMutex);
 		const auto resourceIt = gCatalog.find(CatalogKey(origin, resourceId));
+
 		if (resourceIt == gCatalog.end())
 			return;
+
 		resourceIt->second.resident = resident;
+
 		if (!status.empty())
 			resourceIt->second.status = status;
 	}
@@ -73,6 +78,7 @@ namespace ShaderResourceCatalog
 	void RemoveRuntimeResourcesByOwner(const std::string& ownerRenderPassId)
 	{
 		std::lock_guard<std::mutex> lock(gCatalogMutex);
+
 		for (auto resourceIt = gCatalog.begin(); resourceIt != gCatalog.end();)
 		{
 			if (resourceIt->second.origin == ShaderResource::ResourceOrigin::Runtime &&
@@ -90,6 +96,7 @@ namespace ShaderResourceCatalog
 	void ClearRuntimeResources()
 	{
 		std::lock_guard<std::mutex> lock(gCatalogMutex);
+
 		for (auto resourceIt = gCatalog.begin(); resourceIt != gCatalog.end();)
 		{
 			if (resourceIt->second.origin == ShaderResource::ResourceOrigin::Runtime)
@@ -104,16 +111,21 @@ namespace ShaderResourceCatalog
 		std::lock_guard<std::mutex> lock(gCatalogMutex);
 		std::vector<ShaderResource::CatalogEntry> snapshot;
 		snapshot.reserve(gCatalog.size());
+
 		for (const auto& resource : gCatalog)
 			snapshot.push_back(resource.second);
+
 		std::sort(snapshot.begin(), snapshot.end(), [](const auto& left, const auto& right)
 		{
 			if (left.origin != right.origin)
 				return left.origin < right.origin;
+
 			if (left.name != right.name)
 				return left.name < right.name;
+
 			return left.id < right.id;
 		});
+
 		return snapshot;
 	}
 }

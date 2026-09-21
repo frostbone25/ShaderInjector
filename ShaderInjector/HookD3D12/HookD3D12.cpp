@@ -65,7 +65,6 @@
 #include "RenderDoc/RenderDocIntegration.h"
 #include "VTableIndex.h"
 #include "StringHelper.h"
-#include "D3D12/HookD3D12HookHandlers.h"
 #include "D3D12/HookD3D12RuntimeState.h"
 
 #if defined _M_X64

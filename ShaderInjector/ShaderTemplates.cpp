@@ -2,9 +2,7 @@
 
 namespace ShaderTemplates
 {
-	namespace
-	{
-		const char* vertexShaderTemplate = R"(
+	const char* vertexShaderTemplate = R"(
 struct VertexOutput
 {
 	float4 position : SV_Position;
@@ -18,7 +16,7 @@ VertexOutput main(uint vertexId : SV_VertexID)
 }
 )";
 
-		const char* hullShaderTemplate = R"(
+	const char* hullShaderTemplate = R"(
 struct ControlPoint { float4 position : SV_Position; };
 struct PatchConstants { float edges[3] : SV_TessFactor; float inside : SV_InsideTessFactor; };
 
@@ -41,7 +39,7 @@ ControlPoint main(InputPatch<ControlPoint, 3> patch, uint pointId : SV_OutputCon
 }
 )";
 
-		const char* domainShaderTemplate = R"(
+	const char* domainShaderTemplate = R"(
 struct ControlPoint { float4 position : SV_Position; };
 struct PatchConstants { float edges[3] : SV_TessFactor; float inside : SV_InsideTessFactor; };
 
@@ -54,7 +52,7 @@ ControlPoint main(PatchConstants constants, float3 coordinates : SV_DomainLocati
 }
 )";
 
-		const char* geometryShaderTemplate = R"(
+	const char* geometryShaderTemplate = R"(
 struct Vertex { float4 position : SV_Position; };
 
 [maxvertexcount(3)]
@@ -65,19 +63,25 @@ void main(triangle Vertex input[3], inout TriangleStream<Vertex> outputStream)
 	outputStream.Append(input[2]);
 }
 )";
-	}
 
 	const char* GetModifiedShaderSourceTemplate(ShaderTarget::ShaderType shaderType)
 	{
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return vertexShaderTemplate;
-		case ShaderTarget::HullShader: return hullShaderTemplate;
-		case ShaderTarget::DomainShader: return domainShaderTemplate;
-		case ShaderTarget::GeometryShader: return geometryShaderTemplate;
-		case ShaderTarget::PixelShader: return internalGreenPixelShaderSourceCode;
-		case ShaderTarget::ComputeShader: return internalMarkerComputeShaderSourceCode;
-		default: return nullptr;
+			case ShaderTarget::VertexShader:
+				return vertexShaderTemplate;
+			case ShaderTarget::HullShader: 
+				return hullShaderTemplate;
+			case ShaderTarget::DomainShader: 
+				return domainShaderTemplate;
+			case ShaderTarget::GeometryShader: 
+				return geometryShaderTemplate;
+			case ShaderTarget::PixelShader: 
+				return internalGreenPixelShaderSourceCode;
+			case ShaderTarget::ComputeShader:
+				return internalMarkerComputeShaderSourceCode;
+			default: 
+				return nullptr;
 		}
 	}
 }

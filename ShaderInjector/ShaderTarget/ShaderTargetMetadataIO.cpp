@@ -17,6 +17,7 @@ namespace ShaderTarget
 		try
 		{
 			std::string jsonText;
+
 			if (!ShaderInjectorIO::ReadTextFile(path, jsonText))
 				return false;
 

@@ -1,8 +1,8 @@
-//DatabaseStreamPSOs.cpp
+// capture pipeline-state streams and preserve the raw stream for later rebuilds.
+
 #include <mutex>
 #include <vector>
 
-//custom
 #include "HookD3D12/HookD3D12.h"
 #include "HookD3D12PipelineRegistry.h"
 #include "HookD3D12PipelineUtils.h"
@@ -17,28 +17,28 @@ namespace HookD3D12
 		if (!pipelineStreamDescription || !pipelineStreamDescription->pPipelineStateSubobjectStream || pipelineStreamDescription->SizeInBytes == 0 || !pipelineState)
 			return;
 
-		PipelineStateInfo capturedPipeline{};
-		capturedPipeline.pipelineState = pipelineState;
+		PipelineStateInfo capturedStreamPipeline{};
+		capturedStreamPipeline.pipelineState = pipelineState;
 
-		// Keep the raw stream blob; second-run persistence rebuilds need the exact subobject stream captured here.
-		const uint8_t* streamStart = (const uint8_t*)pipelineStreamDescription->pPipelineStateSubobjectStream;
-		capturedPipeline.streamBlob.assign(streamStart, streamStart + pipelineStreamDescription->SizeInBytes);
+		//preserve the exact byte stream because warm-cache rebuilds need every original subobject.
+		const uint8_t* streamDataStart = static_cast<const uint8_t*>(pipelineStreamDescription->pPipelineStateSubobjectStream);
+		capturedStreamPipeline.streamBlob.assign(streamDataStart, streamDataStart + pipelineStreamDescription->SizeInBytes);
 
-		ParsePipelineStream(pipelineStreamDescription, capturedPipeline);
+		ParsePipelineStream(pipelineStreamDescription, capturedStreamPipeline);
 
-		// The stream supplied by the game only borrows this COM pointer. Replacement
-		// rebuilds may happen much later, after the caller has released its reference.
-		if (capturedPipeline.rootSignature)
-			capturedPipeline.rootSignature->AddRef();
+		//the stream only borrows this COM pointer, so retain it for future replacement work.
+		if (capturedStreamPipeline.rootSignature)
+			capturedStreamPipeline.rootSignature->AddRef();
 
 		{
-			std::lock_guard<std::mutex> lock(gPipelineMutex);
+			std::lock_guard<std::mutex> pipelineLock(gPipelineMutex);
 			RegisterKnownPipelineStateLocked(pipelineState);
-			gPipelineStates.push_back(capturedPipeline);
+			gPipelineStates.push_back(capturedStreamPipeline);
 			RebindPipelineStateInfoPointerFields(gPipelineStates.back());
 			QueueShaderTargetApplyWork();
 		}
 
-		ShaderAutomaticDiscovery::ProcessCapturedStreamPipeline(capturedPipeline);
+		//analyze after the database entry is stored so discovery can use the captured stream immediately.
+		ShaderAutomaticDiscovery::ProcessCapturedStreamPipeline(capturedStreamPipeline);
 	}
 }

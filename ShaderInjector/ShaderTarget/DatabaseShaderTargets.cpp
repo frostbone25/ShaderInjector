@@ -36,9 +36,7 @@ namespace HookD3D12
 
 		return modifiedShader && modifiedShader->enabled &&
 			modifiedShader->shaderType == replacement.shaderType &&
-			DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(
-				*modifiedShader,
-				replacement.originalShaderAnalysis);
+			DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(*modifiedShader, replacement.originalShaderAnalysis);
 	}
 
 	void RefreshShaderTargetsForModifiedShaderStateChange()
@@ -98,13 +96,9 @@ namespace HookD3D12
 				if (modifiedShader && IsShaderTargetEffectivelyEnabled(replacement))
 					compiledReplacementBlob = modifiedShader->compiledBlob;
 				else if (modifiedShader && modifiedShader->enabled && !modifiedShader->compiledBlob.empty() &&
-					!DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(
-						*modifiedShader,
-						replacement.originalShaderAnalysis))
+					!DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(*modifiedShader, replacement.originalShaderAnalysis))
 				{
-					ShaderInjectorIO::WriteToLogFileError(
-						"DatabaseShaderTargets->RefreshLoadedShaderTargets: refusing incompatible compiled shader interface for " +
-						replacement.name + " from " + modifiedShader->id);
+					ShaderInjectorIO::WriteToLogFileError("DatabaseShaderTargets->RefreshLoadedShaderTargets: refusing incompatible compiled shader interface for " + replacement.name + " from " + modifiedShader->id);
 				}
 
 				gLoadedShaderTargets.push_back(replacement);

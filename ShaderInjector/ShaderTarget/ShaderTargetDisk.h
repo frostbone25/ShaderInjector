@@ -21,7 +21,7 @@ namespace ShaderTarget
 
 		ShaderType shaderType = Unknown;
 
-		//The shader profile to compile as
+		//the shader profile to compile as
 		std::string shaderProfile; //ps_6_6
 		std::string shaderEntryPoint = "main";
 
@@ -31,14 +31,14 @@ namespace ShaderTarget
 		std::string originalShaderBlobPath;
 		ShaderAnalysis::ShaderAnalysisDisk originalShaderAnalysis;
 
-		// Stable ID of the ModifiedShader package that supplies replacement HLSL.
+		//stable ID of the ModifiedShader package that supplies replacement HLSL.
 		std::string modifiedShaderId;
 
 		std::string replacementDirectory;
 		std::string jsonPath;
 
-		// Runtime-only cache resolved from modifiedShaderId. This path is never
-		// serialized and always points into the ModifiedShader package directory.
+		//runtime-only cache resolved from modifiedShaderId. 
+		//this path is never serialized and always points into the ModifiedShader package directory.
 		std::string modifiedShaderBlobPath;
 
 		std::string sourceList;

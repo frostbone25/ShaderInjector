@@ -34,17 +34,23 @@ namespace ShaderTarget
 		try
 		{
 			std::string jsonText;
+
 			if (!ShaderInjectorIO::ReadTextFile(path, jsonText))
 				return false;
 
 			const nlohmann::ordered_json json = nlohmann::ordered_json::parse(jsonText);
+
 			outReplacement = json.get<ShaderTarget::ShaderTargetDisk>();
+
 			if (json.contains("shaderBytecodeHashAliases") && json["shaderBytecodeHashAliases"].is_array())
 				outReplacement.shaderBytecodeHashAliases = json["shaderBytecodeHashAliases"].get<std::vector<std::string>>();
+
 			if (json.contains("pipelineCachedBlobHashAliases") && json["pipelineCachedBlobHashAliases"].is_array())
 				outReplacement.pipelineCachedBlobHashAliases = json["pipelineCachedBlobHashAliases"].get<std::vector<std::string>>();
+
 			if (json.contains("originalShaderAnalysis") && json["originalShaderAnalysis"].is_object())
 				outReplacement.originalShaderAnalysis = json["originalShaderAnalysis"].get<ShaderAnalysis::ShaderAnalysisDisk>();
+
 			if (json.contains("pipelineTemplates") && json["pipelineTemplates"].is_array())
 				outReplacement.pipelineTemplates = json["pipelineTemplates"].get<std::vector<ShaderTarget::ShaderPipelineTemplateDisk>>();
 

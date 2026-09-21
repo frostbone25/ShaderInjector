@@ -58,27 +58,4 @@ namespace HookD3D12
 	extern FunctionOMSetRenderTargetsD3D12 Original_OMSetRenderTargets;
 	extern FunctionExecuteIndirectD3D12 Original_ExecuteIndirect;
 
-	void STDMETHODCALLTYPE Hook_DrawInstanced(ID3D12GraphicsCommandList*, UINT, UINT, UINT, UINT);
-	void STDMETHODCALLTYPE Hook_DrawIndexedInstanced(ID3D12GraphicsCommandList*, UINT, UINT, UINT, INT, UINT);
-	void STDMETHODCALLTYPE Hook_Dispatch(ID3D12GraphicsCommandList*, UINT, UINT, UINT);
-	void STDMETHODCALLTYPE Hook_IASetPrimitiveTopology(ID3D12GraphicsCommandList*, D3D12_PRIMITIVE_TOPOLOGY);
-	void STDMETHODCALLTYPE Hook_RSSetViewports(ID3D12GraphicsCommandList*, UINT, const D3D12_VIEWPORT*);
-	void STDMETHODCALLTYPE Hook_RSSetScissorRects(ID3D12GraphicsCommandList*, UINT, const D3D12_RECT*);
-	void STDMETHODCALLTYPE Hook_SetDescriptorHeaps(ID3D12GraphicsCommandList*, UINT, ID3D12DescriptorHeap* const*);
-	void STDMETHODCALLTYPE Hook_SetComputeRootDescriptorTable(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_DESCRIPTOR_HANDLE);
-	void STDMETHODCALLTYPE Hook_SetGraphicsRootDescriptorTable(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_DESCRIPTOR_HANDLE);
-	void STDMETHODCALLTYPE Hook_SetComputeRoot32BitConstant(ID3D12GraphicsCommandList*, UINT, UINT, UINT);
-	void STDMETHODCALLTYPE Hook_SetGraphicsRoot32BitConstant(ID3D12GraphicsCommandList*, UINT, UINT, UINT);
-	void STDMETHODCALLTYPE Hook_SetComputeRoot32BitConstants(ID3D12GraphicsCommandList*, UINT, UINT, const void*, UINT);
-	void STDMETHODCALLTYPE Hook_SetGraphicsRoot32BitConstants(ID3D12GraphicsCommandList*, UINT, UINT, const void*, UINT);
-	void STDMETHODCALLTYPE Hook_SetComputeRootConstantBufferView(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_VIRTUAL_ADDRESS);
-	void STDMETHODCALLTYPE Hook_SetGraphicsRootConstantBufferView(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_VIRTUAL_ADDRESS);
-	void STDMETHODCALLTYPE Hook_SetComputeRootShaderResourceView(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_VIRTUAL_ADDRESS);
-	void STDMETHODCALLTYPE Hook_SetGraphicsRootShaderResourceView(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_VIRTUAL_ADDRESS);
-	void STDMETHODCALLTYPE Hook_SetComputeRootUnorderedAccessView(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_VIRTUAL_ADDRESS);
-	void STDMETHODCALLTYPE Hook_SetGraphicsRootUnorderedAccessView(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_VIRTUAL_ADDRESS);
-	void STDMETHODCALLTYPE Hook_IASetIndexBuffer(ID3D12GraphicsCommandList*, const D3D12_INDEX_BUFFER_VIEW*);
-	void STDMETHODCALLTYPE Hook_IASetVertexBuffers(ID3D12GraphicsCommandList*, UINT, UINT, const D3D12_VERTEX_BUFFER_VIEW*);
-	void STDMETHODCALLTYPE Hook_OMSetRenderTargets(ID3D12GraphicsCommandList*, UINT, const D3D12_CPU_DESCRIPTOR_HANDLE*, BOOL, const D3D12_CPU_DESCRIPTOR_HANDLE*);
-	void STDMETHODCALLTYPE Hook_ExecuteIndirect(ID3D12GraphicsCommandList*, ID3D12CommandSignature*, UINT, ID3D12Resource*, UINT64, ID3D12Resource*, UINT64);
 }

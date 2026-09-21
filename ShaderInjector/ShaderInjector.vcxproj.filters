@@ -156,16 +156,10 @@
     <ClInclude Include="HookD3D12\UncapturedPipelineStateInfo.h">
       <Filter>HookD3D12</Filter>
     </ClInclude>
-    <ClInclude Include="HookD3D12\D3D12\HookD3D12HookHandlers.h">
-      <Filter>D3D12</Filter>
-    </ClInclude>
     <ClInclude Include="HookD3D12\D3D12\HookD3D12RuntimeState.h">
       <Filter>D3D12</Filter>
     </ClInclude>
     <ClInclude Include="HookD3D12\D3D12\HookD3D12ExecutionHookHelpers.h">
-      <Filter>D3D12</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12\D3D12\HookD3D12SwapChainHookHandlers.h">
       <Filter>D3D12</Filter>
     </ClInclude>
     <ClInclude Include="HookD3D12\HookD3D12OverlayStartup.h">
@@ -775,12 +769,6 @@
     </ClCompile>
     <ClCompile Include="ShaderResource\DatabaseShaderResources.cpp">
       <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="DDS\DDSLegacyFormat.cpp">
-      <Filter>DDS</Filter>
-    </ClCompile>
-    <ClCompile Include="DDS\DDSHeaderParser.cpp">
-      <Filter>DDS</Filter>
     </ClCompile>
     <ClCompile Include="DDS\DDS.cpp">
       <Filter>DDS</Filter>
