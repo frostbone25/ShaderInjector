@@ -129,13 +129,31 @@
     <ClInclude Include="VTableIndex.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Database\DatabaseGraphicsPSOs.h">
-      <Filter>Database</Filter>
-    </ClInclude>
-    <ClInclude Include="Database\DatabaseStreamPSOs.h">
-      <Filter>Database</Filter>
-    </ClInclude>
     <ClInclude Include="HookD3D12\HookD3D12.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\ComputePipelineInfo.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\D3D12PipelineInfo.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\FrameContext.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\GraphicsPipelineInfo.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\PipelineStateInfo.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\PSOPendingRebuild.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\RootSignatureInfo.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\UncapturedPipelineStateInfo.h">
       <Filter>HookD3D12</Filter>
     </ClInclude>
     <ClInclude Include="HookD3D12\D3D12\HookD3D12HookHandlers.h">
@@ -228,7 +246,7 @@
     <ClInclude Include="DDS\DDSHeader.h">
       <Filter>DDS</Filter>
     </ClInclude>
-    <ClInclude Include="DDS\DDSHeaderDx10.h">
+    <ClInclude Include="DDS\DDSHeaderDX10.h">
       <Filter>DDS</Filter>
     </ClInclude>
     <ClInclude Include="DDS\DDSConstants.h">
@@ -304,6 +322,12 @@
       <Filter>ModifiedShader</Filter>
     </ClInclude>
     <ClInclude Include="ModifiedShader\ModifiedShader.h">
+      <Filter>ModifiedShader</Filter>
+    </ClInclude>
+    <ClInclude Include="ModifiedShader\ModifiedShaderPackageDisk.h">
+      <Filter>ModifiedShader</Filter>
+    </ClInclude>
+    <ClInclude Include="ModifiedShader\ModifiedShaderTargetDisk.h">
       <Filter>ModifiedShader</Filter>
     </ClInclude>
     <ClInclude Include="ModifiedShader\ModifiedShaderCreation.h">
@@ -509,6 +533,9 @@
     <ClCompile Include="Database\DatabaseGraphicsPSOs.cpp">
       <Filter>Database</Filter>
     </ClCompile>
+    <ClCompile Include="Database\DatabaseComputePSOs.cpp">
+      <Filter>Database</Filter>
+    </ClCompile>
     <ClCompile Include="Database\DatabaseStreamPSOs.cpp">
       <Filter>Database</Filter>
     </ClCompile>
@@ -516,6 +543,9 @@
       <Filter>HookD3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_CopyDescriptors.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CopyDescriptorsSimple.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateDescriptorHeap.cpp">
@@ -527,7 +557,19 @@
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreatePipelineState.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateResource.cpp">
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateComputePipelineState.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateGraphicsPipelineState.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateCommittedResource.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreatePlacedResource.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateReservedResource.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateRootSignature.cpp">
@@ -536,13 +578,34 @@
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateSwapChain.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateViews.cpp">
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateSwapChainForHwnd.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateConstantBufferView.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateShaderResourceView.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateUnorderedAccessView.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateRenderTargetView.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateDepthStencilView.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreateSampler.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_Dispatch.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="HookD3D12\D3D12\HookD3D12_Draw.cpp">
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_DrawInstanced.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_DrawIndexedInstanced.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_ExecuteCommandListsD3D12.cpp">
@@ -551,19 +614,46 @@
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_ExecuteIndirect.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="HookD3D12\D3D12\HookD3D12_InputAssembler.cpp">
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_IASetPrimitiveTopology.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_IASetIndexBuffer.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_IASetVertexBuffers.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_OMSetRenderTargets.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="HookD3D12\D3D12\HookD3D12_PipelineLibrary.cpp">
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_LoadGraphicsPipeline.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_LoadComputePipeline.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_LoadPipeline.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_StorePipeline.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_GetSerializedSize.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_Serialize.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_CreatePipelineLibrary.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_PresentD3D12.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="HookD3D12\D3D12\HookD3D12_RasterizerState.cpp">
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_RSSetViewports.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_RSSetScissorRects.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_ResetGraphicsCommandList.cpp">
@@ -578,16 +668,46 @@
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetPipelineState.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRoot32BitConstants.cpp">
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetComputeRoot32BitConstant.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootDescriptors.cpp">
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetGraphicsRoot32BitConstant.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootDescriptorTable.cpp">
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetComputeRoot32BitConstants.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetRootSignature.cpp">
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetGraphicsRoot32BitConstants.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetComputeRootConstantBufferView.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetGraphicsRootConstantBufferView.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetComputeRootShaderResourceView.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetGraphicsRootShaderResourceView.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetComputeRootUnorderedAccessView.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetGraphicsRootUnorderedAccessView.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetComputeRootDescriptorTable.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetGraphicsRootDescriptorTable.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetGraphicsRootSignature.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_SetComputeRootSignature.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\HookD3D12Install.cpp">
@@ -768,6 +888,9 @@
       <Filter>ModifiedShader</Filter>
     </ClCompile>
     <ClCompile Include="ModifiedShader\ModifiedShader.cpp">
+      <Filter>ModifiedShader</Filter>
+    </ClCompile>
+    <ClCompile Include="ModifiedShader\ModifiedShaderSimilarity.cpp">
       <Filter>ModifiedShader</Filter>
     </ClCompile>
     <ClCompile Include="ModifiedShader\ModifiedShaderCreation.cpp">

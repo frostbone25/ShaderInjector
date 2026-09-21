@@ -23,7 +23,7 @@ namespace DatabaseRenderPasses
 	const RenderPass::RenderPassDisk* FindRenderPassByIdReadOnly(const std::string& renderPassId);
 	std::string ResolveModifiedShaderId(const RenderPass::RenderPassDisk& renderPass);
 	std::string ResolveRootTiming(const RenderPass::RenderPassDisk& renderPass);
-	const ModifiedShader::PackageDisk* ResolveModifiedShader(const RenderPass::RenderPassDisk& renderPass);
+	const ModifiedShader::ModifiedShaderPackageDisk* ResolveModifiedShader(const RenderPass::RenderPassDisk& renderPass);
 	bool IsEventChainActive(const RenderPass::RenderPassDisk& renderPass);
 	bool CanReferenceRenderPass(const std::string& renderPassId, const std::string& eventRenderPassId);
 	bool CreateRenderPass(std::string& outRenderPassId);

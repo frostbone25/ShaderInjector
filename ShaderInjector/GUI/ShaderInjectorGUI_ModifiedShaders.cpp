@@ -68,7 +68,7 @@ namespace ShaderInjectorGUI
 		if (!result.compiled)
 			return result;
 
-		const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
 
 		if (!modifiedShader)
 			return result;
@@ -101,11 +101,11 @@ namespace ShaderInjectorGUI
 	ModifiedShaderBatchRecompileResult RecompileModifiedShaders(bool includeInactivePackages)
 	{
 		ModifiedShaderBatchRecompileResult batchResult{};
-		const std::vector<ModifiedShader::PackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
+		const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
 		std::vector<std::string> selectedModifiedShaderIds;
 		selectedModifiedShaderIds.reserve(modifiedShaders.size());
 
-		for (const ModifiedShader::PackageDisk& modifiedShader : modifiedShaders)
+		for (const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : modifiedShaders)
 		{
 			const bool active = modifiedShader.enabled && ModifiedShaderIsUsedByEnabledShaderTarget(modifiedShader.id);
 
@@ -173,7 +173,7 @@ namespace ShaderInjectorGUI
 	void UI_ModifiedShaders()
 	{
 		DatabaseModifiedShaders::EnsureModifiedShadersLoaded();
-		const std::vector<ModifiedShader::PackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
+		const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
 		const std::string modifiedShadersHeader =
 			"Modified Shaders: " + std::to_string(modifiedShaders.size()) + "###ModifiedShaders";
 
@@ -221,7 +221,7 @@ namespace ShaderInjectorGUI
 
 			ImGui::EndDisabled();
 
-			const std::vector<ModifiedShader::PackageDisk>& refreshedModifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
+			const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& refreshedModifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
 
 			if (refreshedModifiedShaders.empty())
 			{
@@ -237,7 +237,7 @@ namespace ShaderInjectorGUI
 			{
 				for (size_t index = 0; index < refreshedModifiedShaders.size(); ++index)
 				{
-					const ModifiedShader::PackageDisk& modifiedShader = refreshedModifiedShaders[index];
+					const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader = refreshedModifiedShaders[index];
 					const bool isUsedByShaderTarget = ModifiedShaderIsUsedByEnabledShaderTarget(modifiedShader.id);
 					const bool isActiveUsedPackage = modifiedShader.enabled && isUsedByShaderTarget;
 					std::string label = DatabaseModifiedShaders::DisplayName(modifiedShader);
@@ -271,7 +271,7 @@ namespace ShaderInjectorGUI
 
 			ImGui::EndChild();
 
-			const ModifiedShader::PackageDisk* selectedModifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(gSelectedModifiedShaderId);
+			const ModifiedShader::ModifiedShaderPackageDisk* selectedModifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(gSelectedModifiedShaderId);
 
 			if (!selectedModifiedShader)
 			{

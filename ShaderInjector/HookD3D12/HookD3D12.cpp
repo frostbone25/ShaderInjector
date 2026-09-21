@@ -45,8 +45,6 @@
 #include "dsound_proxy.h"
 #include "HookD3D12.h"
 #include "ShaderTarget/DatabaseShaderTargets.h"
-#include "DatabaseGraphicsPSOs.h"
-#include "DatabaseStreamPSOs.h"
 #include "HookInput.h"
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderTarget/ShaderTarget.h"
@@ -62,6 +60,7 @@
 #include "HookD3D12RenderPass.h"
 #include "RenderPass/RenderPassRuntime.h"
 #include "RenderPass/RenderPassExecutor.h"
+#include "RenderPass/RenderPassResourceRegistry.h"
 #include "Performance/PerformanceMetrics.h"
 #include "RenderDoc/RenderDocIntegration.h"
 #include "VTableIndex.h"
@@ -77,6 +76,48 @@ typedef uint32_t uintx_t;
 
 namespace HookD3D12
 {
+	UINT DescriptorIncrementSize(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE heapType)
+	{
+		if (!device || heapType >= D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES)
+			return 0;
+
+		struct ThreadDescriptorIncrements
+		{
+			ID3D12Device* device = nullptr;
+			std::array<UINT, D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES> values{};
+		};
+
+		thread_local ThreadDescriptorIncrements cache;
+
+		if (cache.device != device)
+		{
+			cache.device = device;
+			cache.values.fill(0);
+		}
+
+		UINT& increment = cache.values[heapType];
+
+		if (!increment)
+			increment = device->GetDescriptorHandleIncrementSize(heapType);
+
+		return increment;
+	}
+
+	void RegisterCreatedResource(HRESULT result, void** createdObject)
+	{
+		if (FAILED(result) || !createdObject || !*createdObject)
+			return;
+
+		ID3D12Resource* resource = nullptr;
+		IUnknown* unknown = reinterpret_cast<IUnknown*>(*createdObject);
+
+		if (SUCCEEDED(unknown->QueryInterface(IID_PPV_ARGS(&resource))) && resource)
+		{
+			RenderPassResourceRegistry::RegisterResource(resource);
+			resource->Release();
+		}
+	}
+
 	ID3D12Device*                     gDevice = nullptr;
 	ID3D12Device*                     gDevice2 = nullptr;
 	ID3D12CommandQueue*               gCommandQueue = nullptr;

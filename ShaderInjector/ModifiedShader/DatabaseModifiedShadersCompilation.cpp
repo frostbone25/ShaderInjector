@@ -73,19 +73,19 @@ namespace DatabaseModifiedShaders
 				SignatureLayoutsMatch(expected.patchConstantParameters, candidate.patchConstantParameters);
 		}
 
-		static bool PackageHasAnalyzedTargetInterface(const ModifiedShader::PackageDisk& modifiedShader)
+		static bool PackageHasAnalyzedTargetInterface(const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
 		{
 			return std::any_of(
 				modifiedShader.targets.begin(),
 				modifiedShader.targets.end(),
-				[](const ModifiedShader::TargetDisk& target)
+				[](const ModifiedShader::ModifiedShaderTargetDisk& target)
 				{
 					return target.shaderAnalysis.succeeded;
 				});
 		}
 
 		bool ShaderInterfaceMatchesAnyPackageTarget(
-			const ModifiedShader::PackageDisk& modifiedShader,
+			const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 			const ShaderAnalysis::ShaderAnalysisDisk& candidateAnalysis)
 		{
 			if (!PackageHasAnalyzedTargetInterface(modifiedShader))
@@ -94,7 +94,7 @@ namespace DatabaseModifiedShaders
 			return std::any_of(
 				modifiedShader.targets.begin(),
 				modifiedShader.targets.end(),
-				[&](const ModifiedShader::TargetDisk& target)
+				[&](const ModifiedShader::ModifiedShaderTargetDisk& target)
 				{
 					return ShaderInterfaceLayoutsMatch(target.shaderAnalysis, candidateAnalysis);
 				});
@@ -140,7 +140,7 @@ namespace DatabaseModifiedShaders
 				&noDisassemblyCandidates);
 		}
 
-		static bool CompileWithoutAnalyzedInterface(ModifiedShader::PackageDisk& modifiedShader)
+		static bool CompileWithoutAnalyzedInterface(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
 		{
 			std::string compiledBlobPath = modifiedShader.compiledBlobPath;
 
@@ -178,7 +178,7 @@ namespace DatabaseModifiedShaders
 		}
 
 		static bool CompileAndAnalyzeCandidate(
-			const ModifiedShader::PackageDisk& modifiedShader,
+			const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 			const std::string& candidatePath,
 			ShaderInjectorIO::ShaderSignaturePacking signaturePacking,
 			std::vector<uint8_t>& outBlob,
@@ -195,7 +195,7 @@ namespace DatabaseModifiedShaders
 				AnalyzeCompiledBlob(outBlob, outAnalysis);
 		}
 
-		bool CompileModifiedShaderPackage(ModifiedShader::PackageDisk& modifiedShader)
+		bool CompileModifiedShaderPackage(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
 		{
 			//DXBC packages and older fingerprints may lack analyzable interface data.
 			//compile them without rejecting an otherwise valid shader.
@@ -250,7 +250,7 @@ namespace DatabaseModifiedShaders
 			{
 				std::string expectedSignature = "unavailable";
 
-				for (const ModifiedShader::TargetDisk& target : modifiedShader.targets)
+				for (const ModifiedShader::ModifiedShaderTargetDisk& target : modifiedShader.targets)
 				{
 					if (target.shaderAnalysis.succeeded)
 					{
@@ -305,7 +305,7 @@ namespace DatabaseModifiedShaders
 
 	bool CompileModifiedShader(const std::string& modifiedShaderId)
 	{
-		ModifiedShader::PackageDisk* modifiedShader = Detail::FindMutableModifiedShaderById(modifiedShaderId);
+		ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = Detail::FindMutableModifiedShaderById(modifiedShaderId);
 
 		if (!modifiedShader)
 		{
@@ -333,11 +333,17 @@ namespace DatabaseModifiedShaders
 			return false;
 		}
 
-		return Detail::CompileModifiedShaderPackage(*modifiedShader);
+		const bool compiled = Detail::CompileModifiedShaderPackage(*modifiedShader);
+		if (!compiled && !ModifiedShader::WriteJson(*modifiedShader))
+		{
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseModifiedShaders->CompileModifiedShader: could not save package metadata: " + modifiedShader->jsonPath);
+		}
+
+		return compiled;
 	}
 
 	bool CompiledShaderMatchesTargetInterface(
-		const ModifiedShader::PackageDisk& modifiedShader,
+		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 		const ShaderAnalysis::ShaderAnalysisDisk& targetAnalysis)
 	{
 		//preserve the injector's existing missing-blob fallback behavior. 

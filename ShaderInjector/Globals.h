@@ -25,15 +25,19 @@ namespace Globals
 	extern bool gShaderInjectorEnabled;
 	extern bool gRenderDocIntegrationEnabled;
 	extern bool gRenderDocAutoAttachEnabled;
+
 	// High-frequency counters and five-second performance reports. Disabled by
 	// default unless explicitly requested for profiling.
 	extern bool gPerformanceTelemetryEnabled;
+
 	// Logging controls. Informational messages can be disabled independently
 	// from errors, warnings, and successful operation messages.
 	extern bool gDisableLogs;
 	extern bool gVerboseLog;
+
 	// List loaded package names during database refresh, independently of VerboseLog.
 	extern bool gLogModifiedShaderNames;
+
 	// When enabled, compiler profiles follow the dominant shader model observed
 	// in original game PSOs. The per-stage values below remain manual fallbacks.
 	extern bool gAutoDetectShaderModels;

@@ -362,7 +362,7 @@ namespace ShaderDiscovery
 		uint64_t shaderHash,
 		ShaderTarget::ShaderType shaderType,
 		const std::vector<uint8_t>& shaderBytecode,
-		const std::vector<ModifiedShader::PackageDisk>& modifiedShaders,
+		const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& modifiedShaders,
 		ShaderAnalysis::ShaderAnalysisDisk* outCandidateAnalysis)
 	{
 		if (outCandidateAnalysis)
@@ -396,7 +396,7 @@ namespace ShaderDiscovery
 
 		bool hasCompatiblePackage = false;
 
-		for (const ModifiedShader::PackageDisk& package : modifiedShaders)
+		for (const ModifiedShader::ModifiedShaderPackageDisk& package : modifiedShaders)
 		{
 			if (package.enabled && package.shaderType == shaderType && !package.targets.empty())
 			{
@@ -416,14 +416,14 @@ namespace ShaderDiscovery
 
 		for (int packageIndex = 0; packageIndex < static_cast<int>(modifiedShaders.size()); ++packageIndex)
 		{
-			const ModifiedShader::PackageDisk& package = modifiedShaders[packageIndex];
+			const ModifiedShader::ModifiedShaderPackageDisk& package = modifiedShaders[packageIndex];
 
 			if (!package.enabled || package.shaderType != shaderType)
 				continue;
 
 			bool packageMatchesHash = false;
 
-			for (const ModifiedShader::TargetDisk& target : package.targets)
+			for (const ModifiedShader::ModifiedShaderTargetDisk& target : package.targets)
 			{
 				for (const std::string& knownHash : target.knownShaderBytecodeHashes)
 				{
@@ -492,12 +492,12 @@ namespace ShaderDiscovery
 			// match anything - which is most of them.
 			std::unordered_set<std::string> acceptablePortableReflectionHashes;
 
-			for (const ModifiedShader::PackageDisk& package : modifiedShaders)
+			for (const ModifiedShader::ModifiedShaderPackageDisk& package : modifiedShaders)
 			{
 				if (!package.enabled || package.shaderType != shaderType)
 					continue;
 
-				for (const ModifiedShader::TargetDisk& target : package.targets)
+				for (const ModifiedShader::ModifiedShaderTargetDisk& target : package.targets)
 				{
 					if (!target.shaderAnalysis.portableReflectionIdentityHash.empty())
 						acceptablePortableReflectionHashes.insert(target.shaderAnalysis.portableReflectionIdentityHash);
@@ -522,18 +522,18 @@ namespace ShaderDiscovery
 
 			for (int packageIndex = 0; packageIndex < static_cast<int>(modifiedShaders.size()); ++packageIndex)
 			{
-				const ModifiedShader::PackageDisk& package = modifiedShaders[packageIndex];
+				const ModifiedShader::ModifiedShaderPackageDisk& package = modifiedShaders[packageIndex];
 
 				if (!package.enabled || package.shaderType != shaderType)
 					continue;
 
 				double packageScore = 0.0;
 
-				for (const ModifiedShader::TargetDisk& storedTarget : package.targets)
+				for (const ModifiedShader::ModifiedShaderTargetDisk& storedTarget : package.targets)
 				{
-					ModifiedShader::TargetDisk referenceTarget = storedTarget;
+					ModifiedShader::ModifiedShaderTargetDisk referenceTarget = storedTarget;
 					referenceTarget.knownShaderBytecodeHashes.clear();
-					ModifiedShader::TargetDisk candidateTarget{};
+					ModifiedShader::ModifiedShaderTargetDisk candidateTarget{};
 					candidateTarget.targetApplication = referenceTarget.targetApplication;
 					candidateTarget.gameVersion = referenceTarget.gameVersion;
 					candidateTarget.originalShaderBytecodeLength = std::to_string(shaderBytecode.size());
@@ -567,15 +567,15 @@ namespace ShaderDiscovery
 
 			if (bestPackageIndex >= 0)
 			{
-				const ModifiedShader::PackageDisk& bestPackage = modifiedShaders[bestPackageIndex];
+				const ModifiedShader::ModifiedShaderPackageDisk& bestPackage = modifiedShaders[bestPackageIndex];
 				const ShaderAnalysis::ShaderAnalysisDisk* bestTargetAnalysis = nullptr;
 				double bestTargetScore = 0.0;
 
-				for (const ModifiedShader::TargetDisk& storedTarget : bestPackage.targets)
+				for (const ModifiedShader::ModifiedShaderTargetDisk& storedTarget : bestPackage.targets)
 				{
-					ModifiedShader::TargetDisk referenceTarget = storedTarget;
+					ModifiedShader::ModifiedShaderTargetDisk referenceTarget = storedTarget;
 					referenceTarget.knownShaderBytecodeHashes.clear();
-					ModifiedShader::TargetDisk candidateTarget{};
+					ModifiedShader::ModifiedShaderTargetDisk candidateTarget{};
 					candidateTarget.targetApplication = referenceTarget.targetApplication;
 					candidateTarget.gameVersion = referenceTarget.gameVersion;
 					candidateTarget.originalShaderBytecodeLength = std::to_string(shaderBytecode.size());

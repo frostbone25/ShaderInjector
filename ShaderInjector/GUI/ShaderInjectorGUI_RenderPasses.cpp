@@ -106,7 +106,7 @@ namespace ShaderInjectorGUI
 	};
 
 	InheritedBindingSummary SummarizeInheritedBindings(
-		const ModifiedShader::PackageDisk* modifiedShader)
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader)
 	{
 		InheritedBindingSummary summary{};
 		if (!modifiedShader)
@@ -114,7 +114,7 @@ namespace ShaderInjectorGUI
 
 		std::unordered_set<std::string> shaderResources;
 		std::unordered_set<std::string> constantBuffers;
-		for (const ModifiedShader::TargetDisk& target : modifiedShader->targets)
+		for (const ModifiedShader::ModifiedShaderTargetDisk& target : modifiedShader->targets)
 		{
 			if (!target.shaderAnalysis.succeeded)
 				continue;
@@ -151,13 +151,13 @@ namespace ShaderInjectorGUI
 	}
 
 	std::vector<GameTextureBindingOption> CollectGameTextureBindingOptions(
-		const ModifiedShader::PackageDisk* modifiedShader)
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader)
 	{
 		std::vector<GameTextureBindingOption> options;
 		if (!modifiedShader)
 			return options;
 
-		for (const ModifiedShader::TargetDisk& target : modifiedShader->targets)
+		for (const ModifiedShader::ModifiedShaderTargetDisk& target : modifiedShader->targets)
 		{
 			for (const ShaderAnalysis::ResourceBindingDisk& resource : target.shaderAnalysis.resourceBindings)
 			{
@@ -209,14 +209,14 @@ namespace ShaderInjectorGUI
 		}
 	}
 
-	std::vector<MipSourceBindingOption> CollectMipSourceBindingOptions(const ModifiedShader::PackageDisk* modifiedShader)
+	std::vector<MipSourceBindingOption> CollectMipSourceBindingOptions(const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader)
 	{
 		std::vector<MipSourceBindingOption> options;
 
 		if (!modifiedShader)
 			return options;
 
-		for (const ModifiedShader::TargetDisk& target : modifiedShader->targets)
+		for (const ModifiedShader::ModifiedShaderTargetDisk& target : modifiedShader->targets)
 		{
 			for (const ShaderAnalysis::ResourceBindingDisk& resource : target.shaderAnalysis.resourceBindings)
 			{
@@ -252,7 +252,7 @@ namespace ShaderInjectorGUI
 		return options;
 	}
 
-	void ApplyDefaultMipSourceBinding(RenderPass::RenderPassDisk& renderPass, const ModifiedShader::PackageDisk* modifiedShader)
+	void ApplyDefaultMipSourceBinding(RenderPass::RenderPassDisk& renderPass, const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader)
 	{
 		const std::vector<MipSourceBindingOption> options = CollectMipSourceBindingOptions(modifiedShader);
 
@@ -380,7 +380,7 @@ namespace ShaderInjectorGUI
 
 	void ApplyAutomaticExecutionMode(
 		RenderPass::RenderPassDisk& renderPass,
-		const ModifiedShader::PackageDisk* modifiedShader)
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader)
 	{
 		if (!modifiedShader || RenderPass::IsReplacementPass(renderPass.type))
 		{
@@ -1321,7 +1321,7 @@ namespace ShaderInjectorGUI
 					FindCompiledRenderPassNode(renderPassGraph, renderPass.id);
 				const bool graphValid = graphNode && graphNode->valid;
 
-				const ModifiedShader::PackageDisk* modifiedShader = DatabaseRenderPasses::ResolveModifiedShader(renderPass);
+				const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseRenderPasses::ResolveModifiedShader(renderPass);
 				const bool eventChainActive = DatabaseRenderPasses::IsEventChainActive(renderPass);
 				bool hasResolvedShaderTarget = false;
 
@@ -1447,7 +1447,7 @@ namespace ShaderInjectorGUI
 
 					if (typeOption == RenderPass::RenderPassType::MipChain)
 					{
-						const ModifiedShader::PackageDisk* modifiedShader =
+						const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader =
 							DatabaseRenderPasses::ResolveModifiedShader(*renderPass);
 						ApplyDefaultMipSourceBinding(*renderPass, modifiedShader);
 						ApplyAutomaticExecutionMode(*renderPass, modifiedShader);
@@ -1796,7 +1796,7 @@ namespace ShaderInjectorGUI
 		{
 			if (renderPass->event.type == RenderPass::EventType::ModifiedShader)
 			{
-				const ModifiedShader::PackageDisk* eventModifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(renderPass->event.id);
+				const ModifiedShader::ModifiedShaderPackageDisk* eventModifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(renderPass->event.id);
 
 				eventPreview = eventModifiedShader ? DatabaseModifiedShaders::DisplayName(*eventModifiedShader) : renderPass->event.id + " (missing)";
 			}
@@ -1818,11 +1818,11 @@ namespace ShaderInjectorGUI
 
 			if (renderPass->event.type == RenderPass::EventType::ModifiedShader)
 			{
-				const std::vector<ModifiedShader::PackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
+				const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
 
 				for (size_t modifiedShaderIndex = 0; modifiedShaderIndex < modifiedShaders.size(); ++modifiedShaderIndex)
 				{
-					const ModifiedShader::PackageDisk& modifiedShader = modifiedShaders[modifiedShaderIndex];
+					const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader = modifiedShaders[modifiedShaderIndex];
 					const bool selected = modifiedShader.id == renderPass->event.id;
 
 					std::string label = DatabaseModifiedShaders::DisplayName(modifiedShader);
@@ -1877,7 +1877,7 @@ namespace ShaderInjectorGUI
 			ImGui::EndCombo();
 		}
 
-		const ModifiedShader::PackageDisk* selectedModifiedShader = DatabaseRenderPasses::ResolveModifiedShader(*renderPass);
+		const ModifiedShader::ModifiedShaderPackageDisk* selectedModifiedShader = DatabaseRenderPasses::ResolveModifiedShader(*renderPass);
 		if (renderPass->executionMode == RenderPass::ExecutionMode::Automatic)
 			ApplyAutomaticExecutionMode(*renderPass, selectedModifiedShader);
 

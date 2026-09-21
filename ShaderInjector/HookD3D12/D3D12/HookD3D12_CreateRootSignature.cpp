@@ -15,18 +15,10 @@
 
 namespace HookD3D12
 {
-	namespace
-	{
-		std::unordered_map<ID3D12RootSignature*, RootSignatureInfo> gRootSignatureInfoByPointer;
-		std::unordered_map<std::string, ID3D12RootSignature*> gPersistedRootSignaturesByPath;
-		std::unordered_set<ID3D12RootSignature*> gRenderPassRegisteredRootSignatures;
-		std::mutex gRootSignatureMutex;
-	}
-
-	HRESULT STDMETHODCALLTYPE Hook_CreateRootSignature(ID3D12Device* device, UINT nodeMask, const void* blob, SIZE_T blobSize, REFIID interfaceId, void** rootSignature)
-	{
-		return Handle_CreateRootSignature(device, nodeMask, blob, blobSize, interfaceId, rootSignature);
-	}
+	std::unordered_map<ID3D12RootSignature*, RootSignatureInfo> gRootSignatureInfoByPointer;
+	std::unordered_map<std::string, ID3D12RootSignature*> gPersistedRootSignaturesByPath;
+	std::unordered_set<ID3D12RootSignature*> gRenderPassRegisteredRootSignatures;
+	std::mutex gRootSignatureMutex;
 
 	bool GetRootSignatureBlob(ID3D12RootSignature* rootSignature, std::vector<uint8_t>& blob, uint64_t& hash)
 	{
@@ -38,6 +30,7 @@ namespace HookD3D12
 
 		std::lock_guard<std::mutex> lock(gRootSignatureMutex);
 		auto rootSignatureIt = gRootSignatureInfoByPointer.find(rootSignature);
+
 		if (rootSignatureIt == gRootSignatureInfoByPointer.end() || rootSignatureIt->second.blob.empty())
 			return false;
 
@@ -52,10 +45,12 @@ namespace HookD3D12
 			return;
 
 		std::lock_guard<std::mutex> lock(gRootSignatureMutex);
+
 		if (gRenderPassRegisteredRootSignatures.find(rootSignature) != gRenderPassRegisteredRootSignatures.end())
 			return;
 
 		const auto rootSignatureIt = gRootSignatureInfoByPointer.find(rootSignature);
+
 		if (rootSignatureIt == gRootSignatureInfoByPointer.end() || rootSignatureIt->second.blob.empty())
 			return;
 
@@ -63,6 +58,7 @@ namespace HookD3D12
 			rootSignature,
 			rootSignatureIt->second.blob.data(),
 			rootSignatureIt->second.blob.size());
+
 		gRenderPassRegisteredRootSignatures.insert(rootSignature);
 	}
 
@@ -72,10 +68,12 @@ namespace HookD3D12
 			return nullptr;
 
 		auto existingIt = gPersistedRootSignaturesByPath.find(shaderTarget.rootSignatureBlobPath);
+
 		if (existingIt != gPersistedRootSignaturesByPath.end())
 			return existingIt->second;
 
 		std::vector<uint8_t> blob;
+
 		if (!ShaderInjectorIO::LoadDXILBlobFromDisk(shaderTarget.rootSignatureBlobPath, blob))
 		{
 			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12RootSignature->GetOrCreatePersistedRootSignature: missing blob for " + shaderTarget.name);
@@ -83,6 +81,7 @@ namespace HookD3D12
 		}
 
 		ID3D12RootSignature* rootSignature = nullptr;
+
 		HRESULT result = Original_CreateRootSignature
 			? Original_CreateRootSignature(device, 0, blob.data(), blob.size(), IID_PPV_ARGS(&rootSignature))
 			: device->CreateRootSignature(0, blob.data(), blob.size(), IID_PPV_ARGS(&rootSignature));
@@ -94,12 +93,14 @@ namespace HookD3D12
 		}
 
 		gPersistedRootSignaturesByPath[shaderTarget.rootSignatureBlobPath] = rootSignature;
+
 		if (RenderPassRuntime::HasEnabledRenderPasses())
 		{
 			RenderPassResourceRegistry::RegisterRootSignature(rootSignature, blob.data(), blob.size());
 			std::lock_guard<std::mutex> lock(gRootSignatureMutex);
 			gRenderPassRegisteredRootSignatures.insert(rootSignature);
 		}
+
 		return rootSignature;
 	}
 
@@ -117,6 +118,11 @@ namespace HookD3D12
 		gRenderPassRegisteredRootSignatures.clear();
 	}
 
+	HRESULT STDMETHODCALLTYPE Hook_CreateRootSignature(ID3D12Device* device, UINT nodeMask, const void* blob, SIZE_T blobSize, REFIID interfaceId, void** rootSignature)
+	{
+		return Handle_CreateRootSignature(device, nodeMask, blob, blobSize, interfaceId, rootSignature);
+	}
+
 	HRESULT STDMETHODCALLTYPE Handle_CreateRootSignature(ID3D12Device* device, UINT nodeMask, const void* blob, SIZE_T blobSize, REFIID interfaceId, void** rootSignature)
 	{
 		HRESULT result = Original_CreateRootSignature(device, nodeMask, blob, blobSize, interfaceId, rootSignature);
@@ -125,6 +131,7 @@ namespace HookD3D12
 		{
 			ID3D12RootSignature* rootSignatureObject = nullptr;
 			IUnknown* unknown = reinterpret_cast<IUnknown*>(*rootSignature);
+
 			if (unknown && SUCCEEDED(unknown->QueryInterface(IID_PPV_ARGS(&rootSignatureObject))))
 			{
 				RootSignatureInfo info{};
@@ -143,6 +150,7 @@ namespace HookD3D12
 					std::lock_guard<std::mutex> lock(gRootSignatureMutex);
 					gRenderPassRegisteredRootSignatures.insert(rootSignatureObject);
 				}
+
 				rootSignatureObject->Release();
 			}
 		}

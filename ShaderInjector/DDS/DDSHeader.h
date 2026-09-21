@@ -7,7 +7,7 @@
 namespace DDS
 {
 #pragma pack(push, 1)
-	struct DdsHeader
+	struct DDSHeader
 	{
 		uint32_t size;
 		uint32_t flags;
@@ -17,7 +17,7 @@ namespace DDS
 		uint32_t depth;
 		uint32_t mipMapCount;
 		uint32_t reserved1[11];
-		DdsPixelFormat pixelFormat;
+		DDSPixelFormat pixelFormat;
 		uint32_t caps;
 		uint32_t caps2;
 		uint32_t caps3;
@@ -26,5 +26,5 @@ namespace DDS
 	};
 #pragma pack(pop)
 
-	static_assert(sizeof(DdsHeader) == 124, "Unexpected DDS header size.");
+	static_assert(sizeof(DDSHeader) == 124, "Unexpected DDS header size.");
 }

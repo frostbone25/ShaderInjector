@@ -6,8 +6,8 @@
 
 namespace HookD3D12
 {
-	// Hook entry points live in this directory. Their implementation handlers stay
-	// grouped by subsystem so hook installation is decoupled from runtime state.
+	//hook entry points live in this directory. 
+	//their implementation handlers stay grouped by subsystem so hook installation is decoupled from runtime state.
 	HRESULT WINAPI Handle_CreateDeviceD3D12(IUnknown*, D3D_FEATURE_LEVEL, REFIID, void**);
 
 	HRESULT STDMETHODCALLTYPE Handle_CreateComputePipelineState(ID3D12Device*, const D3D12_COMPUTE_PIPELINE_STATE_DESC*, REFIID, void**);

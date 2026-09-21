@@ -67,7 +67,7 @@ namespace ShaderInjectorGUI
 
 	bool EnsureModifiedShaderCompiledForShaderTarget(const std::string& modifiedShaderId)
 	{
-		const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
 
 		if (!modifiedShader)
 		{
@@ -107,7 +107,7 @@ namespace ShaderInjectorGUI
 		if (!EnsureModifiedShaderCompiledForShaderTarget(shaderTarget.modifiedShaderId))
 			return false;
 
-		const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(shaderTarget.modifiedShaderId);
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(shaderTarget.modifiedShaderId);
 
 		if (!modifiedShader)
 			return false;
@@ -321,14 +321,14 @@ namespace ShaderInjectorGUI
 		float comboWidth = ImGui::GetContentRegionAvail().x - buttonWidth - spacing;
 		ImGui::SetNextItemWidth(comboWidth);
 
-		const ModifiedShader::PackageDisk* selectedPackage = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
+		const ModifiedShader::ModifiedShaderPackageDisk* selectedPackage = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
 		const std::string currentPackageName = selectedPackage
 			? DatabaseModifiedShaders::DisplayName(*selectedPackage)
 			: "(none)";
 
 		if (ImGui::BeginCombo("##ShaderTargetModifiedShader", currentPackageName.c_str()))
 		{
-			for (const ModifiedShader::PackageDisk& modifiedShader : DatabaseModifiedShaders::GetModifiedShaders())
+			for (const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : DatabaseModifiedShaders::GetModifiedShaders())
 			{
 				if (!modifiedShader.enabled || modifiedShader.shaderType != replacement.shaderType)
 					continue;

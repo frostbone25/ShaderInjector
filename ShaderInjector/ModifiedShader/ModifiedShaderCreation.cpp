@@ -41,10 +41,9 @@ namespace ModifiedShaderCreation
 			return false;
 		}
 
-		ModifiedShader::PackageDisk package{};
+		ModifiedShader::ModifiedShaderPackageDisk package{};
 		package.id = packageName;
 		package.name = packageName;
-		package.description = "Modified Shader template generated from captured " + shaderTypeName + " bytecode.";
 		package.shaderType = shaderType;
 		package.shaderProfile = StringHelper::ShaderProfileForType(shaderType);
 		package.shaderEntryPoint = "main";
@@ -54,9 +53,7 @@ namespace ModifiedShaderCreation
 		package.jsonPath = jsonPath;
 		package.sourcePath = sourcePath;
 		package.compiledBlobPath = compiledBlobPath;
-		package.notes = "Rename this package and edit its HLSL source as needed. Target metadata is used for automated shader discovery.";
-
-		ModifiedShader::TargetDisk target{};
+		ModifiedShader::ModifiedShaderTargetDisk target{};
 		target.name = "CapturedShader_" + hashText;
 		target.knownShaderBytecodeHashes.push_back(hashText);
 		target.originalShaderBytecodeLength = std::to_string(shaderBytecodeLength);

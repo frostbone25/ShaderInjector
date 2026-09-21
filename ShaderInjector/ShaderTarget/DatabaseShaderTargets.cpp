@@ -32,7 +32,7 @@ namespace HookD3D12
 		if (!replacement.enabled || replacement.modifiedShaderId.empty())
 			return false;
 
-		const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
 
 		return modifiedShader && modifiedShader->enabled &&
 			modifiedShader->shaderType == replacement.shaderType &&
@@ -92,7 +92,7 @@ namespace HookD3D12
 
 				std::vector<uint8_t> compiledReplacementBlob;
 
-				const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
+				const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
 				replacement.modifiedShaderBlobPath = modifiedShader ? modifiedShader->compiledBlobPath : "";
 
 				if (modifiedShader && IsShaderTargetEffectivelyEnabled(replacement))

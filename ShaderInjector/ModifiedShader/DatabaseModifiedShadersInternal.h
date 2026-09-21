@@ -8,13 +8,13 @@
 
 namespace DatabaseModifiedShaders::Detail
 {
-	ModifiedShader::PackageDisk* FindMutableModifiedShaderById(const std::string& modifiedShaderId);
+	ModifiedShader::ModifiedShaderPackageDisk* FindMutableModifiedShaderById(const std::string& modifiedShaderId);
 
 	bool AnalyzeCompiledBlob(const std::vector<uint8_t>& compiledBlob, ShaderAnalysis::ShaderAnalysisDisk& outAnalysis);
 
 	bool ShaderInterfaceMatchesAnyPackageTarget(
-		const ModifiedShader::PackageDisk& modifiedShader,
+		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 		const ShaderAnalysis::ShaderAnalysisDisk& candidateAnalysis);
 
-	bool CompileModifiedShaderPackage(ModifiedShader::PackageDisk& modifiedShader);
+	bool CompileModifiedShaderPackage(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader);
 }

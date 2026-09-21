@@ -37,7 +37,7 @@ namespace DatabaseModifiedShaders
 		return ShaderInjectorIO::MovePath(currentPath, desiredPath);
 	}
 
-	bool MoveModifiedShaderPackageToName(ModifiedShader::PackageDisk& modifiedShader, const std::string& displayName)
+	bool MoveModifiedShaderPackageToName(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader, const std::string& displayName)
 	{
 		const std::string fileStem = ShaderInjectorIO::SanitizeFileStem(displayName);
 
@@ -102,7 +102,7 @@ namespace DatabaseModifiedShaders
 
 	bool SetModifiedShaderEnabled(const std::string& modifiedShaderId, bool enabled)
 	{
-		ModifiedShader::PackageDisk* modifiedShader = Detail::FindMutableModifiedShaderById(modifiedShaderId);
+		ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = Detail::FindMutableModifiedShaderById(modifiedShaderId);
 
 		if (!modifiedShader)
 			return false;
@@ -124,7 +124,7 @@ namespace DatabaseModifiedShaders
 		if (displayName.empty())
 			return false;
 
-		ModifiedShader::PackageDisk* modifiedShader = Detail::FindMutableModifiedShaderById(modifiedShaderId);
+		ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = Detail::FindMutableModifiedShaderById(modifiedShaderId);
 
 		if (!modifiedShader || !MoveModifiedShaderPackageToName(*modifiedShader, displayName))
 			return false;
@@ -136,7 +136,7 @@ namespace DatabaseModifiedShaders
 
 	bool DeleteModifiedShader(const std::string& modifiedShaderId)
 	{
-		const ModifiedShader::PackageDisk* modifiedShader = FindModifiedShaderById(modifiedShaderId);
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = FindModifiedShaderById(modifiedShaderId);
 
 		if (!modifiedShader || modifiedShader->packageDirectory.empty())
 			return false;

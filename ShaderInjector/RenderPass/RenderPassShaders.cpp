@@ -162,11 +162,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 
 		const ShaderAnalysis::ShaderAnalysisDisk* SelectReflectionAnalysis(
-			const ModifiedShader::PackageDisk& modifiedShader)
+			const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
 		{
 			const ShaderAnalysis::ShaderAnalysisDisk* selected = nullptr;
 			size_t selectedInformationCount = 0;
-			for (const ModifiedShader::TargetDisk& target : modifiedShader.targets)
+			for (const ModifiedShader::ModifiedShaderTargetDisk& target : modifiedShader.targets)
 			{
 				const ShaderAnalysis::ShaderAnalysisDisk& analysis = target.shaderAnalysis;
 				if (!analysis.succeeded)
@@ -552,7 +552,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 		std::string BuildFragmentShaderSource(
 			const RenderPass::RenderPassDisk& renderPass,
-			const ModifiedShader::PackageDisk& modifiedShader,
+			const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 			bool replacementPixelShader)
 		{
 			std::ostringstream source;
@@ -644,7 +644,7 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 
 		std::string BuildComputeShaderSource(
 			const RenderPass::RenderPassDisk& renderPass,
-			const ModifiedShader::PackageDisk& modifiedShader)
+			const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
 		{
 			std::ostringstream source;
 			const bool replacement = renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader;
@@ -713,7 +713,7 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 
 	bool CreateShaderTemplate(
 		RenderPass::RenderPassDisk& renderPass,
-		const ModifiedShader::PackageDisk& modifiedShader,
+		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 		std::string& outError)
 	{
 		outError.clear();

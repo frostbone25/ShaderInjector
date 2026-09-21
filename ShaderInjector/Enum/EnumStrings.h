@@ -10,6 +10,7 @@ namespace RenderPassRuntime
 {
 	const char* RootBindingTypeName(RootBindingType type);
 }
+
 std::string GetProcessorArchitectureName(WORD architecture);
 
 std::string D3DFeatureLevelToString(D3D_FEATURE_LEVEL featureLevel);

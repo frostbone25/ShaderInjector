@@ -96,7 +96,7 @@ namespace HookD3D12
 			replacement.replacementDirectory = replacementDirectory;
 			replacement.originalShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalShaderBytecode" + ShaderInjectorIO::extensionBIN);
 			replacement.modifiedShaderId = modifiedShaderId;
-			const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
+			const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
 			replacement.modifiedShaderBlobPath = modifiedShader ? modifiedShader->compiledBlobPath : "";
 
 			if (originalShaderAnalysis && originalShaderAnalysis->succeeded)

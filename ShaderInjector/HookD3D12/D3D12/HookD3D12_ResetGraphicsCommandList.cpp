@@ -23,8 +23,10 @@ namespace HookD3D12
 		const auto resetCommandList = [&](ID3D12PipelineState* pipelineState)
 		{
 			const HRESULT result = Original_ResetGraphicsCommandList(commandList, allocator, pipelineState);
+
 			if (trackRenderPassState || retireRecordedRenderPassWork)
 				RenderPassRuntime::CompleteCommandListReset(commandList, SUCCEEDED(result));
+
 			return result;
 		};
 
@@ -67,6 +69,7 @@ namespace HookD3D12
 			}
 
 			auto overrideIt = gPipelineStateOverrides.find(initialState);
+
 			if (overrideIt != gPipelineStateOverrides.end() && overrideIt->second)
 				boundState = overrideIt->second;
 		}

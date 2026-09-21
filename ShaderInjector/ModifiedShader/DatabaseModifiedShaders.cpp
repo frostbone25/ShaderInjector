@@ -14,7 +14,7 @@
 
 namespace DatabaseModifiedShaders
 {
-	std::vector<ModifiedShader::PackageDisk> gModifiedShaders;
+	std::vector<ModifiedShader::ModifiedShaderPackageDisk> gModifiedShaders;
 
 	bool gModifiedShadersLoaded = false;
 
@@ -38,7 +38,7 @@ namespace DatabaseModifiedShaders
 
 		for (const std::string& jsonPath : jsonPaths)
 		{
-			ModifiedShader::PackageDisk package{};
+			ModifiedShader::ModifiedShaderPackageDisk package{};
 
 			if (!ModifiedShader::LoadJson(jsonPath, package))
 				continue;
@@ -47,9 +47,12 @@ namespace DatabaseModifiedShaders
 			//override package metadata in memory so existing packages follow the selected profile on recompile.
 			package.shaderProfile = StringHelper::ShaderProfileForType(package.shaderType);
 
-			if (package.id.empty() || package.shaderType == ShaderTarget::Unknown ||
-				package.shaderProfile.empty() || package.shaderEntryPoint.empty() ||
-				package.sourcePath.empty() || !ShaderInjectorIO::FileExists(package.sourcePath) ||
+			if (package.id.empty() || 
+				package.shaderType == ShaderTarget::Unknown ||
+				package.shaderProfile.empty() || 
+				package.shaderEntryPoint.empty() ||
+				package.sourcePath.empty() || 
+				!ShaderInjectorIO::FileExists(package.sourcePath) ||
 				package.compiledBlobPath.empty())
 			{
 				ShaderInjectorIO::WriteToLogFileWarning("DatabaseModifiedShaders->RefreshModifiedShaders: ignoring incomplete package " + jsonPath);
@@ -98,7 +101,7 @@ namespace DatabaseModifiedShaders
 
 		if (Globals::gLogModifiedShaderNames)
 		{
-			for (const ModifiedShader::PackageDisk& package : gModifiedShaders)
+			for (const ModifiedShader::ModifiedShaderPackageDisk& package : gModifiedShaders)
 			{
 				ShaderInjectorIO::WriteToLogFileStatus("DatabaseModifiedShaders->RefreshModifiedShaders: loaded name=\"" + (package.name.empty() ? package.id : package.name) + "\" id=" + package.id);
 			}
@@ -111,25 +114,25 @@ namespace DatabaseModifiedShaders
 			RefreshModifiedShaders();
 	}
 
-	const std::vector<ModifiedShader::PackageDisk>& GetModifiedShaders()
+	const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& GetModifiedShaders()
 	{
 		EnsureModifiedShadersLoaded();
 		return gModifiedShaders;
 	}
 
-	const ModifiedShader::PackageDisk* FindModifiedShaderById(const std::string& modifiedShaderId)
+	const ModifiedShader::ModifiedShaderPackageDisk* FindModifiedShaderById(const std::string& modifiedShaderId)
 	{
 		return Detail::FindMutableModifiedShaderById(modifiedShaderId);
 	}
 
-	ModifiedShader::PackageDisk* Detail::FindMutableModifiedShaderById(const std::string& modifiedShaderId)
+	ModifiedShader::ModifiedShaderPackageDisk* Detail::FindMutableModifiedShaderById(const std::string& modifiedShaderId)
 	{
 		if (modifiedShaderId.empty())
 			return nullptr;
 
 		EnsureModifiedShadersLoaded();
 
-		for (ModifiedShader::PackageDisk& modifiedShader : gModifiedShaders)
+		for (ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : gModifiedShaders)
 		{
 			if (modifiedShader.id == modifiedShaderId)
 				return &modifiedShader;
@@ -138,7 +141,7 @@ namespace DatabaseModifiedShaders
 		return nullptr;
 	}
 
-	std::string DisplayName(const ModifiedShader::PackageDisk& modifiedShader)
+	std::string DisplayName(const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
 	{
 		if (modifiedShader.name.empty() || modifiedShader.name == modifiedShader.id)
 			return modifiedShader.id;

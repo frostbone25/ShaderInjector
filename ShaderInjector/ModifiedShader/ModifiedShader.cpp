@@ -1,40 +1,18 @@
 #include "ModifiedShader.h"
 
 #include <algorithm>
-#include <unordered_set>
 
 #include "Hash.h"
 #include "IO/ShaderInjectorIO.h"
-#include "SimilarityScore.h"
 
 namespace ModifiedShader
 {
-	double HashCollectionSimilarity(const std::vector<std::string>& left, const std::vector<std::string>& right)
-	{
-		if (left.empty() && right.empty())
-			return 1.0;
-
-		const std::unordered_set<std::string> leftHashes(left.begin(), left.end());
-		const std::unordered_set<std::string> rightHashes(right.begin(), right.end());
-		std::unordered_set<std::string> combinedHashes = leftHashes;
-		combinedHashes.insert(rightHashes.begin(), rightHashes.end());
-		size_t sharedHashCount = 0;
-
-		for (const std::string& hash : rightHashes)
-		{
-			if (leftHashes.find(hash) != leftHashes.end())
-				++sharedHashCount;
-		}
-
-		return combinedHashes.empty() ? 1.0 : static_cast<double>(sharedHashCount) / static_cast<double>(combinedHashes.size());
-	}
-
 	bool AnalysesHaveSameStrictIdentity(const ShaderAnalysis::ShaderAnalysisDisk& left, const ShaderAnalysis::ShaderAnalysisDisk& right)
 	{
 		return left.succeeded && right.succeeded && !left.crossVersionIdentityHash.empty() && left.crossVersionIdentityHash == right.crossVersionIdentityHash;
 	}
 
-	bool TargetDisk::MatchesShader(uint64_t shaderHash, const ShaderAnalysis::ShaderAnalysisDisk& analysis) const
+	bool ModifiedShaderTargetDisk::MatchesShader(uint64_t shaderHash, const ShaderAnalysis::ShaderAnalysisDisk& analysis) const
 	{
 		if (shaderHash != 0)
 		{
@@ -48,31 +26,12 @@ namespace ModifiedShader
 		return AnalysesHaveSameStrictIdentity(shaderAnalysis, analysis);
 	}
 
-	double TargetDisk::CalculateSimilarityScore(const TargetDisk& other) const
-	{
-		SimilarityScore::WeightedAverage score;
-		score.Add(HashCollectionSimilarity(knownShaderBytecodeHashes, other.knownShaderBytecodeHashes), 4.0);
-		score.Add(SimilarityScore::NumericString(originalShaderBytecodeLength, other.originalShaderBytecodeLength), 2.0);
-
-		if (shaderAnalysis.succeeded || other.shaderAnalysis.succeeded)
-			score.Add(shaderAnalysis.CalculateSimilarityScore(other.shaderAnalysis), 10.0);
-
-		score.Add(SimilarityScore::Exact(targetApplication, other.targetApplication), 1.0);
-		score.Add(SimilarityScore::Exact(gameVersion, other.gameVersion), 0.5);
-		return score.Result();
-	}
-
-	double TargetDisk::CalculateSimilarityScore(const std::vector<TargetDisk>& left, const std::vector<TargetDisk>& right)
-	{
-		return SimilarityScore::CalculateCollectionSimilarityScore(left, right);
-	}
-
-	bool PackageDisk::MatchesShader(uint64_t shaderHash, const ShaderAnalysis::ShaderAnalysisDisk& analysis) const
+	bool ModifiedShaderPackageDisk::MatchesShader(uint64_t shaderHash, const ShaderAnalysis::ShaderAnalysisDisk& analysis) const
 	{
 		if (!enabled)
 			return false;
 
-		for (const TargetDisk& target : targets)
+		for (const ModifiedShaderTargetDisk& target : targets)
 		{
 			if (target.MatchesShader(shaderHash, analysis))
 				return true;
@@ -81,28 +40,12 @@ namespace ModifiedShader
 		return false;
 	}
 
-	double PackageDisk::CalculateSimilarityScore(const PackageDisk& other) const
-	{
-		SimilarityScore::WeightedAverage score;
-		score.Add(SimilarityScore::Exact(id, other.id), 2.0);
-		score.Add(SimilarityScore::Exact(shaderType, other.shaderType), 8.0);
-		score.Add(SimilarityScore::Exact(shaderProfile, other.shaderProfile), 3.0);
-		score.Add(SimilarityScore::Exact(shaderEntryPoint, other.shaderEntryPoint), 2.0);
-		score.Add(TargetDisk::CalculateSimilarityScore(targets, other.targets), 12.0);
-		return score.Result();
-	}
-
-	double PackageDisk::CalculateSimilarityScore(const std::vector<PackageDisk>& left, const std::vector<PackageDisk>& right)
-	{
-		return SimilarityScore::CalculateCollectionSimilarityScore(left, right);
-	}
-
-	bool WriteJson(const PackageDisk& package)
+	bool WriteJson(const ModifiedShaderPackageDisk& package)
 	{
 		if (package.jsonPath.empty())
 			return false;
 
-		PackageDisk portablePackage = package;
+		ModifiedShaderPackageDisk portablePackage = package;
 		portablePackage.sourceFile = ShaderInjectorIO::FileNameFromPath(portablePackage.sourceFile.empty() ? portablePackage.sourcePath : portablePackage.sourceFile);
 		portablePackage.compiledBlobFile = ShaderInjectorIO::FileNameFromPath(portablePackage.compiledBlobFile.empty() ? portablePackage.compiledBlobPath : portablePackage.compiledBlobFile);
 		portablePackage.packageDirectory = ".";
@@ -118,7 +61,7 @@ namespace ModifiedShader
 		return ShaderInjectorIO::WriteTextFile(package.jsonPath, json.dump(4));
 	}
 
-	bool LoadJson(const std::string& jsonPath, PackageDisk& outPackage)
+	bool LoadJson(const std::string& jsonPath, ModifiedShaderPackageDisk& outPackage)
 	{
 		try
 		{
@@ -128,10 +71,7 @@ namespace ModifiedShader
 				return false;
 
 			const nlohmann::ordered_json json = nlohmann::ordered_json::parse(jsonText);
-			PackageDisk package = json.get<PackageDisk>();
-
-			if (package.format != formatName)
-				return false;
+			ModifiedShaderPackageDisk package = json.get<ModifiedShaderPackageDisk>();
 
 			package.jsonPath = jsonPath;
 			package.packageDirectory = ShaderInjectorIO::DirectoryFromPath(jsonPath);
@@ -155,12 +95,12 @@ namespace ModifiedShader
 		}
 	}
 
-	TargetDisk BuildTargetFromShaderTarget(
+	ModifiedShaderTargetDisk BuildTargetFromShaderTarget(
 		const ShaderTarget::ShaderTargetDisk& shaderTarget,
 		const std::string& targetApplication,
 		const std::string& gameVersion)
 	{
-		TargetDisk target{};
+		ModifiedShaderTargetDisk target{};
 		target.name = shaderTarget.name;
 		target.targetApplication = targetApplication;
 		target.gameVersion = gameVersion;

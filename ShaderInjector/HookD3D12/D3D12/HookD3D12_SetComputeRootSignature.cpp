@@ -7,45 +7,9 @@
 
 namespace HookD3D12
 {
-	void STDMETHODCALLTYPE Hook_SetGraphicsRootSignature(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature)
-	{
-		Handle_SetGraphicsRootSignature(commandList, rootSignature);
-	}
-
 	void STDMETHODCALLTYPE Hook_SetComputeRootSignature(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature)
 	{
 		Handle_SetComputeRootSignature(commandList, rootSignature);
-	}
-
-	void STDMETHODCALLTYPE Handle_SetGraphicsRootSignature(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature)
-	{
-		if (!Globals::gShaderInjectorEnabled)
-		{
-			GetCommandListPipelineState(commandList).graphicsRootSignature.store(rootSignature, std::memory_order_release);
-			Original_SetGraphicsRootSignature(commandList, rootSignature);
-			return;
-		}
-
-		if (IsInsideRenderPassInjection())
-		{
-			Original_SetGraphicsRootSignature(commandList, rootSignature);
-			return;
-		}
-
-		if (RenderPassRuntime::IsPipelineExecutionTrackingRequired(false))
-			RenderPassRuntime::TrackRootSignature(commandList, false, rootSignature);
-
-		CommandListPipelineState& commandListState = GetCommandListPipelineState(commandList);
-		commandListState.graphicsRootSignature.store(rootSignature, std::memory_order_release);
-		ID3D12PipelineState* currentPipelineState = commandListState.pipelineState.load(std::memory_order_acquire);
-
-		if (currentPipelineState && !IsKnownPipelineStateLocked(currentPipelineState))
-		{
-			std::lock_guard<std::mutex> lock(gPipelineMutex);
-			UpdateUncapturedPipelineRootSignatureLocked(currentPipelineState, rootSignature, false);
-		}
-
-		Original_SetGraphicsRootSignature(commandList, rootSignature);
 	}
 
 	void STDMETHODCALLTYPE Handle_SetComputeRootSignature(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature)

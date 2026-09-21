@@ -6,7 +6,7 @@
 
 #include "DDS/DDSConstants.h"
 #include "DDS/DDSHeader.h"
-#include "DDS/DDSHeaderDx10.h"
+#include "DDS/DDSHeaderDX10.h"
 #include "DDS/DDSLegacyFormat.h"
 
 namespace DDS::Internal
@@ -18,11 +18,11 @@ namespace DDS::Internal
 		std::string& outError)
 	{
 		uint32_t magic = 0;
-		DdsHeader header{};
+		DDSHeader header{};
 		file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
 		file.read(reinterpret_cast<char*>(&header), sizeof(header));
-		if (!file || magic != ddsMagic || header.size != sizeof(DdsHeader) ||
-			header.pixelFormat.size != sizeof(DdsPixelFormat))
+		if (!file || magic != ddsMagic || header.size != sizeof(DDSHeader) ||
+			header.pixelFormat.size != sizeof(DDSPixelFormat))
 		{
 			outError = "DDS header is invalid.";
 			return false;
@@ -35,7 +35,7 @@ namespace DDS::Internal
 
 		if (header.pixelFormat.fourCC == fourCcDx10)
 		{
-			DdsHeaderDx10 dx10{};
+			DDSHeaderDX10 dx10{};
 			file.read(reinterpret_cast<char*>(&dx10), sizeof(dx10));
 			if (!file || !dx10.arraySize)
 			{

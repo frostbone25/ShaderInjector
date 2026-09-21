@@ -5,7 +5,7 @@
 namespace DDS
 {
 #pragma pack(push, 1)
-	struct DdsPixelFormat
+	struct DDSPixelFormat
 	{
 		uint32_t size;
 		uint32_t flags;
@@ -18,5 +18,5 @@ namespace DDS
 	};
 #pragma pack(pop)
 
-	static_assert(sizeof(DdsPixelFormat) == 32, "Unexpected DDS pixel format size.");
+	static_assert(sizeof(DDSPixelFormat) == 32, "Unexpected DDS pixel format size.");
 }

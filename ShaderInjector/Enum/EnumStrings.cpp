@@ -12,12 +12,18 @@ namespace RenderPassRuntime
 	{
 		switch (type)
 		{
-			case RootBindingType::DescriptorTable: return "Descriptor Table";
-			case RootBindingType::ConstantBufferView: return "CBV";
-			case RootBindingType::ShaderResourceView: return "SRV";
-			case RootBindingType::UnorderedAccessView: return "UAV";
-			case RootBindingType::Constants: return "Root Constants";
-			default: return "";
+			case RootBindingType::DescriptorTable:
+				return "Descriptor Table";
+			case RootBindingType::ConstantBufferView: 
+				return "CBV";
+			case RootBindingType::ShaderResourceView: 
+				return "SRV";
+			case RootBindingType::UnorderedAccessView: 
+				return "UAV";
+			case RootBindingType::Constants: 
+				return "Root Constants";
+			default: 
+				return "";
 		}
 	}
 }
@@ -163,12 +169,17 @@ namespace RenderPass
 	{
 		switch (type)
 		{
-			case RenderPassType::MipChain: return "MipChain";
-			case RenderPassType::TemporalHistory: return "Temporal History";
-			case RenderPassType::ReplacementPixelShader: return "Replacement Pixel Shader";
-			case RenderPassType::ReplacementComputeShader: return "Replacement Compute Shader";
+			case RenderPassType::MipChain: 
+				return "MipChain";
+			case RenderPassType::TemporalHistory: 
+				return "Temporal History";
+			case RenderPassType::ReplacementPixelShader: 
+				return "Replacement Pixel Shader";
+			case RenderPassType::ReplacementComputeShader: 
+				return "Replacement Compute Shader";
 			case RenderPassType::Custom:
-			default: return "Custom";
+			default: 
+				return "Custom";
 		}
 	}
 
@@ -176,10 +187,13 @@ namespace RenderPass
 	{
 		switch (mode)
 		{
-			case ExecutionMode::FullscreenPixel: return "Fullscreen Pixel";
-			case ExecutionMode::Compute: return "Compute";
+			case ExecutionMode::FullscreenPixel: 
+				return "Fullscreen Pixel";
+			case ExecutionMode::Compute: 
+				return "Compute";
 			case ExecutionMode::Automatic:
-			default: return "Automatic";
+			default: 
+				return "Automatic";
 		}
 	}
 
@@ -187,16 +201,25 @@ namespace RenderPass
 	{
 		switch (operation)
 		{
-			case PassOperation::Custom: return "Custom";
-			case PassOperation::ReplaceOriginal: return "Replace Original";
-			case PassOperation::MipChain: return "Mip Chain";
-			case PassOperation::Downsample: return "Downsample";
-			case PassOperation::UpsampleChain: return "Upsample Chain";
-			case PassOperation::Copy: return "Copy";
-			case PassOperation::TemporalHistory: return "Temporal History Copy";
-			case PassOperation::Resolve: return "Resolve";
+			case PassOperation::Custom: 
+				return "Custom";
+			case PassOperation::ReplaceOriginal: 
+				return "Replace Original";
+			case PassOperation::MipChain: 
+				return "Mip Chain";
+			case PassOperation::Downsample: 
+				return "Downsample";
+			case PassOperation::UpsampleChain: 
+				return "Upsample Chain";
+			case PassOperation::Copy: 
+				return "Copy";
+			case PassOperation::TemporalHistory: 
+				return "Temporal History Copy";
+			case PassOperation::Resolve: 
+				return "Resolve";
 			case PassOperation::Automatic:
-			default: return "Automatic";
+			default: 
+				return "Automatic";
 		}
 	}
 
@@ -204,9 +227,11 @@ namespace RenderPass
 	{
 		switch (type)
 		{
-			case EventType::RenderPass: return "Render Pass";
+			case EventType::RenderPass:
+				return "Render Pass";
 			case EventType::ModifiedShader:
-			default: return "Modified Shader";
+			default: 
+				return "Modified Shader";
 		}
 	}
 }
@@ -217,10 +242,13 @@ namespace ShaderResource
 	{
 		switch (origin)
 		{
-			case ResourceOrigin::Game: return "Game Runtime";
-			case ResourceOrigin::Runtime: return "Injector Runtime";
+			case ResourceOrigin::Game: 
+				return "Game Runtime";
+			case ResourceOrigin::Runtime: 
+				return "Injector Runtime";
 			case ResourceOrigin::Disk:
-			default: return "Offline / Disk";
+			default: 
+				return "Offline / Disk";
 		}
 	}
 
@@ -228,11 +256,15 @@ namespace ShaderResource
 	{
 		switch (lifetime)
 		{
-			case ResourceLifetime::Transient: return "Transient";
-			case ResourceLifetime::Persistent: return "Persistent";
-			case ResourceLifetime::History: return "History";
+			case ResourceLifetime::Transient: 
+				return "Transient";
+			case ResourceLifetime::Persistent: 
+				return "Persistent";
+			case ResourceLifetime::History: 
+				return "History";
 			case ResourceLifetime::Immutable:
-			default: return "Immutable";
+			default: 
+				return "Immutable";
 		}
 	}
 
@@ -240,13 +272,19 @@ namespace ShaderResource
 	{
 		switch (dimension)
 		{
-			case TextureDimension::Texture2D: return "Texture2D";
-			case TextureDimension::Texture2DArray: return "Texture2DArray";
-			case TextureDimension::TextureCube: return "TextureCube";
-			case TextureDimension::TextureCubeArray: return "TextureCubeArray";
-			case TextureDimension::Texture3D: return "Texture3D";
+			case TextureDimension::Texture2D: 
+				return "Texture2D";
+			case TextureDimension::Texture2DArray: 
+				return "Texture2DArray";
+			case TextureDimension::TextureCube: 
+				return "TextureCube";
+			case TextureDimension::TextureCubeArray: 
+				return "TextureCubeArray";
+			case TextureDimension::Texture3D: 
+				return "Texture3D";
 			case TextureDimension::Unknown:
-			default: return "Unknown";
+			default: 
+				return "Unknown";
 		}
 	}
 
@@ -254,13 +292,18 @@ namespace ShaderResource
 	{
 		switch (dimension)
 		{
-			case TextureDimension::Texture2DArray: return "Texture2DArray<float4>";
-			case TextureDimension::TextureCube: return "TextureCube<float4>";
-			case TextureDimension::TextureCubeArray: return "TextureCubeArray<float4>";
-			case TextureDimension::Texture3D: return "Texture3D<float4>";
+			case TextureDimension::Texture2DArray: 
+				return "Texture2DArray<float4>";
+			case TextureDimension::TextureCube: 
+				return "TextureCube<float4>";
+			case TextureDimension::TextureCubeArray: 
+				return "TextureCubeArray<float4>";
+			case TextureDimension::Texture3D: 
+				return "Texture3D<float4>";
 			case TextureDimension::Texture2D:
 			case TextureDimension::Unknown:
-			default: return "Texture2D<float4>";
+			default: 
+				return "Texture2D<float4>";
 		}
 	}
 }

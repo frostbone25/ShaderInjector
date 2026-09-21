@@ -6,5 +6,5 @@
 
 namespace DDS::Internal
 {
-	DXGI_FORMAT LegacyFormat(const DdsPixelFormat& format);
+	DXGI_FORMAT LegacyFormat(const DDSPixelFormat& format);
 }

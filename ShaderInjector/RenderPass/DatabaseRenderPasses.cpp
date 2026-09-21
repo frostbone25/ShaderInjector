@@ -275,7 +275,7 @@ namespace DatabaseRenderPasses
 		return {};
 	}
 
-	const ModifiedShader::PackageDisk* ResolveModifiedShader(const RenderPass::RenderPassDisk& renderPass)
+	const ModifiedShader::ModifiedShaderPackageDisk* ResolveModifiedShader(const RenderPass::RenderPassDisk& renderPass)
 	{
 		const std::string modifiedShaderId = ResolveModifiedShaderId(renderPass);
 		return modifiedShaderId.empty()
@@ -486,7 +486,7 @@ namespace DatabaseRenderPasses
 			return false;
 		}
 
-		const ModifiedShader::PackageDisk* modifiedShader = ResolveModifiedShader(*renderPass);
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = ResolveModifiedShader(*renderPass);
 		if (!modifiedShader)
 		{
 			outError = "Select an event that resolves to an available Modified Shader first.";

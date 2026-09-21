@@ -25,7 +25,7 @@ namespace HookD3D12
 			return false;
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
-		const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
 		replacement.modifiedShaderBlobPath = modifiedShader ? modifiedShader->compiledBlobPath : "";
 
 		if (!modifiedShader)
@@ -69,7 +69,7 @@ namespace HookD3D12
 			return false;
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
-		const ModifiedShader::PackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
 		replacement.modifiedShaderBlobPath = modifiedShader ? modifiedShader->compiledBlobPath : "";
 
 		if (replacementIndex >= (int)gLoadedShaderTargetBlobs.size())

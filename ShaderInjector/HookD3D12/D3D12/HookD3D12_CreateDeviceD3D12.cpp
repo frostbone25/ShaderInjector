@@ -23,8 +23,11 @@ namespace HookD3D12
 			{
 				InstallPipelineHooksForDevice(device);
 				InstallRenderPassResourceHooksForDevice(device);
+
 				SystemInfoLogger::LogD3D12DeviceInfo(device);
+
 				ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12Install->Hook_CreateDeviceD3D12: D3D12CreateDevice captured device and installed pipeline hooks");
+
 				device->Release();
 			}
 		}

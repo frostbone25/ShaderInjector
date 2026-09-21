@@ -68,6 +68,7 @@ namespace HookD3D12
 			}
 
 			auto overrideIt = gPipelineStateOverrides.find(pipelineState);
+
 			if (overrideIt != gPipelineStateOverrides.end() && overrideIt->second)
 				boundPipelineState = overrideIt->second;
 		}

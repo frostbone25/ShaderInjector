@@ -66,6 +66,7 @@ namespace HookD3D12
 		}
 
 		HRESULT hr = swapChain->GetDesc(&outDesc);
+
 		if (FAILED(hr))
 		{
 			ResetOverlayStartupGate();
@@ -73,6 +74,7 @@ namespace HookD3D12
 		}
 
 		HWND outputWindow = outDesc.OutputWindow;
+
 		if (!outputWindow || !IsWindow(outputWindow) || IsIconic(outputWindow))
 		{
 			ResetOverlayStartupGate();
@@ -86,6 +88,7 @@ namespace HookD3D12
 		}
 
 		RECT clientRect{};
+
 		if (!GetClientRect(outputWindow, &clientRect))
 		{
 			ResetOverlayStartupGate();
@@ -94,6 +97,7 @@ namespace HookD3D12
 
 		LONG clientWidth = clientRect.right - clientRect.left;
 		LONG clientHeight = clientRect.bottom - clientRect.top;
+
 		if (clientWidth <= 0 || clientHeight <= 0)
 		{
 			ResetOverlayStartupGate();
@@ -101,6 +105,7 @@ namespace HookD3D12
 		}
 
 		ULONGLONG now = GetTickCount64();
+
 		if (gLastResizeBuffersTick != 0 && now - gLastResizeBuffersTick < kOverlayResizeCooldownMs)
 		{
 			if (!gLoggedResizeCooldown)

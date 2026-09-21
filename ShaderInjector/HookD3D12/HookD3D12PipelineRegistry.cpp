@@ -33,6 +33,7 @@ namespace HookD3D12
 		if (pipelineStateObject)
 		{
 			std::unique_lock<std::shared_mutex> lock(gPipelineStateRegistryMutex);
+
 			if (gKnownPipelineStates.insert(pipelineStateObject).second)
 				gPipelineStateRegistryGeneration.fetch_add(1, std::memory_order_release);
 		}
@@ -43,6 +44,7 @@ namespace HookD3D12
 		if (pipelineStateObject)
 		{
 			std::unique_lock<std::shared_mutex> lock(gPipelineStateRegistryMutex);
+
 			if (gKnownPipelineStates.erase(pipelineStateObject) != 0)
 				gPipelineStateRegistryGeneration.fetch_add(1, std::memory_order_release);
 		}
@@ -54,8 +56,8 @@ namespace HookD3D12
 			return true;
 
 		const uint64_t generation = gPipelineStateRegistryGeneration.load(std::memory_order_acquire);
-		KnownPipelineCacheEntry& cacheEntry = gKnownPipelineCache[
-			(reinterpret_cast<uintptr_t>(pipelineStateObject) >> 4) % gKnownPipelineCache.size()];
+		KnownPipelineCacheEntry& cacheEntry = gKnownPipelineCache[(reinterpret_cast<uintptr_t>(pipelineStateObject) >> 4) % gKnownPipelineCache.size()];
+
 		if (cacheEntry.pipelineState == pipelineStateObject && cacheEntry.generation == generation)
 			return cacheEntry.known;
 

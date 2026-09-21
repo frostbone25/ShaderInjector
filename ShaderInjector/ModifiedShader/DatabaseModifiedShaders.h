@@ -11,11 +11,11 @@ namespace DatabaseModifiedShaders
 
 	void EnsureModifiedShadersLoaded();
 
-	const std::vector<ModifiedShader::PackageDisk>& GetModifiedShaders();
+	const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& GetModifiedShaders();
 
-	const ModifiedShader::PackageDisk* FindModifiedShaderById(const std::string& modifiedShaderId);
+	const ModifiedShader::ModifiedShaderPackageDisk* FindModifiedShaderById(const std::string& modifiedShaderId);
 
-	std::string DisplayName(const ModifiedShader::PackageDisk& modifiedShader);
+	std::string DisplayName(const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader);
 
 	bool SetModifiedShaderEnabled(const std::string& modifiedShaderId, bool enabled);
 
@@ -26,6 +26,6 @@ namespace DatabaseModifiedShaders
 	bool CompileModifiedShader(const std::string& modifiedShaderId);
 
 	bool CompiledShaderMatchesTargetInterface(
-		const ModifiedShader::PackageDisk& modifiedShader,
+		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 		const ShaderAnalysis::ShaderAnalysisDisk& targetAnalysis);
 }

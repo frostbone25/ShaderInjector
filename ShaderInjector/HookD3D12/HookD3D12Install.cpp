@@ -157,7 +157,9 @@ namespace HookD3D12
 	{
 		if (!commandList)
 			return;
+
 		void** commandListVTable = *reinterpret_cast<void***>(commandList);
+
 		if (fastCommandListHookedVTable.load(std::memory_order_acquire) == commandListVTable)
 			return;
 
@@ -216,6 +218,7 @@ namespace HookD3D12
 		std::lock_guard<std::mutex> installationLock(hookInstallationMutex);
 		void** deviceVTable = *reinterpret_cast<void***>(device);
 		void* deviceVTableKey = deviceVTable;
+
 		if (renderPassHookedDeviceVTables.find(deviceVTableKey) != renderPassHookedDeviceVTables.end())
 			return;
 
@@ -243,6 +246,7 @@ namespace HookD3D12
 		};
 
 		bool resourceHooksInstalled = true;
+
 		for (const HookDefinition& hook : resourceHooks)
 		{
 			const MH_STATUS createStatus = MH_CreateHook(
@@ -258,13 +262,11 @@ namespace HookD3D12
 		if (resourceHooksInstalled)
 		{
 			renderPassHookedDeviceVTables.insert(deviceVTableKey);
-			ShaderInjectorIO::WriteToLogFileSuccess(
-				"HookD3D12Install->InstallRenderPassResourceHooksForDevice: mip resource hooks installed");
+			ShaderInjectorIO::WriteToLogFileSuccess("HookD3D12Install->InstallRenderPassResourceHooksForDevice: mip resource hooks installed");
 		}
 		else
 		{
-			ShaderInjectorIO::WriteToLogFileError(
-				"HookD3D12Install->InstallRenderPassResourceHooksForDevice: one or more resource hooks failed");
+			ShaderInjectorIO::WriteToLogFileError("HookD3D12Install->InstallRenderPassResourceHooksForDevice: one or more resource hooks failed");
 		}
 	}
 
@@ -272,7 +274,9 @@ namespace HookD3D12
 	{
 		if (!device || !capturedGraphicsCommandListVTable || !RenderPassRuntime::HasEnabledRenderPasses())
 			return;
+
 		void** initialDeviceVTable = *reinterpret_cast<void***>(device);
+
 		if (fastDeferredDeviceVTable.load(std::memory_order_acquire) == initialDeviceVTable &&
 			fastDeferredCommandListVTable.load(std::memory_order_acquire) == capturedGraphicsCommandListVTable)
 		{
@@ -295,6 +299,7 @@ namespace HookD3D12
 
 		void** deviceVTable = *reinterpret_cast<void***>(device);
 		void* deviceVTableKey = deviceVTable;
+
 		if (renderPassHookedDeviceVTables.find(deviceVTableKey) == renderPassHookedDeviceVTables.end())
 		{
 			const HookDefinition resourceHooks[] =
@@ -314,6 +319,7 @@ namespace HookD3D12
 			};
 
 			bool resourceHooksInstalled = true;
+
 			for (const HookDefinition& hook : resourceHooks)
 			{
 				const MH_STATUS createStatus = MH_CreateHook(
@@ -329,18 +335,17 @@ namespace HookD3D12
 			if (resourceHooksInstalled)
 			{
 				renderPassHookedDeviceVTables.insert(deviceVTableKey);
-				ShaderInjectorIO::WriteToLogFileSuccess(
-					"HookD3D12Install->InstallDeferredRenderPassHooks: resource hooks installed after overlay readiness");
+				ShaderInjectorIO::WriteToLogFileSuccess("HookD3D12Install->InstallDeferredRenderPassHooks: resource hooks installed after overlay readiness");
 			}
 			else
 			{
-				ShaderInjectorIO::WriteToLogFileError(
-					"HookD3D12Install->InstallDeferredRenderPassHooks: one or more deferred resource hooks failed");
+				ShaderInjectorIO::WriteToLogFileError("HookD3D12Install->InstallDeferredRenderPassHooks: one or more deferred resource hooks failed");
 			}
 		}
 
 		void** commandListVTable = capturedGraphicsCommandListVTable;
 		void* commandListVTableKey = commandListVTable;
+
 		if (renderPassHookedCommandListVTables.find(commandListVTableKey) == renderPassHookedCommandListVTables.end())
 		{
 			const HookDefinition commandListHooks[] =
@@ -371,6 +376,7 @@ namespace HookD3D12
 			};
 
 			bool commandListHooksInstalled = true;
+
 			for (const HookDefinition& hook : commandListHooks)
 			{
 				const MH_STATUS createStatus = MH_CreateHook(
@@ -386,14 +392,11 @@ namespace HookD3D12
 			if (commandListHooksInstalled)
 			{
 				renderPassHookedCommandListVTables.insert(commandListVTableKey);
-				ShaderInjectorIO::WriteToLogFileSuccess(StringHelper::Format(
-					"HookD3D12Install->InstallDeferredRenderPassHooks: command-list hooks installed after overlay readiness vtable=%p",
-					commandListVTable));
+				ShaderInjectorIO::WriteToLogFileSuccess(StringHelper::Format("HookD3D12Install->InstallDeferredRenderPassHooks: command-list hooks installed after overlay readiness vtable = %p", commandListVTable));
 			}
 			else
 			{
-				ShaderInjectorIO::WriteToLogFileError(
-					"HookD3D12Install->InstallDeferredRenderPassHooks: one or more deferred command-list hooks failed");
+				ShaderInjectorIO::WriteToLogFileError("HookD3D12Install->InstallDeferredRenderPassHooks: one or more deferred command-list hooks failed");
 			}
 		}
 

@@ -13,9 +13,19 @@
 
 //custom
 #include "ShaderTarget/ShaderTarget.h"
+#include "HookD3D12/ComputePipelineInfo.h"
+#include "HookD3D12/D3D12PipelineInfo.h"
+#include "HookD3D12/FrameContext.h"
+#include "HookD3D12/GraphicsPipelineInfo.h"
+#include "HookD3D12/PSOPendingRebuild.h"
+#include "HookD3D12/PipelineStateInfo.h"
+#include "HookD3D12/RootSignatureInfo.h"
+#include "HookD3D12/UncapturedPipelineStateInfo.h"
 
 namespace HookD3D12
 {
+	UINT DescriptorIncrementSize(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE heapType);
+	void RegisterCreatedResource(HRESULT result, void** createdObject);
 	bool InstallD3D12CreateDeviceHook(HMODULE d3d12Module);
 	void InstallPipelineHooksForDevice(ID3D12Device* device);
 	void InstallRenderPassResourceHooksForDevice(ID3D12Device* device);
@@ -31,182 +41,8 @@ namespace HookD3D12
 		REFIID interfaceId,
 		void** pipelineState);
 
-
-	struct D3D12PipelineInfo
-	{
-		std::string gpuName;
-
-		UINT vendorId = 0;
-		UINT deviceId = 0;
-
-		SIZE_T dedicatedVideoMemory = 0;
-		SIZE_T dedicatedSystemMemory = 0;
-		SIZE_T sharedSystemMemory = 0;
-
-		UINT resourceBindingTier = 0;
-		UINT tiledResourcesTier = 0;
-		UINT conservativeRasterTier = 0;
-		UINT raytracingTier = 0;
-		UINT meshShaderTier = 0;
-
-		UINT swapChainBuffers = 0;
-		DXGI_FORMAT swapChainFormat = DXGI_FORMAT_UNKNOWN;
-
-		UINT commandQueueType = 0;
-	};
-
-	struct GraphicsPipelineInfo
-	{
-		ID3D12PipelineState* pipelineState = nullptr;
-
-		uint64_t vsHash = 0; 
-		SIZE_T vsSize = 0;
-
-		uint64_t psHash = 0; 
-		SIZE_T psSize = 0;
-
-		uint64_t gsHash = 0; 
-		SIZE_T gsSize = 0;
-
-		uint64_t hsHash = 0; 
-		SIZE_T hsSize = 0;
-
-		uint64_t dsHash = 0; 
-		SIZE_T dsSize = 0;
-
-		std::vector<uint8_t> vsBytecode;
-		std::vector<uint8_t> psBytecode;
-		std::vector<uint8_t> gsBytecode;
-		std::vector<uint8_t> hsBytecode;
-		std::vector<uint8_t> dsBytecode;
-
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC originalDesc = {};
-
-		bool psDisabled = false;
-		ID3D12PipelineState* psoWithoutPS = nullptr;
-
-		ID3D12PipelineState* psoWithReplacement = nullptr;
-		std::string activeShaderTargetName;
-		ShaderTarget::ShaderType activeShaderTargetType = ShaderTarget::Unknown;
-		uint64_t activeShaderTargetHash = 0;
-		bool activeShaderTargetUsesFallback = false;
-		uint8_t shaderTargetApplyFailureCount = 0;
-		bool shaderTargetApplyRetryQueued = false;
-
-		std::vector<D3D12_INPUT_ELEMENT_DESC> inputElements;
-		std::vector<std::string> inputElementSemanticNames;
-		std::vector<D3D12_SO_DECLARATION_ENTRY> soDeclarations;
-		std::vector<std::string> soSemanticNames;
-		std::vector<UINT> soStrides;
-	};
-
-	struct PipelineStateInfo
-	{
-		ID3D12PipelineState* pipelineState = nullptr;
-
-		uint64_t vsHash = 0; SIZE_T vsSize = 0;
-		uint64_t psHash = 0; SIZE_T psSize = 0;
-		uint64_t gsHash = 0; SIZE_T gsSize = 0;
-		uint64_t hsHash = 0; SIZE_T hsSize = 0;
-		uint64_t dsHash = 0; SIZE_T dsSize = 0;
-		uint64_t csHash = 0; SIZE_T csSize = 0;
-		uint64_t asHash = 0; SIZE_T asSize = 0;
-		uint64_t msHash = 0; SIZE_T msSize = 0;
-
-		bool isGraphics = false;
-		bool isCompute = false;
-		ID3D12RootSignature* rootSignature = nullptr;
-
-		std::vector<uint8_t> streamBlob;
-
-		bool vsDisabled = false;  ID3D12PipelineState* psoWithoutVS = nullptr;
-		bool psDisabled = false;  ID3D12PipelineState* psoWithoutPS = nullptr;
-		bool csDisabled = false;  ID3D12PipelineState* psoWithoutCS = nullptr;
-		bool gsDisabled = false;  ID3D12PipelineState* psoWithoutGS = nullptr;
-		bool hsDisabled = false;  ID3D12PipelineState* psoWithoutHS = nullptr;
-		bool dsDisabled = false;  ID3D12PipelineState* psoWithoutDS = nullptr;
-
-		ID3D12PipelineState* psoWithReplacement = nullptr;
-		std::string activeShaderTargetName;
-		ShaderTarget::ShaderType activeShaderTargetType = ShaderTarget::Unknown;
-		uint64_t activeShaderTargetHash = 0;
-		bool activeShaderTargetUsesFallback = false;
-		uint8_t shaderTargetApplyFailureCount = 0;
-		bool shaderTargetApplyRetryQueued = false;
-
-		std::vector<D3D12_INPUT_ELEMENT_DESC> inputElements;
-		std::vector<std::string> inputElementSemanticNames;
-		std::vector<D3D12_SO_DECLARATION_ENTRY> soDeclarations;
-		std::vector<std::string> soSemanticNames;
-		std::vector<UINT> soStrides;
-		bool hasViewInstancing = false;
-		D3D12_VIEW_INSTANCING_FLAGS viewInstancingFlags = D3D12_VIEW_INSTANCING_FLAG_NONE;
-		std::vector<D3D12_VIEW_INSTANCE_LOCATION> viewInstanceLocations;
-
-		std::vector<uint8_t> vsBytecode;
-		std::vector<uint8_t> psBytecode;
-		std::vector<uint8_t> gsBytecode;
-		std::vector<uint8_t> hsBytecode;
-		std::vector<uint8_t> dsBytecode;
-		std::vector<uint8_t> csBytecode;
-		std::vector<uint8_t> asBytecode;
-		std::vector<uint8_t> msBytecode;
-	};
-
-	struct UncapturedPipelineStateInfo
-	{
-		ID3D12PipelineState* pipelineState = nullptr;
-		// Keep the exact verified variant for render passes on warmed-cache runs.
-		std::shared_ptr<const PipelineStateInfo> rebuildTemplate;
-		Microsoft::WRL::ComPtr<ID3D12RootSignature> rebuildRootSignature;
-		uint64_t cachedBlobHash = 0;
-		SIZE_T cachedBlobSize = 0;
-		std::vector<uint8_t> cachedBlob;
-		bool attemptedReplacement = false;
-		bool retryReplacementOnRootSignatureChange = false;
-		ID3D12PipelineState* replacementPipelineState = nullptr;
-		ID3D12RootSignature* observedGraphicsRootSignature = nullptr;
-		ID3D12RootSignature* observedComputeRootSignature = nullptr;
-		std::string activeShaderTargetName;
-		ShaderTarget::ShaderType activeShaderTargetType = ShaderTarget::Unknown;
-		uint64_t activeShaderTargetHash = 0;
-		uint8_t shaderTargetApplyFailureCount = 0;
-		bool shaderTargetApplyRetryQueued = false;
-	};
-
 	// Borrowed template; caller holds gPipelineMutex while using it.
 	const PipelineStateInfo* FindUncapturedRebuildTemplateLocked(ID3D12PipelineState* pipelineState);
-
-	struct FrameContext
-	{
-		ID3D12CommandAllocator* allocator = nullptr;
-		ID3D12Resource* renderTarget = nullptr;
-		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {};
-		UINT64 fenceValue = 0;
-	};
-
-	struct ComputePipelineInfo
-	{
-		ID3D12PipelineState* pipelineState = nullptr;
-
-		uint64_t csHash = 0;
-		SIZE_T csSize = 0;
-		std::vector<uint8_t> csBytecode;
-		D3D12_COMPUTE_PIPELINE_STATE_DESC originalDesc = {};
-	};
-
-	struct RootSignatureInfo
-	{
-		uint64_t hash = 0;
-		std::vector<uint8_t> blob;
-	};
-
-	struct PSOPendingRebuild
-	{
-		PipelineSourceList source;
-		int index;
-		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetType;
-	};
 
 	extern std::vector<PSOPendingRebuild> gPendingRebuilds;
 	extern std::mutex gPipelineMutex;

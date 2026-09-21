@@ -106,7 +106,7 @@ namespace ShaderAutomaticDiscovery
 		struct AnalysisJob
 		{
 			QueuedShader queuedShader;
-			std::shared_ptr<const std::vector<ModifiedShader::PackageDisk>> modifiedShaders;
+			std::shared_ptr<const std::vector<ModifiedShader::ModifiedShaderPackageDisk>> modifiedShaders;
 		};
 
 		struct AnalysisResult
@@ -123,7 +123,7 @@ namespace ShaderAutomaticDiscovery
 		std::unordered_set<ShaderKey, ShaderKeyHasher> gSubmittedShaders;
 		std::unordered_map<ShaderKey, std::string, ShaderKeyHasher> gDirectMatchShaders;
 		std::unordered_set<std::string> gModifiedShadersWithGeneratedTargets;
-		std::shared_ptr<const std::vector<ModifiedShader::PackageDisk>> gModifiedShaderAnalysisSnapshot;
+		std::shared_ptr<const std::vector<ModifiedShader::ModifiedShaderPackageDisk>> gModifiedShaderAnalysisSnapshot;
 		bool gCompatibleShaderTypes[static_cast<size_t>(ShaderTarget::Unknown) + 1]{};
 		bool gSeenShaderTypes[static_cast<size_t>(ShaderTarget::Unknown) + 1]{};
 		std::vector<std::pair<size_t, size_t>> gPlausibleByteLengthRanges[static_cast<size_t>(ShaderTarget::Unknown) + 1];
@@ -297,12 +297,12 @@ namespace ShaderAutomaticDiscovery
 
 			if (gModifiedShaderAnalysisSnapshot)
 			{
-				for (const ModifiedShader::PackageDisk& modifiedShader : *gModifiedShaderAnalysisSnapshot)
+				for (const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : *gModifiedShaderAnalysisSnapshot)
 				{
 					if (!modifiedShader.enabled || modifiedShader.shaderType != shaderType)
 						continue;
 
-					for (const ModifiedShader::TargetDisk& target : modifiedShader.targets)
+					for (const ModifiedShader::ModifiedShaderTargetDisk& target : modifiedShader.targets)
 					{
 						size_t targetLength = 0;
 						if (!ParseByteLength(target.originalShaderBytecodeLength, targetLength))
@@ -441,7 +441,7 @@ namespace ShaderAutomaticDiscovery
 
 			size_t enabledModifiedShaderCount = 0;
 
-			for (const ModifiedShader::PackageDisk& modifiedShader : *gModifiedShaderAnalysisSnapshot)
+			for (const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : *gModifiedShaderAnalysisSnapshot)
 			{
 				if (!modifiedShader.enabled || modifiedShader.shaderType == ShaderTarget::Unknown)
 					continue;
@@ -625,7 +625,7 @@ namespace ShaderAutomaticDiscovery
 			size_t enabledModifiedShaderCount = 0;
 			size_t modifiedShadersWithTargets = 0;
 
-			for (const ModifiedShader::PackageDisk& modifiedShader : DatabaseModifiedShaders::GetModifiedShaders())
+			for (const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : DatabaseModifiedShaders::GetModifiedShaders())
 			{
 				if (!modifiedShader.enabled || modifiedShader.shaderType == ShaderTarget::Unknown)
 					continue;
@@ -898,7 +898,7 @@ namespace ShaderAutomaticDiscovery
 				if (!existingTarget.enabled)
 					return;
 
-				const ModifiedShader::PackageDisk* existingPackage = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
+				const ModifiedShader::ModifiedShaderPackageDisk* existingPackage = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
 
 				if (existingPackage && existingPackage->compiledBlob.empty())
 				{
@@ -910,7 +910,7 @@ namespace ShaderAutomaticDiscovery
 				return;
 			}
 
-			const ModifiedShader::PackageDisk* selectedPackage = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
+			const ModifiedShader::ModifiedShaderPackageDisk* selectedPackage = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
 
 			if (!selectedPackage)
 				return;
@@ -1111,7 +1111,7 @@ namespace ShaderAutomaticDiscovery
 			size_t enabledPackageCounts[static_cast<size_t>(ShaderTarget::Unknown) + 1]{};
 			size_t enabledReplacementCounts[static_cast<size_t>(ShaderTarget::Unknown) + 1]{};
 
-			for (const ModifiedShader::PackageDisk& modifiedShader : DatabaseModifiedShaders::GetModifiedShaders())
+			for (const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : DatabaseModifiedShaders::GetModifiedShaders())
 			{
 				if (!modifiedShader.enabled || modifiedShader.shaderType == ShaderTarget::Unknown)
 					continue;
@@ -1148,11 +1148,11 @@ namespace ShaderAutomaticDiscovery
 		}
 	}
 
-	void RefreshModifiedShaderIndex(const std::vector<ModifiedShader::PackageDisk>& modifiedShaders)
+	void RefreshModifiedShaderIndex(const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& modifiedShaders)
 	{
-		auto analysisSnapshot = std::make_shared<std::vector<ModifiedShader::PackageDisk>>(modifiedShaders);
+		auto analysisSnapshot = std::make_shared<std::vector<ModifiedShader::ModifiedShaderPackageDisk>>(modifiedShaders);
 
-		for (ModifiedShader::PackageDisk& modifiedShader : *analysisSnapshot)
+		for (ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : *analysisSnapshot)
 			modifiedShader.compiledBlob.clear();
 
 		std::lock_guard<std::mutex> lock(gQueueMutex);
@@ -1170,7 +1170,7 @@ namespace ShaderAutomaticDiscovery
 		for (auto& ranges : gPlausibleByteLengthRanges)
 			ranges.clear();
 
-		for (const ModifiedShader::PackageDisk& modifiedShader : modifiedShaders)
+		for (const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : modifiedShaders)
 		{
 			if (!modifiedShader.enabled || modifiedShader.shaderType == ShaderTarget::Unknown)
 				continue;
@@ -1182,7 +1182,7 @@ namespace ShaderAutomaticDiscovery
 
 			gCompatibleShaderTypes[shaderTypeIndex] = true;
 
-			for (const ModifiedShader::TargetDisk& target : modifiedShader.targets)
+			for (const ModifiedShader::ModifiedShaderTargetDisk& target : modifiedShader.targets)
 			{
 				size_t targetByteLength = 0;
 
