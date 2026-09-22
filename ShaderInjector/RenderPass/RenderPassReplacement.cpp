@@ -7,8 +7,6 @@
 
 #include "Hash.h"
 #include "HookD3D12/HookD3D12.h"
-#include "HookD3D12/HookD3D12PipelineUtils.h"
-#include "HookD3D12/HookD3D12RenderPass.h"
 #include "StringHelper.h"
 
 namespace RenderPassReplacement

@@ -1,5 +1,4 @@
 //HookD3D12PipelineUtils.cpp
-#include "HookD3D12PipelineUtils.h"
 
 #include <algorithm>
 #include <cstring>

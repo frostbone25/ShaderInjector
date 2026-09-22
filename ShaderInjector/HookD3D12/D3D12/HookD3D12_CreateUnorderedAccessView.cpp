@@ -1,6 +1,5 @@
-#include "../HookD3D12.h"
 
-#include "../HookD3D12RenderPass.h"
+#include "../HookD3D12.h"
 #include "Globals.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
 #include "RenderPass/RenderPassRuntime.h"

@@ -14,7 +14,7 @@
 
 #include <wrl/client.h>
 
-#include "HookD3D12/HookD3D12RenderPass.h"
+#include "HookD3D12/HookD3D12.h"
 #include "IO/ShaderInjectorIO.h"
 #include "Performance/PerformanceMetrics.h"
 #include "RenderPass/RenderPassResourceRegistry.h"

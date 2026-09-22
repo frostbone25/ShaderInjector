@@ -7,112 +7,108 @@
 
 namespace RenderPassGraph
 {
-	namespace
+	void AddDependency(CompiledNode& node, size_t dependencyIndex)
 	{
+		if (dependencyIndex == invalidNodeIndex || dependencyIndex == node.renderPassIndex)
+			return;
+		if (std::find(node.dependencies.begin(), node.dependencies.end(), dependencyIndex) == node.dependencies.end())
+			node.dependencies.push_back(dependencyIndex);
+	}
 
-		void AddDependency(CompiledNode& node, size_t dependencyIndex)
+	bool HasImplementedBackend(
+		const RenderPass::RenderPassDisk& renderPass,
+		const CompiledNode& node)
+	{
+		switch (node.operation)
 		{
-			if (dependencyIndex == invalidNodeIndex || dependencyIndex == node.renderPassIndex)
-				return;
-			if (std::find(node.dependencies.begin(), node.dependencies.end(), dependencyIndex) == node.dependencies.end())
-				node.dependencies.push_back(dependencyIndex);
+		case RenderPass::PassOperation::Custom:
+			return renderPass.type == RenderPass::RenderPassType::Custom &&
+				(node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
+					node.executionMode == RenderPass::ExecutionMode::Compute);
+		case RenderPass::PassOperation::Downsample:
+		case RenderPass::PassOperation::UpsampleChain:
+			return renderPass.type == RenderPass::RenderPassType::Custom &&
+				(node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
+					node.executionMode == RenderPass::ExecutionMode::Compute);
+		case RenderPass::PassOperation::MipChain:
+			return renderPass.type == RenderPass::RenderPassType::MipChain &&
+				(node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
+					node.executionMode == RenderPass::ExecutionMode::Compute);
+		case RenderPass::PassOperation::ReplaceOriginal:
+			return (renderPass.type == RenderPass::RenderPassType::ReplacementPixelShader &&
+				node.executionMode == RenderPass::ExecutionMode::FullscreenPixel) ||
+				(renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader &&
+					node.executionMode == RenderPass::ExecutionMode::Compute);
+		case RenderPass::PassOperation::Copy:
+			return renderPass.type == RenderPass::RenderPassType::Custom;
+		case RenderPass::PassOperation::TemporalHistory:
+			return renderPass.type == RenderPass::RenderPassType::TemporalHistory;
+		case RenderPass::PassOperation::Resolve:
+		case RenderPass::PassOperation::Automatic:
+		default:
+			return false;
 		}
+	}
 
-		bool HasImplementedBackend(
-			const RenderPass::RenderPassDisk& renderPass,
-			const CompiledNode& node)
+	std::vector<size_t> StableTopologicalSort(
+		const std::vector<RenderPass::RenderPassDisk>& renderPasses,
+		const std::vector<CompiledNode>& nodes,
+		const std::vector<size_t>& candidates,
+		std::vector<std::string>& diagnostics)
+	{
+		std::unordered_set<size_t> candidateSet(candidates.begin(), candidates.end());
+		std::unordered_map<size_t, size_t> indegrees;
+		std::unordered_map<size_t, std::vector<size_t>> dependents;
+		for (size_t candidateIndex : candidates)
 		{
-			switch (node.operation)
+			indegrees[candidateIndex] = 0;
+			for (size_t dependencyIndex : nodes[candidateIndex].dependencies)
 			{
-			case RenderPass::PassOperation::Custom:
-				return renderPass.type == RenderPass::RenderPassType::Custom &&
-					(node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
-						node.executionMode == RenderPass::ExecutionMode::Compute);
-			case RenderPass::PassOperation::Downsample:
-			case RenderPass::PassOperation::UpsampleChain:
-				return renderPass.type == RenderPass::RenderPassType::Custom &&
-					(node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
-						node.executionMode == RenderPass::ExecutionMode::Compute);
-			case RenderPass::PassOperation::MipChain:
-				return renderPass.type == RenderPass::RenderPassType::MipChain &&
-					(node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
-						node.executionMode == RenderPass::ExecutionMode::Compute);
-			case RenderPass::PassOperation::ReplaceOriginal:
-				return (renderPass.type == RenderPass::RenderPassType::ReplacementPixelShader &&
-						node.executionMode == RenderPass::ExecutionMode::FullscreenPixel) ||
-					(renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader &&
-							node.executionMode == RenderPass::ExecutionMode::Compute);
-			case RenderPass::PassOperation::Copy:
-				return renderPass.type == RenderPass::RenderPassType::Custom;
-			case RenderPass::PassOperation::TemporalHistory:
-				return renderPass.type == RenderPass::RenderPassType::TemporalHistory;
-			case RenderPass::PassOperation::Resolve:
-			case RenderPass::PassOperation::Automatic:
-			default:
-				return false;
+				if (candidateSet.find(dependencyIndex) == candidateSet.end())
+					continue;
+				++indegrees[candidateIndex];
+				dependents[dependencyIndex].push_back(candidateIndex);
 			}
 		}
 
-		std::vector<size_t> StableTopologicalSort(
-			const std::vector<RenderPass::RenderPassDisk>& renderPasses,
-			const std::vector<CompiledNode>& nodes,
-			const std::vector<size_t>& candidates,
-			std::vector<std::string>& diagnostics)
+		std::vector<size_t> order;
+		order.reserve(candidates.size());
+		std::unordered_set<size_t> appended;
+		while (order.size() < candidates.size())
 		{
-			std::unordered_set<size_t> candidateSet(candidates.begin(), candidates.end());
-			std::unordered_map<size_t, size_t> indegrees;
-			std::unordered_map<size_t, std::vector<size_t>> dependents;
+			size_t selectedIndex = invalidNodeIndex;
 			for (size_t candidateIndex : candidates)
 			{
-				indegrees[candidateIndex] = 0;
-				for (size_t dependencyIndex : nodes[candidateIndex].dependencies)
+				if (appended.find(candidateIndex) == appended.end() && !indegrees[candidateIndex])
 				{
-					if (candidateSet.find(dependencyIndex) == candidateSet.end())
-						continue;
-					++indegrees[candidateIndex];
-					dependents[dependencyIndex].push_back(candidateIndex);
-				}
-			}
-
-			std::vector<size_t> order;
-			order.reserve(candidates.size());
-			std::unordered_set<size_t> appended;
-			while (order.size() < candidates.size())
-			{
-				size_t selectedIndex = invalidNodeIndex;
-				for (size_t candidateIndex : candidates)
-				{
-					if (appended.find(candidateIndex) == appended.end() && !indegrees[candidateIndex])
-					{
-						selectedIndex = candidateIndex;
-						break;
-					}
-				}
-				if (selectedIndex == invalidNodeIndex)
+					selectedIndex = candidateIndex;
 					break;
-
-				appended.insert(selectedIndex);
-				order.push_back(selectedIndex);
-				for (size_t dependentIndex : dependents[selectedIndex])
-				{
-					if (indegrees[dependentIndex])
-						--indegrees[dependentIndex];
 				}
 			}
+			if (selectedIndex == invalidNodeIndex)
+				break;
 
-			if (order.size() != candidates.size())
+			appended.insert(selectedIndex);
+			order.push_back(selectedIndex);
+			for (size_t dependentIndex : dependents[selectedIndex])
 			{
-				for (size_t candidateIndex : candidates)
+				if (indegrees[dependentIndex])
+					--indegrees[dependentIndex];
+			}
+		}
+
+		if (order.size() != candidates.size())
+		{
+			for (size_t candidateIndex : candidates)
+			{
+				if (appended.find(candidateIndex) == appended.end())
 				{
-					if (appended.find(candidateIndex) == appended.end())
-					{
-						diagnostics.push_back(
-							"Dependency cycle excludes render pass " + renderPasses[candidateIndex].name + ".");
-					}
+					diagnostics.push_back(
+						"Dependency cycle excludes render pass " + renderPasses[candidateIndex].name + ".");
 				}
 			}
-			return order;
 		}
+		return order;
 	}
 
 	Compilation Compile(const std::vector<RenderPass::RenderPassDisk>& renderPasses)
@@ -136,75 +132,77 @@ namespace RenderPassGraph
 
 		std::vector<VisitState> visitStates(renderPasses.size(), VisitState::Unvisited);
 		std::function<bool(size_t)> resolveNode = [&](size_t renderPassIndex)
-		{
-			CompiledNode& node = compilation.nodes[renderPassIndex];
-			const RenderPass::RenderPassDisk& renderPass = renderPasses[renderPassIndex];
-			if (visitStates[renderPassIndex] == VisitState::Complete)
-				return node.valid;
-			if (visitStates[renderPassIndex] == VisitState::Visiting)
 			{
-				node.error = "Render-pass event dependency cycle.";
-				compilation.diagnostics.push_back(node.error + " Pass=" + renderPass.name + ".");
-				return false;
-			}
-
-			visitStates[renderPassIndex] = VisitState::Visiting;
-			if (!renderPass.enabled)
-				node.error = "Render pass is disabled.";
-			else if (renderPass.id.empty() || duplicateRenderPassIds.find(renderPass.id) != duplicateRenderPassIds.end())
-				node.error = "Render pass has an empty or duplicate id.";
-			else if (!HasImplementedBackend(renderPass, node))
-				node.error = "The selected operation and execution mode do not have a compatible runtime backend.";
-			else if (renderPass.event.id.empty())
-				node.error = "Render pass has no event anchor.";
-			else if (renderPass.event.type == RenderPass::EventType::ModifiedShader)
-			{
-				node.valid = true;
-				node.modifiedShaderId = renderPass.event.id;
-				node.rootBoundary = (node.operation == RenderPass::PassOperation::MipChain &&
-					!RenderPass::FindMipChainRuntimeSource(renderPass)) ||
-					renderPass.timing != RenderPass::timingAfter
-					? Boundary::Before
-					: Boundary::After;
-			}
-			else
-			{
-				const auto parentIt = compilation.renderPassIndices.find(renderPass.event.id);
-				if (parentIt == compilation.renderPassIndices.end() || parentIt->second == renderPassIndex)
-					node.error = "Referenced render pass was not found or references itself.";
-				else if (resolveNode(parentIt->second))
+				CompiledNode& node = compilation.nodes[renderPassIndex];
+				const RenderPass::RenderPassDisk& renderPass = renderPasses[renderPassIndex];
+				if (visitStates[renderPassIndex] == VisitState::Complete)
+					return node.valid;
+				if (visitStates[renderPassIndex] == VisitState::Visiting)
 				{
-					const CompiledNode& parent = compilation.nodes[parentIt->second];
+					node.error = "Render-pass event dependency cycle.";
+					compilation.diagnostics.push_back(node.error + " Pass=" + renderPass.name + ".");
+					return false;
+				}
+
+				visitStates[renderPassIndex] = VisitState::Visiting;
+				if (!renderPass.enabled)
+					node.error = "Render pass is disabled.";
+				else if (renderPass.id.empty() || duplicateRenderPassIds.find(renderPass.id) != duplicateRenderPassIds.end())
+					node.error = "Render pass has an empty or duplicate id.";
+				else if (!HasImplementedBackend(renderPass, node))
+					node.error = "The selected operation and execution mode do not have a compatible runtime backend.";
+				else if (renderPass.event.id.empty())
+					node.error = "Render pass has no event anchor.";
+				else if (renderPass.event.type == RenderPass::EventType::ModifiedShader)
+				{
 					node.valid = true;
-					node.parentRenderPassIndex = parentIt->second;
-					node.modifiedShaderId = parent.modifiedShaderId;
-					node.rootBoundary = parent.rootBoundary;
-					if (renderPass.timing == RenderPass::timingBefore)
-						AddDependency(compilation.nodes[parentIt->second], renderPassIndex);
-					else
-						AddDependency(node, parentIt->second);
+					node.modifiedShaderId = renderPass.event.id;
+					node.rootBoundary = (node.operation == RenderPass::PassOperation::MipChain &&
+						!RenderPass::FindMipChainRuntimeSource(renderPass)) ||
+						renderPass.timing != RenderPass::timingAfter
+						? Boundary::Before
+						: Boundary::After;
 				}
 				else
-					node.error = "Referenced render-pass event chain is invalid.";
-			}
+				{
+					const auto parentIt = compilation.renderPassIndices.find(renderPass.event.id);
+					if (parentIt == compilation.renderPassIndices.end() || parentIt->second == renderPassIndex)
+						node.error = "Referenced render pass was not found or references itself.";
+					else if (resolveNode(parentIt->second))
+					{
+						const CompiledNode& parent = compilation.nodes[parentIt->second];
+						node.valid = true;
+						node.parentRenderPassIndex = parentIt->second;
+						node.modifiedShaderId = parent.modifiedShaderId;
+						node.rootBoundary = parent.rootBoundary;
+						if (renderPass.timing == RenderPass::timingBefore)
+							AddDependency(compilation.nodes[parentIt->second], renderPassIndex);
+						else
+							AddDependency(node, parentIt->second);
+					}
+					else
+						node.error = "Referenced render-pass event chain is invalid.";
+				}
 
-			if (node.valid && node.operation == RenderPass::PassOperation::MipChain &&
-				!RenderPass::FindMipChainRuntimeSource(renderPass) &&
-				node.rootBoundary == Boundary::After)
-			{
-				node.valid = false;
-				node.error = "Mip-chain passes cannot execute after the anchor draw.";
-			}
-			visitStates[renderPassIndex] = VisitState::Complete;
-			if (!node.valid && renderPass.enabled && !node.error.empty())
-				compilation.diagnostics.push_back(node.error + " Pass=" + renderPass.name + ".");
-			return node.valid;
-		};
+				if (node.valid && node.operation == RenderPass::PassOperation::MipChain &&
+					!RenderPass::FindMipChainRuntimeSource(renderPass) &&
+					node.rootBoundary == Boundary::After)
+				{
+					node.valid = false;
+					node.error = "Mip-chain passes cannot execute after the anchor draw.";
+				}
+				visitStates[renderPassIndex] = VisitState::Complete;
+				if (!node.valid && renderPass.enabled && !node.error.empty())
+					compilation.diagnostics.push_back(node.error + " Pass=" + renderPass.name + ".");
+				return node.valid;
+			};
 
 		for (size_t renderPassIndex = 0; renderPassIndex < renderPasses.size(); ++renderPassIndex)
 			resolveNode(renderPassIndex);
 
 		std::unordered_map<std::string, size_t> runtimeResourceOwners;
+		std::unordered_map<std::string, const RenderPass::RuntimeResourceDefinitionDisk*> runtimeDefinitions;
+		std::unordered_map<std::string, size_t> reuseSourceCounts;
 		for (size_t renderPassIndex = 0; renderPassIndex < renderPasses.size(); ++renderPassIndex)
 		{
 			for (const RenderPass::RuntimeResourceDefinitionDisk& definition : renderPasses[renderPassIndex].runtimeResources)
@@ -214,6 +212,10 @@ namespace RenderPassGraph
 				const auto inserted = runtimeResourceOwners.emplace(definition.id, renderPassIndex);
 				if (!inserted.second && inserted.first->second != renderPassIndex)
 					compilation.diagnostics.push_back("Duplicate runtime-resource id: " + definition.id + ".");
+				if (inserted.second)
+					runtimeDefinitions.emplace(definition.id, &definition);
+				if (!definition.reuseFromResourceId.empty())
+					++reuseSourceCounts[definition.reuseFromResourceId];
 			}
 		}
 
@@ -240,11 +242,11 @@ namespace RenderPassGraph
 				}
 			}
 			const bool hasShaderInput = std::any_of(renderPass.inputs.begin(), renderPass.inputs.end(), [](const auto& input)
-			{
-				return input.origin == ShaderResource::ResourceOrigin::Runtime &&
-					input.access == RenderPass::ResourceAccess::ShaderResource &&
-					!input.resourceId.empty();
-			});
+				{
+					return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+						input.access == RenderPass::ResourceAccess::ShaderResource &&
+						!input.resourceId.empty();
+				});
 			const bool hasCopyInput = hasShaderInput || std::any_of(
 				renderPass.inputs.begin(), renderPass.inputs.end(), [](const auto& input)
 				{
@@ -253,11 +255,11 @@ namespace RenderPassGraph
 							input.origin == ShaderResource::ResourceOrigin::Game);
 				});
 			const bool hasRenderTargetOutput = std::any_of(renderPass.outputs.begin(), renderPass.outputs.end(), [](const auto& output)
-			{
-				return output.origin == ShaderResource::ResourceOrigin::Runtime &&
-					output.access == RenderPass::ResourceAccess::RenderTarget &&
-					!output.resourceId.empty();
-			});
+				{
+					return output.origin == ShaderResource::ResourceOrigin::Runtime &&
+						output.access == RenderPass::ResourceAccess::RenderTarget &&
+						!output.resourceId.empty();
+				});
 			const bool hasUnorderedAccessOutput = std::any_of(
 				renderPass.outputs.begin(), renderPass.outputs.end(), [](const auto& output)
 				{
@@ -337,6 +339,80 @@ namespace RenderPassGraph
 				if (!inserted.second && inserted.first->second != renderPassIndex)
 					compilation.diagnostics.push_back("Runtime resource has multiple producers: " + output.resourceId + ".");
 			}
+		}
+
+		for (size_t renderPassIndex = 0; renderPassIndex < renderPasses.size(); ++renderPassIndex)
+		{
+			CompiledNode& node = compilation.nodes[renderPassIndex];
+			if (!node.valid)
+				continue;
+			const RenderPass::RenderPassDisk& renderPass = renderPasses[renderPassIndex];
+			for (const RenderPass::RuntimeResourceDefinitionDisk& definition : renderPass.runtimeResources)
+			{
+				const std::string& sourceId = definition.reuseFromResourceId;
+				if (sourceId.empty())
+					continue;
+				const auto sourceDefinition = runtimeDefinitions.find(sourceId);
+				const auto sourceProducer = runtimeResourceProducers.find(sourceId);
+				if (sourceId == definition.id || sourceDefinition == runtimeDefinitions.end() ||
+					sourceProducer == runtimeResourceProducers.end() ||
+					sourceProducer->second == renderPassIndex || reuseSourceCounts[sourceId] != 1 ||
+					definition.texture.lifetime == ShaderResource::ResourceLifetime::History ||
+					sourceDefinition->second->texture.lifetime == ShaderResource::ResourceLifetime::History)
+				{
+					node.valid = false;
+					node.error = "Texture reuse requires one earlier, non-history runtime output: " + sourceId + ".";
+					break;
+				}
+				const CompiledNode& producer = compilation.nodes[sourceProducer->second];
+				if (!producer.valid || producer.modifiedShaderId != node.modifiedShaderId ||
+					producer.rootBoundary != node.rootBoundary)
+				{
+					node.valid = false;
+					node.error = "Reused texture crosses incompatible execution anchors: " + sourceId + ".";
+					break;
+				}
+				// A pass must not read the physical allocation it is about to overwrite.
+				std::string ancestorId = sourceId;
+				std::unordered_set<std::string> ancestors;
+				while (!ancestorId.empty() && ancestors.insert(ancestorId).second)
+				{
+					if (std::any_of(renderPass.inputs.begin(), renderPass.inputs.end(), [&](const auto& input)
+						{
+							return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+								input.temporalView == ShaderResource::TemporalView::Current && input.resourceId == ancestorId;
+						}))
+					{
+						node.valid = false;
+						node.error = "A pass cannot read and overwrite the same runtime texture: " + ancestorId + ".";
+						break;
+					}
+					const auto ancestor = runtimeDefinitions.find(ancestorId);
+					if (ancestor == runtimeDefinitions.end())
+						ancestorId.clear();
+					else
+						ancestorId = ancestor->second->reuseFromResourceId;
+				}
+				if (!node.valid)
+					break;
+				AddDependency(node, sourceProducer->second);
+				// All readers of the old logical value must finish before this allocation is reused.
+				for (size_t consumerIndex = 0; consumerIndex < renderPasses.size(); ++consumerIndex)
+				{
+					if (consumerIndex == renderPassIndex || !compilation.nodes[consumerIndex].valid)
+						continue;
+					const bool readsSource = std::any_of(renderPasses[consumerIndex].inputs.begin(),
+						renderPasses[consumerIndex].inputs.end(), [&](const auto& input)
+						{
+							return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+								input.temporalView == ShaderResource::TemporalView::Current && input.resourceId == sourceId;
+						});
+					if (readsSource)
+						AddDependency(node, consumerIndex);
+				}
+			}
+			if (!node.valid)
+				compilation.diagnostics.push_back(node.error + " Pass=" + renderPass.name + ".");
 		}
 
 		for (size_t renderPassIndex = 0; renderPassIndex < renderPasses.size(); ++renderPassIndex)
@@ -442,32 +518,32 @@ namespace RenderPassGraph
 		std::vector<uint8_t> appendedRenderPasses(renderPasses.size(), 0);
 		std::function<void(size_t, std::vector<size_t>&)> appendRenderPassSubtree =
 			[&](size_t renderPassIndex, std::vector<size_t>& executionOrder)
-		{
-			if (renderPassIndex >= renderPasses.size() || appendedRenderPasses[renderPassIndex] ||
-				!compilation.nodes[renderPassIndex].valid)
 			{
-				return;
-			}
-			appendedRenderPasses[renderPassIndex] = 1;
-
-			const auto appendChildren = [&](const char* timing)
-			{
-				for (size_t childIndex = 0; childIndex < renderPasses.size(); ++childIndex)
+				if (renderPassIndex >= renderPasses.size() || appendedRenderPasses[renderPassIndex] ||
+					!compilation.nodes[renderPassIndex].valid)
 				{
-					const RenderPass::RenderPassDisk& child = renderPasses[childIndex];
-					if (compilation.nodes[childIndex].valid &&
-						child.event.type == RenderPass::EventType::RenderPass &&
-						child.event.id == renderPasses[renderPassIndex].id && child.timing == timing)
-					{
-						appendRenderPassSubtree(childIndex, executionOrder);
-					}
+					return;
 				}
-			};
+				appendedRenderPasses[renderPassIndex] = 1;
 
-			appendChildren(RenderPass::timingBefore);
-			executionOrder.push_back(renderPassIndex);
-			appendChildren(RenderPass::timingAfter);
-		};
+				const auto appendChildren = [&](const char* timing)
+					{
+						for (size_t childIndex = 0; childIndex < renderPasses.size(); ++childIndex)
+						{
+							const RenderPass::RenderPassDisk& child = renderPasses[childIndex];
+							if (compilation.nodes[childIndex].valid &&
+								child.event.type == RenderPass::EventType::RenderPass &&
+								child.event.id == renderPasses[renderPassIndex].id && child.timing == timing)
+							{
+								appendRenderPassSubtree(childIndex, executionOrder);
+							}
+						}
+					};
+
+				appendChildren(RenderPass::timingBefore);
+				executionOrder.push_back(renderPassIndex);
+				appendChildren(RenderPass::timingAfter);
+			};
 
 		for (size_t renderPassIndex = 0; renderPassIndex < renderPasses.size(); ++renderPassIndex)
 		{
@@ -506,18 +582,18 @@ namespace RenderPassGraph
 				{
 					const uint32_t boundaryMask = boundaryIndex ? 2u : 1u;
 					if (std::any_of(candidates.begin(), candidates.end(), [&](size_t candidateIndex)
-					{
-						return compilation.nodes[candidateIndex].operation == RenderPass::PassOperation::Copy ||
-							compilation.nodes[candidateIndex].executionMode == RenderPass::ExecutionMode::FullscreenPixel;
-					}))
+						{
+							return compilation.nodes[candidateIndex].operation == RenderPass::PassOperation::Copy ||
+								compilation.nodes[candidateIndex].executionMode == RenderPass::ExecutionMode::FullscreenPixel;
+						}))
 					{
 						planEntry.second.graphicsBoundaryMask |= boundaryMask;
 					}
 					if (std::any_of(candidates.begin(), candidates.end(), [&](size_t candidateIndex)
-					{
-						return compilation.nodes[candidateIndex].operation == RenderPass::PassOperation::Copy ||
-							compilation.nodes[candidateIndex].executionMode == RenderPass::ExecutionMode::Compute;
-					}))
+						{
+							return compilation.nodes[candidateIndex].operation == RenderPass::PassOperation::Copy ||
+								compilation.nodes[candidateIndex].executionMode == RenderPass::ExecutionMode::Compute;
+						}))
 					{
 						planEntry.second.computeBoundaryMask |= boundaryMask;
 					}

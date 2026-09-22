@@ -5,7 +5,6 @@
 
 #include "HookD3D12/HookD3D12.h"
 #include "Hash.h"
-#include "HookD3D12PipelineRegistry.h"
 #include "ShaderAutomaticDiscovery.h"
 #include "ShaderModelDetector.h"
 

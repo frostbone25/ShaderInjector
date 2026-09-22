@@ -1,4 +1,4 @@
-//HookD3D12.cpp
+// d3d12 hook implementation
 #include "Enum/ShaderTargetApplyResult.h"
 #include <windows.h>
 #include <wrl/client.h>
@@ -31,15 +31,15 @@
 #include <d3d11.h>
 #include <d3d12.h>
 
-//minhook
+// minhook
 #include "MinHook.h"
 
-//imgui
+// imgui
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
 #include "imgui_impl_win32.h"
 
-//custom
+// project headers
 #include "Hooks.h"
 #include "Globals.h"
 #include "dsound_proxy.h"
@@ -52,12 +52,6 @@
 #include "Hash.h"
 #include "FPSCounter.h"
 #include "ShaderAutomaticDiscovery.h"
-#include "HookD3D12PipelineUtils.h"
-#include "HookD3D12ReplacementLookup.h"
-#include "HookD3D12ReplacementTemplates.h"
-#include "HookD3D12OverlayStartup.h"
-#include "HookD3D12PipelineRegistry.h"
-#include "HookD3D12RenderPass.h"
 #include "RenderPass/RenderPassRuntime.h"
 #include "RenderPass/RenderPassExecutor.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
@@ -66,25 +60,49 @@
 #include "VTableIndex.h"
 #include "StringHelper.h"
 #include "D3D12/HookD3D12RuntimeState.h"
-
-#if defined _M_X64
-typedef uint64_t uintx_t;
-#elif defined _M_IX86
-typedef uint32_t uintx_t;
-#endif
+#include "ThreadDescriptorIncrements.h"
+#include "OverrideSnapshotReadScope.h"
+#include "PipelineBindingCacheEntry.h"
+#include "ShaderCandidate.h"
+#include "SwapChainCommandQueueBinding.h"
 
 namespace HookD3D12
 {
+	template <typename Element>
+	static Element* DataOrNull(std::vector<Element>& values)
+	{
+		if (values.empty())
+			return nullptr;
+
+		return values.data();
+	}
+
+	template <typename Element>
+	static const Element* DataOrNull(const std::vector<Element>& values)
+	{
+		if (values.empty())
+			return nullptr;
+
+		return values.data();
+	}
+
+	static D3D12_SHADER_BYTECODE MakeShaderBytecode(const std::vector<uint8_t>& bytecode)
+	{
+		return { DataOrNull(bytecode), bytecode.size() };
+	}
+
+	static const std::vector<uint8_t>& SelectPixelMarkerBlob()
+	{
+		if (!Globals::markerPixelShaderBlob.empty())
+			return Globals::markerPixelShaderBlob;
+
+		return Globals::nullPixelShaderBlob;
+	}
+
 	UINT DescriptorIncrementSize(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE heapType)
 	{
 		if (!device || heapType >= D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES)
 			return 0;
-
-		struct ThreadDescriptorIncrements
-		{
-			ID3D12Device* device = nullptr;
-			std::array<UINT, D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES> values{};
-		};
 
 		thread_local ThreadDescriptorIncrements cache;
 
@@ -129,12 +147,6 @@ namespace HookD3D12
 	UINT64                            gOverlayFenceValue = 0;
 	UINT                              gBufferCount = 0;
 
-	struct SwapChainCommandQueueBinding
-	{
-		IDXGISwapChain3* swapChain = nullptr;
-		ID3D12CommandQueue* commandQueue = nullptr;
-	};
-
 	FrameContext* gFrameContexts = nullptr;
 	bool          gInitialized = false;
 	bool          gShutdown = false;
@@ -158,7 +170,7 @@ namespace HookD3D12
 
 	// RTSS can install its swap-chain interception after our process-wide MinHook
 	// detour. In that load order, subsequent Presents can bypass our hook entirely.
-	// A private vtable for the game's swap chain lets us wrap RTSS's current targets
+	// a private vtable for the game's swap chain lets us wrap RTSS's current targets
 	// without removing RTSS from the call chain.
 	static constexpr size_t gSwapChain3VTableEntryCount = 40;
 	static IDXGISwapChain3* gRTSSCompatibilitySwapChain = nullptr;
@@ -193,14 +205,7 @@ namespace HookD3D12
 	static std::atomic<uint64_t> gPipelineStateOverrideGeneration{ 1 };
 	static std::atomic<uint32_t> gPipelineStateOverrideReaderCount{ 0 };
 
-	struct PipelineBindingCacheEntry
-	{
-		ID3D12PipelineState* requestedPipelineState = nullptr;
-		ID3D12PipelineState* resolvedPipelineState = nullptr;
-		uint64_t overrideGeneration = 0;
-	};
-
-	// Games rotate through hundreds of PSOs while recording a frame. A larger direct
+	// games rotate through hundreds of PSOs while recording a frame. A larger direct
 	// cache prevents ordinary binds from repeatedly reaching the shared PSO registry.
 	static thread_local std::array<PipelineBindingCacheEntry, 256> gPipelineBindingCache;
 	static std::vector<ID3D12PipelineState*> gRetiredPipelineStates;
@@ -223,9 +228,7 @@ namespace HookD3D12
 
 	PixelShaderSelectionStyle gShaderSelectionStyle = PixelShaderSelectionStyle::BluePixelShader;
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| CREATE DEVICE |||||||||||||||||||||||||||||||||||||||||||||||||||||
+	// shared pipeline state and replacement bookkeeping
 
 	void MarkShaderTargetApplyDirty()
 	{
@@ -279,6 +282,7 @@ namespace HookD3D12
 
 		gCachedCommandList = commandList;
 		gCachedCommandListState = state.get();
+
 		return *gCachedCommandListState;
 	}
 
@@ -303,9 +307,19 @@ namespace HookD3D12
 		return gActivePipelineActivityCount.load(std::memory_order_acquire) == 0;
 	}
 
+	OverrideSnapshotReadScope::OverrideSnapshotReadScope()
+	{
+		gPipelineStateOverrideReaderCount.fetch_add(1, std::memory_order_acq_rel);
+	}
+
+	OverrideSnapshotReadScope::~OverrideSnapshotReadScope()
+	{
+		gPipelineStateOverrideReaderCount.fetch_sub(1, std::memory_order_acq_rel);
+	}
+
 	void ResetUncapturedReplacementAttempts()
 	{
-		// Force a new immutable binding snapshot so thread-local known-PSO cache
+		// force a new immutable binding snapshot so thread-local known-PSO cache
 		// entries cannot bypass this reconsideration pass.
 		gPipelineStateOverridesDirty.store(true, std::memory_order_release);
 
@@ -329,15 +343,15 @@ namespace HookD3D12
 
 			if (uncaptured.cachedBlobHash &&
 				(FindEnabledShaderTargetByCachedBlob(uncaptured.cachedBlobHash) >= 0 ||
-					SupportsCachedBlobContentMatching(uncaptured.cachedBlobSize) ||
-					SupportsCachedBlobMetadataMatching(uncaptured.cachedBlobSize)))
+				SupportsCachedBlobContentMatching(uncaptured.cachedBlobSize) ||
+				SupportsCachedBlobMetadataMatching(uncaptured.cachedBlobSize)))
 			{
 				uncaptured.shaderTargetApplyRetryQueued = true;
 				gUncapturedShaderTargetRetryQueue.push_back(pipelineIndex);
 			}
 		}
 
-		// Shader-target refreshes can change every match. Restart all cursors so existing
+		// shader-target refreshes can change every match. restart all cursors so existing
 		// captured and uncaptured pipelines are reconsidered incrementally.
 		gGraphicsShaderTargetApplyCursor = 0;
 		gStreamShaderTargetApplyCursor = 0;
@@ -376,12 +390,41 @@ namespace HookD3D12
 
 		for (auto& pipeline : gPipelineStates)
 		{
-			if (pipeline.vsDisabled) { pipeline.vsDisabled = false; changed = true; }
-			if (pipeline.psDisabled) { pipeline.psDisabled = false; changed = true; }
-			if (pipeline.csDisabled) { pipeline.csDisabled = false; changed = true; }
-			if (pipeline.gsDisabled) { pipeline.gsDisabled = false; changed = true; }
-			if (pipeline.hsDisabled) { pipeline.hsDisabled = false; changed = true; }
-			if (pipeline.dsDisabled) { pipeline.dsDisabled = false; changed = true; }
+			if (pipeline.vsDisabled)
+			{
+				pipeline.vsDisabled = false;
+				changed = true;
+			}
+
+			if (pipeline.psDisabled)
+			{
+				pipeline.psDisabled = false;
+				changed = true;
+			}
+
+			if (pipeline.csDisabled)
+			{
+				pipeline.csDisabled = false;
+				changed = true;
+			}
+
+			if (pipeline.gsDisabled)
+			{
+				pipeline.gsDisabled = false;
+				changed = true;
+			}
+
+			if (pipeline.hsDisabled)
+			{
+				pipeline.hsDisabled = false;
+				changed = true;
+			}
+
+			if (pipeline.dsDisabled)
+			{
+				pipeline.dsDisabled = false;
+				changed = true;
+			}
 		}
 
 		if (changed)
@@ -395,8 +438,8 @@ namespace HookD3D12
 
 		UnregisterKnownPipelineStateLocked(pipelineState);
 
-		// Command lists recorded by other game threads may still reference this PSO.
-		// Keep our owning reference alive for the remaining process lifetime rather than risking
+		// command lists recorded by other game threads may still reference this PSO.
+		// keep our owning reference alive for the remaining process lifetime rather than risking
 		// an asynchronous device removal after a replacement reload.
 		if (gRetiredPipelineStateSet.insert(pipelineState).second)
 			gRetiredPipelineStates.push_back(pipelineState);
@@ -404,12 +447,12 @@ namespace HookD3D12
 		pipelineState = nullptr;
 	}
 
-	void ReleaseMarkerPSO(ID3D12PipelineState*& pso)
+	void ReleaseMarkerPSO(ID3D12PipelineState*& pipelineState)
 	{
-		if (!pso)
+		if (!pipelineState)
 			return;
 
-		RetirePipelineState(pso);
+		RetirePipelineState(pipelineState);
 	}
 
 	void InvalidateShaderMarkerPSOs()
@@ -440,6 +483,7 @@ namespace HookD3D12
 		pipeline.activeShaderTargetType = ShaderTarget::Unknown;
 		pipeline.activeShaderTargetHash = 0;
 		pipeline.activeShaderTargetUsesFallback = false;
+
 		ResetShaderTargetRetryState(pipeline);
 	}
 
@@ -451,6 +495,7 @@ namespace HookD3D12
 		pipeline.activeShaderTargetType = ShaderTarget::Unknown;
 		pipeline.activeShaderTargetHash = 0;
 		pipeline.activeShaderTargetUsesFallback = false;
+
 		ResetShaderTargetRetryState(pipeline);
 	}
 
@@ -485,11 +530,13 @@ namespace HookD3D12
 				RetirePipelineState(uncaptured.replacementPipelineState);
 			else
 				uncaptured.replacementPipelineState = nullptr;
+
 			uncaptured.activeShaderTargetName.clear();
 			uncaptured.activeShaderTargetType = ShaderTarget::Unknown;
 			uncaptured.activeShaderTargetHash = 0;
 			uncaptured.attemptedReplacement = false;
 			uncaptured.retryReplacementOnRootSignatureChange = false;
+
 			ResetShaderTargetRetryState(uncaptured);
 		}
 
@@ -506,8 +553,10 @@ namespace HookD3D12
 	const PipelineStateInfo* FindUncapturedRebuildTemplateLocked(ID3D12PipelineState* pipelineState)
 	{
 		const auto found = gUncapturedPipelineStateIndexByPointer.find(pipelineState);
+
 		if (found == gUncapturedPipelineStateIndexByPointer.end() || found->second >= gUncapturedPipelineStates.size())
 			return nullptr;
+
 		return gUncapturedPipelineStates[found->second].rebuildTemplate.get();
 	}
 
@@ -534,6 +583,7 @@ namespace HookD3D12
 				pipeline.activeShaderTargetName,
 				pipeline.activeShaderTargetHash,
 				pipeline.activeShaderTargetType);
+
 			if (activeShaderTarget)
 			{
 				RenderPassRuntime::PipelineOutputState outputState{};
@@ -544,7 +594,11 @@ namespace HookD3D12
 					outputState.renderTargetFormats[renderTargetIndex] = pipeline.originalDesc.RTVFormats[renderTargetIndex];
 
 				outputState.depthStencilFormat = pipeline.originalDesc.DSVFormat;
-				outputState.sampleCount = pipeline.originalDesc.SampleDesc.Count ? pipeline.originalDesc.SampleDesc.Count : 1;
+				outputState.sampleCount = pipeline.originalDesc.SampleDesc.Count;
+
+				if (!outputState.sampleCount)
+					outputState.sampleCount = 1;
+
 				outputState.sampleQuality = pipeline.originalDesc.SampleDesc.Quality;
 
 				gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithReplacement;
@@ -564,12 +618,41 @@ namespace HookD3D12
 			if (!pipeline.pipelineState)
 				continue;
 
-			if (pipeline.vsDisabled && pipeline.psoWithoutVS) { gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutVS; continue; }
-			if (pipeline.psDisabled && pipeline.psoWithoutPS) { gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutPS; continue; }
-			if (pipeline.csDisabled && pipeline.psoWithoutCS) { gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutCS; continue; }
-			if (pipeline.gsDisabled && pipeline.psoWithoutGS) { gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutGS; continue; }
-			if (pipeline.hsDisabled && pipeline.psoWithoutHS) { gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutHS; continue; }
-			if (pipeline.dsDisabled && pipeline.psoWithoutDS) { gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutDS; continue; }
+			if (pipeline.vsDisabled && pipeline.psoWithoutVS)
+			{
+				gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutVS;
+				continue;
+			}
+
+			if (pipeline.psDisabled && pipeline.psoWithoutPS)
+			{
+				gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutPS;
+				continue;
+			}
+
+			if (pipeline.csDisabled && pipeline.psoWithoutCS)
+			{
+				gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutCS;
+				continue;
+			}
+
+			if (pipeline.gsDisabled && pipeline.psoWithoutGS)
+			{
+				gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutGS;
+				continue;
+			}
+
+			if (pipeline.hsDisabled && pipeline.psoWithoutHS)
+			{
+				gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutHS;
+				continue;
+			}
+
+			if (pipeline.dsDisabled && pipeline.psoWithoutDS)
+			{
+				gPipelineStateOverrides[pipeline.pipelineState] = pipeline.psoWithoutDS;
+				continue;
+			}
 
 			if (!pipeline.psoWithReplacement)
 				continue;
@@ -597,11 +680,12 @@ namespace HookD3D12
 			{
 				gPipelineStateOverrides[uncaptured.pipelineState] = uncaptured.replacementPipelineState;
 
-				const RenderPassRuntime::PipelineOutputState outputState = uncaptured.rebuildTemplate
-					? ExtractPipelineOutputState(*uncaptured.rebuildTemplate)
-					: RenderPassRuntime::PipelineOutputState{};
-				RenderPassRuntime::AddShaderTargetBinding(uncaptured.pipelineState, activeShaderTarget->modifiedShaderId,
-					uncaptured.activeShaderTargetName, uncaptured.activeShaderTargetHash, uncaptured.activeShaderTargetType, outputState);
+				RenderPassRuntime::PipelineOutputState outputState{};
+
+				if (uncaptured.rebuildTemplate)
+					outputState = ExtractPipelineOutputState(*uncaptured.rebuildTemplate);
+
+				RenderPassRuntime::AddShaderTargetBinding(uncaptured.pipelineState, activeShaderTarget->modifiedShaderId, uncaptured.activeShaderTargetName, uncaptured.activeShaderTargetHash, uncaptured.activeShaderTargetType, outputState);
 			}
 		}
 
@@ -630,7 +714,7 @@ namespace HookD3D12
 		ID3D12PipelineState* requestedPipelineState,
 		ID3D12PipelineState*& resolvedPipelineState)
 	{
-		// A dirty map may be missing a newly built replacement or may still contain
+		// a dirty map may be missing a newly built replacement or may still contain
 		// an invalidated one. The first bind after a real state change takes the
 		// synchronized path and republishes it immediately.
 		if (gPipelineStateOverridesDirty.load(std::memory_order_acquire))
@@ -647,24 +731,15 @@ namespace HookD3D12
 			return true;
 		}
 
-		struct OverrideSnapshotReadScope
-		{
-			OverrideSnapshotReadScope()
-			{
-				gPipelineStateOverrideReaderCount.fetch_add(1, std::memory_order_acq_rel);
-			}
-			~OverrideSnapshotReadScope()
-			{
-				gPipelineStateOverrideReaderCount.fetch_sub(1, std::memory_order_acq_rel);
-			}
-		} readScope;
+		OverrideSnapshotReadScope readScope;
 
 		if (gPipelineStateOverridesDirty.load(std::memory_order_acquire))
 			return false;
 
 		const PipelineStateOverrideMap* publishedOverrides = gPublishedPipelineStateOverrides.load(std::memory_order_acquire);
 		const uint64_t stablePublishedGeneration = gPipelineStateOverrideGeneration.load(std::memory_order_acquire);
-		// Do not cache an old snapshot under the generation of a newly published
+
+		// do not cache an old snapshot under the generation of a newly published
 		// one. Otherwise this thread can keep binding the original PSO indefinitely.
 		if (stablePublishedGeneration != publishedGeneration ||
 			gPipelineStateOverridesDirty.load(std::memory_order_acquire))
@@ -693,9 +768,7 @@ namespace HookD3D12
 		GatherD3D12PipelineInfo(swapChain, gDevice, gCommandQueue, gPipelineInfo);
 	}
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| HOOK - SET GRAPHICS ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| HOOK - SET GRAPHICS ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| HOOK - SET GRAPHICS ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
+	// root-signature tracking for uncaptured pipelines
 
 	void UpdateUncapturedPipelineRootSignatureLocked(ID3D12PipelineState* pipelineState, ID3D12RootSignature* rootSignature, bool computeRootSignature)
 	{
@@ -712,12 +785,12 @@ namespace HookD3D12
 		if (uncaptured.replacementPipelineState)
 			return;
 
-		// Reset clears the command-list root state, but nullptr is not a newly
+		// reset clears the command-list root state, but nullptr is not a newly
 		// observed root-signature candidate for rebuilding a persisted PSO.
 		if (!rootSignature)
 			return;
 
-		// A cached PSO that did not match any shader target cannot become a match
+		// a cached PSO that did not match any shader target cannot become a match
 		// merely because its command-list root signature changed. Leaving those
 		// attempts settled prevents frequently bound PSOs from starving the
 		// incremental uncaptured-PSO apply cursor.
@@ -726,9 +799,11 @@ namespace HookD3D12
 			return;
 		}
 
-		ID3D12RootSignature*& observedRootSignature = computeRootSignature ? uncaptured.observedComputeRootSignature : uncaptured.observedGraphicsRootSignature;
+		ID3D12RootSignature** observedRootSignature = &uncaptured.observedGraphicsRootSignature;
+		if (computeRootSignature)
+			observedRootSignature = &uncaptured.observedComputeRootSignature;
 
-		if (observedRootSignature == rootSignature)
+		if (*observedRootSignature == rootSignature)
 			return;
 
 		const bool retryingFailedReplacement = uncaptured.attemptedReplacement && uncaptured.retryReplacementOnRootSignatureChange;
@@ -736,10 +811,10 @@ namespace HookD3D12
 		if (rootSignature)
 			rootSignature->AddRef();
 
-		if (observedRootSignature)
-			observedRootSignature->Release();
+		if (*observedRootSignature)
+			(*observedRootSignature)->Release();
 
-		observedRootSignature = rootSignature;
+		*observedRootSignature = rootSignature;
 
 		if (!retryingFailedReplacement)
 			return;
@@ -752,16 +827,19 @@ namespace HookD3D12
 
 		QueueShaderTargetApplyWork();
 
+		const char* rootSignatureType = "graphics";
+
+		if (computeRootSignature)
+			rootSignatureType = "compute";
+
 		ShaderInjectorGUI::WriteToRuntimeLog(
 			std::string("HookD3D12->UpdateUncapturedPipelineRootSignatureLocked: Retrying matched uncaptured PSO after observing a new ") +
-			(computeRootSignature ? "compute" : "graphics") +
-			" root signature: pso=" + StringHelper::PointerToString(pipelineState) +
-			" root=" + StringHelper::PointerToString(rootSignature));
+			rootSignatureType +
+			" root signature: pso = " + StringHelper::PointerToString(pipelineState) +
+			" root = " + StringHelper::PointerToString(rootSignature));
 	}
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| HOOK - SET COMPUTE ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| HOOK - SET COMPUTE ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| HOOK - SET COMPUTE ROOT SIGNATURE |||||||||||||||||||||||||||||||||||||||||||||||||||||
+	// compute root-signature entry point follows the graphics path
 
 	void RecordUncapturedPipelineStateLocked(ID3D12PipelineState* pipelineState, ID3D12RootSignature* observedGraphicsRootSignature, ID3D12RootSignature* observedComputeRootSignature, const char* reason)
 	{
@@ -781,7 +859,8 @@ namespace HookD3D12
 
 		UncapturedPipelineStateInfo info{};
 		info.pipelineState = pipelineState;
-		// This object is queried after the bind returns, and its address is used as
+
+		// this object is queried after the bind returns, and its address is used as
 		// a persistent lookup key. Retain it so a game release cannot reuse that key.
 		pipelineState->AddRef();
 		info.observedGraphicsRootSignature = observedGraphicsRootSignature;
@@ -793,7 +872,7 @@ namespace HookD3D12
 		if (info.observedComputeRootSignature)
 			info.observedComputeRootSignature->AddRef();
 
-		// The hash is sufficient for the normal persisted lookup. Avoid copying and
+		// the hash is sufficient for the normal persisted lookup. avoid copying and
 		// synchronously serializing opaque driver blobs from SetPipelineState; the
 		// full bytes are acquired later only when content matching is required.
 		GetPipelineCachedBlobInfo(pipelineState, info.cachedBlobHash, info.cachedBlobSize, nullptr);
@@ -803,19 +882,15 @@ namespace HookD3D12
 		gUncapturedPipelineStateIndexByPointer[pipelineState] = uncapturedIndex;
 		UncapturedPipelineStateInfo& storedPipeline = gUncapturedPipelineStates[uncapturedIndex];
 
-		//char buffer[384];
-		//sprintf_s(buffer, "HookD3D12->RecordUncapturedPipelineStateLocked: %s uncaptured PSO=%p cachedHash=%s cachedBytes=%zu", reason ? reason : "Bound", pipelineState, info.cachedBlobHash ? Hash::FormatHash(info.cachedBlobHash).c_str() : "<none>", (size_t)info.cachedBlobSize);
-		//ShaderInjectorGUI::WriteToRuntimeLog(buffer);
-
 		if (info.cachedBlobHash)
 		{
-			// Persisted targets can be identified from the cheap cached-blob hash at
+			// persisted targets can be identified from the cheap cached-blob hash at
 			// bind time. Put those candidates ahead of the incremental no-match scan so
 			// a warm cache cannot leave a visible shader original for many frames.
 			if (gLoadedShaderTargetsOnce &&
 				(FindEnabledShaderTargetByCachedBlob(info.cachedBlobHash) >= 0 ||
-					SupportsCachedBlobContentMatching(info.cachedBlobSize) ||
-					SupportsCachedBlobMetadataMatching(info.cachedBlobSize)))
+				SupportsCachedBlobContentMatching(info.cachedBlobSize) ||
+				SupportsCachedBlobMetadataMatching(info.cachedBlobSize)))
 			{
 				storedPipeline.shaderTargetApplyRetryQueued = true;
 				// FIFO also gives earlier candidates a turn during a sustained PSO burst.
@@ -825,21 +900,21 @@ namespace HookD3D12
 		}
 		else
 		{
-			// There is no persisted identity to match later. Mark this PSO as settled
+			// there is no persisted identity to match later. mark this PSO as settled
 			// so every future bind can take the known-PSO fast path.
 			storedPipeline.attemptedReplacement = true;
 			RegisterKnownPipelineStateLocked(pipelineState);
 		}
 	}
 
-	HRESULT CreatePipelineStateInternal(ID3D12Device2* device, const D3D12_PIPELINE_STATE_STREAM_DESC* desc, REFIID riid, void** ppPSO)
+	HRESULT CreatePipelineStateInternal(ID3D12Device2* device, const D3D12_PIPELINE_STATE_STREAM_DESC* streamDescription, REFIID interfaceId, void** outputPipelineState)
 	{
-		return Original_CreatePipelineState(device, desc, riid, ppPSO);
+		return Original_CreatePipelineState(device, streamDescription, interfaceId, outputPipelineState);
 	}
 
-	void RebuildStreamPSOWithoutStage(PipelineStateInfo& p, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetType, ID3D12PipelineState*& outPSO, ID3D12Device* device) // ID3D12Device is queried for ID3D12Device2 below.
+	void RebuildStreamPSOWithoutStage(PipelineStateInfo& pipeline, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetType, ID3D12PipelineState*& outputPipelineState, ID3D12Device* device)
 	{
-		if (outPSO || p.streamBlob.empty() || !device)
+		if (outputPipelineState || pipeline.streamBlob.empty() || !device)
 			return;
 
 		const bool hiddenSelection = gShaderSelectionStyle == PixelShaderSelectionStyle::Hidden;
@@ -856,67 +931,67 @@ namespace HookD3D12
 			return;
 		}
 
-		//IMPORTANT NOTE: this executes
-		//char blobInfo[256];
-		//sprintf_s(blobInfo, "streamBlob size=%zu targetType=%u", p.streamBlob.size(), (UINT)targetType);
-		//MessageBoxA(nullptr, blobInfo, "Stream PSO: blob info", MB_OK);
+		// query Device2 because it owns the stream-based creation entry point
+		ID3D12Device2* deviceInterface = nullptr;
 
-		// QI for Device2 which has CreatePipelineState
-		ID3D12Device2* device2 = nullptr;
-
-		if (FAILED(device->QueryInterface(IID_PPV_ARGS(&device2))))
+		if (FAILED(device->QueryInterface(IID_PPV_ARGS(&deviceInterface))))
 		{
 			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: Failed QueryInterface for Device2");
 			return;
 		}
 
-		std::vector<uint8_t> patchedBlob = p.streamBlob;
+		std::vector<uint8_t> patchedBlob = pipeline.streamBlob;
 
-		uint8_t* ptr = patchedBlob.data();
-		uint8_t* end = ptr + patchedBlob.size();
+		uint8_t* streamCursor = patchedBlob.data();
+		uint8_t* streamEnd = streamCursor + patchedBlob.size();
 
 		bool patchedTarget = false;
-		bool patchedCache = false;
-		int  iterations = 0;
 
 		auto originalShaderForType = [&](D3D12_PIPELINE_STATE_SUBOBJECT_TYPE type) -> const std::vector<uint8_t>*
 		{
 			switch (type)
 			{
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS: return &p.vsBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS: return &p.psBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS: return &p.csBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS: return &p.gsBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS: return &p.hsBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS: return &p.dsBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS: return &p.asBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS: return &p.msBytecode;
-				default: return nullptr;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS: 
+					return &pipeline.vsBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS: 
+					return &pipeline.psBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS: 
+					return &pipeline.csBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS: 
+					return &pipeline.gsBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS: 
+					return &pipeline.hsBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS: 
+					return &pipeline.dsBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS: 
+					return &pipeline.asBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS: 
+					return &pipeline.msBytecode;
+				default: 
+					return nullptr;
 			}
 		};
 
-		while (ptr < end)
+		while (streamCursor < streamEnd)
 		{
-			if (ptr + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE) > end)
+			if (streamCursor + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE) > streamEnd)
 			{
-				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: Stream walk: ptr overran end reading type");
+				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: stream cursor overran the buffer while reading a type");
 				break;
 			}
 
-			auto type = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(ptr);
-			UINT typeIdx = (UINT)type;
+			auto type = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(streamCursor);
+			UINT subobjectTypeIndex = static_cast<UINT>(type);
 
-			if (typeIdx >= ARRAYSIZE(kSubobjectSizes))
+			if (subobjectTypeIndex >= ARRAYSIZE(kSubobjectSizes))
 			{
-				char unk[256];
-				sprintf_s(unk, "HookD3D12->RebuildStreamPSOWithoutStage: Unknown typeIdx=%u at offset=%zu, stopping", typeIdx, (size_t)(ptr - patchedBlob.data()));
-				ShaderInjectorGUI::WriteToRuntimeLogError(unk);
+				ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("HookD3D12->RebuildStreamPSOWithoutStage: unknown subobject type=%u at offset=%zu, stopping", subobjectTypeIndex, static_cast<size_t>(streamCursor - patchedBlob.data())));
 				break;
 			}
 
-			size_t subobjectSize = kSubobjectSizes[typeIdx];
+			size_t subobjectSize = kSubobjectSizes[subobjectTypeIndex];
 
-			if (ptr + subobjectSize > end)
+			if (streamCursor + subobjectSize > streamEnd)
 			{
 				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: Stream walk: subobject overruns buffer");
 				break;
@@ -924,171 +999,135 @@ namespace HookD3D12
 
 			if (const std::vector<uint8_t>* originalBytecode = originalShaderForType(type))
 			{
-				uint8_t* payloadPtr = ptr + sizeof(void*);
-				D3D12_SHADER_BYTECODE* bc = reinterpret_cast<D3D12_SHADER_BYTECODE*>(payloadPtr);
+				uint8_t* payloadPointer = streamCursor + sizeof(void*);
+				D3D12_SHADER_BYTECODE* shaderBytecode = reinterpret_cast<D3D12_SHADER_BYTECODE*>(payloadPointer);
 
-				//[PASSED] test to see if we can re-inject the original bytecode and still be fine (to ensure that we can infact sucessfully rebuild a PSO)
-				//bc->pShaderBytecode = p.psBytecode.data();
-				//bc->BytecodeLength = p.psBytecode.size();
-				
-				//[PASSED] test to see if we can nullify shader bytecode (to ensure that we can infact sucessfully rebuild a PSO)
-				//bc->pShaderBytecode = nullptr;
-				//bc->BytecodeLength = 0
-
-				//[PASSED] test to see if we completely replace the shader pointer with my own copied memory that we control now
-				//std::vector<uint8_t> replacementShader;
-				//replacementShader = p.psBytecode;
-				//bc->pShaderBytecode = replacementShader.data();
-				//bc->BytecodeLength = replacementShader.size();
-
-				//[PASSED] test to see if when we modify a byte within the bytecode, if we can trigger an error (E_INVALIDARG), this proves the game is using our bytecode
-				//std::vector<uint8_t> replacementShader;
-				//replacementShader = p.psBytecode;
-				//replacementShader[replacementShader.size() - 1] = 5; //modify byte
-				//bc->pShaderBytecode = replacementShader.data();
-				//bc->BytecodeLength = replacementShader.size();
 				if (type != targetType)
 				{
-					bc->pShaderBytecode = originalBytecode->empty() ? nullptr : originalBytecode->data();
-					bc->BytecodeLength = originalBytecode->size();
+					shaderBytecode->pShaderBytecode = DataOrNull(*originalBytecode);
+					shaderBytecode->BytecodeLength = originalBytecode->size();
 				}
 				else if (!hiddenSelection && targetType == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS)
 				{
-					const std::vector<uint8_t>& markerBlob = !Globals::markerPixelShaderBlob.empty() ? Globals::markerPixelShaderBlob : Globals::nullPixelShaderBlob;
-					bc->pShaderBytecode = markerBlob.empty() ? nullptr : markerBlob.data();
-					bc->BytecodeLength = markerBlob.size();
+					const std::vector<uint8_t>& markerBlob = SelectPixelMarkerBlob();
+					shaderBytecode->pShaderBytecode = DataOrNull(markerBlob);
+					shaderBytecode->BytecodeLength = markerBlob.size();
 				}
 				else if (!hiddenSelection && targetType == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS)
 				{
-					bc->pShaderBytecode = Globals::markerComputeShaderBlob.data();
-					bc->BytecodeLength = Globals::markerComputeShaderBlob.size();
+					shaderBytecode->pShaderBytecode = Globals::markerComputeShaderBlob.data();
+					shaderBytecode->BytecodeLength = Globals::markerComputeShaderBlob.size();
 				}
 				else
 				{
-					bc->pShaderBytecode = nullptr;
-					bc->BytecodeLength = 0;
+					shaderBytecode->pShaderBytecode = nullptr;
+					shaderBytecode->BytecodeLength = 0;
 				}
 
 				if (type == targetType)
 					patchedTarget = true;
 			}
 
-			// Always zero out CachedPSO regardless of target -
+			// always zero out CachedPSO regardless of target -
 			// the cached blob pointer is session-specific and will crash on reuse
 			if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CACHED_PSO)
 			{
-				uint8_t* payloadPtr = ptr + sizeof(void*);
-				D3D12_CACHED_PIPELINE_STATE* cached = reinterpret_cast<D3D12_CACHED_PIPELINE_STATE*>(payloadPtr);
+				uint8_t* payloadPointer = streamCursor + sizeof(void*);
+				D3D12_CACHED_PIPELINE_STATE* cached = reinterpret_cast<D3D12_CACHED_PIPELINE_STATE*>(payloadPointer);
 				cached->pCachedBlob = nullptr;
 				cached->CachedBlobSizeInBytes = 0;
-				patchedCache = true;
 			}
 
 			if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT)
 			{
-				uint8_t* payloadPtr = ptr + sizeof(void*);
-				D3D12_INPUT_LAYOUT_DESC* layout = reinterpret_cast<D3D12_INPUT_LAYOUT_DESC*>(payloadPtr);
+				uint8_t* payloadPointer = streamCursor + sizeof(void*);
+				D3D12_INPUT_LAYOUT_DESC* layout = reinterpret_cast<D3D12_INPUT_LAYOUT_DESC*>(payloadPointer);
 
-				// The pInputElementDescs pointer in the blob points to game memory.
-				// We can't fix it up easily here without copying the elements,
+				// the pInputElementDescs pointer in the blob points to game memory.
+				// we can't fix it up easily here without copying the elements,
 				// so null it out - most PSOs don't need it for non-VS stages anyway,
 				// but if this is a graphics PSO with VS intact, this will cause issues.
-				// For now zero it to stop the crash.
+				// for now zero it to stop the crash.
 				layout->pInputElementDescs = nullptr;
 				layout->NumElements = 0;
 			}
 
-			// Also null out STREAM_OUTPUT which has the same problem
+			// also null out STREAM_OUTPUT which has the same problem
 			if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_STREAM_OUTPUT)
 			{
-				uint8_t* payloadPtr = ptr + sizeof(void*);
-				D3D12_STREAM_OUTPUT_DESC* so = reinterpret_cast<D3D12_STREAM_OUTPUT_DESC*>(payloadPtr);
-				so->pSODeclaration = nullptr;
-				so->NumEntries = 0;
-				so->pBufferStrides = nullptr;
-				so->NumStrides = 0;
+				uint8_t* payloadPointer = streamCursor + sizeof(void*);
+				D3D12_STREAM_OUTPUT_DESC* streamOutput = reinterpret_cast<D3D12_STREAM_OUTPUT_DESC*>(payloadPointer);
+				streamOutput->pSODeclaration = nullptr;
+				streamOutput->NumEntries = 0;
+				streamOutput->pBufferStrides = nullptr;
+				streamOutput->NumStrides = 0;
 			}
 
-			ptr += subobjectSize;
-			iterations++;
+			streamCursor += subobjectSize;
 		}
-
-		//IMPORTANT NOTE: this executes
-		//char patchResult[256];
-		//sprintf_s(patchResult, "[HookD3D12]: RebuildStreamPSOWithoutStage() patchedTarget=%d patchedCache=%d iterations=%d", patchedTarget, patchedCache, iterations);
-		//ShaderInjectorGUI::WriteToRuntimeLog(patchResult);
 
 		if (!patchedTarget)
 		{
-			// The target shader type wasn't found in the stream at all
-			// This PSO may not actually contain that stage
+			// the target shader type wasn't found in the stream at all
+			// this PSO may not actually contain that stage
 			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: Target shader type not found in stream blob, aborting");
-			device2->Release();
+			deviceInterface->Release();
 			return;
 		}
 
-		// Second pass: fix up pointer-bearing subobjects
-		ptr = patchedBlob.data();
-		end = ptr + patchedBlob.size();
+		// second pass: fix up pointer-bearing subobjects
+		streamCursor = patchedBlob.data();
+		streamEnd = streamCursor + patchedBlob.size();
 
-		while (ptr < end)
+		while (streamCursor < streamEnd)
 		{
-			auto type = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(ptr);
-			UINT typeIdx = (UINT)type;
+			auto type = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(streamCursor);
+			UINT subobjectTypeIndex = static_cast<UINT>(type);
 
-			if (typeIdx >= ARRAYSIZE(kSubobjectSizes)) 
+			if (subobjectTypeIndex >= ARRAYSIZE(kSubobjectSizes))
 				break;
 
-			size_t subobjectSize = kSubobjectSizes[typeIdx];
+			size_t subobjectSize = kSubobjectSizes[subobjectTypeIndex];
 
-			if (ptr + subobjectSize > end) 
+			if (streamCursor + subobjectSize > streamEnd)
 				break;
 
 			if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT)
 			{
-				uint8_t* payloadPtr = ptr + sizeof(void*);
-				D3D12_INPUT_LAYOUT_DESC* layout = reinterpret_cast<D3D12_INPUT_LAYOUT_DESC*>(payloadPtr);
-				layout->pInputElementDescs = p.inputElements.empty() ? nullptr : p.inputElements.data();
-				layout->NumElements = (UINT)p.inputElements.size();
+				uint8_t* payloadPointer = streamCursor + sizeof(void*);
+				D3D12_INPUT_LAYOUT_DESC* layout = reinterpret_cast<D3D12_INPUT_LAYOUT_DESC*>(payloadPointer);
+				layout->pInputElementDescs = DataOrNull(pipeline.inputElements);
+				layout->NumElements = static_cast<UINT>(pipeline.inputElements.size());
 			}
 
 			if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_STREAM_OUTPUT)
 			{
-				uint8_t* payloadPtr = ptr + sizeof(void*);
-				D3D12_STREAM_OUTPUT_DESC* so = reinterpret_cast<D3D12_STREAM_OUTPUT_DESC*>(payloadPtr);
-				so->pSODeclaration = p.soDeclarations.empty() ? nullptr : p.soDeclarations.data();
-				so->NumEntries = (UINT)p.soDeclarations.size();
-				so->pBufferStrides = p.soStrides.empty() ? nullptr : p.soStrides.data();
-				so->NumStrides = (UINT)p.soStrides.size();
+				uint8_t* payloadPointer = streamCursor + sizeof(void*);
+				D3D12_STREAM_OUTPUT_DESC* streamOutput = reinterpret_cast<D3D12_STREAM_OUTPUT_DESC*>(payloadPointer);
+				streamOutput->pSODeclaration = DataOrNull(pipeline.soDeclarations);
+				streamOutput->NumEntries = static_cast<UINT>(pipeline.soDeclarations.size());
+				streamOutput->pBufferStrides = DataOrNull(pipeline.soStrides);
+				streamOutput->NumStrides = static_cast<UINT>(pipeline.soStrides.size());
 			}
 
-			ptr += subobjectSize;
+			streamCursor += subobjectSize;
 		}
 
 		D3D12_PIPELINE_STATE_STREAM_DESC patchedDesc{};
 		patchedDesc.pPipelineStateSubobjectStream = patchedBlob.data();
 		patchedDesc.SizeInBytes = patchedBlob.size();
 
-		//ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12]: RebuildStreamPSOWithoutStage() Calling CreatePipelineState...");
+		HRESULT result = CreatePipelineStateInternal(deviceInterface, &patchedDesc, IID_PPV_ARGS(&outputPipelineState));
+		deviceInterface->Release();
 
-		//IMPORTANT NOTE: we learned a lesson with CreateGraphicsPipelineState earlier
-		//where doing device->oCreateGraphicsPipelineState created a recursive loop rather than just doing oCreateGraphicsPipelineState that led to a fatal app error
-		//HRESULT hr = device2->CreatePipelineState(&patchedDesc, IID_PPV_ARGS(&outPSO)); //<----------- THIS IS WHERE WE GET APPLICATION FATAL ERROR
-		HRESULT hr = CreatePipelineStateInternal(device2, &patchedDesc, IID_PPV_ARGS(&outPSO));
-		device2->Release();
-
-		//char result[128];
-		//sprintf_s(result, "[HookD3D12]: RebuildStreamPSOWithoutStage() CreatePipelineState hr=0x%08X", (unsigned)hr);
-		//ShaderInjectorGUI::WriteToRuntimeLog(char result);
-
-		if (FAILED(hr))
+		if (FAILED(result))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: RebuildStreamPSOWithoutStage: failed hr=" + std::to_string((unsigned)hr));
-			outPSO = nullptr;
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithoutStage: failed result=" + StringHelper::FormatHRESULT(result));
+			outputPipelineState = nullptr;
 		}
 		else
 		{
-			RegisterKnownPipelineStateLocked(outPSO);
+			RegisterKnownPipelineStateLocked(outputPipelineState);
 		}
 	}
 
@@ -1102,6 +1141,7 @@ namespace HookD3D12
 			return false;
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
+
 		if (!IsShaderTargetEffectivelyEnabled(replacement))
 			return false;
 
@@ -1152,7 +1192,7 @@ namespace HookD3D12
 
 		const bool compiledBlobAvailable = replacementIndex < (int)gLoadedShaderTargetBlobs.size() && !gLoadedShaderTargetBlobs[replacementIndex].empty();
 		const bool compiledBlobOnDisk = !replacement.modifiedShaderBlobPath.empty() && ShaderInjectorIO::FileExists(replacement.modifiedShaderBlobPath);
-		
+
 		if (pipeline.psoWithReplacement && pipeline.activeShaderTargetName == replacement.name && pipeline.activeShaderTargetHash == shaderHash && pipeline.activeShaderTargetType == shaderType)
 		{
 			if (!pipeline.activeShaderTargetUsesFallback || (!compiledBlobAvailable && !compiledBlobOnDisk))
@@ -1170,27 +1210,71 @@ namespace HookD3D12
 		}
 
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = pipeline.originalDesc;
-		desc.VS = { pipeline.vsBytecode.empty() ? nullptr : pipeline.vsBytecode.data(), pipeline.vsBytecode.size() };
-		desc.PS = { pipeline.psBytecode.empty() ? nullptr : pipeline.psBytecode.data(), pipeline.psBytecode.size() };
-		desc.GS = { pipeline.gsBytecode.empty() ? nullptr : pipeline.gsBytecode.data(), pipeline.gsBytecode.size() };
-		desc.HS = { pipeline.hsBytecode.empty() ? nullptr : pipeline.hsBytecode.data(), pipeline.hsBytecode.size() };
-		desc.DS = { pipeline.dsBytecode.empty() ? nullptr : pipeline.dsBytecode.data(), pipeline.dsBytecode.size() };
-		desc.InputLayout.pInputElementDescs = pipeline.inputElements.empty() ? nullptr : pipeline.inputElements.data();
-		desc.InputLayout.NumElements = (UINT)pipeline.inputElements.size();
-		desc.StreamOutput.pSODeclaration = pipeline.soDeclarations.empty() ? nullptr : pipeline.soDeclarations.data();
-		desc.StreamOutput.NumEntries = (UINT)pipeline.soDeclarations.size();
-		desc.StreamOutput.pBufferStrides = pipeline.soStrides.empty() ? nullptr : pipeline.soStrides.data();
-		desc.StreamOutput.NumStrides = (UINT)pipeline.soStrides.size();
-		desc.CachedPSO = { nullptr, 0 };
+		desc.VS = MakeShaderBytecode(pipeline.vsBytecode);
+		desc.PS = MakeShaderBytecode(pipeline.psBytecode);
+		desc.GS = MakeShaderBytecode(pipeline.gsBytecode);
+		desc.HS = MakeShaderBytecode(pipeline.hsBytecode);
+		desc.DS = MakeShaderBytecode(pipeline.dsBytecode);
+
+		desc.InputLayout.pInputElementDescs = DataOrNull(pipeline.inputElements);
+		desc.InputLayout.NumElements = static_cast<UINT>(pipeline.inputElements.size());
+
+		desc.StreamOutput.pSODeclaration = DataOrNull(pipeline.soDeclarations);
+		desc.StreamOutput.NumEntries = static_cast<UINT>(pipeline.soDeclarations.size());
+
+		desc.StreamOutput.pBufferStrides = DataOrNull(pipeline.soStrides);
+		desc.StreamOutput.NumStrides = static_cast<UINT>(pipeline.soStrides.size());
+
+		desc.CachedPSO = 
+		{ 
+			nullptr, 
+			0 
+		};
 
 		switch (shaderType)
 		{
-			case ShaderTarget::VertexShader: desc.VS = { replacementBytecode, replacementBytecodeSize }; break;
-			case ShaderTarget::PixelShader: desc.PS = { replacementBytecode, replacementBytecodeSize }; break;
-			case ShaderTarget::GeometryShader: desc.GS = { replacementBytecode, replacementBytecodeSize }; break;
-			case ShaderTarget::HullShader: desc.HS = { replacementBytecode, replacementBytecodeSize }; break;
-			case ShaderTarget::DomainShader: desc.DS = { replacementBytecode, replacementBytecodeSize }; break;
-			default: return false;
+			case ShaderTarget::VertexShader: 
+				desc.VS = 
+				{ 
+					replacementBytecode, 
+					replacementBytecodeSize 
+				}; 
+
+				break;
+			case ShaderTarget::PixelShader: 
+				desc.PS = 
+				{ 
+					replacementBytecode, 
+					replacementBytecodeSize 
+				}; 
+
+				break;
+			case ShaderTarget::GeometryShader: 
+				desc.GS = 
+				{ 
+					replacementBytecode, 
+					replacementBytecodeSize 
+				}; 
+
+				break;
+			case ShaderTarget::HullShader: 
+				desc.HS = 
+				{ 
+					replacementBytecode, 
+					replacementBytecodeSize 
+				}; 
+
+				break;
+			case ShaderTarget::DomainShader:
+				desc.DS = 
+				{
+					replacementBytecode, 
+					replacementBytecodeSize 
+				}; 
+
+				break;
+			default: 
+				return false;
 		}
 
 		ID3D12PipelineState* rebuiltPipelineState = nullptr;
@@ -1201,34 +1285,47 @@ namespace HookD3D12
 			Hash::FormatHash(shaderHash).c_str(),
 			pipeline.pipelineState,
 			static_cast<unsigned long long>(replacementBytecodeSize)));
-		HRESULT hr = Original_CreateGraphicsPipelineState(gDevice, &desc, IID_PPV_ARGS(&rebuiltPipelineState));
+		HRESULT result = Original_CreateGraphicsPipelineState(gDevice, &desc, IID_PPV_ARGS(&rebuiltPipelineState));
 		const ULONGLONG rebuildDurationMs = GetTickCount64() - rebuildStartTick;
 
-		if (FAILED(hr) || !rebuiltPipelineState)
+		if (FAILED(result) || !rebuiltPipelineState)
 		{
 			if (rebuiltPipelineState)
 				rebuiltPipelineState->Release();
 
-			const HRESULT removedReason =
-				gDevice ? gDevice->GetDeviceRemovedReason() : E_POINTER;
+			HRESULT removedReason = E_POINTER;
+
+			if (gDevice)
+				removedReason = gDevice->GetDeviceRemovedReason();
+
 			ShaderInjectorGUI::WriteToRuntimeLogError(
-				"HookD3D12->RebuildGraphicsPSOWithReplacement: failed hr=" +
-				StringHelper::FormatHRESULT(hr) +
-				" deviceRemovedReason=" +
+				"HookD3D12->RebuildGraphicsPSOWithReplacement: failed result = " +
+				StringHelper::FormatHRESULT(result) +
+				" deviceRemovedReason = " +
 				StringHelper::FormatHRESULT(removedReason) +
-				" replacement=" + replacement.name);
+				" replacement = " + replacement.name);
+
 			return false;
 		}
 
 		RetirePipelineState(pipeline.psoWithReplacement);
+
 		pipeline.psoWithReplacement = rebuiltPipelineState;
 		pipeline.activeShaderTargetName = replacement.name;
 		pipeline.activeShaderTargetType = shaderType;
 		pipeline.activeShaderTargetHash = shaderHash;
 		pipeline.activeShaderTargetUsesFallback = usedFallback;
+
 		RegisterKnownPipelineStateLocked(pipeline.psoWithReplacement);
+
 		gPipelineStateOverridesDirty = true;
-		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->RebuildGraphicsPSOWithReplacement: Applied graphics shader replacement: " + replacement.name + (usedFallback ? " (null shader fallback)" : "") + " durationMs=" + std::to_string(rebuildDurationMs));
+
+		std::string fallbackDescription;
+
+		if (usedFallback)
+			fallbackDescription = " (null shader fallback)";
+
+		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->RebuildGraphicsPSOWithReplacement: Applied graphics shader replacement: " + replacement.name + fallbackDescription + " durationMs=" + std::to_string(rebuildDurationMs));
 		return true;
 	}
 
@@ -1242,7 +1339,7 @@ namespace HookD3D12
 
 		const bool compiledBlobAvailable = replacementIndex < (int)gLoadedShaderTargetBlobs.size() && !gLoadedShaderTargetBlobs[replacementIndex].empty();
 		const bool compiledBlobOnDisk = !replacement.modifiedShaderBlobPath.empty() && ShaderInjectorIO::FileExists(replacement.modifiedShaderBlobPath);
-		
+
 		if (pipeline.psoWithReplacement && pipeline.activeShaderTargetName == replacement.name && pipeline.activeShaderTargetHash == shaderHash && pipeline.activeShaderTargetType == shaderType)
 		{
 			if (!pipeline.activeShaderTargetUsesFallback || (!compiledBlobAvailable && !compiledBlobOnDisk))
@@ -1260,18 +1357,18 @@ namespace HookD3D12
 		}
 
 		const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetType = SubobjectTypeForShaderType(shaderType);
-		
+
 		if (targetType == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MAX_VALID)
 			return false;
 
-		ID3D12Device2* device2 = nullptr;
-		
-		if (FAILED(gDevice->QueryInterface(IID_PPV_ARGS(&device2))))
+		ID3D12Device2* deviceInterface = nullptr;
+
+		if (FAILED(gDevice->QueryInterface(IID_PPV_ARGS(&deviceInterface))))
 			return false;
 
 		std::vector<uint8_t> patchedBlob = pipeline.streamBlob;
-		uint8_t* ptr = patchedBlob.data();
-		uint8_t* end = ptr + patchedBlob.size();
+		uint8_t* streamCursor = patchedBlob.data();
+		uint8_t* streamEnd = streamCursor + patchedBlob.size();
 		bool patchedTarget = false;
 		bool missingRootSignature = false;
 		bool missingViewInstancingState = false;
@@ -1279,38 +1376,48 @@ namespace HookD3D12
 		{
 			switch (type)
 			{
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS: return &pipeline.vsBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS: return &pipeline.psBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS: return &pipeline.csBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS: return &pipeline.gsBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS: return &pipeline.hsBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS: return &pipeline.dsBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS: return &pipeline.asBytecode;
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS: return &pipeline.msBytecode;
-				default: return nullptr;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS: 
+					return &pipeline.vsBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS: 
+					return &pipeline.psBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS: 
+					return &pipeline.csBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS: 
+					return &pipeline.gsBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS: 
+					return &pipeline.hsBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS: 
+					return &pipeline.dsBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS: 
+					return &pipeline.asBytecode;
+				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS: 
+					return &pipeline.msBytecode;
+				default: 
+					return nullptr;
 			}
 		};
 
-		while (ptr < end)
+		while (streamCursor < streamEnd)
 		{
-			if (ptr + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE) > end)
+			if (streamCursor + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE) > streamEnd)
 				break;
 
-			auto type = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(ptr);
-			UINT typeIdx = (UINT)type;
+			auto type = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(streamCursor);
+			UINT subobjectTypeIndex = static_cast<UINT>(type);
 
-			if (typeIdx >= ARRAYSIZE(kSubobjectSizes))
+			if (subobjectTypeIndex >= ARRAYSIZE(kSubobjectSizes))
 				break;
 
-			size_t subobjectSize = kSubobjectSizes[typeIdx];
-			if (ptr + subobjectSize > end)
+			size_t subobjectSize = kSubobjectSizes[subobjectTypeIndex];
+
+			if (streamCursor + subobjectSize > streamEnd)
 				break;
 
-			uint8_t* payloadPtr = ptr + sizeof(void*);
+			uint8_t* payloadPointer = streamCursor + sizeof(void*);
 
 			if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE)
 			{
-				ID3D12RootSignature** rootSignature = reinterpret_cast<ID3D12RootSignature**>(payloadPtr);
+				ID3D12RootSignature** rootSignature = reinterpret_cast<ID3D12RootSignature**>(payloadPointer);
 
 				if (rootSignatureOverride)
 					*rootSignature = rootSignatureOverride;
@@ -1321,85 +1428,80 @@ namespace HookD3D12
 			}
 			else if (const std::vector<uint8_t>* originalBytecode = originalShaderForType(type))
 			{
-				D3D12_SHADER_BYTECODE* bc = reinterpret_cast<D3D12_SHADER_BYTECODE*>(payloadPtr);
+				D3D12_SHADER_BYTECODE* shaderBytecode = reinterpret_cast<D3D12_SHADER_BYTECODE*>(payloadPointer);
 
 				if (type == targetType)
 				{
-					bc->pShaderBytecode = replacementBytecode;
-					bc->BytecodeLength = replacementBytecodeSize;
+					shaderBytecode->pShaderBytecode = replacementBytecode;
+					shaderBytecode->BytecodeLength = replacementBytecodeSize;
 					patchedTarget = true;
 				}
 				else
 				{
-					bc->pShaderBytecode = originalBytecode->empty() ? nullptr : originalBytecode->data();
-					bc->BytecodeLength = originalBytecode->size();
+					shaderBytecode->pShaderBytecode = DataOrNull(*originalBytecode);
+					shaderBytecode->BytecodeLength = originalBytecode->size();
 				}
 			}
 			else if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CACHED_PSO)
 			{
-				D3D12_CACHED_PIPELINE_STATE* cached = reinterpret_cast<D3D12_CACHED_PIPELINE_STATE*>(payloadPtr);
+				D3D12_CACHED_PIPELINE_STATE* cached = reinterpret_cast<D3D12_CACHED_PIPELINE_STATE*>(payloadPointer);
 				cached->pCachedBlob = nullptr;
 				cached->CachedBlobSizeInBytes = 0;
 			}
 			else if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT)
 			{
-				D3D12_INPUT_LAYOUT_DESC* layout = reinterpret_cast<D3D12_INPUT_LAYOUT_DESC*>(payloadPtr);
-				layout->pInputElementDescs = pipeline.inputElements.empty() ? nullptr : pipeline.inputElements.data();
-				layout->NumElements = (UINT)pipeline.inputElements.size();
+				D3D12_INPUT_LAYOUT_DESC* layout = reinterpret_cast<D3D12_INPUT_LAYOUT_DESC*>(payloadPointer);
+				layout->pInputElementDescs = DataOrNull(pipeline.inputElements);
+				layout->NumElements = static_cast<UINT>(pipeline.inputElements.size());
 			}
 			else if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_STREAM_OUTPUT)
 			{
-				D3D12_STREAM_OUTPUT_DESC* so = reinterpret_cast<D3D12_STREAM_OUTPUT_DESC*>(payloadPtr);
-				so->pSODeclaration = pipeline.soDeclarations.empty() ? nullptr : pipeline.soDeclarations.data();
-				so->NumEntries = (UINT)pipeline.soDeclarations.size();
-				so->pBufferStrides = pipeline.soStrides.empty() ? nullptr : pipeline.soStrides.data();
-				so->NumStrides = (UINT)pipeline.soStrides.size();
+				D3D12_STREAM_OUTPUT_DESC* streamOutput = reinterpret_cast<D3D12_STREAM_OUTPUT_DESC*>(payloadPointer);
+				streamOutput->pSODeclaration = DataOrNull(pipeline.soDeclarations);
+				streamOutput->NumEntries = static_cast<UINT>(pipeline.soDeclarations.size());
+				streamOutput->pBufferStrides = DataOrNull(pipeline.soStrides);
+				streamOutput->NumStrides = static_cast<UINT>(pipeline.soStrides.size());
 			}
 			else if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING)
 			{
-				D3D12_VIEW_INSTANCING_DESC* viewInstancing = reinterpret_cast<D3D12_VIEW_INSTANCING_DESC*>(payloadPtr);
+				D3D12_VIEW_INSTANCING_DESC* viewInstancing = reinterpret_cast<D3D12_VIEW_INSTANCING_DESC*>(payloadPointer);
 
 				if (!pipeline.hasViewInstancing && viewInstancing->ViewInstanceCount > 0)
 				{
-					// Older persisted templates did not serialize the pointed-to locations.
-					// Refuse to dereference their process-specific pointer.
+					// older persisted templates did not serialize the pointed-to locations.
+					// refuse to dereference their process-specific pointer.
 					missingViewInstancingState = true;
 				}
 				else
 				{
 					viewInstancing->ViewInstanceCount = static_cast<UINT>(pipeline.viewInstanceLocations.size());
-					viewInstancing->pViewInstanceLocations =
-						pipeline.viewInstanceLocations.empty() ? nullptr : pipeline.viewInstanceLocations.data();
+					viewInstancing->pViewInstanceLocations = DataOrNull(pipeline.viewInstanceLocations);
 					if (pipeline.hasViewInstancing)
 						viewInstancing->Flags = pipeline.viewInstancingFlags;
 				}
 			}
 
-			ptr += subobjectSize;
+			streamCursor += subobjectSize;
 		}
 
 		if (missingRootSignature)
 		{
-			device2->Release();
+			deviceInterface->Release();
 			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithReplacement: persisted stream template needs an observed root signature for " + replacement.name);
 			return false;
 		}
 
 		if (missingViewInstancingState)
 		{
-			device2->Release();
-			ShaderInjectorGUI::WriteToRuntimeLogError(
-				"HookD3D12->RebuildStreamPSOWithReplacement: persisted stream template is missing durable view-instancing locations for " +
-				replacement.name + "; recreate this shader target from a fresh capture");
+			deviceInterface->Release();
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithReplacement: persisted stream template is missing durable view-instancing locations for " + replacement.name + "; recreate this shader target from a fresh capture");
 			return false;
 		}
 
 		if (!patchedTarget)
 		{
-			device2->Release();
-			ShaderInjectorGUI::WriteToRuntimeLogError(
-				"HookD3D12->RebuildStreamPSOWithReplacement: selected stream does not contain target stage " +
-				StringHelper::ShaderTypeToString(shaderType) + " for " + replacement.name);
+			deviceInterface->Release();
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithReplacement: selected stream does not contain target stage " + StringHelper::ShaderTypeToString(shaderType) + " for " + replacement.name);
 			return false;
 		}
 
@@ -1409,6 +1511,7 @@ namespace HookD3D12
 
 		ID3D12PipelineState* rebuiltPipelineState = nullptr;
 		const ULONGLONG rebuildStartTick = GetTickCount64();
+
 		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
 			"HookD3D12->RebuildStreamPSOWithReplacement: begin replacement=%s shaderHash=%s originalPSO=%p streamBytes=%llu replacementBytes=%llu rootOverride=%p",
 			replacement.name.c_str(),
@@ -1417,10 +1520,11 @@ namespace HookD3D12
 			static_cast<unsigned long long>(patchedBlob.size()),
 			static_cast<unsigned long long>(replacementBytecodeSize),
 			rootSignatureOverride));
-		HRESULT hr = CreatePipelineStateInternal(device2, &patchedDesc, IID_PPV_ARGS(&rebuiltPipelineState));
+
+		HRESULT result = CreatePipelineStateInternal(deviceInterface, &patchedDesc, IID_PPV_ARGS(&rebuiltPipelineState));
 		const ULONGLONG rebuildDurationMs = GetTickCount64() - rebuildStartTick;
 
-		if (FAILED(hr) || !rebuiltPipelineState)
+		if (FAILED(result) || !rebuiltPipelineState)
 		{
 			if (rebuiltPipelineState)
 				rebuiltPipelineState->Release();
@@ -1429,12 +1533,14 @@ namespace HookD3D12
 			bool originalValidationSucceeded = false;
 			HRESULT originalValidationHr = E_FAIL;
 			const std::vector<uint8_t>* originalTargetBytecode = originalShaderForType(targetType);
+
 			if (originalTargetBytecode && !originalTargetBytecode->empty())
 			{
 				attemptedOriginalValidation = true;
 				std::vector<uint8_t> originalValidationBlob = patchedBlob;
 				uint8_t* validationPtr = originalValidationBlob.data();
 				uint8_t* validationEnd = validationPtr + originalValidationBlob.size();
+
 				while (validationPtr < validationEnd)
 				{
 					if (validationPtr + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE) > validationEnd)
@@ -1442,10 +1548,12 @@ namespace HookD3D12
 
 					auto validationType = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(validationPtr);
 					UINT validationTypeIndex = (UINT)validationType;
+
 					if (validationTypeIndex >= ARRAYSIZE(kSubobjectSizes))
 						break;
 
 					size_t validationSubobjectSize = kSubobjectSizes[validationTypeIndex];
+
 					if (validationPtr + validationSubobjectSize > validationEnd)
 						break;
 
@@ -1464,17 +1572,27 @@ namespace HookD3D12
 				originalValidationDesc.pPipelineStateSubobjectStream = originalValidationBlob.data();
 				originalValidationDesc.SizeInBytes = originalValidationBlob.size();
 				ID3D12PipelineState* originalValidationPipelineState = nullptr;
-				originalValidationHr = CreatePipelineStateInternal(device2, &originalValidationDesc, IID_PPV_ARGS(&originalValidationPipelineState));
+				originalValidationHr = CreatePipelineStateInternal(deviceInterface, &originalValidationDesc, IID_PPV_ARGS(&originalValidationPipelineState));
 				originalValidationSucceeded = SUCCEEDED(originalValidationHr) && originalValidationPipelineState;
+
 				if (originalValidationPipelineState)
 					originalValidationPipelineState->Release();
 			}
 
-			device2->Release();
+			deviceInterface->Release();
 
-			const HRESULT removedReason =
-				gDevice ? gDevice->GetDeviceRemovedReason() : E_POINTER;
-			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithReplacement: failed hr=" + StringHelper::FormatHRESULT(hr) + " deviceRemovedReason=" + StringHelper::FormatHRESULT(removedReason) + " replacement=" + replacement.name + " streamBytes=" + std::to_string(patchedBlob.size()) + " root=" + StringHelper::PointerToString(rootSignatureOverride) + " targetType=" + StringHelper::ShaderTypeToString(shaderType) + " replacementBytes=" + std::to_string(replacementBytecodeSize) + " originalTargetBytes=" + std::to_string(originalTargetBytecode ? originalTargetBytecode->size() : 0) + " vsBytes=" + std::to_string(pipeline.vsBytecode.size()) + " psBytes=" + std::to_string(pipeline.psBytecode.size()) + " inputElements=" + std::to_string(pipeline.inputElements.size()));
+			HRESULT removedReason = E_POINTER;
+
+			if (gDevice)
+				removedReason = gDevice->GetDeviceRemovedReason();
+
+			SIZE_T originalTargetByteCount = 0;
+
+			if (originalTargetBytecode)
+				originalTargetByteCount = originalTargetBytecode->size();
+
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->RebuildStreamPSOWithReplacement: failed result=" + StringHelper::FormatHRESULT(result) + " deviceRemovedReason=" + StringHelper::FormatHRESULT(removedReason) + " replacement=" + replacement.name + " streamBytes=" + std::to_string(patchedBlob.size()) + " root=" + StringHelper::PointerToString(rootSignatureOverride) + " targetType=" + StringHelper::ShaderTypeToString(shaderType) + " replacementBytes=" + std::to_string(replacementBytecodeSize) + " originalTargetBytes=" + std::to_string(originalTargetByteCount) + " vsBytes=" + std::to_string(pipeline.vsBytecode.size()) + " psBytes=" + std::to_string(pipeline.psBytecode.size()) + " inputElements=" + std::to_string(pipeline.inputElements.size()));
+			
 			if (attemptedOriginalValidation)
 			{
 				if (originalValidationSucceeded)
@@ -1486,36 +1604,52 @@ namespace HookD3D12
 					ShaderInjectorGUI::WriteToRuntimeLogWarning("HookD3D12->RebuildStreamPSOWithReplacement: original-bytecode validation also failed hr=" + std::to_string((unsigned)originalValidationHr) + "; suspect captured stream/template metadata or root signature for " + replacement.name);
 				}
 			}
+
 			return false;
 		}
 
-		device2->Release();
+		deviceInterface->Release();
+
 		RetirePipelineState(pipeline.psoWithReplacement);
+
 		pipeline.psoWithReplacement = rebuiltPipelineState;
 		pipeline.activeShaderTargetName = replacement.name;
 		pipeline.activeShaderTargetType = shaderType;
 		pipeline.activeShaderTargetHash = shaderHash;
 		pipeline.activeShaderTargetUsesFallback = usedFallback;
+
 		RegisterKnownPipelineStateLocked(pipeline.psoWithReplacement);
+
 		if (!rootSignatureOverride)
 			PersistAppliedStreamPipelineTemplate(replacement, pipeline, -1, shaderType, shaderHash);
+
 		gPipelineStateOverridesDirty = true;
+		ID3D12RootSignature* selectedRootSignature = rootSignatureOverride;
+
+		if (!selectedRootSignature)
+			selectedRootSignature = pipeline.rootSignature;
+
+		const char* fallbackDescription = "";
+
+		if (usedFallback)
+			fallbackDescription = " (null shader fallback)";
+
 		ShaderInjectorGUI::WriteToRuntimeLog(
 			"HookD3D12->RebuildStreamPSOWithReplacement: Applied stream shader replacement: " +
 			replacement.name +
-			" modifiedShader=" + replacement.modifiedShaderId +
-			" originalPSO=" + StringHelper::PointerToString(pipeline.pipelineState) +
-			" root=" + StringHelper::PointerToString(rootSignatureOverride ? rootSignatureOverride : pipeline.rootSignature) +
-			" viewInstances=" + std::to_string(pipeline.viewInstanceLocations.size()) +
-			(usedFallback ? " (null shader fallback)" : "") +
-			" durationMs=" + std::to_string(rebuildDurationMs));
+			" modifiedShader = " + replacement.modifiedShaderId +
+			" originalPSO = " + StringHelper::PointerToString(pipeline.pipelineState) +
+			" root = " + StringHelper::PointerToString(selectedRootSignature) +
+			" viewInstances = " + std::to_string(pipeline.viewInstanceLocations.size()) +
+			fallbackDescription +
+			" durationMs = " + std::to_string(rebuildDurationMs));
+
 		return true;
 	}
 
 	ShaderTargetApplyResult TryApplyGraphicsReplacement(GraphicsPipelineInfo& pipeline)
 	{
-		struct Candidate { uint64_t hash; ShaderTarget::ShaderType type; };
-		const Candidate candidates[] =
+		const ShaderCandidate candidates[] =
 		{
 			{ pipeline.vsHash, ShaderTarget::VertexShader },
 			{ pipeline.psHash, ShaderTarget::PixelShader },
@@ -1524,19 +1658,18 @@ namespace HookD3D12
 			{ pipeline.dsHash, ShaderTarget::DomainShader },
 		};
 
-		for (const Candidate& candidate : candidates)
+		for (const ShaderCandidate& candidate : candidates)
 		{
 			const int replacementIndex = FindEnabledShaderTarget(candidate.hash, candidate.type);
 
 			if (replacementIndex >= 0)
 			{
-				return RebuildGraphicsPSOWithReplacement(
-					pipeline,
-					replacementIndex,
-					candidate.hash,
-					candidate.type)
-					? ShaderTargetApplyResult::Applied
-					: ShaderTargetApplyResult::RetryableFailure;
+				const bool applied = RebuildGraphicsPSOWithReplacement(pipeline, replacementIndex, candidate.hash, candidate.type);
+
+				if (applied)
+					return ShaderTargetApplyResult::Applied;
+
+				return ShaderTargetApplyResult::RetryableFailure;
 			}
 		}
 
@@ -1545,8 +1678,7 @@ namespace HookD3D12
 
 	ShaderTargetApplyResult TryApplyStreamReplacement(PipelineStateInfo& pipeline)
 	{
-		struct Candidate { uint64_t hash; ShaderTarget::ShaderType type; };
-		const Candidate candidates[] =
+		const ShaderCandidate candidates[] =
 		{
 			{ pipeline.vsHash, ShaderTarget::VertexShader },
 			{ pipeline.psHash, ShaderTarget::PixelShader },
@@ -1556,25 +1688,23 @@ namespace HookD3D12
 			{ pipeline.dsHash, ShaderTarget::DomainShader },
 		};
 
-		for (const Candidate& candidate : candidates)
+		for (const ShaderCandidate& candidate : candidates)
 		{
 			const int replacementIndex = FindEnabledShaderTarget(candidate.hash, candidate.type);
 
 			if (replacementIndex >= 0)
 			{
-				return RebuildStreamPSOWithReplacement(
-					pipeline,
-					replacementIndex,
-					candidate.hash,
-					candidate.type)
-					? ShaderTargetApplyResult::Applied
-					: ShaderTargetApplyResult::RetryableFailure;
+				const bool applied = RebuildStreamPSOWithReplacement(pipeline, replacementIndex, candidate.hash, candidate.type);
+
+				if (applied)
+					return ShaderTargetApplyResult::Applied;
+
+				return ShaderTargetApplyResult::RetryableFailure;
 			}
 		}
 
 		return ShaderTargetApplyResult::NoMatch;
 	}
-	
 	bool TryApplyPersistedStreamTemplateToUncaptured(UncapturedPipelineStateInfo& uncaptured, int replacementIndex, uint64_t shaderHash, ShaderTarget::ShaderType shaderType, const char* matchMethod)
 	{
 		if (replacementIndex < 0 || replacementIndex >= (int)gLoadedShaderTargets.size())
@@ -1591,12 +1721,18 @@ namespace HookD3D12
 		if (templateReplacement.pipelineStreamBlobPath.empty())
 			return false;
 
-		const std::string templateLogSuffix =
-			(selectedTemplateName.empty() ? std::string() : (" template=" + selectedTemplateName)) +
-			" matchBytes=" + std::to_string((size_t)selectedTemplateMatchingBytes) +
-			" fixedState=" + (templateReplacement.pipelineFixedFunctionStateHash.empty()
-				? "unknown"
-				: templateReplacement.pipelineFixedFunctionStateHash);
+		std::string templateLogSuffix;
+
+		if (!selectedTemplateName.empty())
+			templateLogSuffix = " template=" + selectedTemplateName;
+
+		templateLogSuffix += " matchBytes=" + std::to_string(static_cast<size_t>(selectedTemplateMatchingBytes));
+		templateLogSuffix += " fixedState=";
+
+		if (templateReplacement.pipelineFixedFunctionStateHash.empty())
+			templateLogSuffix += "unknown";
+		else
+			templateLogSuffix += templateReplacement.pipelineFixedFunctionStateHash;
 
 		PipelineStateInfo persistedPipeline{};
 
@@ -1605,11 +1741,21 @@ namespace HookD3D12
 
 		ID3D12RootSignature* observedRootSignature = nullptr;
 		const bool preferComputeRootSignature = shaderType == ShaderTarget::ComputeShader || (persistedPipeline.isCompute && !persistedPipeline.isGraphics);
-		
+
 		if (preferComputeRootSignature)
-			observedRootSignature = uncaptured.observedComputeRootSignature ? uncaptured.observedComputeRootSignature : uncaptured.observedGraphicsRootSignature;
+		{
+			observedRootSignature = uncaptured.observedComputeRootSignature;
+
+			if (!observedRootSignature)
+				observedRootSignature = uncaptured.observedGraphicsRootSignature;
+		}
 		else
-			observedRootSignature = uncaptured.observedGraphicsRootSignature ? uncaptured.observedGraphicsRootSignature : uncaptured.observedComputeRootSignature;
+		{
+			observedRootSignature = uncaptured.observedGraphicsRootSignature;
+
+			if (!observedRootSignature)
+				observedRootSignature = uncaptured.observedComputeRootSignature;
+		}
 
 		ID3D12RootSignature* persistedRootSignature = GetOrCreatePersistedRootSignature(templateReplacement, gDevice);
 		bool attemptedAnyRootSignature = false;
@@ -1636,17 +1782,17 @@ namespace HookD3D12
 			auto ownedTemplate = std::make_shared<PipelineStateInfo>(std::move(persistedPipeline));
 			RebindPipelineStateInfoPointerFields(*ownedTemplate);
 			uncaptured.rebuildTemplate = std::move(ownedTemplate);
-			// Content matching resolves an opaque warm-cache PSO to one exact persisted
+
+			// content matching resolves an opaque warm-cache PSO to one exact persisted
 			// fixed-function variant. Remember that identity so later launches select
 			// the same cull/depth state directly, which is essential for inside/outside
 			// light-volume pipeline pairs.
-			PersistObservedPipelineCacheAlias(
-				replacement,
-				selectedTemplateName,
-				uncaptured.cachedBlobHash);
+			PersistObservedPipelineCacheAlias(replacement, selectedTemplateName, uncaptured.cachedBlobHash);
+
 			ShaderInjectorGUI::WriteToRuntimeLog(std::string("HookD3D12->TryApplyPersistedStreamTemplateToUncaptured: Applied uncaptured PSO replacement from persisted stream template by ") + matchMethod + " using " + rootSignatureSource + ": " + replacement.name + templateLogSuffix);
 			return true;
 		};
+
 		if (persistedRootSignature)
 		{
 			if (TryRebuildWithRootSignature(persistedRootSignature, "persisted root signature blob"))
@@ -1689,7 +1835,7 @@ namespace HookD3D12
 		std::vector<uint8_t> cachedBlob;
 		bool loadedCachedBlob = false;
 
-		// Prefer the cached blob's stable content before the metadata fallback. A
+		// prefer the cached blob's stable content before the metadata fallback. a
 		// root-signature/length pair can identify a shader family, but local-light
 		// pipelines commonly share that metadata while using opposite cull/depth
 		// variants for cameras outside and inside the light volume.
@@ -1697,14 +1843,11 @@ namespace HookD3D12
 		{
 			uint64_t currentCachedBlobHash = 0;
 			SIZE_T currentCachedBlobSize = 0;
-			loadedCachedBlob = GetPipelineCachedBlobInfo(
-				uncaptured.pipelineState,
-				currentCachedBlobHash,
-				currentCachedBlobSize,
-				&cachedBlob);
+			loadedCachedBlob = GetPipelineCachedBlobInfo(uncaptured.pipelineState, currentCachedBlobHash, currentCachedBlobSize, &cachedBlob);
 
 			double matchingRatio = 0.0;
 			size_t longestMatchingRun = 0;
+
 			if (loadedCachedBlob &&
 				currentCachedBlobHash == uncaptured.cachedBlobHash &&
 				currentCachedBlobSize == uncaptured.cachedBlobSize)
@@ -1729,45 +1872,38 @@ namespace HookD3D12
 			uint64_t graphicsRootSignatureHash = 0;
 			uint64_t computeRootSignatureHash = 0;
 			std::vector<uint8_t> rootSignatureBlob;
-			const bool hasGraphicsRootSignature = GetRootSignatureBlob(
-				uncaptured.observedGraphicsRootSignature,
-				rootSignatureBlob,
-				graphicsRootSignatureHash);
-			const bool hasComputeRootSignature = GetRootSignatureBlob(
-				uncaptured.observedComputeRootSignature,
-				rootSignatureBlob,
-				computeRootSignatureHash);
+			const bool hasGraphicsRootSignature = GetRootSignatureBlob(uncaptured.observedGraphicsRootSignature, rootSignatureBlob, graphicsRootSignatureHash);
+			const bool hasComputeRootSignature = GetRootSignatureBlob(uncaptured.observedComputeRootSignature, rootSignatureBlob, computeRootSignatureHash);
 
-			const int graphicsMetadataMatch = hasGraphicsRootSignature
-				? FindEnabledShaderTargetByCachedBlobMetadata(
-					uncaptured.cachedBlobSize,
-					graphicsRootSignatureHash,
-					false)
-				: -1;
-			const int computeMetadataMatch = hasComputeRootSignature
-				? FindEnabledShaderTargetByCachedBlobMetadata(
-					uncaptured.cachedBlobSize,
-					computeRootSignatureHash,
-					true)
-				: -1;
+			int graphicsMetadataMatch = -1;
+
+			if (hasGraphicsRootSignature)
+				graphicsMetadataMatch = FindEnabledShaderTargetByCachedBlobMetadata(uncaptured.cachedBlobSize, graphicsRootSignatureHash, false);
+
+			int computeMetadataMatch = -1;
+
+			if (hasComputeRootSignature)
+				computeMetadataMatch = FindEnabledShaderTargetByCachedBlobMetadata(uncaptured.cachedBlobSize, computeRootSignatureHash, true);
 
 			if (graphicsMetadataMatch >= 0 && computeMetadataMatch >= 0 &&
 				graphicsMetadataMatch != computeMetadataMatch)
 			{
-				// Command lists can retain both graphics and compute root signatures.
-				// Do not guess when the two independently identify different targets.
+				// command lists can retain both graphics and compute root signatures.
+				// do not guess when the two independently identify different targets.
 				replacementIndex = -1;
 			}
 			else
 			{
-				replacementIndex = graphicsMetadataMatch >= 0
-					? graphicsMetadataMatch
-					: computeMetadataMatch;
+				if (graphicsMetadataMatch >= 0)
+					replacementIndex = graphicsMetadataMatch;
+				else
+					replacementIndex = computeMetadataMatch;
 			}
 
 			if (replacementIndex >= 0)
 			{
 				matchMethod = "cached blob length and root signature";
+
 				ShaderInjectorGUI::WriteToRuntimeLog(
 					"HookD3D12->TryApplyUncapturedReplacement: Verified persisted cached blob metadata: replacement=" +
 					gLoadedShaderTargets[replacementIndex].name +
@@ -1779,12 +1915,12 @@ namespace HookD3D12
 		if (replacementIndex < 0)
 		{
 			uncaptured.attemptedReplacement = true;
-			// Cached PSOs are often bound before their command list sets the final
+
+			// cached PSOs are often bound before their command list sets the final
 			// graphics/compute root signature. An exact-length persisted candidate can
 			// become identifiable when that event arrives, so keep only that targeted
 			// event-driven retry alive instead of permanently settling it here.
-			uncaptured.retryReplacementOnRootSignatureChange =
-				SupportsCachedBlobMetadataMatching(uncaptured.cachedBlobSize);
+			uncaptured.retryReplacementOnRootSignatureChange = SupportsCachedBlobMetadataMatching(uncaptured.cachedBlobSize);
 			return false;
 		}
 
@@ -1819,13 +1955,16 @@ namespace HookD3D12
 			if (pipelineIndex >= 0 && pipelineIndex < (int)gGraphicsPipelines.size())
 			{
 				GraphicsPipelineInfo& pipeline = gGraphicsPipelines[pipelineIndex];
+
 				if (GraphicsPipelineMatchesReplacementTemplate(pipeline, replacement) && RebuildGraphicsPSOWithReplacement(pipeline, replacementIndex, shaderHash, replacement.shaderType))
 				{
 					uncaptured.replacementPipelineState = pipeline.psoWithReplacement;
 					uncaptured.activeShaderTargetName = replacement.name;
 					uncaptured.activeShaderTargetType = replacement.shaderType;
 					uncaptured.activeShaderTargetHash = shaderHash;
+
 					gPipelineStateOverrides[uncaptured.pipelineState] = pipeline.psoWithReplacement;
+
 					ShaderInjectorGUI::WriteToRuntimeLog(std::string("HookD3D12->TryApplyUncapturedReplacement: Applied uncaptured PSO replacement by ") + matchMethod + ": " + replacement.name);
 					return true;
 				}
@@ -1839,13 +1978,16 @@ namespace HookD3D12
 			if (pipelineIndex >= 0 && pipelineIndex < (int)gPipelineStates.size())
 			{
 				PipelineStateInfo& pipeline = gPipelineStates[pipelineIndex];
+
 				if (StreamPipelineMatchesReplacementTemplate(pipeline, replacement) && RebuildStreamPSOWithReplacement(pipeline, replacementIndex, shaderHash, replacement.shaderType))
 				{
 					uncaptured.replacementPipelineState = pipeline.psoWithReplacement;
 					uncaptured.activeShaderTargetName = replacement.name;
 					uncaptured.activeShaderTargetType = replacement.shaderType;
 					uncaptured.activeShaderTargetHash = shaderHash;
+
 					gPipelineStateOverrides[uncaptured.pipelineState] = pipeline.psoWithReplacement;
+
 					ShaderInjectorGUI::WriteToRuntimeLog(std::string("HookD3D12->TryApplyUncapturedReplacement: Applied uncaptured PSO replacement by ") + matchMethod + ": " + replacement.name);
 					return true;
 				}
@@ -1862,7 +2004,9 @@ namespace HookD3D12
 					uncaptured.activeShaderTargetName = replacement.name;
 					uncaptured.activeShaderTargetType = replacement.shaderType;
 					uncaptured.activeShaderTargetHash = shaderHash;
+
 					gPipelineStateOverrides[uncaptured.pipelineState] = pipeline.psoWithReplacement;
+
 					ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->TryApplyUncapturedReplacement: Applied uncaptured PSO replacement by matching graphics template: " + replacement.name);
 					return true;
 				}
@@ -1879,14 +2023,18 @@ namespace HookD3D12
 					uncaptured.activeShaderTargetName = replacement.name;
 					uncaptured.activeShaderTargetType = replacement.shaderType;
 					uncaptured.activeShaderTargetHash = shaderHash;
+
 					gPipelineStateOverrides[uncaptured.pipelineState] = pipeline.psoWithReplacement;
+
 					ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->TryApplyUncapturedReplacement: Applied uncaptured PSO replacement by matching stream template: " + replacement.name);
 					return true;
 				}
 			}
 		}
+
 		uncaptured.attemptedReplacement = true;
 		uncaptured.retryReplacementOnRootSignatureChange = hasPersistedStreamTemplate;
+
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->TryApplyUncapturedReplacement: Uncaptured PSO matched replacement cached blob, but no rebuild template is currently available: " + replacement.name);
 		return false;
 	}
@@ -1911,16 +2059,19 @@ namespace HookD3D12
 		std::lock_guard<std::mutex> lock(gPipelineMutex);
 
 		bool capturedReplacementAttempted = false;
+
 		while (!capturedReplacementAttempted && !gGraphicsShaderTargetRetryQueue.empty())
 		{
 			const size_t pipelineIndex = gGraphicsShaderTargetRetryQueue.front();
 			gGraphicsShaderTargetRetryQueue.pop_front();
+
 			if (pipelineIndex >= gGraphicsPipelines.size())
 				continue;
 
 			GraphicsPipelineInfo& pipeline = gGraphicsPipelines[pipelineIndex];
 			pipeline.shaderTargetApplyRetryQueued = false;
 			const ShaderTargetApplyResult result = TryApplyGraphicsReplacement(pipeline);
+
 			if (result == ShaderTargetApplyResult::NoMatch)
 			{
 				ResetShaderTargetRetryState(pipeline);
@@ -1928,6 +2079,7 @@ namespace HookD3D12
 			}
 
 			capturedReplacementAttempted = true;
+
 			if (result == ShaderTargetApplyResult::Applied)
 				ResetShaderTargetRetryState(pipeline);
 			else
@@ -1938,12 +2090,14 @@ namespace HookD3D12
 		{
 			const size_t pipelineIndex = gStreamShaderTargetRetryQueue.front();
 			gStreamShaderTargetRetryQueue.pop_front();
+
 			if (pipelineIndex >= gPipelineStates.size())
 				continue;
 
 			PipelineStateInfo& pipeline = gPipelineStates[pipelineIndex];
 			pipeline.shaderTargetApplyRetryQueued = false;
 			const ShaderTargetApplyResult result = TryApplyStreamReplacement(pipeline);
+
 			if (result == ShaderTargetApplyResult::NoMatch)
 			{
 				ResetShaderTargetRetryState(pipeline);
@@ -1951,6 +2105,7 @@ namespace HookD3D12
 			}
 
 			capturedReplacementAttempted = true;
+
 			if (result == ShaderTargetApplyResult::Applied)
 				ResetShaderTargetRetryState(pipeline);
 			else
@@ -1958,6 +2113,7 @@ namespace HookD3D12
 		}
 
 		size_t graphicsAttemptsThisFrame = 0;
+
 		while (gGraphicsShaderTargetApplyCursor < gGraphicsPipelines.size() &&
 			graphicsAttemptsThisFrame < gMaximumCapturedReplacementAttemptsPerListPerFrame &&
 			!capturedReplacementAttempted)
@@ -1968,6 +2124,7 @@ namespace HookD3D12
 			++gGraphicsShaderTargetApplyCursor;
 			++graphicsAttemptsThisFrame;
 			capturedReplacementAttempted = result != ShaderTargetApplyResult::NoMatch;
+
 			if (result == ShaderTargetApplyResult::Applied)
 				ResetShaderTargetRetryState(pipeline);
 			else if (result == ShaderTargetApplyResult::RetryableFailure)
@@ -1975,6 +2132,7 @@ namespace HookD3D12
 		}
 
 		size_t streamAttemptsThisFrame = 0;
+
 		while (gStreamShaderTargetApplyCursor < gPipelineStates.size() &&
 			streamAttemptsThisFrame < gMaximumCapturedReplacementAttemptsPerListPerFrame &&
 			!capturedReplacementAttempted)
@@ -1985,6 +2143,7 @@ namespace HookD3D12
 			++gStreamShaderTargetApplyCursor;
 			++streamAttemptsThisFrame;
 			capturedReplacementAttempted = result != ShaderTargetApplyResult::NoMatch;
+
 			if (result == ShaderTargetApplyResult::Applied)
 				ResetShaderTargetRetryState(pipeline);
 			else if (result == ShaderTargetApplyResult::RetryableFailure)
@@ -1992,51 +2151,56 @@ namespace HookD3D12
 		}
 
 		size_t uncapturedCandidatesThisFrame = 0;
+
 		while (!capturedReplacementAttempted && !gUncapturedShaderTargetRetryQueue.empty() &&
 			uncapturedCandidatesThisFrame < gMaximumUncapturedCandidatesPerFrame)
 		{
 			const size_t pipelineIndex = gUncapturedShaderTargetRetryQueue.front();
 			gUncapturedShaderTargetRetryQueue.pop_front();
+
 			if (pipelineIndex >= gUncapturedPipelineStates.size())
 				continue;
 
 			UncapturedPipelineStateInfo& uncaptured = gUncapturedPipelineStates[pipelineIndex];
 			uncaptured.shaderTargetApplyRetryQueued = false;
+
 			if (uncaptured.replacementPipelineState)
 				continue;
+
 			uncaptured.attemptedReplacement = false;
 			uncaptured.retryReplacementOnRootSignatureChange = false;
 			const bool applied = TryApplyUncapturedReplacement(uncaptured);
 			++uncapturedCandidatesThisFrame;
 			++gUncapturedCandidateAttemptCount;
-			// A failed identity comparison is not a PSO rebuild. Keep looking within
+
+			// a failed identity comparison is not a PSO rebuild. keep looking within
 			// the bounded candidate budget, but still rebuild at most one PSO per call.
 			capturedReplacementAttempted = applied || uncaptured.retryReplacementOnRootSignatureChange;
+
 			if (applied)
 			{
 				ResetShaderTargetRetryState(uncaptured);
+
 				gPipelineStateOverridesDirty.store(true, std::memory_order_release);
 			}
 			else if (uncaptured.retryReplacementOnRootSignatureChange)
 			{
 				if (!uncaptured.attemptedReplacement)
 				{
-					QueueShaderTargetRetry(
-						uncaptured,
-						gUncapturedShaderTargetRetryQueue,
-						pipelineIndex,
-						"uncaptured");
+					QueueShaderTargetRetry(uncaptured, gUncapturedShaderTargetRetryQueue, pipelineIndex, "uncaptured");
 				}
 			}
 			else
 			{
 				ResetShaderTargetRetryState(uncaptured);
+
 				if (uncaptured.attemptedReplacement)
 					RegisterKnownPipelineStateLocked(uncaptured.pipelineState);
 			}
 		}
 
 		size_t uncapturedInspectionsThisFrame = 0;
+
 		while (!capturedReplacementAttempted &&
 			gUncapturedShaderTargetApplyCursor < gUncapturedPipelineStates.size() &&
 			uncapturedInspectionsThisFrame < 256 &&
@@ -2061,31 +2225,31 @@ namespace HookD3D12
 
 			const bool applied = TryApplyUncapturedReplacement(uncaptured);
 			capturedReplacementAttempted = applied || uncaptured.retryReplacementOnRootSignatureChange;
+
 			if (uncaptured.replacementPipelineState)
 				gPipelineStateOverridesDirty.store(true, std::memory_order_release);
+
 			if (applied)
 				ResetShaderTargetRetryState(uncaptured);
+
 			else if (uncaptured.retryReplacementOnRootSignatureChange)
 			{
 				if (!uncaptured.attemptedReplacement)
 				{
-					QueueShaderTargetRetry(
-						uncaptured,
-						gUncapturedShaderTargetRetryQueue,
-						gUncapturedShaderTargetApplyCursor - 1,
-						"uncaptured");
+					QueueShaderTargetRetry(uncaptured, gUncapturedShaderTargetRetryQueue, gUncapturedShaderTargetApplyCursor - 1, "uncaptured");
 				}
 			}
 
-			// Once an uncaptured PSO either has an override or has conclusively failed
+			// once an uncaptured PSO either has an override or has conclusively failed
 			// to match, it no longer needs discovery/root-signature synchronization on
-			// every bind. Failed persisted rebuilds stay unresolved so a later root
+			// every bind. failed persisted rebuilds stay unresolved so a later root
 			// signature can still trigger the targeted retry path.
 			if (uncaptured.replacementPipelineState ||
 				(uncaptured.attemptedReplacement && !uncaptured.retryReplacementOnRootSignatureChange))
 			{
 				RegisterKnownPipelineStateLocked(uncaptured.pipelineState);
 			}
+
 			++uncapturedCandidatesThisFrame;
 			++gUncapturedCandidateAttemptCount;
 		}
@@ -2104,12 +2268,10 @@ namespace HookD3D12
 		if (!gShaderTargetApplyDirty && gUncapturedCandidateAttemptCount != gReportedUncapturedCandidateAttemptCount)
 		{
 			gReportedUncapturedCandidateAttemptCount = gUncapturedCandidateAttemptCount;
-			const size_t appliedCount = static_cast<size_t>(std::count_if(
-				gUncapturedPipelineStates.begin(), gUncapturedPipelineStates.end(),
-				[](const auto& pipeline) { return pipeline.replacementPipelineState != nullptr; }));
-			ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
-				"HookD3D12->ApplyShaderTargetPSOs: cached-PSO queue drained; observed=%zu candidatesChecked=%zu rebuilt=%zu pending=0",
-				gUncapturedPipelineStates.size(), gUncapturedCandidateAttemptCount, appliedCount));
+
+			const size_t appliedCount = static_cast<size_t>(std::count_if(gUncapturedPipelineStates.begin(), gUncapturedPipelineStates.end(), [](const auto& pipeline) { return pipeline.replacementPipelineState != nullptr; }));
+
+			ShaderInjectorIO::WriteToLogFile(StringHelper::Format("HookD3D12->ApplyShaderTargetPSOs: cached-PSO queue drained; observed=%zu candidatesChecked=%zu rebuilt=%zu pending=0", gUncapturedPipelineStates.size(), gUncapturedCandidateAttemptCount, appliedCount));
 		}
 	}
 
@@ -2120,8 +2282,8 @@ namespace HookD3D12
 
 	ID3D12Device* GetCapturedDevice()
 	{
-		// The injector owns this reference for the lifetime of the active D3D12 hook.
-		// Callers must treat the returned pointer as borrowed.
+		// the injector owns this reference for the lifetime of the active D3D12 hook.
+		// callers must treat the returned pointer as borrowed.
 		return gDevice;
 	}
 
@@ -2198,10 +2360,7 @@ namespace HookD3D12
 
 		if (registeredNewBinding)
 		{
-			ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
-				"HookD3D12->RegisterSwapChainCommandQueue: swapChain=%p exactDirectQueue=%p",
-				swapChain,
-				commandQueue));
+			ShaderInjectorIO::WriteToLogFile(StringHelper::Format("HookD3D12->RegisterSwapChainCommandQueue: swapChain=%p exactDirectQueue=%p", swapChain, commandQueue));
 		}
 	}
 
@@ -2230,6 +2389,7 @@ namespace HookD3D12
 			return;
 
 		ID3D12Device* queueDevice = nullptr;
+
 		if (FAILED(commandQueue->GetDevice(IID_PPV_ARGS(&queueDevice))))
 			return;
 
@@ -2240,6 +2400,7 @@ namespace HookD3D12
 			return;
 
 		std::lock_guard<std::mutex> lock(gCommandQueueCaptureMutex);
+
 		if (gMostRecentDirectCommandQueue == commandQueue)
 		{
 			gMostRecentDirectCommandQueueThreadId = GetCurrentThreadId();
@@ -2261,6 +2422,7 @@ namespace HookD3D12
 			return false;
 
 		ID3D12Device* swapChainDevice = nullptr;
+
 		if (FAILED(swapChain->GetDevice(IID_PPV_ARGS(&swapChainDevice))))
 			return false;
 
@@ -2279,6 +2441,7 @@ namespace HookD3D12
 			swapChainDevice->Release();
 
 		ID3D12CommandQueue* exactCommandQueue = FindRegisteredSwapChainCommandQueue(swapChain);
+
 		if (exactCommandQueue)
 		{
 			ID3D12Device* exactQueueDevice = nullptr;
@@ -2296,15 +2459,12 @@ namespace HookD3D12
 
 			if (gCommandQueue != exactCommandQueue)
 			{
-				// Fence values and allocator ownership already reference the previous
-				// queue. Changing queues after submission would make that synchronization
+				// fence values and allocator ownership already reference the previous
+				// queue. changing queues after submission would make that synchronization
 				// ambiguous, so disable only the overlay and leave shader hooks active.
 				if (gOverlaySubmissionCount != 0)
 				{
-					ShaderInjectorIO::WriteToLogFileError(StringHelper::Format(
-						"HookD3D12->AdoptMostRecentDirectCommandQueue: swap-chain queue changed after overlay submission old=%p new=%p; overlay disabled",
-						gCommandQueue,
-						exactCommandQueue));
+					ShaderInjectorIO::WriteToLogFileError(StringHelper::Format("HookD3D12->AdoptMostRecentDirectCommandQueue: swap-chain queue changed after overlay submission old=%p new=%p; overlay disabled", gCommandQueue, exactCommandQueue));
 					gOverlayRenderingDisabled = true;
 					exactCommandQueue->Release();
 					return false;
@@ -2323,12 +2483,14 @@ namespace HookD3D12
 			if (!gLoggedExactCommandQueueCaptured)
 			{
 				const D3D12_COMMAND_QUEUE_DESC queueDescription = gCommandQueue->GetDesc();
+
 				ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
 					"HookD3D12->AdoptMostRecentDirectCommandQueue: adopted exact swap-chain queue=%p priority=%d flags=0x%X nodeMask=%u",
 					gCommandQueue,
 					queueDescription.Priority,
 					static_cast<unsigned int>(queueDescription.Flags),
 					queueDescription.NodeMask));
+
 				gLoggedExactCommandQueueCaptured = true;
 			}
 
@@ -2341,6 +2503,7 @@ namespace HookD3D12
 		ID3D12CommandQueue* candidateQueue = nullptr;
 		{
 			std::lock_guard<std::mutex> lock(gCommandQueueCaptureMutex);
+
 			if (gMostRecentDirectCommandQueueThreadId == GetCurrentThreadId())
 				candidateQueue = gMostRecentDirectCommandQueue;
 			else if (gMostRecentDirectCommandQueue && !gLoggedUnsafeFallbackQueue)
@@ -2349,6 +2512,7 @@ namespace HookD3D12
 					"HookD3D12->AdoptMostRecentDirectCommandQueue: no exact swap-chain queue and recent queue belongs to another thread queueThread=%lu presentThread=%lu; overlay waiting",
 					static_cast<unsigned long>(gMostRecentDirectCommandQueueThreadId),
 					static_cast<unsigned long>(GetCurrentThreadId())));
+
 				gLoggedUnsafeFallbackQueue = true;
 			}
 
@@ -2377,12 +2541,14 @@ namespace HookD3D12
 		if (!gLoggedCommandQueueCaptured)
 		{
 			const D3D12_COMMAND_QUEUE_DESC queueDescription = gCommandQueue->GetDesc();
+
 			ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
 				"HookD3D12->AdoptMostRecentDirectCommandQueue: captured pre-Present direct queue=%p priority=%d flags=0x%X nodeMask=%u",
 				gCommandQueue,
 				queueDescription.Priority,
 				static_cast<unsigned int>(queueDescription.Flags),
 				queueDescription.NodeMask));
+
 			gLoggedCommandQueueCaptured = true;
 		}
 
@@ -2391,7 +2557,11 @@ namespace HookD3D12
 
 	void LogOverlayDeviceFailure(const char* operation, HRESULT operationResult)
 	{
-		const HRESULT removedReason = gDevice ? gDevice->GetDeviceRemovedReason() : E_POINTER;
+		HRESULT removedReason = E_POINTER;
+
+		if (gDevice)
+			removedReason = gDevice->GetDeviceRemovedReason();
+
 		ShaderInjectorIO::WriteToLogFileError(
 			std::string("HookD3D12->") + operation +
 			" failed result=" + StringHelper::FormatHRESULT(operationResult) +
@@ -2405,52 +2575,46 @@ namespace HookD3D12
 
 		std::lock_guard<std::mutex> lock(gPipelineMutex);
 
-		for (auto& req : gPendingRebuilds)
+		for (auto& rebuildRequest : gPendingRebuilds)
 		{
-			if (req.source == PipelineSourceList::Graphics)
+			if (rebuildRequest.source == PipelineSourceList::Graphics)
 			{
-				if (req.index >= (int)gGraphicsPipelines.size())
+				if (rebuildRequest.index >= static_cast<int>(gGraphicsPipelines.size()))
 					continue;
 
-				auto& p = gGraphicsPipelines[req.index];
+				auto& graphicsPipeline = gGraphicsPipelines[rebuildRequest.index];
 
-				if (!p.psoWithoutPS && gDevice)
+				if (!graphicsPipeline.psoWithoutPS && gDevice)
 				{
-					//IMPORTANT NOTE: This executes
-					//MessageBoxA(nullptr, "Starting Graphics Pipeline State Rebuild...", "Shader Injector", MB_OK);
-
-					//NOTE: rebuild!
-					D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = p.originalDesc;
-					desc.VS = { p.vsBytecode.empty() ? nullptr : p.vsBytecode.data(), p.vsBytecode.size() };
+					D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = graphicsPipeline.originalDesc;
+					desc.VS = MakeShaderBytecode(graphicsPipeline.vsBytecode);
 
 					const bool hiddenSelection = gShaderSelectionStyle == PixelShaderSelectionStyle::Hidden;
-					const std::vector<uint8_t>& markerBlob = !Globals::markerPixelShaderBlob.empty() ? Globals::markerPixelShaderBlob : Globals::nullPixelShaderBlob;
-					desc.PS = hiddenSelection || markerBlob.empty() ? D3D12_SHADER_BYTECODE{ nullptr, 0 } : D3D12_SHADER_BYTECODE{ markerBlob.data(), markerBlob.size() };
-					
-					desc.InputLayout.pInputElementDescs = p.inputElements.empty() ? nullptr : p.inputElements.data();
-					desc.InputLayout.NumElements = (UINT)p.inputElements.size();
-					desc.StreamOutput.pSODeclaration = p.soDeclarations.empty() ? nullptr : p.soDeclarations.data();
-					desc.StreamOutput.NumEntries = (UINT)p.soDeclarations.size();
-					desc.StreamOutput.pBufferStrides = p.soStrides.empty() ? nullptr : p.soStrides.data();
-					desc.StreamOutput.NumStrides = (UINT)p.soStrides.size();
+					const std::vector<uint8_t>& markerBlob = SelectPixelMarkerBlob();
+
+					if (hiddenSelection || markerBlob.empty())
+						desc.PS = { nullptr, 0 };
+					else
+						desc.PS = { markerBlob.data(), markerBlob.size() };
+
+					desc.InputLayout.pInputElementDescs = DataOrNull(graphicsPipeline.inputElements);
+					desc.InputLayout.NumElements = static_cast<UINT>(graphicsPipeline.inputElements.size());
+					desc.StreamOutput.pSODeclaration = DataOrNull(graphicsPipeline.soDeclarations);
+					desc.StreamOutput.NumEntries = static_cast<UINT>(graphicsPipeline.soDeclarations.size());
+					desc.StreamOutput.pBufferStrides = DataOrNull(graphicsPipeline.soStrides);
+					desc.StreamOutput.NumStrides = static_cast<UINT>(graphicsPipeline.soStrides.size());
 					desc.CachedPSO = { nullptr, 0 };
 
-					//EXTREMELY IMPORTANT NOTE: we call the original function here, not through device-> otherwise we create a recursion loop and create a fatal application error
-					//HRESULT hr = gDevice->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&p.psoWithoutPS)); //<-- causes recursion madness
-					HRESULT hr = Original_CreateGraphicsPipelineState(gDevice, &desc, IID_PPV_ARGS(&p.psoWithoutPS));
+					HRESULT result = Original_CreateGraphicsPipelineState(gDevice, &desc, IID_PPV_ARGS(&graphicsPipeline.psoWithoutPS));
 
-					if (SUCCEEDED(hr))
-						RegisterKnownPipelineStateLocked(p.psoWithoutPS);
+					if (SUCCEEDED(result))
+						RegisterKnownPipelineStateLocked(graphicsPipeline.psoWithoutPS);
 
-					if (FAILED(hr))
+					if (FAILED(result))
 					{
-						p.psDisabled = false;
-						
-						//char errbuf[128];
-						//sprintf_s(errbuf, "hr=0x%08X", (unsigned)hr);
-						//PrintLog("ProcessPendingRebuilds: graphics PSO rebuild failed " + std::string(errbuf));
+						graphicsPipeline.psDisabled = false;
 
-						// Dump desc fields to diagnose E_INVALIDARG
+						// dump desc fields to diagnose E_INVALIDARG
 						char dbg[1024];
 						sprintf_s(dbg,
 							"Rebuilding Graphics PSO:\n"
@@ -2485,28 +2649,41 @@ namespace HookD3D12
 					}
 				}
 			}
-			else if (req.source == PipelineSourceList::Stream)
+			else if (rebuildRequest.source == PipelineSourceList::Stream)
 			{
-				if (req.index >= (int)gPipelineStates.size())
+				if (rebuildRequest.index >= static_cast<int>(gPipelineStates.size()))
 					continue;
 
-				auto& p = gPipelineStates[req.index];
+				auto& pipeline = gPipelineStates[rebuildRequest.index];
 
-				ID3D12PipelineState** outPSO = nullptr;
+				ID3D12PipelineState** outputPipelineState = nullptr;
 
-				switch (req.targetType)
+				switch (rebuildRequest.targetType)
 				{
-					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS: outPSO = &p.psoWithoutVS; break;
-					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS: outPSO = &p.psoWithoutPS; break;
-					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS: outPSO = &p.psoWithoutCS; break;
-					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS: outPSO = &p.psoWithoutGS; break;
-					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS: outPSO = &p.psoWithoutHS; break;
-					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS: outPSO = &p.psoWithoutDS; break;
-					default: continue;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS: 
+						outputPipelineState = &pipeline.psoWithoutVS; 
+						break;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS: 
+						outputPipelineState = &pipeline.psoWithoutPS; 
+						break;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS: 
+						outputPipelineState = &pipeline.psoWithoutCS; 
+						break;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS: 
+						outputPipelineState = &pipeline.psoWithoutGS; 
+						break;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS: 
+						outputPipelineState = &pipeline.psoWithoutHS; 
+						break;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS: 
+						outputPipelineState = &pipeline.psoWithoutDS; 
+						break;
+					default: 
+						continue;
 				}
 
-				if (outPSO && !*outPSO)
-					RebuildStreamPSOWithoutStage(p, req.targetType, *outPSO, gDevice);
+				if (outputPipelineState && !*outputPipelineState)
+					RebuildStreamPSOWithoutStage(pipeline, rebuildRequest.targetType, *outputPipelineState, gDevice);
 			}
 		}
 
@@ -2539,13 +2716,11 @@ namespace HookD3D12
 		{
 			void** currentVTable = *reinterpret_cast<void***>(gRTSSCompatibilitySwapChain);
 
-			// Another overlay may have replaced our table after installation. Only
+			// another overlay may have replaced our table after installation. only
 			// restore the pointer when this object still owns the active table.
 			if (currentVTable == gRTSSCompatibilitySwapChainVTable)
 			{
-				InterlockedExchangePointer(
-					reinterpret_cast<PVOID volatile*>(gRTSSCompatibilitySwapChain),
-					gRTSSOriginalSwapChainVTable);
+				InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(gRTSSCompatibilitySwapChain), gRTSSOriginalSwapChainVTable);
 			}
 		}
 
@@ -2561,58 +2736,53 @@ namespace HookD3D12
 		gRTSSOriginalResizeBuffers = nullptr;
 	}
 
-	bool InstallSwapChainCompatibility(IDXGISwapChain3* pSwapChain, const char* compatibilitySource)
+	bool InstallSwapChainCompatibility(IDXGISwapChain3* swapChain, const char* compatibilitySource)
 	{
-		if (!pSwapChain)
+		if (!swapChain)
 			return false;
 
 		std::lock_guard<std::mutex> lock(gRTSSCompatibilityMutex);
-		void** currentVTable = *reinterpret_cast<void***>(pSwapChain);
+		void** currentVTable = *reinterpret_cast<void***>(swapChain);
 
-		if (pSwapChain == gRTSSCompatibilitySwapChain && currentVTable == gRTSSCompatibilitySwapChainVTable)
+		if (swapChain == gRTSSCompatibilitySwapChain && currentVTable == gRTSSCompatibilitySwapChainVTable)
 			return true;
 
 		RestoreRTSSSwapChainCompatibilityLocked();
-		currentVTable = *reinterpret_cast<void***>(pSwapChain);
+		currentVTable = *reinterpret_cast<void***>(swapChain);
 
 		void** compatibilityVTable = new void*[gSwapChain3VTableEntryCount];
-		std::memcpy(
-			compatibilityVTable,
-			currentVTable,
-			gSwapChain3VTableEntryCount * sizeof(void*));
 
-		FunctionPresentD3D12 currentPresent =
-			reinterpret_cast<FunctionPresentD3D12>(currentVTable[VTableIndex::indexPresent]);
-		FunctionPresent1D3D12 currentPresent1 =
-			reinterpret_cast<FunctionPresent1D3D12>(currentVTable[VTableIndex::indexPresent1]);
-		FunctionResizeBuffersD3D12 currentResizeBuffers =
-			reinterpret_cast<FunctionResizeBuffersD3D12>(currentVTable[VTableIndex::indexResizeBuffers]);
+		std::memcpy(compatibilityVTable, currentVTable, gSwapChain3VTableEntryCount * sizeof(void*));
 
-		compatibilityVTable[VTableIndex::indexPresent] =
-			reinterpret_cast<void*>(&Hook_RTSSCompatibilityPresent);
-		compatibilityVTable[VTableIndex::indexPresent1] =
-			reinterpret_cast<void*>(&Hook_RTSSCompatibilityPresent1);
-		compatibilityVTable[VTableIndex::indexResizeBuffers] =
-			reinterpret_cast<void*>(&Hook_RTSSCompatibilityResizeBuffers);
+		FunctionPresentD3D12 currentPresent = reinterpret_cast<FunctionPresentD3D12>(currentVTable[VTableIndex::indexPresent]);
+		FunctionPresent1D3D12 currentPresent1 = reinterpret_cast<FunctionPresent1D3D12>(currentVTable[VTableIndex::indexPresent1]);
+		FunctionResizeBuffersD3D12 currentResizeBuffers = reinterpret_cast<FunctionResizeBuffersD3D12>(currentVTable[VTableIndex::indexResizeBuffers]);
 
-		// Publish every downstream pointer before making the private table visible
+		compatibilityVTable[VTableIndex::indexPresent] = reinterpret_cast<void*>(&Hook_RTSSCompatibilityPresent);
+		compatibilityVTable[VTableIndex::indexPresent1] = reinterpret_cast<void*>(&Hook_RTSSCompatibilityPresent1);
+		compatibilityVTable[VTableIndex::indexResizeBuffers] = reinterpret_cast<void*>(&Hook_RTSSCompatibilityResizeBuffers);
+
+		// publish every downstream pointer before making the private table visible
 		// to other threads that may already be presenting this swap chain.
-		pSwapChain->AddRef();
-		gRTSSCompatibilitySwapChain = pSwapChain;
+		swapChain->AddRef();
+		gRTSSCompatibilitySwapChain = swapChain;
 		gRTSSOriginalSwapChainVTable = currentVTable;
 		gRTSSCompatibilitySwapChainVTable = compatibilityVTable;
 		gRTSSOriginalPresent = currentPresent;
 		gRTSSOriginalPresent1 = currentPresent1;
 		gRTSSOriginalResizeBuffers = currentResizeBuffers;
 
-		InterlockedExchangePointer(
-			reinterpret_cast<PVOID volatile*>(pSwapChain),
-			compatibilityVTable);
+		InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(swapChain), compatibilityVTable);
+
+		const char* sourceName = compatibilitySource;
+
+		if (!sourceName)
+			sourceName = "External";
 
 		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
 			"HookD3D12->InstallSwapChainCompatibility: installed source=%s swapChain=%p Present=%p Present1=%p ResizeBuffers=%p",
-			compatibilitySource ? compatibilitySource : "External",
-			pSwapChain,
+			sourceName,
+			swapChain,
 			reinterpret_cast<void*>(currentPresent),
 			reinterpret_cast<void*>(currentPresent1),
 			reinterpret_cast<void*>(currentResizeBuffers)));
@@ -2620,18 +2790,16 @@ namespace HookD3D12
 		return true;
 	}
 
-	bool InstallRTSSSwapChainCompatibility(IDXGISwapChain3* pSwapChain)
+	bool InstallRTSSSwapChainCompatibility(IDXGISwapChain3* swapChain)
 	{
 		if (!FindRTSSHookModule())
 			return false;
 
-		return InstallSwapChainCompatibility(pSwapChain, "RTSS");
+		return InstallSwapChainCompatibility(swapChain, "RTSS");
 	}
 
 	void Release()
 	{
-		//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->Release: Releasing resources and hooks.");
-
 		gRuntimeReady.store(false, std::memory_order_release);
 		gShutdown = true;
 		ShaderAutomaticDiscovery::Shutdown();
@@ -2640,11 +2808,6 @@ namespace HookD3D12
 		{
 			std::lock_guard<std::mutex> lock(gRTSSCompatibilityMutex);
 			RestoreRTSSSwapChainCompatibilityLocked();
-		}
-
-		if (Globals::mainWindow)
-		{
-			//inputhook::Remove(globals::mainWindow);
 		}
 
 		WaitForOverlayGPUIdle();
@@ -2670,11 +2833,13 @@ namespace HookD3D12
 
 		{
 			std::lock_guard<std::mutex> lock(gCommandQueueCaptureMutex);
+
 			if (gMostRecentDirectCommandQueue)
 			{
 				gMostRecentDirectCommandQueue->Release();
 				gMostRecentDirectCommandQueue = nullptr;
 			}
+
 			gMostRecentDirectCommandQueueThreadId = 0;
 
 			for (SwapChainCommandQueueBinding& binding : gSwapChainCommandQueueBindings)
@@ -2699,6 +2864,7 @@ namespace HookD3D12
 				uncaptured.pipelineState->Release();
 				uncaptured.pipelineState = nullptr;
 			}
+
 			if (uncaptured.observedGraphicsRootSignature)
 			{
 				uncaptured.observedGraphicsRootSignature->Release();
@@ -2729,8 +2895,6 @@ namespace HookD3D12
 			gDevice = nullptr;
 		}
 
-		// Disable hooks installed for D3D12
-		//hooks::Remove();
 	}
 
 	bool IsInitialized()

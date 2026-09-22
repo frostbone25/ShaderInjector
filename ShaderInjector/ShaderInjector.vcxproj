@@ -226,13 +226,6 @@
     <ClInclude Include="HookD3D12\UncapturedPipelineStateInfo.h" />
     <ClInclude Include="HookD3D12\D3D12\HookD3D12RuntimeState.h" />
     <ClInclude Include="HookD3D12\D3D12\HookD3D12ExecutionHookHelpers.h" />
-    <ClInclude Include="HookD3D12\HookD3D12OverlayStartup.h" />
-    <ClInclude Include="HookD3D12\HookD3D12PipelineRegistry.h" />
-    <ClInclude Include="HookD3D12\HookD3D12PipelineUtils.h" />
-    <ClInclude Include="HookD3D12\HookD3D12RenderPass.h" />
-    <ClInclude Include="HookD3D12\HookD3D12ReplacementLookup.h" />
-    <ClInclude Include="HookD3D12\HookD3D12ReplacementTemplates.h" />
-    <ClInclude Include="HookD3D12\HookD3D12Resources.h" />
     <ClInclude Include="Hooks.h" />
     <ClInclude Include="HookInput.h" />
     <ClInclude Include="IO\ProcessRunner.h" />

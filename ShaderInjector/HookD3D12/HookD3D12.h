@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <d3d12.h>
 #include <dxgi.h>
@@ -21,11 +22,185 @@
 #include "HookD3D12/PipelineStateInfo.h"
 #include "HookD3D12/RootSignatureInfo.h"
 #include "HookD3D12/UncapturedPipelineStateInfo.h"
-#include "HookD3D12/HookD3D12RenderPass.h"
-#include "HookD3D12/HookD3D12Resources.h"
+#include "HookD3D12/ScopedRenderPassInjection.h"
+#include "HookD3D12/ScopedPipelineActivity.h"
+
+namespace RenderPassRuntime
+{
+	struct PipelineOutputState;
+}
 
 namespace HookD3D12
 {
+	template<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type, typename PayloadT>
+	struct alignas(void*) PSOSubobject
+	{
+		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE type;
+		PayloadT payload;
+	};
+
+	static const size_t kSubobjectSizes[] =
+	{
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE,        ID3D12RootSignature*>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS,                    D3D12_SHADER_BYTECODE>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS,                    D3D12_SHADER_BYTECODE>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS,                    D3D12_SHADER_BYTECODE>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS,                    D3D12_SHADER_BYTECODE>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS,                    D3D12_SHADER_BYTECODE>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS,                    D3D12_SHADER_BYTECODE>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_STREAM_OUTPUT,         D3D12_STREAM_OUTPUT_DESC>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND,                 D3D12_BLEND_DESC>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK,           UINT>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER,            D3D12_RASTERIZER_DESC>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL,         D3D12_DEPTH_STENCIL_DESC>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT,          D3D12_INPUT_LAYOUT_DESC>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_IB_STRIP_CUT_VALUE,    D3D12_INDEX_BUFFER_STRIP_CUT_VALUE>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY,    D3D12_PRIMITIVE_TOPOLOGY_TYPE>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS, D3D12_RT_FORMAT_ARRAY>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT,  DXGI_FORMAT>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC,           DXGI_SAMPLE_DESC>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_NODE_MASK,             UINT>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CACHED_PSO,            D3D12_CACHED_PIPELINE_STATE>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_FLAGS,                 D3D12_PIPELINE_STATE_FLAGS>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL1,        D3D12_DEPTH_STENCIL_DESC1>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING,       D3D12_VIEW_INSTANCING_DESC>),
+		0, // Value 23 is reserved by the D3D12 subobject enum.
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS,                    D3D12_SHADER_BYTECODE>),
+		sizeof(PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS,                    D3D12_SHADER_BYTECODE>),
+	};
+
+	// Overlay startup readiness and resize coordination.
+	void ResetOverlayStartupGate();
+	bool IsSwapChainReadyForOverlayInitialization(IDXGISwapChain3* swapChain, DXGI_SWAP_CHAIN_DESC& outDesc);
+	void NotifyOverlayResizeBuffersSucceeded();
+
+	// Known pipeline-state tracking.
+	void RegisterKnownPipelineStateLocked(ID3D12PipelineState* pipelineStateObject);
+	void UnregisterKnownPipelineStateLocked(ID3D12PipelineState* pipelineStateObject);
+	bool IsKnownPipelineStateLocked(ID3D12PipelineState* pipelineStateObject);
+	bool MarkUntrackedBoundPipelineStateLocked(ID3D12PipelineState* pipelineStateObject);
+
+	// Pipeline stream layout parsing and replacement metadata helpers.
+	void FillCommonReplacementHashes(ShaderTarget::ShaderTargetDisk& replacement, uint64_t vsHash, uint64_t psHash, uint64_t csHash, uint64_t gsHash, uint64_t hsHash, uint64_t dsHash);
+	void FillCommonReplacementStageLengths(ShaderTarget::ShaderTargetDisk& replacement, SIZE_T vsSize, SIZE_T psSize, SIZE_T csSize, SIZE_T gsSize, SIZE_T hsSize, SIZE_T dsSize);
+	std::string HashStructText(const void* data, size_t size);
+	std::string JoinUIntValues(const UINT* values, UINT count);
+	std::string RenderTargetFormatsSignature(const DXGI_FORMAT* formats, UINT count);
+	std::string InputLayoutSignature(const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputElements);
+	std::string StreamOutputSignature(const std::vector<D3D12_SO_DECLARATION_ENTRY>& declarations, const std::vector<UINT>& strides);
+	std::string PipelineStreamSubobjectTypeSignature(const std::vector<uint8_t>& streamBlob);
+	uint64_t CanonicalPipelineFixedFunctionStateHash(const std::vector<uint8_t>& streamBlob);
+	void FillInputAndStreamOutputSignatures(ShaderTarget::ShaderTargetDisk& replacement, const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputElements, const std::vector<D3D12_SO_DECLARATION_ENTRY>& soDeclarations, const std::vector<UINT>& soStrides);
+	void FillGraphicsReplacementPortableState(ShaderTarget::ShaderTargetDisk& replacement, const GraphicsPipelineInfo& pipeline);
+	void FillStreamReplacementPortableStateFromBlob(ShaderTarget::ShaderTargetDisk& replacement, const PipelineStateInfo& pipeline);
+	RenderPassRuntime::PipelineOutputState ExtractPipelineOutputState(const PipelineStateInfo& pipeline);
+	ShaderTarget::ShaderPipelineStreamMetadataDisk BuildPipelineStreamMetadata(const PipelineStateInfo& pipeline);
+	void ApplyPipelineStreamMetadata(const ShaderTarget::ShaderPipelineStreamMetadataDisk& metadata, PipelineStateInfo& pipeline);
+	void RebindPipelineStateInfoPointerFields(PipelineStateInfo& info);
+	void ParsePipelineStream(const D3D12_PIPELINE_STATE_STREAM_DESC* desc, PipelineStateInfo& info);
+	void GatherD3D12PipelineInfo(IDXGISwapChain3* swapChain, ID3D12Device* device, ID3D12CommandQueue* commandQueue, D3D12PipelineInfo& pipelineInfo);
+
+	// Render-pass command-list hooks and their original function pointers.
+	bool IsInsideRenderPassInjection();
+	using FunctionDrawInstancedD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, UINT, UINT, UINT);
+	using FunctionDrawIndexedInstancedD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, UINT, UINT, INT, UINT);
+	using FunctionDispatchD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, UINT, UINT);
+	using FunctionIASetPrimitiveTopologyD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, D3D12_PRIMITIVE_TOPOLOGY);
+	using FunctionRSSetViewportsD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, const D3D12_VIEWPORT*);
+	using FunctionRSSetScissorRectsD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, const D3D12_RECT*);
+	using FunctionSetDescriptorHeapsD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, ID3D12DescriptorHeap* const*);
+	using FunctionSetRootDescriptorTableD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_DESCRIPTOR_HANDLE);
+	using FunctionSetRoot32BitConstantD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, UINT, UINT);
+	using FunctionSetRoot32BitConstantsD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, UINT, const void*, UINT);
+	using FunctionSetRootDescriptorD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_VIRTUAL_ADDRESS);
+	using FunctionIASetIndexBufferD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, const D3D12_INDEX_BUFFER_VIEW*);
+	using FunctionIASetVertexBuffersD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, UINT, const D3D12_VERTEX_BUFFER_VIEW*);
+	using FunctionOMSetRenderTargetsD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, const D3D12_CPU_DESCRIPTOR_HANDLE*, BOOL, const D3D12_CPU_DESCRIPTOR_HANDLE*);
+	using FunctionExecuteIndirectD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12CommandSignature*, UINT, ID3D12Resource*, UINT64, ID3D12Resource*, UINT64);
+	extern FunctionDrawInstancedD3D12 Original_DrawInstanced;
+	extern FunctionDrawIndexedInstancedD3D12 Original_DrawIndexedInstanced;
+	extern FunctionDispatchD3D12 Original_Dispatch;
+	extern FunctionIASetPrimitiveTopologyD3D12 Original_IASetPrimitiveTopology;
+	extern FunctionRSSetViewportsD3D12 Original_RSSetViewports;
+	extern FunctionRSSetScissorRectsD3D12 Original_RSSetScissorRects;
+	extern FunctionSetDescriptorHeapsD3D12 Original_SetDescriptorHeaps;
+	extern FunctionSetRootDescriptorTableD3D12 Original_SetComputeRootDescriptorTable;
+	extern FunctionSetRootDescriptorTableD3D12 Original_SetGraphicsRootDescriptorTable;
+	extern FunctionSetRoot32BitConstantD3D12 Original_SetComputeRoot32BitConstant;
+	extern FunctionSetRoot32BitConstantD3D12 Original_SetGraphicsRoot32BitConstant;
+	extern FunctionSetRoot32BitConstantsD3D12 Original_SetComputeRoot32BitConstants;
+	extern FunctionSetRoot32BitConstantsD3D12 Original_SetGraphicsRoot32BitConstants;
+	extern FunctionSetRootDescriptorD3D12 Original_SetComputeRootConstantBufferView;
+	extern FunctionSetRootDescriptorD3D12 Original_SetGraphicsRootConstantBufferView;
+	extern FunctionSetRootDescriptorD3D12 Original_SetComputeRootShaderResourceView;
+	extern FunctionSetRootDescriptorD3D12 Original_SetGraphicsRootShaderResourceView;
+	extern FunctionSetRootDescriptorD3D12 Original_SetComputeRootUnorderedAccessView;
+	extern FunctionSetRootDescriptorD3D12 Original_SetGraphicsRootUnorderedAccessView;
+	extern FunctionIASetIndexBufferD3D12 Original_IASetIndexBuffer;
+	extern FunctionIASetVertexBuffersD3D12 Original_IASetVertexBuffers;
+	extern FunctionOMSetRenderTargetsD3D12 Original_OMSetRenderTargets;
+	extern FunctionExecuteIndirectD3D12 Original_ExecuteIndirect;
+
+	// Cached-blob and persisted replacement lookup helpers.
+	bool GetPipelineCachedBlobInfo(ID3D12PipelineState* pipelineState, uint64_t& outHash, SIZE_T& outSize, std::vector<uint8_t>* outBytes = nullptr);
+	bool SupportsCachedBlobContentMatching(SIZE_T cachedBlobSize);
+	bool SupportsCachedBlobMetadataMatching(SIZE_T cachedBlobSize);
+	void ResetCachedBlobContentLookup();
+	bool MatchPersistedCachedBlobContent(const std::string& persistedBlobPath, const std::string& persistedBlobLength, const std::vector<uint8_t>& currentBlob, double& outMatchingRatio, size_t& outLongestMatchingRun);
+	bool PersistedPipelineEntryTargetsShader(const ShaderTarget::ShaderTargetDisk& replacement, const ShaderTarget::ShaderTargetDisk& pipelineEntry);
+	bool PersistedPipelineEntryTargetsShader(const ShaderTarget::ShaderTargetDisk& replacement, const ShaderTarget::ShaderPipelineTemplateDisk& pipelineEntry);
+	bool PersistedPipelineStreamsAreEquivalent(const std::string& firstStreamPath, const std::string& secondStreamPath);
+	bool ReplacementHasCachedBlobHash(const ShaderTarget::ShaderTargetDisk& replacement, uint64_t cachedBlobHash);
+	int FindEnabledShaderTargetByCachedBlob(uint64_t cachedBlobHash);
+	int FindEnabledShaderTargetByCachedBlobMetadata(SIZE_T cachedBlobSize, uint64_t rootSignatureHash, bool computePipeline);
+	int FindEnabledShaderTargetByCachedBlobContent(const std::vector<uint8_t>& cachedBlob, double& outMatchingRatio, size_t& outLongestMatchingRun);
+	bool ReplacementHashMatches(uint64_t pipelineHash, const std::string& replacementHash);
+	bool GraphicsPipelineMatchesReplacementTemplate(const GraphicsPipelineInfo& pipeline, const ShaderTarget::ShaderTargetDisk& replacement);
+	bool StreamPipelineMatchesReplacementTemplate(const PipelineStateInfo& pipeline, const ShaderTarget::ShaderTargetDisk& replacement);
+	D3D12_PIPELINE_STATE_SUBOBJECT_TYPE SubobjectTypeForShaderType(ShaderTarget::ShaderType shaderType);
+	const ShaderTarget::ShaderTargetDisk* FindActiveShaderTarget(const std::string& shaderTargetName, uint64_t shaderHash, ShaderTarget::ShaderType shaderType);
+
+	// Persisted shader and stream replacement template helpers.
+	bool LoadPersistedShaderBlob(const std::string& path, std::vector<uint8_t>& bytecode, uint64_t& hash, SIZE_T& size);
+	bool LoadPersistedStreamTemplateFromReplacement(const ShaderTarget::ShaderTargetDisk& replacement, PipelineStateInfo& outPipeline);
+	void BackfillReplacementPortableMetadataFromSidecars(ShaderTarget::ShaderTargetDisk& replacement);
+	uint64_t StreamShaderHashForType(const PipelineStateInfo& pipeline, ShaderTarget::ShaderType shaderType);
+	bool StreamPipelineHasShaderHash(const PipelineStateInfo& pipeline, ShaderTarget::ShaderType shaderType, uint64_t shaderHash);
+	void FillPipelineTemplateCommonState(ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate, const PipelineStateInfo& pipeline);
+	ShaderTarget::ShaderTargetDisk ReplacementWithPipelineTemplate(const ShaderTarget::ShaderTargetDisk& replacement, const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate);
+	SIZE_T CountMatchingBytes(const std::vector<uint8_t>& lhs, const std::vector<uint8_t>& rhs);
+	bool WriteStreamPipelineTemplateVariant(ShaderTarget::ShaderTargetDisk& replacement, const PipelineStateInfo& pipeline, int pipelineIndex, int templateIndex, bool& ok);
+	void WriteMatchingStreamPipelineTemplateVariants(ShaderTarget::ShaderTargetDisk& replacement, ShaderTarget::ShaderType shaderType, uint64_t shaderHash, bool& ok);
+	bool PersistAppliedStreamPipelineTemplate(ShaderTarget::ShaderTargetDisk& replacement, const PipelineStateInfo& pipeline, int pipelineIndex, ShaderTarget::ShaderType shaderType, uint64_t shaderHash);
+	bool PersistStreamPipelineTemplatesForShaderAlias(ShaderTarget::ShaderTargetDisk& replacement, ShaderTarget::ShaderType shaderType, uint64_t shaderHash);
+	bool PersistObservedPipelineCacheAlias(ShaderTarget::ShaderTargetDisk& replacement, const std::string& pipelineTemplateName, uint64_t cachedBlobHash);
+	bool SelectPersistedPipelineTemplateForUncaptured(const ShaderTarget::ShaderTargetDisk& replacement, const UncapturedPipelineStateInfo& uncaptured, ShaderTarget::ShaderTargetDisk& outTemplateReplacement, std::string& outTemplateName, SIZE_T& outMatchingBytes);
+
+	// Device resource and descriptor hook types.
+	using FunctionCreateDescriptorHeapD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_DESCRIPTOR_HEAP_DESC*, REFIID, void**);
+	using FunctionCreateConstantBufferViewD3D12 = void(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_CONSTANT_BUFFER_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
+	using FunctionCreateShaderResourceViewD3D12 = void(STDMETHODCALLTYPE*)(ID3D12Device*, ID3D12Resource*, const D3D12_SHADER_RESOURCE_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
+	using FunctionCreateUnorderedAccessViewD3D12 = void(STDMETHODCALLTYPE*)(ID3D12Device*, ID3D12Resource*, ID3D12Resource*, const D3D12_UNORDERED_ACCESS_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
+	using FunctionCreateRenderTargetViewD3D12 = void(STDMETHODCALLTYPE*)(ID3D12Device*, ID3D12Resource*, const D3D12_RENDER_TARGET_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
+	using FunctionCreateDepthStencilViewD3D12 = void(STDMETHODCALLTYPE*)(ID3D12Device*, ID3D12Resource*, const D3D12_DEPTH_STENCIL_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
+	using FunctionCreateSamplerD3D12 = void(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_SAMPLER_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
+	using FunctionCopyDescriptorsD3D12 = void(STDMETHODCALLTYPE*)(ID3D12Device*, UINT, const D3D12_CPU_DESCRIPTOR_HANDLE*, const UINT*, UINT, const D3D12_CPU_DESCRIPTOR_HANDLE*, const UINT*, D3D12_DESCRIPTOR_HEAP_TYPE);
+	using FunctionCopyDescriptorsSimpleD3D12 = void(STDMETHODCALLTYPE*)(ID3D12Device*, UINT, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_DESCRIPTOR_HEAP_TYPE);
+	using FunctionCreateCommittedResourceD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_HEAP_PROPERTIES*, D3D12_HEAP_FLAGS, const D3D12_RESOURCE_DESC*, D3D12_RESOURCE_STATES, const D3D12_CLEAR_VALUE*, REFIID, void**);
+	using FunctionCreatePlacedResourceD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, ID3D12Heap*, UINT64, const D3D12_RESOURCE_DESC*, D3D12_RESOURCE_STATES, const D3D12_CLEAR_VALUE*, REFIID, void**);
+	using FunctionCreateReservedResourceD3D12 = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device*, const D3D12_RESOURCE_DESC*, D3D12_RESOURCE_STATES, const D3D12_CLEAR_VALUE*, REFIID, void**);
+	extern FunctionCreateDescriptorHeapD3D12 Original_CreateDescriptorHeap;
+	extern FunctionCreateConstantBufferViewD3D12 Original_CreateConstantBufferView;
+	extern FunctionCreateShaderResourceViewD3D12 Original_CreateShaderResourceView;
+	extern FunctionCreateUnorderedAccessViewD3D12 Original_CreateUnorderedAccessView;
+	extern FunctionCreateRenderTargetViewD3D12 Original_CreateRenderTargetView;
+	extern FunctionCreateDepthStencilViewD3D12 Original_CreateDepthStencilView;
+	extern FunctionCreateSamplerD3D12 Original_CreateSampler;
+	extern FunctionCopyDescriptorsD3D12 Original_CopyDescriptors;
+	extern FunctionCopyDescriptorsSimpleD3D12 Original_CopyDescriptorsSimple;
+	extern FunctionCreateCommittedResourceD3D12 Original_CreateCommittedResource;
+	extern FunctionCreatePlacedResourceD3D12 Original_CreatePlacedResource;
+	extern FunctionCreateReservedResourceD3D12 Original_CreateReservedResource;
 	// Return the device-specific spacing between descriptors in a heap.
 	UINT DescriptorIncrementSize(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE heapType);
 
@@ -70,21 +245,6 @@ namespace HookD3D12
 	extern char gShaderTargetNameBuffer[256];
 	extern bool gLoadedShaderTargetsOnce;
 	extern PixelShaderSelectionStyle gShaderSelectionStyle;
-
-
-	// Mark work performed inside a pipeline hook so nested injector calls can be recognized.
-	class ScopedPipelineActivity
-	{
-	public:
-		explicit ScopedPipelineActivity(bool trackActivity = true);
-		~ScopedPipelineActivity();
-
-		ScopedPipelineActivity(const ScopedPipelineActivity&) = delete;
-		ScopedPipelineActivity& operator=(const ScopedPipelineActivity&) = delete;
-
-	private:
-		bool trackingActivity = false;
-	};
 
 
 	// Look up replacements and schedule or invalidate PSO rebuild work when state changes.
@@ -356,7 +516,7 @@ namespace HookD3D12
 	// Device resources and descriptors
 	// Track resources and views that can later be inherited by a render pass.
 	// reference - https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12device-createshaderresourceview
-	// Original_* function types and pointers are declared in HookD3D12Resources.h.
+	// Original_* function types and pointers are declared above.
 	// Create heaps and views so later passes can identify the resources behind descriptors.
 	HRESULT STDMETHODCALLTYPE Hook_CreateDescriptorHeap(ID3D12Device*, const D3D12_DESCRIPTOR_HEAP_DESC*, REFIID, void**);
 	void STDMETHODCALLTYPE Hook_CreateConstantBufferView(ID3D12Device*, const D3D12_CONSTANT_BUFFER_VIEW_DESC*, D3D12_CPU_DESCRIPTOR_HANDLE);
@@ -392,7 +552,7 @@ namespace HookD3D12
 	// Command recording for render passes
 	// Observe draws, dispatches, state changes, and resource bindings at execution boundaries.
 	// reference - https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12graphicscommandlist-drawinstanced
-	// Original_* function types and pointers are declared in HookD3D12RenderPass.h.
+	// Original_* function types and pointers are declared above.
 	// Draw and dispatch boundaries determine when configured passes execute.
 	void STDMETHODCALLTYPE Hook_DrawInstanced(ID3D12GraphicsCommandList*, UINT, UINT, UINT, UINT);
 	void STDMETHODCALLTYPE Hook_DrawIndexedInstanced(ID3D12GraphicsCommandList*, UINT, UINT, UINT, INT, UINT);
@@ -450,6 +610,4 @@ namespace HookD3D12
 	void STDMETHODCALLTYPE Handle_IASetVertexBuffers(ID3D12GraphicsCommandList*, UINT, UINT, const D3D12_VERTEX_BUFFER_VIEW*);
 	void STDMETHODCALLTYPE Handle_OMSetRenderTargets(ID3D12GraphicsCommandList*, UINT, const D3D12_CPU_DESCRIPTOR_HANDLE*, BOOL, const D3D12_CPU_DESCRIPTOR_HANDLE*);
 	void STDMETHODCALLTYPE Handle_ExecuteIndirect(ID3D12GraphicsCommandList*, ID3D12CommandSignature*, UINT, ID3D12Resource*, UINT64, ID3D12Resource*, UINT64);
-
-	//ID3D12PipelineLibrary
 }

@@ -1,8 +1,7 @@
-#include "../HookD3D12.h"
 
 #include <array>
 
-#include "../HookD3D12RenderPass.h"
+#include "../HookD3D12.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
 #include "RenderPass/RenderPassRuntime.h"
 

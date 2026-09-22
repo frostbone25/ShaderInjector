@@ -1,5 +1,4 @@
 //HookD3D12ReplacementLookup.cpp
-#include "HookD3D12ReplacementLookup.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -7,296 +6,288 @@
 //custom
 #include "Hash.h"
 #include "ShaderTarget/DatabaseShaderTargets.h"
-#include "HookD3D12PipelineUtils.h"
-#include "HookD3D12ReplacementTemplates.h"
+#include "HookD3D12.h"
+#include "CachedBlobContentMatch.h"
 #include "ShaderDiscovery.h"
 #include "IO/ShaderInjectorIO.h"
 
 namespace HookD3D12
 {
-	namespace
+	// Very small driver cache records can be mostly common bookkeeping with only
+	// a few identifying bytes. Records at or above 2 KiB still have to satisfy the
+	// strict byte-ratio, stable-run, and cross-target ambiguity checks below. This
+	// includes compact persisted graphics PSOs that would otherwise never recover
+	// on a warm-cache launch.
+	constexpr size_t minimumContentMatchSize = 2048;
+	constexpr double minimumMatchingByteRatio = 0.98;
+	constexpr double minimumStableRunRatio = 0.50;
+	constexpr double ambiguityRatioMargin = 0.002;
+
+	std::unordered_map<std::string, std::vector<uint8_t>> gCachedBlobSidecars;
+	std::unordered_map<std::string, uint64_t> gPipelineStreamSidecarHashes;
+
+	uint64_t SerializedShaderHashForType(
+		const ShaderTarget::ShaderTargetDisk& pipelineEntry,
+		ShaderTarget::ShaderType shaderType)
 	{
-		// Very small driver cache records can be mostly common bookkeeping with only
-		// a few identifying bytes. Records at or above 2 KiB still have to satisfy the
-		// strict byte-ratio, stable-run, and cross-target ambiguity checks below. This
-		// includes compact persisted graphics PSOs that would otherwise never recover
-		// on a warm-cache launch.
-		constexpr size_t minimumContentMatchSize = 2048;
-		constexpr double minimumMatchingByteRatio = 0.98;
-		constexpr double minimumStableRunRatio = 0.50;
-		constexpr double ambiguityRatioMargin = 0.002;
-
-		struct CachedBlobContentMatch
+		switch (shaderType)
 		{
-			double matchingRatio = 0.0;
-			size_t longestMatchingRun = 0;
+		case ShaderTarget::VertexShader: return Hash::ParseHashText(pipelineEntry.vsHash);
+		case ShaderTarget::HullShader: return Hash::ParseHashText(pipelineEntry.hsHash);
+		case ShaderTarget::DomainShader: return Hash::ParseHashText(pipelineEntry.dsHash);
+		case ShaderTarget::GeometryShader: return Hash::ParseHashText(pipelineEntry.gsHash);
+		case ShaderTarget::PixelShader: return Hash::ParseHashText(pipelineEntry.psHash);
+		case ShaderTarget::ComputeShader: return Hash::ParseHashText(pipelineEntry.csHash);
+		default: return 0;
+		}
+	}
+
+	uint64_t SerializedShaderHashForType(
+		const ShaderTarget::ShaderPipelineTemplateDisk& pipelineEntry,
+		ShaderTarget::ShaderType shaderType)
+	{
+		switch (shaderType)
+		{
+		case ShaderTarget::VertexShader: return Hash::ParseHashText(pipelineEntry.vsHash);
+		case ShaderTarget::HullShader: return Hash::ParseHashText(pipelineEntry.hsHash);
+		case ShaderTarget::DomainShader: return Hash::ParseHashText(pipelineEntry.dsHash);
+		case ShaderTarget::GeometryShader: return Hash::ParseHashText(pipelineEntry.gsHash);
+		case ShaderTarget::PixelShader: return Hash::ParseHashText(pipelineEntry.psHash);
+		case ShaderTarget::ComputeShader: return Hash::ParseHashText(pipelineEntry.csHash);
+		default: return 0;
+		}
+	}
+
+	bool TargetContainsSerializedShaderHash(
+		const ShaderTarget::ShaderTargetDisk& replacement,
+		uint64_t shaderHash)
+	{
+		if (!shaderHash)
+			return false;
+
+		if (Hash::ParseHashText(replacement.originalShaderBytecodeHash) == shaderHash)
+			return true;
+
+		return std::any_of(
+			replacement.shaderBytecodeHashAliases.begin(),
+			replacement.shaderBytecodeHashAliases.end(),
+			[shaderHash](const std::string& aliasHash)
+			{
+				return Hash::ParseHashText(aliasHash) == shaderHash;
+			});
+	}
+
+	bool CachedBlobHashMatches(
+		const std::string& primaryHash,
+		const std::vector<std::string>& hashAliases,
+		uint64_t cachedBlobHash)
+	{
+		if (!cachedBlobHash)
+			return false;
+		if (Hash::ParseHashText(primaryHash) == cachedBlobHash)
+			return true;
+		return std::any_of(
+			hashAliases.begin(),
+			hashAliases.end(),
+			[cachedBlobHash](const std::string& hashAlias)
+			{
+				return Hash::ParseHashText(hashAlias) == cachedBlobHash;
+			});
+	}
+
+	uint64_t CanonicalPipelineStreamSidecarHash(const std::string& path)
+	{
+		if (path.empty())
+			return 0;
+
+		const auto cachedHash = gPipelineStreamSidecarHashes.find(path);
+		if (cachedHash != gPipelineStreamSidecarHashes.end())
+			return cachedHash->second;
+
+		std::vector<uint8_t> streamBlob;
+		if (!ShaderInjectorIO::LoadDXILBlobFromDisk(path, streamBlob) || streamBlob.empty())
+		{
+			gPipelineStreamSidecarHashes.emplace(path, 0);
+			return 0;
+		}
+
+		const uint64_t streamHash = CanonicalPipelineFixedFunctionStateHash(streamBlob);
+		gPipelineStreamSidecarHashes.emplace(path, streamHash);
+		return streamHash;
+	}
+
+	struct CapturedShaderKey
+	{
+		uint64_t hash = 0;
+		ShaderTarget::ShaderType type = ShaderTarget::Unknown;
+
+		bool operator==(const CapturedShaderKey& other) const
+		{
+			return hash == other.hash && type == other.type;
+		}
+	};
+
+	struct CapturedShaderKeyHasher
+	{
+		size_t operator()(const CapturedShaderKey& key) const
+		{
+			return static_cast<size_t>(key.hash ^ (static_cast<uint64_t>(key.type) << 57));
+		}
+	};
+
+	struct CapturedShaderLocation
+	{
+		bool streamPipeline = false;
+		size_t pipelineIndex = 0;
+	};
+
+	std::unordered_map<CapturedShaderKey, CapturedShaderLocation, CapturedShaderKeyHasher> gCapturedShaderLocations;
+	size_t gIndexedGraphicsPipelineCount = 0;
+	size_t gIndexedStreamPipelineCount = 0;
+
+	uint64_t GraphicsShaderHash(const GraphicsPipelineInfo& pipeline, ShaderTarget::ShaderType shaderType)
+	{
+		switch (shaderType)
+		{
+		case ShaderTarget::VertexShader: return pipeline.vsHash;
+		case ShaderTarget::PixelShader: return pipeline.psHash;
+		case ShaderTarget::GeometryShader: return pipeline.gsHash;
+		case ShaderTarget::HullShader: return pipeline.hsHash;
+		case ShaderTarget::DomainShader: return pipeline.dsHash;
+		default: return 0;
+		}
+	}
+
+	const std::vector<uint8_t>& GraphicsShaderBytecode(const GraphicsPipelineInfo& pipeline, ShaderTarget::ShaderType shaderType)
+	{
+		static const std::vector<uint8_t> emptyBytecode;
+		switch (shaderType)
+		{
+		case ShaderTarget::VertexShader: return pipeline.vsBytecode;
+		case ShaderTarget::PixelShader: return pipeline.psBytecode;
+		case ShaderTarget::GeometryShader: return pipeline.gsBytecode;
+		case ShaderTarget::HullShader: return pipeline.hsBytecode;
+		case ShaderTarget::DomainShader: return pipeline.dsBytecode;
+		default: return emptyBytecode;
+		}
+	}
+
+	const std::vector<uint8_t>& StreamShaderBytecode(const PipelineStateInfo& pipeline, ShaderTarget::ShaderType shaderType)
+	{
+		static const std::vector<uint8_t> emptyBytecode;
+		switch (shaderType)
+		{
+		case ShaderTarget::VertexShader: return pipeline.vsBytecode;
+		case ShaderTarget::PixelShader: return pipeline.psBytecode;
+		case ShaderTarget::ComputeShader: return pipeline.csBytecode;
+		case ShaderTarget::GeometryShader: return pipeline.gsBytecode;
+		case ShaderTarget::HullShader: return pipeline.hsBytecode;
+		case ShaderTarget::DomainShader: return pipeline.dsBytecode;
+		default: return emptyBytecode;
+		}
+	}
+
+	void RebuildCapturedShaderLocationIndex()
+	{
+		gCapturedShaderLocations.clear();
+		const ShaderTarget::ShaderType graphicsTypes[] =
+		{
+			ShaderTarget::VertexShader,
+			ShaderTarget::PixelShader,
+			ShaderTarget::GeometryShader,
+			ShaderTarget::HullShader,
+			ShaderTarget::DomainShader,
+		};
+		const ShaderTarget::ShaderType streamTypes[] =
+		{
+			ShaderTarget::VertexShader,
+			ShaderTarget::PixelShader,
+			ShaderTarget::ComputeShader,
+			ShaderTarget::GeometryShader,
+			ShaderTarget::HullShader,
+			ShaderTarget::DomainShader,
 		};
 
-		std::unordered_map<std::string, std::vector<uint8_t>> gCachedBlobSidecars;
-		std::unordered_map<std::string, uint64_t> gPipelineStreamSidecarHashes;
-
-		uint64_t SerializedShaderHashForType(
-			const ShaderTarget::ShaderTargetDisk& pipelineEntry,
-			ShaderTarget::ShaderType shaderType)
+		for (size_t pipelineIndex = 0; pipelineIndex < gGraphicsPipelines.size(); ++pipelineIndex)
 		{
-			switch (shaderType)
+			for (ShaderTarget::ShaderType shaderType : graphicsTypes)
 			{
-				case ShaderTarget::VertexShader: return Hash::ParseHashText(pipelineEntry.vsHash);
-				case ShaderTarget::HullShader: return Hash::ParseHashText(pipelineEntry.hsHash);
-				case ShaderTarget::DomainShader: return Hash::ParseHashText(pipelineEntry.dsHash);
-				case ShaderTarget::GeometryShader: return Hash::ParseHashText(pipelineEntry.gsHash);
-				case ShaderTarget::PixelShader: return Hash::ParseHashText(pipelineEntry.psHash);
-				case ShaderTarget::ComputeShader: return Hash::ParseHashText(pipelineEntry.csHash);
-				default: return 0;
+				const uint64_t shaderHash = GraphicsShaderHash(gGraphicsPipelines[pipelineIndex], shaderType);
+				if (shaderHash != 0)
+					gCapturedShaderLocations.emplace(CapturedShaderKey{ shaderHash, shaderType }, CapturedShaderLocation{ false, pipelineIndex });
 			}
 		}
 
-		uint64_t SerializedShaderHashForType(
-			const ShaderTarget::ShaderPipelineTemplateDisk& pipelineEntry,
-			ShaderTarget::ShaderType shaderType)
+		for (size_t pipelineIndex = 0; pipelineIndex < gPipelineStates.size(); ++pipelineIndex)
 		{
-			switch (shaderType)
+			for (ShaderTarget::ShaderType shaderType : streamTypes)
 			{
-				case ShaderTarget::VertexShader: return Hash::ParseHashText(pipelineEntry.vsHash);
-				case ShaderTarget::HullShader: return Hash::ParseHashText(pipelineEntry.hsHash);
-				case ShaderTarget::DomainShader: return Hash::ParseHashText(pipelineEntry.dsHash);
-				case ShaderTarget::GeometryShader: return Hash::ParseHashText(pipelineEntry.gsHash);
-				case ShaderTarget::PixelShader: return Hash::ParseHashText(pipelineEntry.psHash);
-				case ShaderTarget::ComputeShader: return Hash::ParseHashText(pipelineEntry.csHash);
-				default: return 0;
+				const uint64_t shaderHash = StreamShaderHashForType(gPipelineStates[pipelineIndex], shaderType);
+				if (shaderHash != 0)
+					gCapturedShaderLocations[CapturedShaderKey{ shaderHash, shaderType }] = CapturedShaderLocation{ true, pipelineIndex };
 			}
 		}
 
-		bool TargetContainsSerializedShaderHash(
-			const ShaderTarget::ShaderTargetDisk& replacement,
-			uint64_t shaderHash)
+		gIndexedGraphicsPipelineCount = gGraphicsPipelines.size();
+		gIndexedStreamPipelineCount = gPipelineStates.size();
+	}
+
+	const std::vector<uint8_t>* FindCapturedShaderBytecode(
+		uint64_t shaderHash,
+		ShaderTarget::ShaderType shaderType,
+		bool& outStreamPipeline)
+	{
+		outStreamPipeline = false;
+		if (gIndexedGraphicsPipelineCount != gGraphicsPipelines.size() ||
+			gIndexedStreamPipelineCount != gPipelineStates.size())
 		{
-			if (!shaderHash)
-				return false;
-
-			if (Hash::ParseHashText(replacement.originalShaderBytecodeHash) == shaderHash)
-				return true;
-
-			return std::any_of(
-				replacement.shaderBytecodeHashAliases.begin(),
-				replacement.shaderBytecodeHashAliases.end(),
-				[shaderHash](const std::string& aliasHash)
-				{
-					return Hash::ParseHashText(aliasHash) == shaderHash;
-				});
+			RebuildCapturedShaderLocationIndex();
 		}
 
-		bool CachedBlobHashMatches(
-			const std::string& primaryHash,
-			const std::vector<std::string>& hashAliases,
-			uint64_t cachedBlobHash)
+		const auto location = gCapturedShaderLocations.find(CapturedShaderKey{ shaderHash, shaderType });
+		if (location == gCapturedShaderLocations.end())
+			return nullptr;
+
+		outStreamPipeline = location->second.streamPipeline;
+		if (outStreamPipeline)
 		{
-			if (!cachedBlobHash)
-				return false;
-			if (Hash::ParseHashText(primaryHash) == cachedBlobHash)
-				return true;
-			return std::any_of(
-				hashAliases.begin(),
-				hashAliases.end(),
-				[cachedBlobHash](const std::string& hashAlias)
-				{
-					return Hash::ParseHashText(hashAlias) == cachedBlobHash;
-				});
-		}
-
-		uint64_t CanonicalPipelineStreamSidecarHash(const std::string& path)
-		{
-			if (path.empty())
-				return 0;
-
-			const auto cachedHash = gPipelineStreamSidecarHashes.find(path);
-			if (cachedHash != gPipelineStreamSidecarHashes.end())
-				return cachedHash->second;
-
-			std::vector<uint8_t> streamBlob;
-			if (!ShaderInjectorIO::LoadDXILBlobFromDisk(path, streamBlob) || streamBlob.empty())
-			{
-				gPipelineStreamSidecarHashes.emplace(path, 0);
-				return 0;
-			}
-
-			const uint64_t streamHash = CanonicalPipelineFixedFunctionStateHash(streamBlob);
-			gPipelineStreamSidecarHashes.emplace(path, streamHash);
-			return streamHash;
-		}
-
-		struct CapturedShaderKey
-		{
-			uint64_t hash = 0;
-			ShaderTarget::ShaderType type = ShaderTarget::Unknown;
-
-			bool operator==(const CapturedShaderKey& other) const
-			{
-				return hash == other.hash && type == other.type;
-			}
-		};
-
-		struct CapturedShaderKeyHasher
-		{
-			size_t operator()(const CapturedShaderKey& key) const
-			{
-				return static_cast<size_t>(key.hash ^ (static_cast<uint64_t>(key.type) << 57));
-			}
-		};
-
-		struct CapturedShaderLocation
-		{
-			bool streamPipeline = false;
-			size_t pipelineIndex = 0;
-		};
-
-		std::unordered_map<CapturedShaderKey, CapturedShaderLocation, CapturedShaderKeyHasher> gCapturedShaderLocations;
-		size_t gIndexedGraphicsPipelineCount = 0;
-		size_t gIndexedStreamPipelineCount = 0;
-
-		uint64_t GraphicsShaderHash(const GraphicsPipelineInfo& pipeline, ShaderTarget::ShaderType shaderType)
-		{
-			switch (shaderType)
-			{
-				case ShaderTarget::VertexShader: return pipeline.vsHash;
-				case ShaderTarget::PixelShader: return pipeline.psHash;
-				case ShaderTarget::GeometryShader: return pipeline.gsHash;
-				case ShaderTarget::HullShader: return pipeline.hsHash;
-				case ShaderTarget::DomainShader: return pipeline.dsHash;
-				default: return 0;
-			}
-		}
-
-		const std::vector<uint8_t>& GraphicsShaderBytecode(const GraphicsPipelineInfo& pipeline, ShaderTarget::ShaderType shaderType)
-		{
-			static const std::vector<uint8_t> emptyBytecode;
-			switch (shaderType)
-			{
-				case ShaderTarget::VertexShader: return pipeline.vsBytecode;
-				case ShaderTarget::PixelShader: return pipeline.psBytecode;
-				case ShaderTarget::GeometryShader: return pipeline.gsBytecode;
-				case ShaderTarget::HullShader: return pipeline.hsBytecode;
-				case ShaderTarget::DomainShader: return pipeline.dsBytecode;
-				default: return emptyBytecode;
-			}
-		}
-
-		const std::vector<uint8_t>& StreamShaderBytecode(const PipelineStateInfo& pipeline, ShaderTarget::ShaderType shaderType)
-		{
-			static const std::vector<uint8_t> emptyBytecode;
-			switch (shaderType)
-			{
-				case ShaderTarget::VertexShader: return pipeline.vsBytecode;
-				case ShaderTarget::PixelShader: return pipeline.psBytecode;
-				case ShaderTarget::ComputeShader: return pipeline.csBytecode;
-				case ShaderTarget::GeometryShader: return pipeline.gsBytecode;
-				case ShaderTarget::HullShader: return pipeline.hsBytecode;
-				case ShaderTarget::DomainShader: return pipeline.dsBytecode;
-				default: return emptyBytecode;
-			}
-		}
-
-		void RebuildCapturedShaderLocationIndex()
-		{
-			gCapturedShaderLocations.clear();
-			const ShaderTarget::ShaderType graphicsTypes[] =
-			{
-				ShaderTarget::VertexShader,
-				ShaderTarget::PixelShader,
-				ShaderTarget::GeometryShader,
-				ShaderTarget::HullShader,
-				ShaderTarget::DomainShader,
-			};
-			const ShaderTarget::ShaderType streamTypes[] =
-			{
-				ShaderTarget::VertexShader,
-				ShaderTarget::PixelShader,
-				ShaderTarget::ComputeShader,
-				ShaderTarget::GeometryShader,
-				ShaderTarget::HullShader,
-				ShaderTarget::DomainShader,
-			};
-
-			for (size_t pipelineIndex = 0; pipelineIndex < gGraphicsPipelines.size(); ++pipelineIndex)
-			{
-				for (ShaderTarget::ShaderType shaderType : graphicsTypes)
-				{
-					const uint64_t shaderHash = GraphicsShaderHash(gGraphicsPipelines[pipelineIndex], shaderType);
-					if (shaderHash != 0)
-						gCapturedShaderLocations.emplace(CapturedShaderKey{ shaderHash, shaderType }, CapturedShaderLocation{ false, pipelineIndex });
-				}
-			}
-
-			for (size_t pipelineIndex = 0; pipelineIndex < gPipelineStates.size(); ++pipelineIndex)
-			{
-				for (ShaderTarget::ShaderType shaderType : streamTypes)
-				{
-					const uint64_t shaderHash = StreamShaderHashForType(gPipelineStates[pipelineIndex], shaderType);
-					if (shaderHash != 0)
-						gCapturedShaderLocations[CapturedShaderKey{ shaderHash, shaderType }] = CapturedShaderLocation{ true, pipelineIndex };
-				}
-			}
-
-			gIndexedGraphicsPipelineCount = gGraphicsPipelines.size();
-			gIndexedStreamPipelineCount = gPipelineStates.size();
-		}
-
-		const std::vector<uint8_t>* FindCapturedShaderBytecode(
-			uint64_t shaderHash,
-			ShaderTarget::ShaderType shaderType,
-			bool& outStreamPipeline)
-		{
-			outStreamPipeline = false;
-			if (gIndexedGraphicsPipelineCount != gGraphicsPipelines.size() ||
-				gIndexedStreamPipelineCount != gPipelineStates.size())
-			{
-				RebuildCapturedShaderLocationIndex();
-			}
-
-			const auto location = gCapturedShaderLocations.find(CapturedShaderKey{ shaderHash, shaderType });
-			if (location == gCapturedShaderLocations.end())
+			if (location->second.pipelineIndex >= gPipelineStates.size())
 				return nullptr;
-
-			outStreamPipeline = location->second.streamPipeline;
-			if (outStreamPipeline)
-			{
-				if (location->second.pipelineIndex >= gPipelineStates.size())
-					return nullptr;
-				return &StreamShaderBytecode(gPipelineStates[location->second.pipelineIndex], shaderType);
-			}
-
-			if (location->second.pipelineIndex >= gGraphicsPipelines.size())
-				return nullptr;
-			return &GraphicsShaderBytecode(gGraphicsPipelines[location->second.pipelineIndex], shaderType);
+			return &StreamShaderBytecode(gPipelineStates[location->second.pipelineIndex], shaderType);
 		}
 
-		const std::vector<uint8_t>& LoadCachedBlobSidecar(const std::string& path)
+		if (location->second.pipelineIndex >= gGraphicsPipelines.size())
+			return nullptr;
+		return &GraphicsShaderBytecode(gGraphicsPipelines[location->second.pipelineIndex], shaderType);
+	}
+
+	const std::vector<uint8_t>& LoadCachedBlobSidecar(const std::string& path)
+	{
+		auto existing = gCachedBlobSidecars.find(path);
+		if (existing != gCachedBlobSidecars.end())
+			return existing->second;
+
+		std::vector<uint8_t> bytes;
+		if (!path.empty())
+			ShaderInjectorIO::LoadDXILBlobFromDisk(path, bytes);
+
+		return gCachedBlobSidecars.emplace(path, std::move(bytes)).first->second;
+	}
+
+	CachedBlobContentMatch CompareCachedBlobContent(
+		const std::vector<uint8_t>& persistedBlob,
+		const std::vector<uint8_t>& currentBlob)
+	{
+		CachedBlobContentMatch match{};
+		const size_t smallerSize = (std::min)(persistedBlob.size(), currentBlob.size());
+		const size_t largerSize = (std::max)(persistedBlob.size(), currentBlob.size());
+		if (smallerSize < minimumContentMatchSize || largerSize == 0 ||
+			static_cast<double>(smallerSize) / static_cast<double>(largerSize) < minimumMatchingByteRatio)
 		{
-			auto existing = gCachedBlobSidecars.find(path);
-			if (existing != gCachedBlobSidecars.end())
-				return existing->second;
-
-			std::vector<uint8_t> bytes;
-			if (!path.empty())
-				ShaderInjectorIO::LoadDXILBlobFromDisk(path, bytes);
-
-			return gCachedBlobSidecars.emplace(path, std::move(bytes)).first->second;
+			return match;
 		}
 
-		CachedBlobContentMatch CompareCachedBlobContent(
-			const std::vector<uint8_t>& persistedBlob,
-			const std::vector<uint8_t>& currentBlob)
-		{
-			CachedBlobContentMatch match{};
-			const size_t smallerSize = (std::min)(persistedBlob.size(), currentBlob.size());
-			const size_t largerSize = (std::max)(persistedBlob.size(), currentBlob.size());
-			if (smallerSize < minimumContentMatchSize || largerSize == 0 ||
-				static_cast<double>(smallerSize) / static_cast<double>(largerSize) < minimumMatchingByteRatio)
-			{
-				return match;
-			}
-
-			const auto compareAligned = [&](size_t persistedOffset, size_t currentOffset, size_t byteCount)
+		const auto compareAligned = [&](size_t persistedOffset, size_t currentOffset, size_t byteCount)
 			{
 				CachedBlobContentMatch candidate{};
 				size_t matchingBytes = 0;
@@ -316,7 +307,7 @@ namespace HookD3D12
 				return candidate;
 			};
 
-			const auto keepBetter = [&](const CachedBlobContentMatch& candidate)
+		const auto keepBetter = [&](const CachedBlobContentMatch& candidate)
 			{
 				if (candidate.matchingRatio > match.matchingRatio ||
 					(candidate.matchingRatio == match.matchingRatio &&
@@ -324,130 +315,130 @@ namespace HookD3D12
 					match = candidate;
 			};
 
-			// A warmed driver cache can add or remove a small envelope around otherwise
-			// identical pipeline data. Check front and back alignment, then one changed
-			// middle region. The larger blob remains the denominator, so the normal 98%
-			// threshold strictly bounds how much envelope variance is accepted.
-			keepBetter(compareAligned(0, 0, smallerSize));
-			keepBetter(compareAligned(
-				persistedBlob.size() - smallerSize,
-				currentBlob.size() - smallerSize,
-				smallerSize));
+		// A warmed driver cache can add or remove a small envelope around otherwise
+		// identical pipeline data. Check front and back alignment, then one changed
+		// middle region. The larger blob remains the denominator, so the normal 98%
+		// threshold strictly bounds how much envelope variance is accepted.
+		keepBetter(compareAligned(0, 0, smallerSize));
+		keepBetter(compareAligned(
+			persistedBlob.size() - smallerSize,
+			currentBlob.size() - smallerSize,
+			smallerSize));
 
-			// A driver may wrap the stable payload at both ends, so neither front nor
-			// back alignment necessarily lines up. Locate a few anchors from the saved
-			// payload within the narrow shift permitted by the 98% threshold, then score
-			// the entire resulting overlap. This stays linear over a small search window
-			// instead of performing an unrestricted edit-distance comparison.
-			constexpr size_t anchorSize = 32;
-			if (persistedBlob.size() >= anchorSize && currentBlob.size() >= anchorSize)
+		// A driver may wrap the stable payload at both ends, so neither front nor
+		// back alignment necessarily lines up. Locate a few anchors from the saved
+		// payload within the narrow shift permitted by the 98% threshold, then score
+		// the entire resulting overlap. This stays linear over a small search window
+		// instead of performing an unrestricted edit-distance comparison.
+		constexpr size_t anchorSize = 32;
+		if (persistedBlob.size() >= anchorSize && currentBlob.size() >= anchorSize)
+		{
+			const size_t maximumShift =
+				static_cast<size_t>(static_cast<double>(largerSize) * (1.0 - minimumMatchingByteRatio)) + 1;
+			const size_t anchorOffsets[] =
 			{
-				const size_t maximumShift =
-					static_cast<size_t>(static_cast<double>(largerSize) * (1.0 - minimumMatchingByteRatio)) + 1;
-				const size_t anchorOffsets[] =
+				persistedBlob.size() / 4,
+				persistedBlob.size() / 2,
+				(persistedBlob.size() * 3) / 4,
+			};
+
+			for (size_t anchorOffset : anchorOffsets)
+			{
+				anchorOffset = (std::min)(anchorOffset, persistedBlob.size() - anchorSize);
+				const size_t searchStart = anchorOffset > maximumShift ? anchorOffset - maximumShift : 0;
+				const size_t searchLastStart = (std::min)(
+					currentBlob.size() - anchorSize,
+					anchorOffset + maximumShift);
+				if (searchStart > searchLastStart)
+					continue;
+
+				auto searchPosition = currentBlob.begin() + searchStart;
+				const auto searchEnd = currentBlob.begin() + searchLastStart + anchorSize;
+				while (searchPosition < searchEnd)
 				{
-					persistedBlob.size() / 4,
-					persistedBlob.size() / 2,
-					(persistedBlob.size() * 3) / 4,
-				};
+					const auto found = std::search(
+						searchPosition,
+						searchEnd,
+						persistedBlob.begin() + anchorOffset,
+						persistedBlob.begin() + anchorOffset + anchorSize);
+					if (found == searchEnd)
+						break;
 
-				for (size_t anchorOffset : anchorOffsets)
-				{
-					anchorOffset = (std::min)(anchorOffset, persistedBlob.size() - anchorSize);
-					const size_t searchStart = anchorOffset > maximumShift ? anchorOffset - maximumShift : 0;
-					const size_t searchLastStart = (std::min)(
-						currentBlob.size() - anchorSize,
-						anchorOffset + maximumShift);
-					if (searchStart > searchLastStart)
-						continue;
-
-					auto searchPosition = currentBlob.begin() + searchStart;
-					const auto searchEnd = currentBlob.begin() + searchLastStart + anchorSize;
-					while (searchPosition < searchEnd)
-					{
-						const auto found = std::search(
-							searchPosition,
-							searchEnd,
-							persistedBlob.begin() + anchorOffset,
-							persistedBlob.begin() + anchorOffset + anchorSize);
-						if (found == searchEnd)
-							break;
-
-						const size_t currentAnchorOffset = static_cast<size_t>(found - currentBlob.begin());
-						const size_t persistedOffset = currentAnchorOffset < anchorOffset
-							? anchorOffset - currentAnchorOffset
-							: 0;
-						const size_t currentOffset = currentAnchorOffset > anchorOffset
-							? currentAnchorOffset - anchorOffset
-							: 0;
-						const size_t overlapSize = (std::min)(
-							persistedBlob.size() - persistedOffset,
-							currentBlob.size() - currentOffset);
-						keepBetter(compareAligned(persistedOffset, currentOffset, overlapSize));
-						searchPosition = found + 1;
-					}
+					const size_t currentAnchorOffset = static_cast<size_t>(found - currentBlob.begin());
+					const size_t persistedOffset = currentAnchorOffset < anchorOffset
+						? anchorOffset - currentAnchorOffset
+						: 0;
+					const size_t currentOffset = currentAnchorOffset > anchorOffset
+						? currentAnchorOffset - anchorOffset
+						: 0;
+					const size_t overlapSize = (std::min)(
+						persistedBlob.size() - persistedOffset,
+						currentBlob.size() - currentOffset);
+					keepBetter(compareAligned(persistedOffset, currentOffset, overlapSize));
+					searchPosition = found + 1;
 				}
 			}
-
-			size_t matchingPrefix = 0;
-			while (matchingPrefix < smallerSize &&
-				persistedBlob[matchingPrefix] == currentBlob[matchingPrefix])
-				++matchingPrefix;
-
-			size_t matchingSuffix = 0;
-			while (matchingSuffix < smallerSize - matchingPrefix &&
-				persistedBlob[persistedBlob.size() - 1 - matchingSuffix] ==
-					currentBlob[currentBlob.size() - 1 - matchingSuffix])
-			{
-				++matchingSuffix;
-			}
-
-			CachedBlobContentMatch splitMatch{};
-			splitMatch.matchingRatio = static_cast<double>(matchingPrefix + matchingSuffix) /
-				static_cast<double>(largerSize);
-			splitMatch.longestMatchingRun = (std::max)(matchingPrefix, matchingSuffix);
-			keepBetter(splitMatch);
-			return match;
 		}
 
-		bool CachedBlobLengthsCanMatch(size_t persistedBlobSize, size_t currentBlobSize)
+		size_t matchingPrefix = 0;
+		while (matchingPrefix < smallerSize &&
+			persistedBlob[matchingPrefix] == currentBlob[matchingPrefix])
+			++matchingPrefix;
+
+		size_t matchingSuffix = 0;
+		while (matchingSuffix < smallerSize - matchingPrefix &&
+			persistedBlob[persistedBlob.size() - 1 - matchingSuffix] ==
+			currentBlob[currentBlob.size() - 1 - matchingSuffix])
 		{
-			const size_t smallerSize = (std::min)(persistedBlobSize, currentBlobSize);
-			const size_t largerSize = (std::max)(persistedBlobSize, currentBlobSize);
-			return smallerSize >= minimumContentMatchSize && largerSize > 0 &&
-				static_cast<double>(smallerSize) / static_cast<double>(largerSize) >= minimumMatchingByteRatio;
+			++matchingSuffix;
 		}
 
-		bool TryParseCachedBlobLength(const std::string& serializedLength, size_t& outLength)
-		{
-			outLength = 0;
-			if (serializedLength.empty())
-				return false;
+		CachedBlobContentMatch splitMatch{};
+		splitMatch.matchingRatio = static_cast<double>(matchingPrefix + matchingSuffix) /
+			static_cast<double>(largerSize);
+		splitMatch.longestMatchingRun = (std::max)(matchingPrefix, matchingSuffix);
+		keepBetter(splitMatch);
+		return match;
+	}
 
-			char* parseEnd = nullptr;
-			const unsigned long long parsedLength = _strtoui64(serializedLength.c_str(), &parseEnd, 10);
-			if (parseEnd == serializedLength.c_str() || *parseEnd != '\0' || parsedLength > SIZE_MAX)
-				return false;
-			outLength = static_cast<size_t>(parsedLength);
-			return true;
-		}
+	bool CachedBlobLengthsCanMatch(size_t persistedBlobSize, size_t currentBlobSize)
+	{
+		const size_t smallerSize = (std::min)(persistedBlobSize, currentBlobSize);
+		const size_t largerSize = (std::max)(persistedBlobSize, currentBlobSize);
+		return smallerSize >= minimumContentMatchSize && largerSize > 0 &&
+			static_cast<double>(smallerSize) / static_cast<double>(largerSize) >= minimumMatchingByteRatio;
+	}
 
-		bool CachedBlobLengthCanMatch(const std::string& serializedLength, size_t currentBlobSize)
-		{
-			size_t persistedBlobSize = 0;
-			return TryParseCachedBlobLength(serializedLength, persistedBlobSize) &&
-				CachedBlobLengthsCanMatch(persistedBlobSize, currentBlobSize);
-		}
+	bool TryParseCachedBlobLength(const std::string& serializedLength, size_t& outLength)
+	{
+		outLength = 0;
+		if (serializedLength.empty())
+			return false;
 
-		bool CachedBlobMetadataMatches(
-			const ShaderTarget::ShaderTargetDisk& replacement,
-			SIZE_T cachedBlobSize,
-			uint64_t rootSignatureHash)
-		{
-			if (!cachedBlobSize || !rootSignatureHash)
-				return false;
+		char* parseEnd = nullptr;
+		const unsigned long long parsedLength = _strtoui64(serializedLength.c_str(), &parseEnd, 10);
+		if (parseEnd == serializedLength.c_str() || *parseEnd != '\0' || parsedLength > SIZE_MAX)
+			return false;
+		outLength = static_cast<size_t>(parsedLength);
+		return true;
+	}
 
-			const auto entryMatches = [&](const std::string& length, const std::string& rootHash)
+	bool CachedBlobLengthCanMatch(const std::string& serializedLength, size_t currentBlobSize)
+	{
+		size_t persistedBlobSize = 0;
+		return TryParseCachedBlobLength(serializedLength, persistedBlobSize) &&
+			CachedBlobLengthsCanMatch(persistedBlobSize, currentBlobSize);
+	}
+
+	bool CachedBlobMetadataMatches(
+		const ShaderTarget::ShaderTargetDisk& replacement,
+		SIZE_T cachedBlobSize,
+		uint64_t rootSignatureHash)
+	{
+		if (!cachedBlobSize || !rootSignatureHash)
+			return false;
+
+		const auto entryMatches = [&](const std::string& length, const std::string& rootHash)
 			{
 				size_t parsedLength = 0;
 				return TryParseCachedBlobLength(length, parsedLength) &&
@@ -455,51 +446,51 @@ namespace HookD3D12
 					Hash::ParseHashText(rootHash) == rootSignatureHash;
 			};
 
-			std::vector<std::string> matchingPipelineStreamPaths;
-			if (PersistedPipelineEntryTargetsShader(replacement, replacement) &&
-				entryMatches(replacement.pipelineCachedBlobLength, replacement.rootSignatureHash))
+		std::vector<std::string> matchingPipelineStreamPaths;
+		if (PersistedPipelineEntryTargetsShader(replacement, replacement) &&
+			entryMatches(replacement.pipelineCachedBlobLength, replacement.rootSignatureHash))
+		{
+			matchingPipelineStreamPaths.push_back(replacement.pipelineStreamBlobPath);
+		}
+		for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
+		{
+			if (PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate) &&
+				entryMatches(pipelineTemplate.pipelineCachedBlobLength, pipelineTemplate.rootSignatureHash))
 			{
-				matchingPipelineStreamPaths.push_back(replacement.pipelineStreamBlobPath);
+				matchingPipelineStreamPaths.push_back(pipelineTemplate.pipelineStreamBlobPath);
 			}
-			for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
-			{
-				if (PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate) &&
-					entryMatches(pipelineTemplate.pipelineCachedBlobLength, pipelineTemplate.rootSignatureHash))
-				{
-					matchingPipelineStreamPaths.push_back(pipelineTemplate.pipelineStreamBlobPath);
-				}
-			}
-
-			if (matchingPipelineStreamPaths.empty())
-				return false;
-			if (matchingPipelineStreamPaths.size() == 1)
-				return true;
-
-			// Root signature and cache length can be shared by multiple fixed-function
-			// variants of the same shader. Permit metadata recovery only when all matching
-			// entries serialize the same pipeline stream; otherwise the cache bytes are
-			// required to select the correct raster/depth/blend state.
-			uint64_t matchingPipelineStreamHash = 0;
-			for (const std::string& pipelineStreamPath : matchingPipelineStreamPaths)
-			{
-				const uint64_t pipelineStreamHash = CanonicalPipelineStreamSidecarHash(pipelineStreamPath);
-				if (!pipelineStreamHash)
-					return false;
-				if (!matchingPipelineStreamHash)
-					matchingPipelineStreamHash = pipelineStreamHash;
-				else if (matchingPipelineStreamHash != pipelineStreamHash)
-					return false;
-			}
-			return true;
 		}
 
-		CachedBlobContentMatch BestCachedBlobContentMatch(
-			const ShaderTarget::ShaderTargetDisk& replacement,
-			const std::vector<uint8_t>& currentBlob)
-		{
-			CachedBlobContentMatch bestMatch{};
+		if (matchingPipelineStreamPaths.empty())
+			return false;
+		if (matchingPipelineStreamPaths.size() == 1)
+			return true;
 
-			auto considerPath = [&](const std::string& path, const std::string& serializedLength)
+		// Root signature and cache length can be shared by multiple fixed-function
+		// variants of the same shader. Permit metadata recovery only when all matching
+		// entries serialize the same pipeline stream; otherwise the cache bytes are
+		// required to select the correct raster/depth/blend state.
+		uint64_t matchingPipelineStreamHash = 0;
+		for (const std::string& pipelineStreamPath : matchingPipelineStreamPaths)
+		{
+			const uint64_t pipelineStreamHash = CanonicalPipelineStreamSidecarHash(pipelineStreamPath);
+			if (!pipelineStreamHash)
+				return false;
+			if (!matchingPipelineStreamHash)
+				matchingPipelineStreamHash = pipelineStreamHash;
+			else if (matchingPipelineStreamHash != pipelineStreamHash)
+				return false;
+		}
+		return true;
+	}
+
+	CachedBlobContentMatch BestCachedBlobContentMatch(
+		const ShaderTarget::ShaderTargetDisk& replacement,
+		const std::vector<uint8_t>& currentBlob)
+	{
+		CachedBlobContentMatch bestMatch{};
+
+		auto considerPath = [&](const std::string& path, const std::string& serializedLength)
 			{
 				// Driver cache sidecars can be large and a target may contain many templates.
 				// Length metadata lets us reject almost every candidate without loading it
@@ -526,16 +517,15 @@ namespace HookD3D12
 				}
 			};
 
-			if (PersistedPipelineEntryTargetsShader(replacement, replacement))
-				considerPath(replacement.pipelineCachedBlobPath, replacement.pipelineCachedBlobLength);
-			for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
-			{
-				if (PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate))
-					considerPath(pipelineTemplate.pipelineCachedBlobPath, pipelineTemplate.pipelineCachedBlobLength);
-			}
-
-			return bestMatch;
+		if (PersistedPipelineEntryTargetsShader(replacement, replacement))
+			considerPath(replacement.pipelineCachedBlobPath, replacement.pipelineCachedBlobLength);
+		for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
+		{
+			if (PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate))
+				considerPath(pipelineTemplate.pipelineCachedBlobPath, pipelineTemplate.pipelineCachedBlobLength);
 		}
+
+		return bestMatch;
 	}
 
 	void ResetCachedBlobContentLookup()
@@ -863,13 +853,13 @@ namespace HookD3D12
 	{
 		switch (shaderType)
 		{
-			case ShaderTarget::VertexShader:   return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS;
-			case ShaderTarget::PixelShader:    return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS;
-			case ShaderTarget::GeometryShader: return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS;
-			case ShaderTarget::HullShader:     return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS;
-			case ShaderTarget::DomainShader:   return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS;
-			case ShaderTarget::ComputeShader:  return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS;
-			default: return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MAX_VALID;
+		case ShaderTarget::VertexShader:   return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS;
+		case ShaderTarget::PixelShader:    return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS;
+		case ShaderTarget::GeometryShader: return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS;
+		case ShaderTarget::HullShader:     return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS;
+		case ShaderTarget::DomainShader:   return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS;
+		case ShaderTarget::ComputeShader:  return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS;
+		default: return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MAX_VALID;
 		}
 	}
 

@@ -20,7 +20,7 @@
 namespace RenderPass
 {
 	inline constexpr const char* formatName = "ShaderInjector.RenderPass";
-	inline constexpr int currentSchemaVersion = 9;
+	inline constexpr int currentSchemaVersion = 10;
 	inline constexpr const char* timingBefore = "Before";
 	inline constexpr const char* timingAfter = "After";
 
@@ -87,12 +87,15 @@ namespace RenderPass
 	{
 		std::string id;
 		std::string name;
+		// A later pass can write through this new logical ID into an earlier texture.
+		std::string reuseFromResourceId;
 		ShaderResource::TextureDescriptionDisk texture;
 
 		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
 			RuntimeResourceDefinitionDisk,
 			id,
 			name,
+			reuseFromResourceId,
 			texture)
 	};
 

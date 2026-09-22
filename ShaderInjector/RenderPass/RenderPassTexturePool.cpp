@@ -47,19 +47,45 @@ namespace RenderPassTexturePool
 			uint64_t generation = 0;
 			uint64_t allocationBytes = 0;
 		};
+		struct RecordedTextureVersion
+		{
+			ComPtr<ID3D12Resource> resource;
+			ComPtr<ID3D12DescriptorHeap> shaderViewHeap;
+			ComPtr<ID3D12DescriptorHeap> renderTargetViewHeap;
+			uint64_t allocationBytes = 0;
+		};
+		struct SubmittedTextures
+		{
+			ComPtr<ID3D12Fence> fence;
+			UINT64 fenceValue = 0;
+			std::vector<RecordedTextureVersion> versions;
+		};
+		struct QueueFence
+		{
+			ComPtr<ID3D12CommandQueue> queue;
+			ComPtr<ID3D12Fence> fence;
+			UINT64 nextValue = 0;
+		};
 
 		std::mutex gPoolMutex;
 		std::unordered_map<std::string, DefinitionRecord> gDefinitions;
 		std::unordered_map<std::string, TextureEntry> gTextures;
+		std::unordered_map<ID3D12GraphicsCommandList*, std::unordered_map<ID3D12Resource*, RecordedTextureVersion>> gRecordedTextures;
+		std::unordered_map<ID3D12CommandQueue*, QueueFence> gQueueFences;
+		std::unordered_map<ID3D12CommandQueue*, std::unordered_map<ID3D12Resource*, RecordedTextureVersion>> gPendingQueueTextures;
+		std::atomic<bool> gHasPendingQueueTextures{ false };
+		std::vector<SubmittedTextures> gSubmittedTextures;
+		std::atomic<bool> gHasSubmittedTextures{ false };
+		std::vector<RecordedTextureVersion> gUnretirableTextures;
+		std::atomic<size_t> gRecordedCommandListCount{ 0 };
+		using RecordingEpoch = std::shared_ptr<std::atomic<uint64_t>>;
+		std::unordered_map<ID3D12GraphicsCommandList*, RecordingEpoch> gRecordingEpochs;
 		struct HistoryBootstrapTexture
 		{
 			ComPtr<ID3D12Device> device;
 			TextureView texture;
 		};
 		std::unordered_map<std::string, HistoryBootstrapTexture> gHistoryBootstrapTextures;
-		// Configuration and resolution changes are rare. Retaining replaced allocations
-		// avoids releasing a texture while an already-recorded game command list uses it.
-		std::vector<TextureEntry> gRetiredTextures;
 		std::atomic<uint64_t> gConfigurationGeneration{ 1 };
 		std::atomic<uint64_t> gTextureGeneration{ 1 };
 		std::atomic<uint64_t> gFrameIndex{ 0 };
@@ -73,6 +99,7 @@ namespace RenderPassTexturePool
 		thread_local std::vector<InputTextureOverride> gInputTextureOverrides;
 		thread_local size_t gExecutionScopeDepth = 0;
 		thread_local uint64_t gExecutionFrameIndex = 0;
+		thread_local ID3D12GraphicsCommandList* gExecutionCommandList = nullptr;
 		uint64_t CurrentFrameIndex()
 		{
 			return gExecutionScopeDepth ? gExecutionFrameIndex : gFrameIndex.load(std::memory_order_acquire);
@@ -80,6 +107,43 @@ namespace RenderPassTexturePool
 		constexpr D3D12_RESOURCE_STATES shaderReadState =
 			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
 			D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
+		RecordingEpoch GetRecordingEpochLocked(ID3D12GraphicsCommandList* commandList)
+		{
+			auto& epoch = gRecordingEpochs[commandList];
+			if (!epoch)
+				epoch = std::make_shared<std::atomic<uint64_t>>(1);
+			return epoch;
+		}
+
+		void RecordTextureLocked(ID3D12GraphicsCommandList* commandList, const TextureEntry& entry)
+		{
+			if (!commandList)
+				return;
+			GetRecordingEpochLocked(commandList);
+			auto [recording, inserted] = gRecordedTextures.try_emplace(commandList);
+			if (inserted)
+				gRecordedCommandListCount.fetch_add(1, std::memory_order_release);
+			for (uint32_t versionIndex = 0; versionIndex < entry.versionCount; ++versionIndex)
+			{
+				const TextureVersion& version = entry.versions[versionIndex];
+				if (!version.resource)
+					continue;
+			recording->second.try_emplace(version.resource.Get(), RecordedTextureVersion{
+					version.resource, version.shaderViewHeap, version.renderTargetViewHeap,
+					entry.allocationBytes / entry.versionCount });
+			}
+		}
+
+		void PruneSubmittedTexturesLocked()
+		{
+			gSubmittedTextures.erase(std::remove_if(gSubmittedTextures.begin(), gSubmittedTextures.end(),
+				[](const SubmittedTextures& submission)
+				{
+					return submission.fence->GetCompletedValue() >= submission.fenceValue;
+				}), gSubmittedTextures.end());
+			gHasSubmittedTextures.store(!gSubmittedTextures.empty(), std::memory_order_release);
+		}
 
 		bool TextureDescriptionsEqual(
 			const ResolvedTextureDescription& left,
@@ -491,56 +555,61 @@ namespace RenderPassTexturePool
 			std::string& outError)
 		{
 			ResolvedTextureDescription resolvedDescription{};
-			if (!ResolveTextureDescription(
-				definition.definition.texture,
-				referenceExtent,
-				resolvedDescription,
-				outError))
-			{
-				return false;
-			}
-
 			const std::string& resourceId = definition.definition.id;
 			auto textureIt = gTextures.find(resourceId);
-			if (textureIt != gTextures.end() &&
-				textureIt->second.device.Get() == device &&
-				textureIt->second.definition.ownerRenderPassId == definition.ownerRenderPassId &&
-				TextureDescriptionsEqual(textureIt->second.description, resolvedDescription))
-			{
-				return true;
-			}
-
 			TextureEntry newEntry{};
+			const std::string& reuseSourceId = definition.definition.reuseFromResourceId;
+			if (!reuseSourceId.empty())
+			{
+				const auto sourceIt = gTextures.find(reuseSourceId);
+				if (sourceIt == gTextures.end() || sourceIt->second.device.Get() != device ||
+					sourceIt->second.versionCount != 1)
+				{
+					outError = "The texture to reuse has not been allocated by an earlier pass: " + reuseSourceId;
+					return false;
+				}
+				resolvedDescription = sourceIt->second.description;
+				if (textureIt != gTextures.end() && textureIt->second.device.Get() == device &&
+					textureIt->second.versions[0].resource.Get() == sourceIt->second.versions[0].resource.Get())
+					return true;
+				newEntry.versions[0] = sourceIt->second.versions[0];
+				newEntry.versionCount = 1;
+			}
+			else
+			{
+				if (!ResolveTextureDescription(definition.definition.texture, referenceExtent, resolvedDescription, outError))
+					return false;
+				if (textureIt != gTextures.end() &&
+					textureIt->second.device.Get() == device &&
+					textureIt->second.definition.ownerRenderPassId == definition.ownerRenderPassId &&
+					TextureDescriptionsEqual(textureIt->second.description, resolvedDescription))
+				{
+					return true;
+				}
+
+				newEntry.versionCount = resolvedDescription.lifetime == ShaderResource::ResourceLifetime::History
+					? 2u : 1u;
+				for (uint32_t versionIndex = 0; versionIndex < newEntry.versionCount; ++versionIndex)
+				{
+					const std::string resourceName = "Shader Injector Runtime: " +
+						(definition.definition.name.empty() ? resourceId : definition.definition.name) +
+						(newEntry.versionCount > 1 ? " [" + std::to_string(versionIndex) + "]" : "");
+					if (!CreateTextureVersion(device, resourceName, resolvedDescription,
+						newEntry.versions[versionIndex], outError))
+						return false;
+				}
+
+				const D3D12_RESOURCE_DESC allocationDescription = BuildD3D12Description(resolvedDescription);
+				newEntry.allocationBytes = device->GetResourceAllocationInfo(0, 1, &allocationDescription).SizeInBytes *
+					newEntry.versionCount;
+			}
 			newEntry.device = device;
 			newEntry.definition = definition;
 			newEntry.description = resolvedDescription;
-			newEntry.versionCount = resolvedDescription.lifetime == ShaderResource::ResourceLifetime::History
-				? 2u
-				: 1u;
 			newEntry.generation = gTextureGeneration.load(std::memory_order_relaxed) + 1;
-			for (uint32_t versionIndex = 0; versionIndex < newEntry.versionCount; ++versionIndex)
-			{
-				const std::string resourceName = "Shader Injector Runtime: " +
-					(definition.definition.name.empty() ? resourceId : definition.definition.name) +
-					(newEntry.versionCount > 1 ? " [" + std::to_string(versionIndex) + "]" : "");
-				if (!CreateTextureVersion(
-					device,
-					resourceName,
-					resolvedDescription,
-					newEntry.versions[versionIndex],
-					outError))
-				{
-					return false;
-				}
-			}
-
-			const D3D12_RESOURCE_DESC allocationDescription = BuildD3D12Description(resolvedDescription);
-			newEntry.allocationBytes = device->GetResourceAllocationInfo(0, 1, &allocationDescription).SizeInBytes *
-				newEntry.versionCount;
 
 			if (textureIt != gTextures.end())
 			{
-				gRetiredTextures.push_back(std::move(textureIt->second));
 				textureIt->second = std::move(newEntry);
 			}
 			else
@@ -567,16 +636,20 @@ namespace RenderPassTexturePool
 			catalogEntry.mipLevels = resolvedDescription.mipLevels;
 			catalogEntry.format = static_cast<uint32_t>(resolvedDescription.format);
 			catalogEntry.resident = true;
-			catalogEntry.status = activeEntry.versionCount > 1
-				? "Allocated history pair"
-				: "Allocated";
+			if (!reuseSourceId.empty())
+				catalogEntry.status = "Reusing " + reuseSourceId;
+			else if (activeEntry.versionCount > 1)
+				catalogEntry.status = "Allocated history pair";
+			else
+				catalogEntry.status = "Allocated";
 			ShaderResourceCatalog::Upsert(catalogEntry);
 			ShaderInjectorIO::WriteToLogFile(
-				"RenderPassTexturePool->EnsureTextureLocked: allocated id=" + resourceId +
+				"RenderPassTexturePool->EnsureTextureLocked: resolved id=" + resourceId +
 				" extent=" + std::to_string(resolvedDescription.width) + "x" +
 				std::to_string(resolvedDescription.height) +
 				" mips=" + std::to_string(resolvedDescription.mipLevels) +
-				" versions=" + std::to_string(activeEntry.versionCount));
+				" versions=" + std::to_string(activeEntry.versionCount) +
+				(reuseSourceId.empty() ? std::string() : " reusedFrom=" + reuseSourceId));
 			return true;
 		}
 
@@ -616,9 +689,11 @@ namespace RenderPassTexturePool
 		}
 	}
 
-	ScopedInputTextureOverrides::ScopedInputTextureOverrides()
-		: previousCount(gInputTextureOverrides.size())
+	ScopedInputTextureOverrides::ScopedInputTextureOverrides(ID3D12GraphicsCommandList* commandList)
+		: previousCount(gInputTextureOverrides.size()), previousCommandList(gExecutionCommandList)
 	{
+		if (commandList)
+			gExecutionCommandList = commandList;
 		// Present may advance on another thread while this graph is recorded.
 		// Keep every input/output in this execution on the same history pair.
 		if (gExecutionScopeDepth++ == 0)
@@ -628,6 +703,7 @@ namespace RenderPassTexturePool
 	ScopedInputTextureOverrides::~ScopedInputTextureOverrides()
 	{
 		gInputTextureOverrides.resize(previousCount);
+		gExecutionCommandList = previousCommandList;
 		--gExecutionScopeDepth;
 	}
 
@@ -661,6 +737,8 @@ namespace RenderPassTexturePool
 		bool hasHistoryResources = false;
 		for (const RenderPass::RenderPassDisk& renderPass : renderPasses)
 		{
+			if (!renderPass.enabled)
+				continue;
 			for (const RenderPass::RuntimeResourceDefinitionDisk& definition : renderPass.runtimeResources)
 			{
 				if (definition.id.empty())
@@ -678,6 +756,27 @@ namespace RenderPassTexturePool
 					definition.texture.lifetime == ShaderResource::ResourceLifetime::History;
 			}
 		}
+		// The first producer creates the allocation; include write capabilities needed by later aliases.
+		for (const auto& [resourceId, record] : definitions)
+		{
+			if (record.definition.reuseFromResourceId.empty())
+				continue;
+			std::string sourceId = record.definition.reuseFromResourceId;
+			std::unordered_set<std::string> visited{ resourceId };
+			while (visited.insert(sourceId).second)
+			{
+				const auto source = definitions.find(sourceId);
+				if (source == definitions.end())
+					break;
+				if (source->second.definition.reuseFromResourceId.empty())
+				{
+					source->second.definition.texture.allowRenderTarget |= record.definition.texture.allowRenderTarget;
+					source->second.definition.texture.allowUnorderedAccess |= record.definition.texture.allowUnorderedAccess;
+					break;
+				}
+				sourceId = source->second.definition.reuseFromResourceId;
+			}
+		}
 
 		std::lock_guard<std::mutex> lock(gPoolMutex);
 		gDefinitions = std::move(definitions);
@@ -688,7 +787,6 @@ namespace RenderPassTexturePool
 			if (definitionIt == gDefinitions.end() ||
 				definitionIt->second.ownerRenderPassId != textureIt->second.definition.ownerRenderPassId)
 			{
-				gRetiredTextures.push_back(std::move(textureIt->second));
 				textureIt = gTextures.erase(textureIt);
 			}
 			else
@@ -788,6 +886,8 @@ namespace RenderPassTexturePool
 			ID3D12GraphicsCommandList* commandList = nullptr;
 			uint64_t configurationGeneration = 0;
 			uint64_t textureEpoch = 0;
+			RecordingEpoch recordingEpoch;
+			uint64_t recordingValue = 0;
 			ReferenceExtent referenceExtent;
 			bool succeeded = false;
 			std::string error;
@@ -807,6 +907,8 @@ namespace RenderPassTexturePool
 				cacheEntry.commandList == commandList &&
 				cacheEntry.configurationGeneration == configurationGeneration &&
 				cacheEntry.textureEpoch == gTextureGeneration.load(std::memory_order_acquire) &&
+				cacheEntry.recordingEpoch &&
+				cacheEntry.recordingValue == cacheEntry.recordingEpoch->load(std::memory_order_acquire) &&
 				cacheEntry.referenceExtent.width == referenceExtent.width &&
 				cacheEntry.referenceExtent.height == referenceExtent.height &&
 				cacheEntry.referenceExtent.dimension == referenceExtent.dimension &&
@@ -832,8 +934,10 @@ namespace RenderPassTexturePool
 
 		bool resourcesReady = true;
 		uint64_t textureEpoch = 0;
+		RecordingEpoch recordingEpoch;
 		{
 			std::lock_guard<std::mutex> lock(gPoolMutex);
+			recordingEpoch = GetRecordingEpochLocked(commandList);
 			for (const RenderPass::RuntimeResourceDefinitionDisk& passDefinition : renderPass.runtimeResources)
 			{
 				const auto definitionIt = gDefinitions.find(passDefinition.id);
@@ -849,6 +953,7 @@ namespace RenderPassTexturePool
 					resourcesReady = false;
 					break;
 				}
+				RecordTextureLocked(commandList, gTextures.at(passDefinition.id));
 			}
 			textureEpoch = gTextureGeneration.load(std::memory_order_relaxed);
 		}
@@ -861,6 +966,8 @@ namespace RenderPassTexturePool
 			commandList,
 			configurationGeneration,
 			textureEpoch,
+			recordingEpoch,
+			recordingEpoch->load(std::memory_order_relaxed),
 			referenceExtent,
 			resourcesReady,
 			outError };
@@ -877,6 +984,9 @@ namespace RenderPassTexturePool
 		{
 			uint64_t textureEpoch = 0;
 			uint64_t frameIndex = 0;
+			RecordingEpoch recordingEpoch;
+			uint64_t recordingValue = 0;
+			ID3D12GraphicsCommandList* recordedCommandList = nullptr;
 			bool frameSensitive = false;
 			TextureView texture;
 		};
@@ -896,6 +1006,9 @@ namespace RenderPassTexturePool
 		{
 			const ThreadTextureLookup& lookup = cached->second[temporalIndex];
 			if (lookup.textureEpoch == textureEpoch &&
+				(!gExecutionCommandList || (lookup.recordedCommandList == gExecutionCommandList &&
+					lookup.recordingEpoch &&
+					lookup.recordingValue == lookup.recordingEpoch->load(std::memory_order_acquire))) &&
 				(!lookup.frameSensitive || lookup.frameIndex == frameIndex))
 			{
 				outTexture = lookup.texture;
@@ -909,9 +1022,16 @@ namespace RenderPassTexturePool
 			return false;
 		if (!FillTextureViewLocked(textureIt->second, temporalView, outTexture))
 			return false;
+		RecordTextureLocked(gExecutionCommandList, textureIt->second);
+		RecordingEpoch recordingEpoch;
+		if (gExecutionCommandList)
+			recordingEpoch = GetRecordingEpochLocked(gExecutionCommandList);
 		cache[resourceId][temporalIndex] = {
 			gTextureGeneration.load(std::memory_order_relaxed),
 			frameIndex,
+			recordingEpoch,
+			recordingEpoch ? recordingEpoch->load(std::memory_order_relaxed) : 0,
+			gExecutionCommandList,
 			textureIt->second.versionCount > 1,
 			outTexture };
 		return true;
@@ -1020,6 +1140,7 @@ namespace RenderPassTexturePool
 				outError = "Could not resolve an allocated upsample-chain stage.";
 				return false;
 			}
+			RecordTextureLocked(commandList, textureIt->second);
 			outStageTargets.push_back(std::move(target));
 			stageWidth = nextWidth;
 			stageHeight = nextHeight;
@@ -1031,8 +1152,93 @@ namespace RenderPassTexturePool
 
 	void AdvanceFrame()
 	{
+		if (gHasPendingQueueTextures.load(std::memory_order_acquire) ||
+			gHasSubmittedTextures.load(std::memory_order_acquire))
+		{
+			std::lock_guard<std::mutex> lock(gPoolMutex);
+			PruneSubmittedTexturesLocked();
+			for (auto& [commandQueue, pendingVersions] : gPendingQueueTextures)
+			{
+				if (pendingVersions.empty())
+					continue;
+				SubmittedTextures submission{};
+				submission.versions.reserve(pendingVersions.size());
+				for (const auto& version : pendingVersions)
+					submission.versions.push_back(version.second);
+				QueueFence& queueFence = gQueueFences.at(commandQueue);
+				if (!queueFence.fence)
+				{
+					ComPtr<ID3D12Device> device;
+					if (FAILED(commandQueue->GetDevice(IID_PPV_ARGS(&device))) || !device ||
+						FAILED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&queueFence.fence))))
+					{
+						gUnretirableTextures.insert(gUnretirableTextures.end(), submission.versions.begin(), submission.versions.end());
+						ShaderInjectorIO::WriteToLogFileError("RenderPassTexturePool: could not create a texture-retirement fence.");
+						continue;
+					}
+				}
+				submission.fence = queueFence.fence;
+				submission.fenceValue = ++queueFence.nextValue;
+				const HRESULT result = commandQueue->Signal(submission.fence.Get(), submission.fenceValue);
+				if (FAILED(result))
+				{
+					gUnretirableTextures.insert(gUnretirableTextures.end(), submission.versions.begin(), submission.versions.end());
+					ShaderInjectorIO::WriteToLogFileError("RenderPassTexturePool: texture-retirement signal failed with " + StringHelper::FormatHRESULT(result));
+					continue;
+				}
+				gSubmittedTextures.push_back(std::move(submission));
+				gHasSubmittedTextures.store(true, std::memory_order_release);
+			}
+			gPendingQueueTextures.clear();
+			gHasPendingQueueTextures.store(false, std::memory_order_release);
+		}
 		if (gHasHistoryResources.load(std::memory_order_relaxed))
 			gFrameIndex.fetch_add(1, std::memory_order_release);
+	}
+
+	bool HasRecordedCommandListWork()
+	{
+		return gRecordedCommandListCount.load(std::memory_order_acquire) != 0;
+	}
+
+	void ResetCommandListRecording(ID3D12GraphicsCommandList* commandList)
+	{
+		std::lock_guard<std::mutex> lock(gPoolMutex);
+		if (gRecordedTextures.erase(commandList))
+			gRecordedCommandListCount.fetch_sub(1, std::memory_order_release);
+		const auto epoch = gRecordingEpochs.find(commandList);
+		if (epoch != gRecordingEpochs.end())
+			epoch->second->fetch_add(1, std::memory_order_release);
+		PruneSubmittedTexturesLocked();
+	}
+
+	void NotifyCommandListsSubmitted(ID3D12CommandQueue* commandQueue, UINT commandListCount, ID3D12CommandList* const* commandLists)
+	{
+		if (!HasRecordedCommandListWork() || !commandQueue || !commandLists || !commandListCount)
+			return;
+		const D3D12_COMMAND_LIST_TYPE queueType = commandQueue->GetDesc().Type;
+		if (queueType != D3D12_COMMAND_LIST_TYPE_DIRECT && queueType != D3D12_COMMAND_LIST_TYPE_COMPUTE)
+			return;
+
+		std::lock_guard<std::mutex> lock(gPoolMutex);
+		bool recordedAnyTexture = false;
+		for (UINT index = 0; index < commandListCount; ++index)
+		{
+			const auto recorded = gRecordedTextures.find(reinterpret_cast<ID3D12GraphicsCommandList*>(commandLists[index]));
+			if (recorded == gRecordedTextures.end())
+				continue;
+			recordedAnyTexture = true;
+			auto& pendingVersions = gPendingQueueTextures[commandQueue];
+			for (const auto& version : recorded->second)
+				pendingVersions.try_emplace(version.first, version.second);
+		}
+		if (recordedAnyTexture)
+		{
+			QueueFence& queueFence = gQueueFences[commandQueue];
+			if (!queueFence.queue)
+				queueFence.queue = commandQueue;
+			gHasPendingQueueTextures.store(true, std::memory_order_release);
+		}
 	}
 
 	void ReleaseResources()
@@ -1041,7 +1247,15 @@ namespace RenderPassTexturePool
 		gDefinitions.clear();
 		gHistoryBootstrapTextures.clear();
 		gTextures.clear();
-		gRetiredTextures.clear();
+		gRecordedTextures.clear();
+		gPendingQueueTextures.clear();
+		gHasPendingQueueTextures.store(false, std::memory_order_release);
+		gSubmittedTextures.clear();
+		gHasSubmittedTextures.store(false, std::memory_order_release);
+		gUnretirableTextures.clear();
+		gQueueFences.clear();
+		gRecordingEpochs.clear();
+		gRecordedCommandListCount.store(0, std::memory_order_release);
 		gFrameIndex.store(0, std::memory_order_release);
 		gHasHistoryResources.store(false, std::memory_order_release);
 		gConfigurationGeneration.fetch_add(1, std::memory_order_release);
@@ -1053,10 +1267,34 @@ namespace RenderPassTexturePool
 		uint64_t liveBytes = 0, retiredBytes = 0;
 		{
 			std::lock_guard<std::mutex> lock(gPoolMutex);
+			PruneSubmittedTexturesLocked();
 			liveTextures = gTextures.size();
-			retiredTextures = gRetiredTextures.size();
-			for (const auto& texture : gTextures) liveBytes += texture.second.allocationBytes;
-			for (const auto& texture : gRetiredTextures) retiredBytes += texture.allocationBytes;
+			std::unordered_set<ID3D12Resource*> activeResources;
+			for (const auto& texture : gTextures)
+			{
+				liveBytes += texture.second.allocationBytes;
+				for (uint32_t versionIndex = 0; versionIndex < texture.second.versionCount; ++versionIndex)
+					activeResources.insert(texture.second.versions[versionIndex].resource.Get());
+			}
+			std::unordered_set<ID3D12Resource*> retiredResources;
+			const auto countRetired = [&](const RecordedTextureVersion& version)
+			{
+				if (version.resource && activeResources.find(version.resource.Get()) == activeResources.end() &&
+					retiredResources.insert(version.resource.Get()).second)
+					retiredBytes += version.allocationBytes;
+			};
+			for (const auto& recording : gRecordedTextures)
+				for (const auto& version : recording.second)
+					countRetired(version.second);
+			for (const auto& pendingQueue : gPendingQueueTextures)
+				for (const auto& version : pendingQueue.second)
+					countRetired(version.second);
+			for (const auto& batch : gSubmittedTextures)
+				for (const auto& version : batch.versions)
+					countRetired(version);
+			for (const auto& version : gUnretirableTextures)
+				countRetired(version);
+			retiredTextures = retiredResources.size();
 		}
 		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
 			"RenderPassTexturePool->Performance: liveTextures=%zu liveBytes=%llu retiredTextures=%zu retiredBytes=%llu",

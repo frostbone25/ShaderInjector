@@ -1,5 +1,4 @@
 //HookD3D12Install.cpp
-#include "HookD3D12.h"
 
 #include <atomic>
 #include <mutex>
@@ -12,8 +11,8 @@
 //custom
 #include "ShaderInjectorGUI.h"
 #include "VTableIndex.h"
-#include "HookD3D12RenderPass.h"
-#include "HookD3D12Resources.h"
+#include "HookD3D12.h"
+#include "HookDefinition.h"
 #include "RenderPassRuntime.h"
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
@@ -222,13 +221,6 @@ namespace HookD3D12
 		if (renderPassHookedDeviceVTables.find(deviceVTableKey) != renderPassHookedDeviceVTables.end())
 			return;
 
-		struct HookDefinition
-		{
-			size_t vtableIndex;
-			void* hookFunction;
-			void** originalFunction;
-		};
-
 		const HookDefinition resourceHooks[] =
 		{
 			{ VTableIndex::indexCreateDescriptorHeap, reinterpret_cast<void*>(&Hook_CreateDescriptorHeap), reinterpret_cast<void**>(&Original_CreateDescriptorHeap) },
@@ -289,13 +281,6 @@ namespace HookD3D12
 		// ready. Render-pass observation is unnecessary during that phase, especially on
 		// a fresh shader-cache run where no shader target can be resolved yet.
 		std::lock_guard<std::mutex> installationLock(hookInstallationMutex);
-
-		struct HookDefinition
-		{
-			size_t vtableIndex;
-			void* hookFunction;
-			void** originalFunction;
-		};
 
 		void** deviceVTable = *reinterpret_cast<void***>(device);
 		void* deviceVTableKey = deviceVTable;

@@ -1,7 +1,6 @@
-#include "../HookD3D12.h"
 
 #include "HookD3D12RuntimeState.h"
-#include "../HookD3D12PipelineRegistry.h"
+#include "../HookD3D12.h"
 #include "Globals.h"
 #include "RenderPass/RenderPassRuntime.h"
 

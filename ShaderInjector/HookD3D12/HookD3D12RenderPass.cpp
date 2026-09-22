@@ -1,11 +1,8 @@
-#include "HookD3D12RenderPass.h"
+#include "HookD3D12.h"
 
 namespace HookD3D12
 {
-	namespace
-	{
-		thread_local unsigned int gRenderPassInjectionDepth = 0;
-	}
+	thread_local unsigned int gRenderPassInjectionDepth = 0;
 
 	ScopedRenderPassInjection::ScopedRenderPassInjection()
 	{

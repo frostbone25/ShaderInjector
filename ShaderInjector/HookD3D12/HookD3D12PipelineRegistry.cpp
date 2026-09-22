@@ -7,26 +7,17 @@
 #include <unordered_set>
 
 //custom
-#include "HookD3D12PipelineRegistry.h"
+#include "HookD3D12.h"
+#include "KnownPipelineCacheEntry.h"
 
 namespace HookD3D12
 {
-	namespace
-	{
-		std::unordered_set<ID3D12PipelineState*> gKnownPipelineStates;
-		std::unordered_set<ID3D12PipelineState*> gUntrackedBoundPipelineStates;
-		std::shared_mutex gPipelineStateRegistryMutex;
-		std::atomic<uint64_t> gPipelineStateRegistryGeneration = 1;
+	std::unordered_set<ID3D12PipelineState*> gKnownPipelineStates;
+	std::unordered_set<ID3D12PipelineState*> gUntrackedBoundPipelineStates;
+	std::shared_mutex gPipelineStateRegistryMutex;
+	std::atomic<uint64_t> gPipelineStateRegistryGeneration = 1;
 
-		struct KnownPipelineCacheEntry
-		{
-			ID3D12PipelineState* pipelineState = nullptr;
-			uint64_t generation = 0;
-			bool known = false;
-		};
-
-		thread_local std::array<KnownPipelineCacheEntry, 256> gKnownPipelineCache;
-	}
+	thread_local std::array<KnownPipelineCacheEntry, 256> gKnownPipelineCache;
 
 	void RegisterKnownPipelineStateLocked(ID3D12PipelineState* pipelineStateObject)
 	{

@@ -2,52 +2,38 @@
 #include <d3d12.h>
 
 //custom
-#include "HookD3D12OverlayStartup.h"
+#include "HookD3D12.h"
+#include "OverlayStartupGateState.h"
 #include "ShaderInjectorGUI.h"
 
 namespace HookD3D12
 {
-	namespace
+	OverlayStartupGateState gOverlayStartupGate;
+	ULONGLONG gLastResizeBuffersTick = 0;
+	bool gLoggedResizeCooldown = false;
+
+	constexpr int kOverlayStartupStableFrameLimit = 5;
+	constexpr ULONGLONG kOverlayStartupMinimumStableMs = 500;
+	constexpr ULONGLONG kOverlayResizeCooldownMs = 2500;
+
+	bool ProbeSwapChainBuffers(IDXGISwapChain3* swapChain, UINT bufferCount)
 	{
-		struct OverlayStartupGateState
+		if (!swapChain || bufferCount == 0)
+			return false;
+
+		for (UINT i = 0; i < bufferCount; ++i)
 		{
-			HWND outputWindow = nullptr;
-			UINT bufferCount = 0;
-			DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
-			UINT flags = 0;
-			LONG clientWidth = 0;
-			LONG clientHeight = 0;
-			int stableFrames = 0;
-			ULONGLONG firstStableTick = 0;
-		};
+			ID3D12Resource* backBuffer = nullptr;
+			HRESULT hr = swapChain->GetBuffer(i, IID_PPV_ARGS(&backBuffer));
 
-		OverlayStartupGateState gOverlayStartupGate;
-		ULONGLONG gLastResizeBuffersTick = 0;
-		bool gLoggedResizeCooldown = false;
+			if (backBuffer)
+				backBuffer->Release();
 
-		constexpr int kOverlayStartupStableFrameLimit = 5;
-		constexpr ULONGLONG kOverlayStartupMinimumStableMs = 500;
-		constexpr ULONGLONG kOverlayResizeCooldownMs = 2500;
-
-		bool ProbeSwapChainBuffers(IDXGISwapChain3* swapChain, UINT bufferCount)
-		{
-			if (!swapChain || bufferCount == 0)
+			if (FAILED(hr))
 				return false;
-
-			for (UINT i = 0; i < bufferCount; ++i)
-			{
-				ID3D12Resource* backBuffer = nullptr;
-				HRESULT hr = swapChain->GetBuffer(i, IID_PPV_ARGS(&backBuffer));
-
-				if (backBuffer)
-					backBuffer->Release();
-
-				if (FAILED(hr))
-					return false;
-			}
-
-			return true;
 		}
+
+		return true;
 	}
 
 	void ResetOverlayStartupGate()

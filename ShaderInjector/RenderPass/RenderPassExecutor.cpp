@@ -7,7 +7,6 @@
 #include <unordered_map>
 
 #include "HookD3D12.h"
-#include "HookD3D12RenderPass.h"
 #include "RenderPass/RenderPassMipChain.h"
 #include "RenderPass/RenderPassReplacement.h"
 #include "RenderPass/RenderPassTexturePool.h"
@@ -19,281 +18,281 @@
 
 namespace RenderPassExecutor
 {
-		std::mutex gPipelineCacheMutex;
-		std::unordered_map<std::string, ID3D12PipelineState*> gPipelineCache;
-		std::unordered_map<std::string, std::string> gPipelineCreationErrors;
-		std::atomic<bool> gLoggedExecutionDuringActiveCapture = false;
-		std::atomic<uint64_t> gLoggedCaptureRequestSequence = 0;
+	std::mutex gPipelineCacheMutex;
+	std::unordered_map<std::string, ID3D12PipelineState*> gPipelineCache;
+	std::unordered_map<std::string, std::string> gPipelineCreationErrors;
+	std::atomic<bool> gLoggedExecutionDuringActiveCapture = false;
+	std::atomic<uint64_t> gLoggedCaptureRequestSequence = 0;
 
-		struct RenderTargetState
+	struct RenderTargetState
+	{
+		UINT count = 0;
+		DXGI_FORMAT formats[D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
+		UINT sampleCount = 1;
+		UINT sampleQuality = 0;
+	};
+
+	struct ThreadPipelineLookup
+	{
+		const RenderPass::RenderPassDisk* renderPass = nullptr;
+		ID3D12RootSignature* rootSignature = nullptr;
+		RenderTargetState renderTargets;
+		ID3D12PipelineState* pipelineState = nullptr;
+	};
+
+	thread_local std::array<ThreadPipelineLookup, 16> gThreadPipelineLookups;
+	thread_local size_t gNextThreadPipelineLookup = 0;
+	thread_local const RenderPass::RenderPassDisk* gEventNameRenderPass = nullptr;
+	thread_local std::wstring gEventName;
+
+	bool RenderTargetStatesEqual(const RenderTargetState& left, const RenderTargetState& right)
+	{
+		if (left.count != right.count || left.sampleCount != right.sampleCount ||
+			left.sampleQuality != right.sampleQuality)
 		{
-			UINT count = 0;
-			DXGI_FORMAT formats[D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
-			UINT sampleCount = 1;
-			UINT sampleQuality = 0;
-		};
+			return false;
+		}
 
-		struct ThreadPipelineLookup
+		for (UINT renderTargetIndex = 0; renderTargetIndex < left.count; ++renderTargetIndex)
 		{
-			const RenderPass::RenderPassDisk* renderPass = nullptr;
-			ID3D12RootSignature* rootSignature = nullptr;
-			RenderTargetState renderTargets;
-			ID3D12PipelineState* pipelineState = nullptr;
-		};
-
-		thread_local std::array<ThreadPipelineLookup, 16> gThreadPipelineLookups;
-		thread_local size_t gNextThreadPipelineLookup = 0;
-		thread_local const RenderPass::RenderPassDisk* gEventNameRenderPass = nullptr;
-		thread_local std::wstring gEventName;
-
-		bool RenderTargetStatesEqual(const RenderTargetState& left, const RenderTargetState& right)
-		{
-			if (left.count != right.count || left.sampleCount != right.sampleCount ||
-				left.sampleQuality != right.sampleQuality)
-			{
+			if (left.formats[renderTargetIndex] != right.formats[renderTargetIndex])
 				return false;
-			}
-
-			for (UINT renderTargetIndex = 0; renderTargetIndex < left.count; ++renderTargetIndex)
-			{
-				if (left.formats[renderTargetIndex] != right.formats[renderTargetIndex])
-					return false;
-			}
-			return true;
 		}
+		return true;
+	}
 
-		void CacheThreadPipelineLookup(
-			const RenderPass::RenderPassDisk& renderPass,
-			ID3D12RootSignature* rootSignature,
-			const RenderTargetState& renderTargets,
-			ID3D12PipelineState* pipelineState)
+	void CacheThreadPipelineLookup(
+		const RenderPass::RenderPassDisk& renderPass,
+		ID3D12RootSignature* rootSignature,
+		const RenderTargetState& renderTargets,
+		ID3D12PipelineState* pipelineState)
+	{
+		for (ThreadPipelineLookup& lookup : gThreadPipelineLookups)
 		{
-			for (ThreadPipelineLookup& lookup : gThreadPipelineLookups)
+			if (lookup.renderPass == &renderPass && lookup.rootSignature == rootSignature)
 			{
-				if (lookup.renderPass == &renderPass && lookup.rootSignature == rootSignature)
-				{
-					lookup = { &renderPass, rootSignature, renderTargets, pipelineState };
-					return;
-				}
+				lookup = { &renderPass, rootSignature, renderTargets, pipelineState };
+				return;
 			}
-			gThreadPipelineLookups[gNextThreadPipelineLookup] = {
-				&renderPass, rootSignature, renderTargets, pipelineState };
-			gNextThreadPipelineLookup = (gNextThreadPipelineLookup + 1) % gThreadPipelineLookups.size();
 		}
+		gThreadPipelineLookups[gNextThreadPipelineLookup] = {
+			&renderPass, rootSignature, renderTargets, pipelineState };
+		gNextThreadPipelineLookup = (gNextThreadPipelineLookup + 1) % gThreadPipelineLookups.size();
+	}
 
-		const std::wstring& GetRenderPassEventName(const RenderPass::RenderPassDisk& renderPass)
+	const std::wstring& GetRenderPassEventName(const RenderPass::RenderPassDisk& renderPass)
+	{
+		if (gEventNameRenderPass != &renderPass)
 		{
-			if (gEventNameRenderPass != &renderPass)
-			{
-				gEventNameRenderPass = &renderPass;
-				gEventName = StringHelper::Utf8ToWide("Shader Injector Render Pass: " + renderPass.name);
-			}
-			return gEventName;
+			gEventNameRenderPass = &renderPass;
+			gEventName = StringHelper::Utf8ToWide("Shader Injector Render Pass: " + renderPass.name);
 		}
+		return gEventName;
+	}
 
-		bool BuildRenderTargetState(
-			const std::vector<RenderPass::ResourceBindingDiagnostic>& outputBindings,
-			RenderTargetState& outState)
+	bool BuildRenderTargetState(
+		const std::vector<RenderPass::ResourceBindingDiagnostic>& outputBindings,
+		RenderTargetState& outState)
+	{
+		outState = {};
+		outState.sampleCount = 1;
+		for (const RenderPass::ResourceBindingDiagnostic& binding : outputBindings)
 		{
-			outState = {};
-			outState.sampleCount = 1;
-			for (const RenderPass::ResourceBindingDiagnostic& binding : outputBindings)
+			if (binding.bindingType != "RTV" ||
+				binding.descriptorIndex >= D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT ||
+				binding.resourceFormat == DXGI_FORMAT_UNKNOWN)
 			{
-				if (binding.bindingType != "RTV" ||
-					binding.descriptorIndex >= D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT ||
-					binding.resourceFormat == DXGI_FORMAT_UNKNOWN)
-				{
-					continue;
-				}
-
-				outState.formats[binding.descriptorIndex] = static_cast<DXGI_FORMAT>(binding.resourceFormat);
-				outState.count = (std::max)(outState.count, binding.descriptorIndex + 1);
-				if (binding.resourceSampleCount)
-				{
-					outState.sampleCount = binding.resourceSampleCount;
-					outState.sampleQuality = binding.resourceSampleQuality;
-				}
+				continue;
 			}
-			return outState.count > 0 && outState.formats[0] != DXGI_FORMAT_UNKNOWN;
-		}
 
-		bool BuildRenderTargetState(
-			const RenderPassTexturePool::TextureView& runtimeOutput,
-			RenderTargetState& outState)
+			outState.formats[binding.descriptorIndex] = static_cast<DXGI_FORMAT>(binding.resourceFormat);
+			outState.count = (std::max)(outState.count, binding.descriptorIndex + 1);
+			if (binding.resourceSampleCount)
+			{
+				outState.sampleCount = binding.resourceSampleCount;
+				outState.sampleQuality = binding.resourceSampleQuality;
+			}
+		}
+		return outState.count > 0 && outState.formats[0] != DXGI_FORMAT_UNKNOWN;
+	}
+
+	bool BuildRenderTargetState(
+		const RenderPassTexturePool::TextureView& runtimeOutput,
+		RenderTargetState& outState)
+	{
+		outState = {};
+		if (!runtimeOutput.resource || !runtimeOutput.renderTargetView.ptr ||
+			runtimeOutput.description.format == DXGI_FORMAT_UNKNOWN)
 		{
-			outState = {};
-			if (!runtimeOutput.resource || !runtimeOutput.renderTargetView.ptr ||
-				runtimeOutput.description.format == DXGI_FORMAT_UNKNOWN)
-			{
-				return false;
-			}
-			outState.count = 1;
-			outState.formats[0] = runtimeOutput.description.format;
-			outState.sampleCount = runtimeOutput.description.sampleCount;
-			return true;
+			return false;
 		}
+		outState.count = 1;
+		outState.formats[0] = runtimeOutput.description.format;
+		outState.sampleCount = runtimeOutput.description.sampleCount;
+		return true;
+	}
 
-		void RestoreGameOutputState(
-			ID3D12GraphicsCommandList* commandList,
-			const RenderPassMipChain::GraphicsStateSnapshot& gameState)
+	void RestoreGameOutputState(
+		ID3D12GraphicsCommandList* commandList,
+		const RenderPassMipChain::GraphicsStateSnapshot& gameState)
+	{
+		const D3D12_CPU_DESCRIPTOR_HANDLE* depthStencil = gameState.depthStencil.ptr
+			? &gameState.depthStencil
+			: nullptr;
+		commandList->OMSetRenderTargets(
+			static_cast<UINT>(gameState.renderTargets.size()),
+			gameState.renderTargets.empty() ? nullptr : gameState.renderTargets.data(),
+			FALSE,
+			depthStencil);
+		if (!gameState.viewports.empty())
+			commandList->RSSetViewports(static_cast<UINT>(gameState.viewports.size()), gameState.viewports.data());
+		if (!gameState.scissorRectangles.empty())
+			commandList->RSSetScissorRects(
+				static_cast<UINT>(gameState.scissorRectangles.size()),
+				gameState.scissorRectangles.data());
+	}
+
+	std::string BuildPipelineCacheKey(
+		const RenderPass::RenderPassDisk& renderPass,
+		ID3D12RootSignature* rootSignature,
+		const RenderTargetState& renderTargets)
+	{
+		std::string key = renderPass.id + ':' + StringHelper::PointerToString(rootSignature) + ':' +
+			std::to_string(renderPass.vertexShaderBlobHash) + ':' +
+			std::to_string(renderPass.fragmentShaderBlobHash) + ':' +
+			std::to_string(renderTargets.sampleCount) + ':' +
+			std::to_string(renderTargets.sampleQuality);
+		for (UINT renderTargetIndex = 0; renderTargetIndex < renderTargets.count; ++renderTargetIndex)
+			key += ':' + std::to_string(static_cast<UINT>(renderTargets.formats[renderTargetIndex]));
+		return key;
+	}
+
+	D3D12_BLEND_DESC BuildBlendState(UINT renderTargetCount)
+	{
+		D3D12_BLEND_DESC blendState{};
+		for (UINT renderTargetIndex = 0;
+			renderTargetIndex < (std::min)(renderTargetCount, static_cast<UINT>(D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT));
+			++renderTargetIndex)
 		{
-			const D3D12_CPU_DESCRIPTOR_HANDLE* depthStencil = gameState.depthStencil.ptr
-				? &gameState.depthStencil
-				: nullptr;
-			commandList->OMSetRenderTargets(
-				static_cast<UINT>(gameState.renderTargets.size()),
-				gameState.renderTargets.empty() ? nullptr : gameState.renderTargets.data(),
-				FALSE,
-				depthStencil);
-			if (!gameState.viewports.empty())
-				commandList->RSSetViewports(static_cast<UINT>(gameState.viewports.size()), gameState.viewports.data());
-			if (!gameState.scissorRectangles.empty())
-				commandList->RSSetScissorRects(
-					static_cast<UINT>(gameState.scissorRectangles.size()),
-					gameState.scissorRectangles.data());
+			D3D12_RENDER_TARGET_BLEND_DESC& target = blendState.RenderTarget[renderTargetIndex];
+			target.BlendEnable = FALSE;
+			target.LogicOpEnable = FALSE;
+			target.SrcBlend = D3D12_BLEND_ONE;
+			target.DestBlend = D3D12_BLEND_ZERO;
+			target.BlendOp = D3D12_BLEND_OP_ADD;
+			target.SrcBlendAlpha = D3D12_BLEND_ONE;
+			target.DestBlendAlpha = D3D12_BLEND_ZERO;
+			target.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+			target.LogicOp = D3D12_LOGIC_OP_NOOP;
+			target.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 		}
+		return blendState;
+	}
 
-		std::string BuildPipelineCacheKey(
-			const RenderPass::RenderPassDisk& renderPass,
-			ID3D12RootSignature* rootSignature,
-			const RenderTargetState& renderTargets)
+	D3D12_RASTERIZER_DESC BuildRasterizerState(UINT sampleCount)
+	{
+		D3D12_RASTERIZER_DESC rasterizer{};
+		rasterizer.FillMode = D3D12_FILL_MODE_SOLID;
+		rasterizer.CullMode = D3D12_CULL_MODE_NONE;
+		rasterizer.FrontCounterClockwise = FALSE;
+		rasterizer.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+		rasterizer.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+		rasterizer.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+		rasterizer.DepthClipEnable = TRUE;
+		rasterizer.MultisampleEnable = sampleCount > 1;
+		rasterizer.AntialiasedLineEnable = FALSE;
+		rasterizer.ForcedSampleCount = 0;
+		rasterizer.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+		return rasterizer;
+	}
+
+	ID3D12PipelineState* GetOrCreatePipelineState(
+		const RenderPass::RenderPassDisk& renderPass,
+		ID3D12GraphicsCommandList* commandList,
+		ID3D12RootSignature* rootSignature,
+		const RenderTargetState& renderTargets,
+		std::string& outError)
+	{
+		for (const ThreadPipelineLookup& lookup : gThreadPipelineLookups)
 		{
-			std::string key = renderPass.id + ':' + StringHelper::PointerToString(rootSignature) + ':' +
-				std::to_string(renderPass.vertexShaderBlobHash) + ':' +
-				std::to_string(renderPass.fragmentShaderBlobHash) + ':' +
-				std::to_string(renderTargets.sampleCount) + ':' +
-				std::to_string(renderTargets.sampleQuality);
-			for (UINT renderTargetIndex = 0; renderTargetIndex < renderTargets.count; ++renderTargetIndex)
-				key += ':' + std::to_string(static_cast<UINT>(renderTargets.formats[renderTargetIndex]));
-			return key;
+			if (lookup.renderPass == &renderPass &&
+				lookup.rootSignature == rootSignature &&
+				lookup.pipelineState &&
+				RenderTargetStatesEqual(lookup.renderTargets, renderTargets))
+			{
+				return lookup.pipelineState;
+			}
 		}
 
-		D3D12_BLEND_DESC BuildBlendState(UINT renderTargetCount)
+		const std::string cacheKey = BuildPipelineCacheKey(renderPass, rootSignature, renderTargets);
+		std::lock_guard<std::mutex> cacheLock(gPipelineCacheMutex);
+		const auto cachedPipelineIt = gPipelineCache.find(cacheKey);
+		if (cachedPipelineIt != gPipelineCache.end())
 		{
-			D3D12_BLEND_DESC blendState{};
-			for (UINT renderTargetIndex = 0;
-				renderTargetIndex < (std::min)(renderTargetCount, static_cast<UINT>(D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT));
-				++renderTargetIndex)
-			{
-				D3D12_RENDER_TARGET_BLEND_DESC& target = blendState.RenderTarget[renderTargetIndex];
-				target.BlendEnable = FALSE;
-				target.LogicOpEnable = FALSE;
-				target.SrcBlend = D3D12_BLEND_ONE;
-				target.DestBlend = D3D12_BLEND_ZERO;
-				target.BlendOp = D3D12_BLEND_OP_ADD;
-				target.SrcBlendAlpha = D3D12_BLEND_ONE;
-				target.DestBlendAlpha = D3D12_BLEND_ZERO;
-				target.BlendOpAlpha = D3D12_BLEND_OP_ADD;
-				target.LogicOp = D3D12_LOGIC_OP_NOOP;
-				target.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-			}
-			return blendState;
+			CacheThreadPipelineLookup(renderPass, rootSignature, renderTargets, cachedPipelineIt->second);
+			return cachedPipelineIt->second;
 		}
-
-		D3D12_RASTERIZER_DESC BuildRasterizerState(UINT sampleCount)
+		const auto cachedErrorIt = gPipelineCreationErrors.find(cacheKey);
+		if (cachedErrorIt != gPipelineCreationErrors.end())
 		{
-			D3D12_RASTERIZER_DESC rasterizer{};
-			rasterizer.FillMode = D3D12_FILL_MODE_SOLID;
-			rasterizer.CullMode = D3D12_CULL_MODE_NONE;
-			rasterizer.FrontCounterClockwise = FALSE;
-			rasterizer.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-			rasterizer.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-			rasterizer.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-			rasterizer.DepthClipEnable = TRUE;
-			rasterizer.MultisampleEnable = sampleCount > 1;
-			rasterizer.AntialiasedLineEnable = FALSE;
-			rasterizer.ForcedSampleCount = 0;
-			rasterizer.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-			return rasterizer;
+			outError = cachedErrorIt->second;
+			return nullptr;
 		}
 
-		ID3D12PipelineState* GetOrCreatePipelineState(
-			const RenderPass::RenderPassDisk& renderPass,
-			ID3D12GraphicsCommandList* commandList,
-			ID3D12RootSignature* rootSignature,
-			const RenderTargetState& renderTargets,
-			std::string& outError)
+		ID3D12Device* device = nullptr;
+		if (FAILED(commandList->GetDevice(IID_PPV_ARGS(&device))) || !device)
 		{
-			for (const ThreadPipelineLookup& lookup : gThreadPipelineLookups)
-			{
-				if (lookup.renderPass == &renderPass &&
-					lookup.rootSignature == rootSignature &&
-					lookup.pipelineState &&
-					RenderTargetStatesEqual(lookup.renderTargets, renderTargets))
-				{
-					return lookup.pipelineState;
-				}
-			}
-
-			const std::string cacheKey = BuildPipelineCacheKey(renderPass, rootSignature, renderTargets);
-			std::lock_guard<std::mutex> cacheLock(gPipelineCacheMutex);
-			const auto cachedPipelineIt = gPipelineCache.find(cacheKey);
-			if (cachedPipelineIt != gPipelineCache.end())
-			{
-				CacheThreadPipelineLookup(renderPass, rootSignature, renderTargets, cachedPipelineIt->second);
-				return cachedPipelineIt->second;
-			}
-			const auto cachedErrorIt = gPipelineCreationErrors.find(cacheKey);
-			if (cachedErrorIt != gPipelineCreationErrors.end())
-			{
-				outError = cachedErrorIt->second;
-				return nullptr;
-			}
-
-			ID3D12Device* device = nullptr;
-			if (FAILED(commandList->GetDevice(IID_PPV_ARGS(&device))) || !device)
-			{
-				outError = "Could not query the D3D12 device from the command list.";
-				return nullptr;
-			}
-
-			D3D12_GRAPHICS_PIPELINE_STATE_DESC description{};
-			description.pRootSignature = rootSignature;
-			description.VS = { renderPass.vertexShaderBlob.data(), renderPass.vertexShaderBlob.size() };
-			description.PS = { renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size() };
-			description.BlendState = BuildBlendState(renderTargets.count);
-			description.SampleMask = UINT_MAX;
-			description.RasterizerState = BuildRasterizerState(renderTargets.sampleCount);
-			description.DepthStencilState.DepthEnable = FALSE;
-			description.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-			description.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-			description.DepthStencilState.StencilEnable = FALSE;
-			description.InputLayout = { nullptr, 0 };
-			description.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
-			description.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-			description.NumRenderTargets = renderTargets.count;
-			for (UINT renderTargetIndex = 0; renderTargetIndex < renderTargets.count; ++renderTargetIndex)
-				description.RTVFormats[renderTargetIndex] = renderTargets.formats[renderTargetIndex];
-			description.DSVFormat = DXGI_FORMAT_UNKNOWN;
-			description.SampleDesc = { renderTargets.sampleCount, renderTargets.sampleQuality };
-
-			ID3D12PipelineState* pipelineState = nullptr;
-			HRESULT result = E_FAIL;
-			{
-				HookD3D12::ScopedRenderPassInjection injectionScope;
-				result = device->CreateGraphicsPipelineState(
-					&description,
-					IID_PPV_ARGS(&pipelineState));
-			}
-			device->Release();
-			if (FAILED(result) || !pipelineState)
-			{
-				outError = "Fullscreen pipeline creation failed with " + StringHelper::FormatHRESULT(result);
-				gPipelineCreationErrors[cacheKey] = outError;
-				ShaderInjectorIO::WriteToLogFileError(
-					"RenderPassExecutor->GetOrCreatePipelineState: " + renderPass.name + ": " + outError);
-				return nullptr;
-			}
-
-			const std::wstring pipelineName = StringHelper::Utf8ToWide(
-				"Shader Injector Render Pass: " + renderPass.name);
-			pipelineState->SetName(pipelineName.c_str());
-			gPipelineCache.emplace(cacheKey, pipelineState);
-			CacheThreadPipelineLookup(renderPass, rootSignature, renderTargets, pipelineState);
-			ShaderInjectorIO::WriteToLogFile(
-				"RenderPassExecutor->GetOrCreatePipelineState: created fullscreen pipeline for " + renderPass.name);
-			return pipelineState;
+			outError = "Could not query the D3D12 device from the command list.";
+			return nullptr;
 		}
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC description{};
+		description.pRootSignature = rootSignature;
+		description.VS = { renderPass.vertexShaderBlob.data(), renderPass.vertexShaderBlob.size() };
+		description.PS = { renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size() };
+		description.BlendState = BuildBlendState(renderTargets.count);
+		description.SampleMask = UINT_MAX;
+		description.RasterizerState = BuildRasterizerState(renderTargets.sampleCount);
+		description.DepthStencilState.DepthEnable = FALSE;
+		description.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+		description.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+		description.DepthStencilState.StencilEnable = FALSE;
+		description.InputLayout = { nullptr, 0 };
+		description.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
+		description.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		description.NumRenderTargets = renderTargets.count;
+		for (UINT renderTargetIndex = 0; renderTargetIndex < renderTargets.count; ++renderTargetIndex)
+			description.RTVFormats[renderTargetIndex] = renderTargets.formats[renderTargetIndex];
+		description.DSVFormat = DXGI_FORMAT_UNKNOWN;
+		description.SampleDesc = { renderTargets.sampleCount, renderTargets.sampleQuality };
+
+		ID3D12PipelineState* pipelineState = nullptr;
+		HRESULT result = E_FAIL;
+		{
+			HookD3D12::ScopedRenderPassInjection injectionScope;
+			result = device->CreateGraphicsPipelineState(
+				&description,
+				IID_PPV_ARGS(&pipelineState));
+		}
+		device->Release();
+		if (FAILED(result) || !pipelineState)
+		{
+			outError = "Fullscreen pipeline creation failed with " + StringHelper::FormatHRESULT(result);
+			gPipelineCreationErrors[cacheKey] = outError;
+			ShaderInjectorIO::WriteToLogFileError(
+				"RenderPassExecutor->GetOrCreatePipelineState: " + renderPass.name + ": " + outError);
+			return nullptr;
+		}
+
+		const std::wstring pipelineName = StringHelper::Utf8ToWide(
+			"Shader Injector Render Pass: " + renderPass.name);
+		pipelineState->SetName(pipelineName.c_str());
+		gPipelineCache.emplace(cacheKey, pipelineState);
+		CacheThreadPipelineLookup(renderPass, rootSignature, renderTargets, pipelineState);
+		ShaderInjectorIO::WriteToLogFile(
+			"RenderPassExecutor->GetOrCreatePipelineState: created fullscreen pipeline for " + renderPass.name);
+		return pipelineState;
+	}
 
 	bool ExecuteFullscreenTriangle(
 		const RenderPass::RenderPassDisk& renderPass,

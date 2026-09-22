@@ -5,16 +5,11 @@
 #include <unordered_map>
 
 #include "../HookD3D12.h"
+#include "../CommandListPipelineState.h"
+#include "../ScopedSwapChainCompatibilityCall.h"
 
 namespace HookD3D12
 {
-	struct CommandListPipelineState
-	{
-		std::atomic<ID3D12RootSignature*> graphicsRootSignature = nullptr;
-		std::atomic<ID3D12RootSignature*> computeRootSignature = nullptr;
-		std::atomic<ID3D12PipelineState*> pipelineState = nullptr;
-	};
-
 	extern std::atomic<uint32_t> gActivePipelineActivityCount;
 	extern thread_local bool gInsideOverlayResourceCreation;
 	extern std::mutex gPipelineMutex;
@@ -48,22 +43,7 @@ namespace HookD3D12
 	extern FunctionPresent1D3D12 gRTSSOriginalPresent1;
 	extern FunctionResizeBuffersD3D12 gRTSSOriginalResizeBuffers;
 	extern std::mutex gRTSSCompatibilityMutex;
-	extern thread_local bool gInsideSwapChainCompatibilityCall;
 	extern std::atomic<bool> gRuntimeReady;
-
-	class ScopedSwapChainCompatibilityCall
-	{
-	public:
-		ScopedSwapChainCompatibilityCall()
-		{
-			gInsideSwapChainCompatibilityCall = true;
-		}
-
-		~ScopedSwapChainCompatibilityCall()
-		{
-			gInsideSwapChainCompatibilityCall = false;
-		}
-	};
 
 	CommandListPipelineState& GetCommandListPipelineState(ID3D12GraphicsCommandList* commandList);
 	void UpdateUncapturedPipelineRootSignatureLocked(ID3D12PipelineState* pipelineState, ID3D12RootSignature* rootSignature, bool computeRootSignature);

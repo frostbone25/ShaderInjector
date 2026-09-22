@@ -4,8 +4,6 @@
 #include <vector>
 
 #include "HookD3D12/HookD3D12.h"
-#include "HookD3D12PipelineRegistry.h"
-#include "HookD3D12PipelineUtils.h"
 #include "ShaderAutomaticDiscovery.h"
 
 namespace HookD3D12

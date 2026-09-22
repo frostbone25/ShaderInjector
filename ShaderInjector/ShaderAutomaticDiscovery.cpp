@@ -21,8 +21,6 @@
 #include "Globals.h"
 #include "Hash.h"
 #include "HookD3D12.h"
-#include "HookD3D12PipelineUtils.h"
-#include "HookD3D12ReplacementTemplates.h"
 #include "ShaderAnalysis.h"
 #include "ShaderDiscovery.h"
 #include "GUI/ShaderInjectorGUI.h"

@@ -585,6 +585,34 @@ namespace ShaderInjectorGUI
 		if (ImGui::InputText("##Name", name, sizeof(name)))
 			resource.name = name;
 		ImGui::Text("ID: %s", resource.id.c_str());
+		ImGui::TextUnformatted("Reuse Texture");
+		ImGui::SameLine();
+		const char* reusePreview = "New allocation";
+		if (!resource.reuseFromResourceId.empty())
+			reusePreview = resource.reuseFromResourceId.c_str();
+		if (ImGui::BeginCombo("##ReuseTexture", reusePreview))
+		{
+			if (ImGui::Selectable("New allocation", resource.reuseFromResourceId.empty()))
+				resource.reuseFromResourceId.clear();
+			for (const RenderPass::RenderPassDisk& candidatePass : DatabaseRenderPasses::GetRenderPasses())
+			{
+				if (candidatePass.id == renderPass.id)
+					continue;
+				for (const RenderPass::RuntimeResourceDefinitionDisk& candidate : candidatePass.runtimeResources)
+				{
+					if (candidate.id.empty() || candidate.texture.lifetime == ShaderResource::ResourceLifetime::History ||
+						!IsExposedRuntimeResource(candidate.id))
+						continue;
+					const std::string label = candidatePass.name + " / " + candidate.name + "##" + candidate.id;
+					if (ImGui::Selectable(label.c_str(), resource.reuseFromResourceId == candidate.id))
+						resource.reuseFromResourceId = candidate.id;
+				}
+			}
+			ImGui::EndCombo();
+		}
+		if (!resource.reuseFromResourceId.empty())
+			ImGui::TextWrapped("Shares the earlier texture allocation. Read the previous output before this pass overwrites it.");
+		ImGui::BeginDisabled(!resource.reuseFromResourceId.empty());
 
 		ImGui::TextUnformatted("Dimension");
 		ImGui::SameLine();
@@ -706,6 +734,7 @@ namespace ShaderInjectorGUI
 		ImGui::EndDisabled();
 		if (requiresRenderTarget || requiresUnorderedAccess || requiresCopySourceMatch)
 			ImGui::TextUnformatted("Output bindings lock the required resource access flags.");
+		ImGui::EndDisabled();
 		ImGui::PopID();
 		ImGui::TreePop();
 	}

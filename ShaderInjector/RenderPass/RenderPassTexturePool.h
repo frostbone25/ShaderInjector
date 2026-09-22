@@ -58,12 +58,13 @@ namespace RenderPassTexturePool
 	class ScopedInputTextureOverrides
 	{
 	public:
-		ScopedInputTextureOverrides();
+		explicit ScopedInputTextureOverrides(ID3D12GraphicsCommandList* commandList = nullptr);
 		~ScopedInputTextureOverrides();
 		ScopedInputTextureOverrides(const ScopedInputTextureOverrides&) = delete;
 		ScopedInputTextureOverrides& operator=(const ScopedInputTextureOverrides&) = delete;
 	private:
 		size_t previousCount = 0;
+		ID3D12GraphicsCommandList* previousCommandList = nullptr;
 	};
 	void OverrideInputTexture(
 		const std::string& resourceId,
@@ -100,6 +101,9 @@ namespace RenderPassTexturePool
 		std::vector<TextureView>& outStageTargets,
 		std::string& outError);
 	void AdvanceFrame();
+	bool HasRecordedCommandListWork();
+	void ResetCommandListRecording(ID3D12GraphicsCommandList* commandList);
+	void NotifyCommandListsSubmitted(ID3D12CommandQueue* commandQueue, UINT commandListCount, ID3D12CommandList* const* commandLists);
 	void LogPerformanceStatistics();
 	void ReleaseResources();
 }

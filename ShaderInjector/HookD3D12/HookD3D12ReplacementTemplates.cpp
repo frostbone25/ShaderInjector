@@ -1,13 +1,11 @@
 //HookD3D12ReplacementTemplates.cpp
-#include "HookD3D12ReplacementTemplates.h"
 
 #include <algorithm>
 #include <cmath>
 
 //custom
 #include "Hash.h"
-#include "HookD3D12PipelineUtils.h"
-#include "HookD3D12ReplacementLookup.h"
+#include "HookD3D12.h"
 #include "ShaderInjectorGUI.h"
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"

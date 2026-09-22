@@ -162,27 +162,6 @@
     <ClInclude Include="HookD3D12\D3D12\HookD3D12ExecutionHookHelpers.h">
       <Filter>D3D12</Filter>
     </ClInclude>
-    <ClInclude Include="HookD3D12\HookD3D12OverlayStartup.h">
-      <Filter>HookD3D12</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12\HookD3D12PipelineRegistry.h">
-      <Filter>HookD3D12</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12\HookD3D12PipelineUtils.h">
-      <Filter>HookD3D12</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12\HookD3D12RenderPass.h">
-      <Filter>HookD3D12</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12\HookD3D12ReplacementLookup.h">
-      <Filter>HookD3D12</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12\HookD3D12ReplacementTemplates.h">
-      <Filter>HookD3D12</Filter>
-    </ClInclude>
-    <ClInclude Include="HookD3D12\HookD3D12Resources.h">
-      <Filter>HookD3D12</Filter>
-    </ClInclude>
     <ClInclude Include="GUI\ShaderInjectorGUI.h">
       <Filter>GUI</Filter>
     </ClInclude>
@@ -241,15 +220,6 @@
       <Filter>DDS</Filter>
     </ClInclude>
     <ClInclude Include="DDS\DDSHeaderDX10.h">
-      <Filter>DDS</Filter>
-    </ClInclude>
-    <ClInclude Include="DDS\DDSConstants.h">
-      <Filter>DDS</Filter>
-    </ClInclude>
-    <ClInclude Include="DDS\DDSLegacyFormat.h">
-      <Filter>DDS</Filter>
-    </ClInclude>
-    <ClInclude Include="DDS\DDSHeaderParser.h">
       <Filter>DDS</Filter>
     </ClInclude>
     <ClInclude Include="DDS\DDS.h">

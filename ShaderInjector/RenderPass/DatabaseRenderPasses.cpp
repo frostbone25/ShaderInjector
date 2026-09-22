@@ -12,125 +12,122 @@
 
 namespace DatabaseRenderPasses
 {
-	namespace
+	std::vector<RenderPass::RenderPassDisk> gRenderPasses;
+	bool gRenderPassesLoaded = false;
+
+	struct AvailableRenderPassIdentity
 	{
-		std::vector<RenderPass::RenderPassDisk> gRenderPasses;
-		bool gRenderPassesLoaded = false;
+		std::string id;
+		std::string name;
+	};
 
-		struct AvailableRenderPassIdentity
+	AvailableRenderPassIdentity FindAvailableRenderPassIdentity()
+	{
+		const std::string renderPassDirectory = ShaderInjectorIO::GetRenderPassesDirectory();
+
+		for (uint32_t suffix = 1; suffix < UINT32_MAX; ++suffix)
 		{
-			std::string id;
-			std::string name;
-		};
+			const std::string candidateId = suffix == 1
+				? "RenderPass"
+				: "RenderPass_" + std::to_string(suffix);
 
-		AvailableRenderPassIdentity FindAvailableRenderPassIdentity()
-		{
-			const std::string renderPassDirectory = ShaderInjectorIO::GetRenderPassesDirectory();
+			const std::string candidateName = suffix == 1
+				? "New Render Pass"
+				: "New Render Pass " + std::to_string(suffix);
 
-			for (uint32_t suffix = 1; suffix < UINT32_MAX; ++suffix)
-			{
-				const std::string candidateId = suffix == 1
-					? "RenderPass"
-					: "RenderPass_" + std::to_string(suffix);
+			const std::string candidateDirectory = ShaderInjectorIO::JoinPath(
+				renderPassDirectory,
+				ShaderInjectorIO::SanitizeFileStem(candidateName));
 
-				const std::string candidateName = suffix == 1
-					? "New Render Pass"
-					: "New Render Pass " + std::to_string(suffix);
-
-				const std::string candidateDirectory = ShaderInjectorIO::JoinPath(
-					renderPassDirectory,
-					ShaderInjectorIO::SanitizeFileStem(candidateName));
-
-				const bool duplicateId = std::any_of(gRenderPasses.begin(), gRenderPasses.end(), [&](const auto& renderPass)
+			const bool duplicateId = std::any_of(gRenderPasses.begin(), gRenderPasses.end(), [&](const auto& renderPass)
 				{
 					return renderPass.id == candidateId;
 				});
 
-				if (!duplicateId && !ShaderInjectorIO::PathExists(candidateDirectory))
-					return { candidateId, candidateName };
-			}
-
-			return {};
+			if (!duplicateId && !ShaderInjectorIO::PathExists(candidateDirectory))
+				return { candidateId, candidateName };
 		}
 
-		bool RenderPassPackageUsesCurrentName(const RenderPass::RenderPassDisk& renderPass)
-		{
-			const std::string fileStem = ShaderInjectorIO::SanitizeFileStem(renderPass.name);
+		return {};
+	}
 
-			if (fileStem.empty())
+	bool RenderPassPackageUsesCurrentName(const RenderPass::RenderPassDisk& renderPass)
+	{
+		const std::string fileStem = ShaderInjectorIO::SanitizeFileStem(renderPass.name);
+
+		if (fileStem.empty())
+			return false;
+
+		const std::string desiredPackageDirectory = ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetRenderPassesDirectory(), fileStem);
+		const std::string desiredJsonPath = ShaderInjectorIO::JoinPath(desiredPackageDirectory, fileStem + ShaderInjectorIO::extensionJSON);
+
+		return ShaderInjectorIO::PathsEqual(renderPass.packageDirectory, desiredPackageDirectory) && ShaderInjectorIO::PathsEqual(renderPass.jsonPath, desiredJsonPath);
+	}
+
+	bool MoveRenderPassPackageToCurrentName(RenderPass::RenderPassDisk& renderPass)
+	{
+		const std::string fileStem = ShaderInjectorIO::SanitizeFileStem(renderPass.name);
+
+		if (fileStem.empty())
+			return false;
+
+		const std::string renderPassesDirectory = ShaderInjectorIO::GetRenderPassesDirectory();
+		const std::string desiredPackageDirectory = ShaderInjectorIO::JoinPath(renderPassesDirectory, fileStem);
+		const std::string desiredJsonPath = ShaderInjectorIO::JoinPath(desiredPackageDirectory, fileStem + ShaderInjectorIO::extensionJSON);
+
+		std::string currentPackageDirectory = renderPass.packageDirectory.empty()
+			? ShaderInjectorIO::DirectoryFromPath(renderPass.jsonPath)
+			: renderPass.packageDirectory;
+
+		std::string currentJsonPath = renderPass.jsonPath;
+
+		const bool currentlyStoredAtRoot = ShaderInjectorIO::PathsEqual(currentPackageDirectory, renderPassesDirectory);
+
+		if (!currentlyStoredAtRoot &&
+			!ShaderInjectorIO::PathsEqual(currentPackageDirectory, desiredPackageDirectory))
+		{
+			if (ShaderInjectorIO::PathExists(desiredPackageDirectory) ||
+				!ShaderInjectorIO::MovePath(currentPackageDirectory, desiredPackageDirectory))
+			{
+				return false;
+			}
+
+			currentJsonPath = ShaderInjectorIO::JoinPath(
+				desiredPackageDirectory,
+				ShaderInjectorIO::FileNameFromPath(currentJsonPath));
+		}
+		else if (currentlyStoredAtRoot)
+		{
+			if (ShaderInjectorIO::PathExists(desiredPackageDirectory))
 				return false;
 
-			const std::string desiredPackageDirectory = ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetRenderPassesDirectory(), fileStem);
-			const std::string desiredJsonPath = ShaderInjectorIO::JoinPath(desiredPackageDirectory, fileStem + ShaderInjectorIO::extensionJSON);
+			ShaderInjectorIO::DirectoryCreate(desiredPackageDirectory);
 
-			return ShaderInjectorIO::PathsEqual(renderPass.packageDirectory, desiredPackageDirectory) && ShaderInjectorIO::PathsEqual(renderPass.jsonPath, desiredJsonPath);
+			if (!ShaderInjectorIO::DirectoryExists(desiredPackageDirectory))
+				return false;
 		}
 
-		bool MoveRenderPassPackageToCurrentName(RenderPass::RenderPassDisk& renderPass)
+		if (!ShaderInjectorIO::PathsEqual(currentJsonPath, desiredJsonPath))
 		{
-			const std::string fileStem = ShaderInjectorIO::SanitizeFileStem(renderPass.name);
-
-			if (fileStem.empty())
+			if (ShaderInjectorIO::PathExists(desiredJsonPath))
 				return false;
 
-			const std::string renderPassesDirectory = ShaderInjectorIO::GetRenderPassesDirectory();
-			const std::string desiredPackageDirectory = ShaderInjectorIO::JoinPath(renderPassesDirectory, fileStem);
-			const std::string desiredJsonPath = ShaderInjectorIO::JoinPath(desiredPackageDirectory, fileStem + ShaderInjectorIO::extensionJSON);
-
-			std::string currentPackageDirectory = renderPass.packageDirectory.empty()
-				? ShaderInjectorIO::DirectoryFromPath(renderPass.jsonPath)
-				: renderPass.packageDirectory;
-
-			std::string currentJsonPath = renderPass.jsonPath;
-
-			const bool currentlyStoredAtRoot = ShaderInjectorIO::PathsEqual(currentPackageDirectory, renderPassesDirectory);
-
-			if (!currentlyStoredAtRoot &&
-				!ShaderInjectorIO::PathsEqual(currentPackageDirectory, desiredPackageDirectory))
+			if (ShaderInjectorIO::FileExists(currentJsonPath) &&
+				!ShaderInjectorIO::MovePath(currentJsonPath, desiredJsonPath))
 			{
-				if (ShaderInjectorIO::PathExists(desiredPackageDirectory) ||
-					!ShaderInjectorIO::MovePath(currentPackageDirectory, desiredPackageDirectory))
-				{
-					return false;
-				}
-
-				currentJsonPath = ShaderInjectorIO::JoinPath(
-					desiredPackageDirectory,
-					ShaderInjectorIO::FileNameFromPath(currentJsonPath));
+				return false;
 			}
-			else if (currentlyStoredAtRoot)
-			{
-				if (ShaderInjectorIO::PathExists(desiredPackageDirectory))
-					return false;
-
-				ShaderInjectorIO::DirectoryCreate(desiredPackageDirectory);
-
-				if (!ShaderInjectorIO::DirectoryExists(desiredPackageDirectory))
-					return false;
-			}
-
-			if (!ShaderInjectorIO::PathsEqual(currentJsonPath, desiredJsonPath))
-			{
-				if (ShaderInjectorIO::PathExists(desiredJsonPath))
-					return false;
-
-				if (ShaderInjectorIO::FileExists(currentJsonPath) &&
-					!ShaderInjectorIO::MovePath(currentJsonPath, desiredJsonPath))
-				{
-					return false;
-				}
-			}
-
-			renderPass.packageDirectory = desiredPackageDirectory;
-			renderPass.jsonPath = desiredJsonPath;
-			RenderPass::ResolveShaderPaths(renderPass);
-			return RenderPass::WriteJson(renderPass);
 		}
 
-		void PublishRuntimeConfiguration()
-		{
-			RenderPassRuntime::PublishRenderPassConfigurations(gRenderPasses);
-		}
+		renderPass.packageDirectory = desiredPackageDirectory;
+		renderPass.jsonPath = desiredJsonPath;
+		RenderPass::ResolveShaderPaths(renderPass);
+		return RenderPass::WriteJson(renderPass);
+	}
+
+	void PublishRuntimeConfiguration()
+	{
+		RenderPassRuntime::PublishRenderPassConfigurations(gRenderPasses);
 	}
 
 	void RefreshRenderPasses()
@@ -175,9 +172,9 @@ namespace DatabaseRenderPasses
 			}
 
 			const bool duplicateId = std::any_of(gRenderPasses.begin(), gRenderPasses.end(), [&](const auto& existing)
-			{
-				return existing.id == renderPass.id;
-			});
+				{
+					return existing.id == renderPass.id;
+				});
 
 			if (duplicateId)
 			{
@@ -197,9 +194,9 @@ namespace DatabaseRenderPasses
 		}
 
 		std::sort(gRenderPasses.begin(), gRenderPasses.end(), [](const auto& left, const auto& right)
-		{
-			return left.name < right.name;
-		});
+			{
+				return left.name < right.name;
+			});
 
 		PublishRuntimeConfiguration();
 
@@ -223,9 +220,9 @@ namespace DatabaseRenderPasses
 		EnsureRenderPassesLoaded();
 
 		const auto renderPassIt = std::find_if(gRenderPasses.begin(), gRenderPasses.end(), [&](const auto& renderPass)
-		{
-			return renderPass.id == renderPassId;
-		});
+			{
+				return renderPass.id == renderPassId;
+			});
 
 		return renderPassIt != gRenderPasses.end() ? &*renderPassIt : nullptr;
 	}
@@ -483,9 +480,9 @@ namespace DatabaseRenderPasses
 		EnsureRenderPassesLoaded();
 
 		const auto renderPassIt = std::find_if(gRenderPasses.begin(), gRenderPasses.end(), [&](const auto& renderPass)
-		{
-			return renderPass.id == renderPassId;
-		});
+			{
+				return renderPass.id == renderPassId;
+			});
 
 		if (renderPassIt == gRenderPasses.end())
 			return false;

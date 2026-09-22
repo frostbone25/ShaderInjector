@@ -1,8 +1,6 @@
-#include "../HookD3D12.h"
 
 #include "HookD3D12RuntimeState.h"
-#include "../HookD3D12OverlayStartup.h"
-#include "../HookD3D12RenderPass.h"
+#include "../HookD3D12.h"
 #include "FPSCounter.h"
 #include "Globals.h"
 #include "GUI/ShaderInjectorGUI.h"

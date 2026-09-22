@@ -1,0 +1,14 @@
+#pragma once
+
+#include <cstdint>
+
+#include "ShaderTarget/ShaderTarget.h"
+
+namespace HookD3D12
+{
+	struct ShaderCandidate
+	{
+		uint64_t hash = 0;
+		ShaderTarget::ShaderType type = ShaderTarget::Unknown;
+	};
+}

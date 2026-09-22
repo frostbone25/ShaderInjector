@@ -1,7 +1,5 @@
 //HookD3D12Originals.cpp
 #include "HookD3D12.h"
-#include "HookD3D12RenderPass.h"
-#include "HookD3D12Resources.h"
 
 namespace HookD3D12
 {
