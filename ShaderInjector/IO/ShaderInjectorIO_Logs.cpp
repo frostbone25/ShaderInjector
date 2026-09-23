@@ -11,27 +11,22 @@
 
 namespace ShaderInjectorIO
 {
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
+	//serialize log writes and rotation so hook threads never interleave or lose entries.
 
-	//all writes and log rotation share this mutex.
-	//this prevents concurrent hook threads from interleaving lines or rotating the file while another thread is appending to it.
+	//one lock keeps complete lines together and prevents rotation from racing with a write.
 	std::mutex gLogMutex;
 
-	//informational messages are controlled by VerboseLog. 
-	//warnings, errors, and success messages bypass that setting, but DisableLogs still suppresses every message.
-	bool ShouldWriteLogEntry(bool forceWrite)
+	//verbose mode admits regular entries; status entries bypass it, while DisableLogs silences all entries.
+	static bool ShouldWriteLogEntry(bool bypassVerboseFilter)
 	{
 		if (Globals::gDisableLogs)
 			return false;
 
-		return forceWrite || Globals::gVerboseLog;
+		return bypassVerboseFilter || Globals::gVerboseLog;
 	}
 
-	//convert the current time into the short timestamp used at the beginning of every line.
-	//localtime_s and localtime_r are the thread-safe variants on their respective platforms.
-	std::string CurrentTimestamp()
+	//format local time for each line using the thread-safe function available on this platform.
+	static std::string CurrentTimestamp()
 	{
 		const std::time_t currentTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 		std::tm localTime{};
@@ -49,33 +44,33 @@ namespace ShaderInjectorIO
 		return timestamp;
 	}
 
-	//start a fresh current log while preserving exactly one previous run. 
-	//the caller must hold gLogMutex because this helper is part of the startup rotation sequence.
-	void RotateLogFilesLocked()
+	//preserve one previous run before opening an empty current log; the caller holds gLogMutex.
+	static void RotateLogFilesLocked()
 	{
-		//rotation runs before the rest of IO initialization, so create the directory here rather than assuming Initialize has already created it.
+		//rotation can happen before Initialize, so create its directory as part of rotation.
 		std::error_code error;
-		std::filesystem::create_directories(PathFromUtf8(GetLogsDirectory()), error);
+		std::filesystem::create_directories(PathFromUTF8(GetLogsDirectory()), error);
 
-		const std::filesystem::path currentLogPath = PathFromUtf8(GetLogFilePath());
-		const std::filesystem::path previousLogPath = PathFromUtf8(GetPreviousLogFilePath());
+		const std::filesystem::path currentLogPath = PathFromUTF8(GetLogFilePath());
+		const std::filesystem::path previousLogPath = PathFromUTF8(GetPreviousLogFilePath());
 
-		//there is only room for one previous log, so remove it before moving the current log.
+		//keep only one previous log by removing the older copy first.
 		error.clear();
 		std::filesystem::remove(previousLogPath, error);
 
 		error.clear();
+
 		if (std::filesystem::is_regular_file(currentLogPath, error))
 		{
-			//a same-directory rename is atomic and is the preferred path.
+			//a same-directory rename is atomic when the filesystem supports it.
 			error.clear();
 			std::filesystem::rename(currentLogPath, previousLogPath, error);
 
-			//some Wine/Proton filesystem combinations reject rename even within the same directory.
-			//copy first, then remove the original as a portable fallback.
+			//copy first on filesystems where rename does not work, then remove the original.
 			if (error)
 			{
 				error.clear();
+
 				std::filesystem::copy_file(
 					currentLogPath,
 					previousLogPath,
@@ -87,54 +82,53 @@ namespace ShaderInjectorIO
 			}
 		}
 
-		//truncation guarantees that a failed or empty rotation still starts a clean current log for this process.
+		//truncate even when there was no old log so this process always starts with a clean file.
 		std::ofstream currentLog(currentLogPath, std::ios::trunc);
 	}
 
-	void WriteLogEntry(const std::string& text, bool forceWrite)
+	static void WriteLogEntry(const std::string& logText, bool bypassVerboseFilter)
 	{
-		if (!ShouldWriteLogEntry(forceWrite))
+		if (!ShouldWriteLogEntry(bypassVerboseFilter))
 			return;
 
-		std::lock_guard<std::mutex> lock(gLogMutex);
-		std::ofstream logFile(PathFromUtf8(GetLogFilePath()), std::ios::app);
+		std::lock_guard<std::mutex> logLock(gLogMutex);
+		std::ofstream logFile(PathFromUTF8(GetLogFilePath()), std::ios::app);
 
-		//logging is best effort. 
-		//a failed file open must never interfere with rendering or with the game's hook execution.
+		//logging is best effort, so a file error never interrupts rendering or hook execution.
 		if (!logFile.is_open())
 			return;
 
-		logFile << '[' << CurrentTimestamp() << "] " << text << '\n';
+		logFile << '[' << CurrentTimestamp() << "] " << logText << '\n';
 	}
 
 	void RotateLogFiles()
 	{
-		std::lock_guard<std::mutex> lock(gLogMutex);
+		std::lock_guard<std::mutex> logLock(gLogMutex);
 		RotateLogFilesLocked();
 	}
 
-	void WriteToLogFile(const std::string& text)
+	void WriteToLogFile(const std::string& logText)
 	{
-		WriteLogEntry(text, false);
+		WriteLogEntry(logText, false);
 	}
 
-	void WriteToLogFileStatus(const std::string& text)
+	void WriteToLogFileStatus(const std::string& logText)
 	{
-		WriteLogEntry(text, true);
+		WriteLogEntry(logText, true);
 	}
 
-	void WriteToLogFileError(const std::string& text)
+	void WriteToLogFileError(const std::string& logText)
 	{
-		WriteLogEntry("[ERROR] " + text, true);
+		WriteLogEntry("[ERROR] " + logText, true);
 	}
 
-	void WriteToLogFileSuccess(const std::string& text)
+	void WriteToLogFileSuccess(const std::string& logText)
 	{
-		WriteLogEntry("[SUCCESS] " + text, true);
+		WriteLogEntry("[SUCCESS] " + logText, true);
 	}
 
-	void WriteToLogFileWarning(const std::string& text)
+	void WriteToLogFileWarning(const std::string& logText)
 	{
-		WriteLogEntry("[WARNING] " + text, true);
+		WriteLogEntry("[WARNING] " + logText, true);
 	}
 }

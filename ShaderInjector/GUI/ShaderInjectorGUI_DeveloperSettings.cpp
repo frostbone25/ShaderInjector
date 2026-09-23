@@ -15,7 +15,7 @@
 //custom
 #include "HookD3D12.h"
 #include "IO/ShaderInjectorIO.h"
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "Globals.h"
 #include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "RenderPass/DatabaseRenderPasses.h"
@@ -347,9 +347,9 @@ namespace ShaderInjectorGUI
 		if (ImGui::TreeNodeEx("Adapter Info"))
 		{
 			ImGui::SeparatorText("GPU");
-			ImGui::Text("Adapter: %s", HookD3D12::gPipelineInfo.gpuName.c_str());
-			ImGui::Text("Vendor ID: 0x%X", HookD3D12::gPipelineInfo.vendorId);
-			ImGui::Text("Device ID: 0x%X", HookD3D12::gPipelineInfo.deviceId);
+			ImGui::Text("Adapter: %s", HookD3D12::gPipelineInfo.graphicsProcessorName.c_str());
+			ImGui::Text("Vendor ID: 0x%X", HookD3D12::gPipelineInfo.vendorID);
+			ImGui::Text("Device ID: 0x%X", HookD3D12::gPipelineInfo.deviceID);
 			ImGui::SeparatorText("Memory");
 			ImGui::Text("Dedicated VRAM: %.2f GB", HookD3D12::gPipelineInfo.dedicatedVideoMemory / (1024.0 * 1024.0 * 1024.0));
 			ImGui::Text("Dedicated System: %.2f GB", HookD3D12::gPipelineInfo.dedicatedSystemMemory / (1024.0 * 1024.0 * 1024.0));
@@ -368,7 +368,7 @@ namespace ShaderInjectorGUI
 		if (ImGui::TreeNodeEx("D3D12 Pipeline Info"))
 		{
 			ImGui::SeparatorText("Swap Chain");
-			ImGui::Text("Buffers: %u", HookD3D12::gPipelineInfo.swapChainBuffers);
+			ImGui::Text("Buffers: %u", HookD3D12::gPipelineInfo.swapChainBufferCount);
 			ImGui::Text("Format: %u", HookD3D12::gPipelineInfo.swapChainFormat);
 			ImGui::SeparatorText("Feature Support");
 			ImGui::Text("Resource Binding Tier: %u", HookD3D12::gPipelineInfo.resourceBindingTier);
@@ -397,19 +397,19 @@ namespace ShaderInjectorGUI
 
 		if (ImGui::CollapsingHeader(headerText.c_str()))
 		{
-			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::psHash, &HookD3D12::GraphicsPipelineInfo::psSize, &HookD3D12::GraphicsPipelineInfo::psBytecode>(
-				"Pixel Shaders", "GraphicsPS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PipelineSourceList::Graphics, true, true, &HookD3D12::GraphicsPipelineInfo::psDisabled, &HookD3D12::GraphicsPipelineInfo::psoWithoutPS);
+			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::pixelShaderHash, &HookD3D12::GraphicsPipelineInfo::pixelShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::pixelShaderBytecode>(
+				"Pixel Shaders", "GraphicsPS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PipelineSourceList::Graphics, true, true, &HookD3D12::GraphicsPipelineInfo::pixelShaderDisabled, &HookD3D12::GraphicsPipelineInfo::pipelineStateWithoutPixelShader);
 
-			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::vsHash, &HookD3D12::GraphicsPipelineInfo::vsSize, &HookD3D12::GraphicsPipelineInfo::vsBytecode>(
+			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::vertexShaderHash, &HookD3D12::GraphicsPipelineInfo::vertexShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::vertexShaderBytecode>(
 				"Vertex Shaders", "GraphicsVS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::VertexShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
 
-			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::gsHash, &HookD3D12::GraphicsPipelineInfo::gsSize, &HookD3D12::GraphicsPipelineInfo::gsBytecode>(
+			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::geometryShaderHash, &HookD3D12::GraphicsPipelineInfo::geometryShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::geometryShaderBytecode>(
 				"Geometry Shaders", "GraphicsGS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::GeometryShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
 
-			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::hsHash, &HookD3D12::GraphicsPipelineInfo::hsSize, &HookD3D12::GraphicsPipelineInfo::hsBytecode>(
+			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::hullShaderHash, &HookD3D12::GraphicsPipelineInfo::hullShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::hullShaderBytecode>(
 				"Hull Shaders", "GraphicsHS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::HullShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
 
-			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::dsHash, &HookD3D12::GraphicsPipelineInfo::dsSize, &HookD3D12::GraphicsPipelineInfo::dsBytecode>(
+			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::domainShaderHash, &HookD3D12::GraphicsPipelineInfo::domainShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::domainShaderBytecode>(
 				"Domain Shaders", "GraphicsDS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::DomainShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
 		}
 	}
@@ -425,23 +425,23 @@ namespace ShaderInjectorGUI
 
 		if (ImGui::CollapsingHeader(headerText.c_str()))
 		{
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::psHash, &HookD3D12::PipelineStateInfo::psSize, &HookD3D12::PipelineStateInfo::psBytecode>(
-				"Pixel Shaders", "StreamPS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PipelineSourceList::Stream, true, false, &HookD3D12::PipelineStateInfo::psDisabled, &HookD3D12::PipelineStateInfo::psoWithoutPS);
+			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::pixelShaderHash, &HookD3D12::PipelineStateInfo::pixelShaderBytecodeSize, &HookD3D12::PipelineStateInfo::pixelShaderBytecode>(
+				"Pixel Shaders", "StreamPS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PipelineSourceList::Stream, true, false, &HookD3D12::PipelineStateInfo::pixelShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutPixelShader);
 
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::csHash, &HookD3D12::PipelineStateInfo::csSize, &HookD3D12::PipelineStateInfo::csBytecode>(
-				"Compute Shaders", "StreamCS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::ComputeShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS, HookD3D12::PipelineSourceList::Stream, true, false, &HookD3D12::PipelineStateInfo::csDisabled, &HookD3D12::PipelineStateInfo::psoWithoutCS);
+			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::computeShaderHash, &HookD3D12::PipelineStateInfo::computeShaderBytecodeSize, &HookD3D12::PipelineStateInfo::computeShaderBytecode>(
+				"Compute Shaders", "StreamCS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::ComputeShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS, HookD3D12::PipelineSourceList::Stream, true, false, &HookD3D12::PipelineStateInfo::computeShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutComputeShader);
 
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::vsHash, &HookD3D12::PipelineStateInfo::vsSize, &HookD3D12::PipelineStateInfo::vsBytecode>(
-				"Vertex Shaders", "StreamVS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::VertexShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::vsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutVS);
+			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::vertexShaderHash, &HookD3D12::PipelineStateInfo::vertexShaderBytecodeSize, &HookD3D12::PipelineStateInfo::vertexShaderBytecode>(
+				"Vertex Shaders", "StreamVS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::VertexShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::vertexShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutVertexShader);
 
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::gsHash, &HookD3D12::PipelineStateInfo::gsSize, &HookD3D12::PipelineStateInfo::gsBytecode>(
-				"Geometry Shaders", "StreamGS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::GeometryShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::gsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutGS);
+			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::geometryShaderHash, &HookD3D12::PipelineStateInfo::geometryShaderBytecodeSize, &HookD3D12::PipelineStateInfo::geometryShaderBytecode>(
+				"Geometry Shaders", "StreamGS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::GeometryShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::geometryShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutGeometryShader);
 
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::hsHash, &HookD3D12::PipelineStateInfo::hsSize, &HookD3D12::PipelineStateInfo::hsBytecode>(
-				"Hull Shaders", "StreamHS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::HullShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::hsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutHS);
+			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::hullShaderHash, &HookD3D12::PipelineStateInfo::hullShaderBytecodeSize, &HookD3D12::PipelineStateInfo::hullShaderBytecode>(
+				"Hull Shaders", "StreamHS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::HullShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::hullShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutHullShader);
 
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::dsHash, &HookD3D12::PipelineStateInfo::dsSize, &HookD3D12::PipelineStateInfo::dsBytecode>(
-				"Domain Shaders", "StreamDS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::DomainShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::dsDisabled, &HookD3D12::PipelineStateInfo::psoWithoutDS);
+			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::domainShaderHash, &HookD3D12::PipelineStateInfo::domainShaderBytecodeSize, &HookD3D12::PipelineStateInfo::domainShaderBytecode>(
+				"Domain Shaders", "StreamDS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::DomainShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::domainShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutDomainShader);
 		}
 		else
 		{

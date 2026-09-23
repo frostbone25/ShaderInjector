@@ -8,8 +8,8 @@ namespace HookD3D12
 {
 	struct PSOPendingRebuild
 	{
-		PipelineSourceList source;
-		int index;
-		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetType;
+		PipelineSourceList pipelineSource;
+		int pipelineIndex;
+		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetSubobjectType;
 	};
 }

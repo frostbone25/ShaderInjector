@@ -6,9 +6,9 @@ namespace HookD3D12
 {
 	struct FrameContext
 	{
-		ID3D12CommandAllocator* allocator = nullptr;
-		ID3D12Resource* renderTarget = nullptr;
-		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {};
+		ID3D12CommandAllocator* commandAllocator = nullptr;
+		ID3D12Resource* renderTargetResource = nullptr;
+		D3D12_CPU_DESCRIPTOR_HANDLE renderTargetViewHandle = {};
 		UINT64 fenceValue = 0;
 	};
 }

@@ -10,9 +10,12 @@ namespace HookD3D12
 	{
 		ID3D12PipelineState* pipelineState = nullptr;
 
-		uint64_t csHash = 0;
-		SIZE_T csSize = 0;
-		std::vector<uint8_t> csBytecode;
-		D3D12_COMPUTE_PIPELINE_STATE_DESC originalDesc = {};
+		uint64_t computeShaderHash = 0;
+
+		SIZE_T computeShaderBytecodeSize = 0;
+
+		std::vector<uint8_t> computeShaderBytecode;
+
+		D3D12_COMPUTE_PIPELINE_STATE_DESC originalDescription = {};
 	};
 }

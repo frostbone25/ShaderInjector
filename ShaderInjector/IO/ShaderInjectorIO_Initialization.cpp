@@ -2,15 +2,12 @@
 
 namespace ShaderInjectorIO
 {
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INITIALIZATION |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INITIALIZATION |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INITIALIZATION |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
+	//create the injector's working folders after loading settings, so startup logs reflect the configured behavior.
 	bool Initialize()
 	{
-		WriteToLogFile("ShaderInjectorIO->Initialize: Initalizing...");
+		WriteToLogFile("ShaderInjectorIO->Initialize: Initializing...");
 
-		//collect directory/file paths
+		//resolve paths once so every startup check uses the same game-relative locations.
 		const std::string shaderInjectorDirectory = GetShaderInjectorDirectory();
 		const std::string internalDirectory = GetInternalDirectory();
 		const std::string logsDirectory = GetLogsDirectory();
@@ -24,7 +21,7 @@ namespace ShaderInjectorIO
 		const std::string modifiedShadersIncludesDirectory = GetModifiedShadersIncludesDirectory();
 		const std::string injectorSettingsPath = GetInjectorSettingsPath();
 
-		//start by reading, or creating, injector settings so the rest of startup observes the user's configured behavior.
+		//load settings before creating folders so the rest of startup sees the user's configured behavior.
 		const bool injectorSettingsReadResult = ReadInjectorSettings();
 
 		if (!injectorSettingsReadResult && !FileExists(injectorSettingsPath))

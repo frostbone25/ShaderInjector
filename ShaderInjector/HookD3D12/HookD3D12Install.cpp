@@ -242,10 +242,10 @@ namespace HookD3D12
 		for (const HookDefinition& hook : resourceHooks)
 		{
 			const MH_STATUS createStatus = MH_CreateHook(
-				deviceVTable[hook.vtableIndex],
+				deviceVTable[hook.vTableIndex],
 				hook.hookFunction,
 				hook.originalFunction);
-			const MH_STATUS enableStatus = MH_EnableHook(deviceVTable[hook.vtableIndex]);
+			const MH_STATUS enableStatus = MH_EnableHook(deviceVTable[hook.vTableIndex]);
 			const bool createSucceeded = createStatus == MH_OK || createStatus == MH_ERROR_ALREADY_CREATED;
 			const bool enableSucceeded = enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED;
 			resourceHooksInstalled = resourceHooksInstalled && createSucceeded && enableSucceeded;
@@ -308,10 +308,10 @@ namespace HookD3D12
 			for (const HookDefinition& hook : resourceHooks)
 			{
 				const MH_STATUS createStatus = MH_CreateHook(
-					deviceVTable[hook.vtableIndex],
+					deviceVTable[hook.vTableIndex],
 					hook.hookFunction,
 					hook.originalFunction);
-				const MH_STATUS enableStatus = MH_EnableHook(deviceVTable[hook.vtableIndex]);
+				const MH_STATUS enableStatus = MH_EnableHook(deviceVTable[hook.vTableIndex]);
 				const bool createSucceeded = createStatus == MH_OK || createStatus == MH_ERROR_ALREADY_CREATED;
 				const bool enableSucceeded = enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED;
 				resourceHooksInstalled = resourceHooksInstalled && createSucceeded && enableSucceeded;
@@ -365,10 +365,10 @@ namespace HookD3D12
 			for (const HookDefinition& hook : commandListHooks)
 			{
 				const MH_STATUS createStatus = MH_CreateHook(
-					commandListVTable[hook.vtableIndex],
+					commandListVTable[hook.vTableIndex],
 					hook.hookFunction,
 					hook.originalFunction);
-				const MH_STATUS enableStatus = MH_EnableHook(commandListVTable[hook.vtableIndex]);
+				const MH_STATUS enableStatus = MH_EnableHook(commandListVTable[hook.vTableIndex]);
 				const bool createSucceeded = createStatus == MH_OK || createStatus == MH_ERROR_ALREADY_CREATED;
 				const bool enableSucceeded = enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED;
 				commandListHooksInstalled = commandListHooksInstalled && createSucceeded && enableSucceeded;

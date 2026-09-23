@@ -205,7 +205,7 @@
     <ClInclude Include="FPSCounter.h" />
     <ClInclude Include="GUI\ShaderInjectorGUI.h" />
     <ClInclude Include="GUI\ShaderInjectorGUITooltips.h" />
-    <ClInclude Include="Hash.h" />
+    <ClInclude Include="Hash\Hash.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_dx12.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_win32.h" />
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\imconfig.h" />
@@ -228,9 +228,8 @@
     <ClInclude Include="HookD3D12\D3D12\HookD3D12ExecutionHookHelpers.h" />
     <ClInclude Include="Hooks.h" />
     <ClInclude Include="HookInput.h" />
-    <ClInclude Include="IO\ProcessRunner.h" />
+    <ClInclude Include="IO\ProcessResult.h" />
     <ClInclude Include="IO\ShaderInjectorIO.h" />
-    <ClInclude Include="IO\SystemInfoLogger.h" />
     <ClInclude Include="JsonHelper.h" />
     <ClInclude Include="dsound_proxy.h" />
     <ClInclude Include="Keycodes.h" />
@@ -303,7 +302,7 @@
     <ClCompile Include="GUI\ShaderInjectorGUI_RuntimeLogs.cpp" />
     <ClCompile Include="GUI\ShaderInjectorGUI_ShaderConfiguration.cpp" />
     <ClCompile Include="GUI\ShaderInjectorGUI_ShaderTargets.cpp" />
-    <ClCompile Include="Hash.cpp" />
+    <ClCompile Include="Hash\Hash.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="ShaderInjectorInternalResources.cpp" />
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\backends\imgui_impl_dx12.cpp" />
@@ -383,15 +382,15 @@
     <ClCompile Include="Hooks.cpp" />
     <ClCompile Include="HookInput.cpp" />
     <ClCompile Include="dsound_proxy.cpp" />
-    <ClCompile Include="IO\ProcessRunner.cpp" />
     <ClCompile Include="IO\ShaderInjectorIO.cpp" />
+    <ClCompile Include="IO\ShaderInjectorIO_Process.cpp" />
+    <ClCompile Include="IO\ShaderInjectorIO_SystemInfo.cpp" />
     <ClCompile Include="IO\ShaderInjectorIO_Directories.cpp" />
     <ClCompile Include="IO\ShaderInjectorIO_Logs.cpp" />
     <ClCompile Include="IO\ShaderInjectorIO_InternalResources.cpp" />
     <ClCompile Include="IO\ShaderInjectorIO_Initialization.cpp" />
     <ClCompile Include="IO\ShaderInjectorIO_Settings.cpp" />
     <ClCompile Include="IO\ShaderInjectorIO_Shader.cpp" />
-    <ClCompile Include="IO\SystemInfoLogger.cpp" />
     <ClCompile Include="Keycodes.cpp" />
     <ClCompile Include="ModifiedShader\DatabaseModifiedShaders.cpp" />
     <ClCompile Include="ModifiedShader\DatabaseModifiedShadersCompilation.cpp" />

@@ -75,16 +75,16 @@ namespace HookD3D12
 		{
 			for (UINT i = 0; i < gBufferCount; ++i)
 			{
-				if (gFrameContexts[i].renderTarget)
+				if (gFrameContexts[i].renderTargetResource)
 				{
-					gFrameContexts[i].renderTarget->Release();
-					gFrameContexts[i].renderTarget = nullptr;
+					gFrameContexts[i].renderTargetResource->Release();
+					gFrameContexts[i].renderTargetResource = nullptr;
 				}
 
-				if (gFrameContexts[i].allocator)
+				if (gFrameContexts[i].commandAllocator)
 				{
-					gFrameContexts[i].allocator->Release();
-					gFrameContexts[i].allocator = nullptr;
+					gFrameContexts[i].commandAllocator->Release();
+					gFrameContexts[i].commandAllocator = nullptr;
 				}
 			}
 

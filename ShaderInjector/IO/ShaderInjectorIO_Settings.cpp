@@ -12,12 +12,7 @@
 
 namespace ShaderInjectorIO
 {
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INJECTOR SETTINGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INJECTOR SETTINGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INJECTOR SETTINGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
-	//keep the serialized INI names in one place.
-	//these values are part of the on-disk configuration format, so changing one should be an intentional compatibility change.
+	//keep serialized INI names here because changing them changes the user's saved configuration format.
 	static const char* const settingsSectionInjector = "InjectorSettings";
 	static const char* const settingsSectionShaderCompiler = "ShaderCompiler";
 	static const char* const settingsSectionRenderDoc = "RenderDoc";
@@ -62,6 +57,7 @@ namespace ShaderInjectorIO
 		const char* keyName,
 		const ValueType& defaultValue)
 	{
+		//missing or malformed keys keep the caller's current default instead of blocking startup.
 		try
 		{
 			return iniFile[sectionName][keyName].as<ValueType>();
@@ -74,14 +70,15 @@ namespace ShaderInjectorIO
 
 	void PopulateInjectorSettings(ini::IniFile& injectorSettingsINI)
 	{
-		//injector settings
+		//copy live values into their existing INI sections so saves use the same keys as reads.
+		//write menu and injector state to the first section.
 		injectorSettingsINI[settingsSectionInjector][settingsNameOpenMenuKey] = Globals::keyOpenShaderInjectorGUI;
 		injectorSettingsINI[settingsSectionInjector][settingsNameToggleInjectorKey] = Globals::keyToggleShaderInjector;
 		injectorSettingsINI[settingsSectionInjector][settingsNameInjectorEnabled] = Globals::gShaderInjectorEnabled;
 		injectorSettingsINI[settingsSectionInjector][settingsNameMenuOpen] = Globals::gShowShaderInjectorGUI;
 		injectorSettingsINI[settingsSectionInjector][settingsNameMenuScale] = static_cast<double>(Globals::gShaderInjectorGUIScale);
 
-		//shader compiler
+		//keep shader model choices together because the compiler reads them as one configuration group.
 		injectorSettingsINI[settingsSectionShaderCompiler][settingsNameVertexShaderModel] = static_cast<int>(Globals::gVertexShaderModel);
 		injectorSettingsINI[settingsSectionShaderCompiler][settingsNameAutoDetectShaderModels] = Globals::gAutoDetectShaderModels;
 		injectorSettingsINI[settingsSectionShaderCompiler][settingsNameHullShaderModel] = static_cast<int>(Globals::gHullShaderModel);
@@ -90,17 +87,17 @@ namespace ShaderInjectorIO
 		injectorSettingsINI[settingsSectionShaderCompiler][settingsNamePixelShaderModel] = static_cast<int>(Globals::gPixelShaderModel);
 		injectorSettingsINI[settingsSectionShaderCompiler][settingsNameComputeShaderModel] = static_cast<int>(Globals::gComputeShaderModel);
 
-		//render doc
+		//render doc settings control capture integration and automatic attachment.
 		injectorSettingsINI[settingsSectionRenderDoc][settingsNameEnabled] = Globals::gRenderDocIntegrationEnabled;
 		injectorSettingsINI[settingsSectionRenderDoc][settingsNameAutoAttach] = Globals::gRenderDocAutoAttachEnabled;
 
-		//logging
+		//logging preferences share a section so one save keeps their behavior in sync.
 		injectorSettingsINI[settingsSectionLogging][settingsNameDisableLogs] = Globals::gDisableLogs;
 		injectorSettingsINI[settingsSectionLogging][settingsNameVerboseLog] = Globals::gVerboseLog;
 		injectorSettingsINI[settingsSectionLogging][settingsNameLogModifiedShaderNames] = Globals::gLogModifiedShaderNames;
 		injectorSettingsINI[settingsSectionLogging][settingsNamePerformanceTelemetry] = Globals::gPerformanceTelemetryEnabled;
 
-		//shader discovery
+		//save discovery limits and confidence thresholds alongside its worker settings.
 		injectorSettingsINI[settingsSectionShaderDiscovery][settingsNameMode] = static_cast<int>(Globals::gShaderDiscoveryMode);
 		injectorSettingsINI[settingsSectionShaderDiscovery][settingsNameWorkerThreads] = Globals::gShaderDiscoveryWorkerThreads;
 		injectorSettingsINI[settingsSectionShaderDiscovery][settingsNameWorkerThreadPriority] = Globals::gShaderDiscoveryWorkerThreadPriority;
@@ -124,40 +121,53 @@ namespace ShaderInjectorIO
 		try
 		{
 			ini::IniFile injectorSettingsINI;
+			//load each value with the current global as its fallback, then apply the complete snapshot below.
 			injectorSettingsINI.load(injectorSettingsPath);
 
-			const int    keyOpenShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameOpenMenuKey, Globals::keyOpenShaderInjectorGUI);
-			const int    keyToggleShaderInjector = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameToggleInjectorKey, Globals::keyToggleShaderInjector);
-			const bool   shaderInjectorEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameInjectorEnabled, Globals::gShaderInjectorEnabled);
-			const bool   showShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameMenuOpen, Globals::gShowShaderInjectorGUI);
+			//read menu state first, using current globals whenever a key is missing.
+			const int keyOpenShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameOpenMenuKey, Globals::keyOpenShaderInjectorGUI);
+			const int keyToggleShaderInjector = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameToggleInjectorKey, Globals::keyToggleShaderInjector);
+			const bool shaderInjectorEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameInjectorEnabled, Globals::gShaderInjectorEnabled);
+			const bool showShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameMenuOpen, Globals::gShowShaderInjectorGUI);
 			const double shaderInjectorGUIScale = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameMenuScale, static_cast<double>(Globals::gShaderInjectorGUIScale));
-			const bool   renderDocIntegrationEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionRenderDoc, settingsNameEnabled, Globals::gRenderDocIntegrationEnabled);
-			const bool   renderDocAutoAttachEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionRenderDoc, settingsNameAutoAttach, Globals::gRenderDocAutoAttachEnabled);
-			const bool   disableLogs = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionLogging, settingsNameDisableLogs, Globals::gDisableLogs);
-			const bool   verboseLog = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionLogging, settingsNameVerboseLog, Globals::gVerboseLog);
-			const bool   logModifiedShaderNames = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionLogging, settingsNameLogModifiedShaderNames, Globals::gLogModifiedShaderNames);
-			const bool   performanceTelemetryEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionLogging, settingsNamePerformanceTelemetry, Globals::gPerformanceTelemetryEnabled);
-			const int    shaderDiscoveryMode = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameMode, static_cast<int>(Globals::gShaderDiscoveryMode));
-			const int    shaderDiscoveryWorkerThreads = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameWorkerThreads, Globals::gShaderDiscoveryWorkerThreads);
-			const int    shaderDiscoveryWorkerThreadPriority = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameWorkerThreadPriority, Globals::gShaderDiscoveryWorkerThreadPriority);
-			const int    shaderDiscoveryFrameJobBudget = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameFrameJobBudget, Globals::gShaderDiscoveryFrameJobBudget);
-			const int    shaderDiscoveryPendingAnalysisLimit = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNamePendingAnalysisLimit, Globals::gShaderDiscoveryPendingAnalysisLimit);
-			const int    shaderDiscoveryQueuedShaderLimit = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameQueuedShaderLimit, Globals::gShaderDiscoveryQueuedShaderLimit);
+
+			//read capture integration settings as a pair.
+			const bool renderDocIntegrationEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionRenderDoc, settingsNameEnabled, Globals::gRenderDocIntegrationEnabled);
+			const bool renderDocAutoAttachEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionRenderDoc, settingsNameAutoAttach, Globals::gRenderDocAutoAttachEnabled);
+
+			//keep log controls together because they share one INI section.
+			const bool disableLogs = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionLogging, settingsNameDisableLogs, Globals::gDisableLogs);
+			const bool verboseLog = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionLogging, settingsNameVerboseLog, Globals::gVerboseLog);
+			const bool logModifiedShaderNames = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionLogging, settingsNameLogModifiedShaderNames, Globals::gLogModifiedShaderNames);
+			const bool performanceTelemetryEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionLogging, settingsNamePerformanceTelemetry, Globals::gPerformanceTelemetryEnabled);
+
+			//read worker limits and match thresholds as one discovery configuration.
+			const int shaderDiscoveryMode = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameMode, static_cast<int>(Globals::gShaderDiscoveryMode));
+			const int shaderDiscoveryWorkerThreads = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameWorkerThreads, Globals::gShaderDiscoveryWorkerThreads);
+			const int shaderDiscoveryWorkerThreadPriority = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameWorkerThreadPriority, Globals::gShaderDiscoveryWorkerThreadPriority);
+			const int shaderDiscoveryFrameJobBudget = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameFrameJobBudget, Globals::gShaderDiscoveryFrameJobBudget);
+			const int shaderDiscoveryPendingAnalysisLimit = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNamePendingAnalysisLimit, Globals::gShaderDiscoveryPendingAnalysisLimit);
+			const int shaderDiscoveryQueuedShaderLimit = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameQueuedShaderLimit, Globals::gShaderDiscoveryQueuedShaderLimit);
 			const double shaderDiscoveryMinimumSimilarityScore = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameMinimumSimilarityScore, Globals::gShaderDiscoveryMinimumSimilarityScore);
 			const double shaderDiscoverySimilarityAmbiguityMargin = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderDiscovery, settingsNameSimilarityAmbiguityMargin, Globals::gShaderDiscoverySimilarityAmbiguityMargin);
-			const int    vertexShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameVertexShaderModel, static_cast<int>(Globals::gVertexShaderModel));
-			const bool   autoDetectShaderModels = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameAutoDetectShaderModels, Globals::gAutoDetectShaderModels);
-			const int    hullShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameHullShaderModel, static_cast<int>(Globals::gHullShaderModel));
-			const int    domainShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameDomainShaderModel, static_cast<int>(Globals::gDomainShaderModel));
-			const int    geometryShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameGeometryShaderModel, static_cast<int>(Globals::gGeometryShaderModel));
-			const int    pixelShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNamePixelShaderModel, static_cast<int>(Globals::gPixelShaderModel));
-			const int    computeShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameComputeShaderModel, static_cast<int>(Globals::gComputeShaderModel));
 
+			//load the six shader stages from the compiler section.
+			const int vertexShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameVertexShaderModel, static_cast<int>(Globals::gVertexShaderModel));
+			const bool autoDetectShaderModels = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameAutoDetectShaderModels, Globals::gAutoDetectShaderModels);
+			const int hullShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameHullShaderModel, static_cast<int>(Globals::gHullShaderModel));
+			const int domainShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameDomainShaderModel, static_cast<int>(Globals::gDomainShaderModel));
+			const int geometryShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameGeometryShaderModel, static_cast<int>(Globals::gGeometryShaderModel));
+			const int pixelShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNamePixelShaderModel, static_cast<int>(Globals::gPixelShaderModel));
+			const int computeShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameComputeShaderModel, static_cast<int>(Globals::gComputeShaderModel));
+
+			//apply values as a snapshot so other startup code never observes a half-loaded configuration.
 			Globals::keyOpenShaderInjectorGUI = keyOpenShaderInjectorGUI;
 			Globals::keyToggleShaderInjector = keyToggleShaderInjector;
 			Globals::gShaderInjectorEnabled = shaderInjectorEnabled;
 			Globals::gShowShaderInjectorGUI = showShaderInjectorGUI;
 			Globals::gShaderInjectorGUIScale = static_cast<float>((std::clamp)(shaderInjectorGUIScale, 0.5, 4.0));
+
+			//apply the remaining groups after all of their values have been read.
 			Globals::gRenderDocIntegrationEnabled = renderDocIntegrationEnabled;
 			Globals::gRenderDocAutoAttachEnabled = renderDocAutoAttachEnabled;
 			Globals::gDisableLogs = disableLogs;
@@ -223,6 +233,7 @@ namespace ShaderInjectorIO
 			return;
 		}
 
+		//write a fresh file from current defaults only when no user file exists.
 		ini::IniFile injectorSettingsINI;
 		PopulateInjectorSettings(injectorSettingsINI);
 
@@ -246,6 +257,7 @@ namespace ShaderInjectorIO
 		{
 			ini::IniFile injectorSettingsINI;
 
+			//start from the existing file so unrelated sections and keys remain available to other versions.
 			if (FileExists(injectorSettingsPath))
 				injectorSettingsINI.load(injectorSettingsPath);
 
@@ -281,6 +293,7 @@ namespace ShaderInjectorIO
 			if (FileExists(injectorSettingsPath))
 				injectorSettingsINI.load(injectorSettingsPath);
 
+			//clamp the UI value before saving so the next startup reads a supported scale.
 			const float clampedMenuScale = (std::clamp)(menuScale, 0.5f, 4.0f);
 			injectorSettingsINI[settingsSectionInjector][settingsNameMenuScale] = static_cast<double>(clampedMenuScale);
 

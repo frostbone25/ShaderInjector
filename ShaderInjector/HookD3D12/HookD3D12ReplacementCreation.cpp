@@ -7,7 +7,7 @@
 //custom
 #include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "HookD3D12.h"
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "GUI/ShaderInjectorGUI.h"
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderAnalyzer.h"
@@ -22,11 +22,11 @@ namespace HookD3D12
 	{
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return pipeline.vsHash;
-		case ShaderTarget::HullShader: return pipeline.hsHash;
-		case ShaderTarget::DomainShader: return pipeline.dsHash;
-		case ShaderTarget::GeometryShader: return pipeline.gsHash;
-		case ShaderTarget::PixelShader: return pipeline.psHash;
+		case ShaderTarget::VertexShader: return pipeline.vertexShaderHash;
+		case ShaderTarget::HullShader: return pipeline.hullShaderHash;
+		case ShaderTarget::DomainShader: return pipeline.domainShaderHash;
+		case ShaderTarget::GeometryShader: return pipeline.geometryShaderHash;
+		case ShaderTarget::PixelShader: return pipeline.pixelShaderHash;
 		default: return 0;
 		}
 	}
@@ -125,13 +125,13 @@ namespace HookD3D12
 
 		if (graphicsInfo)
 		{
-			FillCommonReplacementHashes(replacement, graphicsInfo->vsHash, graphicsInfo->psHash, 0, graphicsInfo->gsHash, graphicsInfo->hsHash, graphicsInfo->dsHash);
+			FillCommonReplacementHashes(replacement, graphicsInfo->vertexShaderHash, graphicsInfo->pixelShaderHash, 0, graphicsInfo->geometryShaderHash, graphicsInfo->hullShaderHash, graphicsInfo->domainShaderHash);
 			FillGraphicsReplacementPortableState(replacement, *graphicsInfo);
 
 			std::vector<uint8_t> rootSignatureBlob;
 			uint64_t rootSignatureHash = 0;
 
-			if (GetRootSignatureBlob(graphicsInfo->originalDesc.pRootSignature, rootSignatureBlob, rootSignatureHash))
+			if (GetRootSignatureBlob(graphicsInfo->originalDescription.pRootSignature, rootSignatureBlob, rootSignatureHash))
 			{
 				replacement.rootSignatureHash = Hash::FormatHash(rootSignatureHash);
 				replacement.rootSignatureLength = std::to_string(rootSignatureBlob.size());
@@ -139,7 +139,7 @@ namespace HookD3D12
 		}
 		else if (streamInfo)
 		{
-			FillCommonReplacementHashes(replacement, streamInfo->vsHash, streamInfo->psHash, streamInfo->csHash, streamInfo->gsHash, streamInfo->hsHash, streamInfo->dsHash);
+			FillCommonReplacementHashes(replacement, streamInfo->vertexShaderHash, streamInfo->pixelShaderHash, streamInfo->computeShaderHash, streamInfo->geometryShaderHash, streamInfo->hullShaderHash, streamInfo->domainShaderHash);
 			FillStreamReplacementPortableStateFromBlob(replacement, *streamInfo);
 
 			if (!streamInfo->streamBlob.empty())
@@ -158,28 +158,28 @@ namespace HookD3D12
 				replacement.rootSignatureBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "RootSignatureBlob" + ShaderInjectorIO::extensionBIN);
 			}
 
-			if (!streamInfo->vsBytecode.empty())
+			if (!streamInfo->vertexShaderBytecode.empty())
 				replacement.vertexShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalVertexShaderBytecode" + ShaderInjectorIO::extensionBIN);
 
-			if (!streamInfo->psBytecode.empty())
+			if (!streamInfo->pixelShaderBytecode.empty())
 				replacement.pixelShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalPixelShaderBytecode" + ShaderInjectorIO::extensionBIN);
 
-			if (!streamInfo->csBytecode.empty())
+			if (!streamInfo->computeShaderBytecode.empty())
 				replacement.computeShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalComputeShaderBytecode" + ShaderInjectorIO::extensionBIN);
 
-			if (!streamInfo->gsBytecode.empty())
+			if (!streamInfo->geometryShaderBytecode.empty())
 				replacement.geometryShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalGeometryShaderBytecode" + ShaderInjectorIO::extensionBIN);
 
-			if (!streamInfo->hsBytecode.empty())
+			if (!streamInfo->hullShaderBytecode.empty())
 				replacement.hullShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalHullShaderBytecode" + ShaderInjectorIO::extensionBIN);
 
-			if (!streamInfo->dsBytecode.empty())
+			if (!streamInfo->domainShaderBytecode.empty())
 				replacement.domainShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalDomainShaderBytecode" + ShaderInjectorIO::extensionBIN);
 
-			if (!streamInfo->asBytecode.empty())
+			if (!streamInfo->amplificationShaderBytecode.empty())
 				replacement.amplificationShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalAmplificationShaderBytecode" + ShaderInjectorIO::extensionBIN);
 
-			if (!streamInfo->msBytecode.empty())
+			if (!streamInfo->meshShaderBytecode.empty())
 				replacement.meshShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalMeshShaderBytecode" + ShaderInjectorIO::extensionBIN);
 		}
 
@@ -206,29 +206,29 @@ namespace HookD3D12
 				ok = ShaderInjectorIO::WriteBinaryFile(replacement.rootSignatureBlobPath, rootSignatureBlob.data(), rootSignatureBlob.size()) && ok;
 		}
 
-		if (streamInfo && !streamInfo->vsBytecode.empty() && !replacement.vertexShaderBlobPath.empty())
-			ok = ShaderInjectorIO::WriteBinaryFile(replacement.vertexShaderBlobPath, streamInfo->vsBytecode.data(), streamInfo->vsBytecode.size()) && ok;
+		if (streamInfo && !streamInfo->vertexShaderBytecode.empty() && !replacement.vertexShaderBlobPath.empty())
+			ok = ShaderInjectorIO::WriteBinaryFile(replacement.vertexShaderBlobPath, streamInfo->vertexShaderBytecode.data(), streamInfo->vertexShaderBytecode.size()) && ok;
 
-		if (streamInfo && !streamInfo->psBytecode.empty() && !replacement.pixelShaderBlobPath.empty())
-			ok = ShaderInjectorIO::WriteBinaryFile(replacement.pixelShaderBlobPath, streamInfo->psBytecode.data(), streamInfo->psBytecode.size()) && ok;
+		if (streamInfo && !streamInfo->pixelShaderBytecode.empty() && !replacement.pixelShaderBlobPath.empty())
+			ok = ShaderInjectorIO::WriteBinaryFile(replacement.pixelShaderBlobPath, streamInfo->pixelShaderBytecode.data(), streamInfo->pixelShaderBytecode.size()) && ok;
 
-		if (streamInfo && !streamInfo->csBytecode.empty() && !replacement.computeShaderBlobPath.empty())
-			ok = ShaderInjectorIO::WriteBinaryFile(replacement.computeShaderBlobPath, streamInfo->csBytecode.data(), streamInfo->csBytecode.size()) && ok;
+		if (streamInfo && !streamInfo->computeShaderBytecode.empty() && !replacement.computeShaderBlobPath.empty())
+			ok = ShaderInjectorIO::WriteBinaryFile(replacement.computeShaderBlobPath, streamInfo->computeShaderBytecode.data(), streamInfo->computeShaderBytecode.size()) && ok;
 
-		if (streamInfo && !streamInfo->gsBytecode.empty() && !replacement.geometryShaderBlobPath.empty())
-			ok = ShaderInjectorIO::WriteBinaryFile(replacement.geometryShaderBlobPath, streamInfo->gsBytecode.data(), streamInfo->gsBytecode.size()) && ok;
+		if (streamInfo && !streamInfo->geometryShaderBytecode.empty() && !replacement.geometryShaderBlobPath.empty())
+			ok = ShaderInjectorIO::WriteBinaryFile(replacement.geometryShaderBlobPath, streamInfo->geometryShaderBytecode.data(), streamInfo->geometryShaderBytecode.size()) && ok;
 
-		if (streamInfo && !streamInfo->hsBytecode.empty() && !replacement.hullShaderBlobPath.empty())
-			ok = ShaderInjectorIO::WriteBinaryFile(replacement.hullShaderBlobPath, streamInfo->hsBytecode.data(), streamInfo->hsBytecode.size()) && ok;
+		if (streamInfo && !streamInfo->hullShaderBytecode.empty() && !replacement.hullShaderBlobPath.empty())
+			ok = ShaderInjectorIO::WriteBinaryFile(replacement.hullShaderBlobPath, streamInfo->hullShaderBytecode.data(), streamInfo->hullShaderBytecode.size()) && ok;
 
-		if (streamInfo && !streamInfo->dsBytecode.empty() && !replacement.domainShaderBlobPath.empty())
-			ok = ShaderInjectorIO::WriteBinaryFile(replacement.domainShaderBlobPath, streamInfo->dsBytecode.data(), streamInfo->dsBytecode.size()) && ok;
+		if (streamInfo && !streamInfo->domainShaderBytecode.empty() && !replacement.domainShaderBlobPath.empty())
+			ok = ShaderInjectorIO::WriteBinaryFile(replacement.domainShaderBlobPath, streamInfo->domainShaderBytecode.data(), streamInfo->domainShaderBytecode.size()) && ok;
 
-		if (streamInfo && !streamInfo->asBytecode.empty() && !replacement.amplificationShaderBlobPath.empty())
-			ok = ShaderInjectorIO::WriteBinaryFile(replacement.amplificationShaderBlobPath, streamInfo->asBytecode.data(), streamInfo->asBytecode.size()) && ok;
+		if (streamInfo && !streamInfo->amplificationShaderBytecode.empty() && !replacement.amplificationShaderBlobPath.empty())
+			ok = ShaderInjectorIO::WriteBinaryFile(replacement.amplificationShaderBlobPath, streamInfo->amplificationShaderBytecode.data(), streamInfo->amplificationShaderBytecode.size()) && ok;
 
-		if (streamInfo && !streamInfo->msBytecode.empty() && !replacement.meshShaderBlobPath.empty())
-			ok = ShaderInjectorIO::WriteBinaryFile(replacement.meshShaderBlobPath, streamInfo->msBytecode.data(), streamInfo->msBytecode.size()) && ok;
+		if (streamInfo && !streamInfo->meshShaderBytecode.empty() && !replacement.meshShaderBlobPath.empty())
+			ok = ShaderInjectorIO::WriteBinaryFile(replacement.meshShaderBlobPath, streamInfo->meshShaderBytecode.data(), streamInfo->meshShaderBytecode.size()) && ok;
 
 		if (generateShaderDisassembly)
 			ok = ShaderInjectorIO::GenerateShaderTextDXIL(replacement.originalShaderBlobPath) && ok;

@@ -11,7 +11,10 @@
 
 namespace DDS
 {
+	//reference - https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dx-graphics-dds-pguide
 	//constants
+
+	//A DWORD (magic number) containing the four character code value 'DDS ' (0x20534444).
 	constexpr uint32_t ddsMagic = 0x20534444;
 	constexpr uint32_t fourCCFlag = 0x4;
 	constexpr uint32_t rgbFlag = 0x40;

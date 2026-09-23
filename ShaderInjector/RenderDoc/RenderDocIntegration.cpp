@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "Globals.h"
-#include "IO/ProcessRunner.h"
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 #include "renderdoc_app.h"
@@ -72,8 +71,8 @@ namespace RenderDocIntegration
 		std::vector<std::string> candidates;
 
 		//environment overrides support portable RenderDoc installations and Wine prefixes.
-		AddLibraryCandidate(candidates, ProcessRunner::GetEnvironmentVariable("SHADER_INJECTOR_RENDERDOC_PATH"));
-		AddLibraryCandidate(candidates, ProcessRunner::GetEnvironmentVariable("RENDERDOC_PATH"));
+		AddLibraryCandidate(candidates, ShaderInjectorIO::GetEnvironmentVariable("SHADER_INJECTOR_RENDERDOC_PATH"));
+		AddLibraryCandidate(candidates, ShaderInjectorIO::GetEnvironmentVariable("RENDERDOC_PATH"));
 
 		const std::string renderDocOpenCommandKey = "SOFTWARE\\Classes\\RenderDoc.RDCCapture.1\\shell\\open\\command";
 		const std::string machineRegisteredExecutable = StringHelper::ExecutablePathFromCommandLine(ShaderInjectorIO::ReadRegistryString(ShaderInjectorIO::RegistryHive::LocalMachine, renderDocOpenCommandKey));
@@ -81,8 +80,8 @@ namespace RenderDocIntegration
 		AddLibraryCandidate(candidates, ShaderInjectorIO::DirectoryFromPath(machineRegisteredExecutable));
 		AddLibraryCandidate(candidates, ShaderInjectorIO::DirectoryFromPath(userRegisteredExecutable));
 
-		const std::string programW6432 = ProcessRunner::GetEnvironmentVariable("ProgramW6432");
-		const std::string programFiles = ProcessRunner::GetEnvironmentVariable("ProgramFiles");
+		const std::string programW6432 = ShaderInjectorIO::GetEnvironmentVariable("ProgramW6432");
+		const std::string programFiles = ShaderInjectorIO::GetEnvironmentVariable("ProgramFiles");
 
 		if (!programW6432.empty())
 			AddLibraryCandidate(candidates, ShaderInjectorIO::JoinPath(programW6432, "RenderDoc"));
@@ -160,7 +159,7 @@ namespace RenderDocIntegration
 			return false;
 
 		if (gRenderDocLibraryPath.empty())
-			gRenderDocLibraryPath = ProcessRunner::GetLoadedModulePath("renderdoc.dll");
+			gRenderDocLibraryPath = ShaderInjectorIO::GetLoadedModulePath("renderdoc.dll");
 
 		return true;
 	}

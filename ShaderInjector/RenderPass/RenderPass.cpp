@@ -4,7 +4,7 @@
 #include <iterator>
 #include <utility>
 
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "IO/ShaderInjectorIO.h"
 
 namespace RenderPass

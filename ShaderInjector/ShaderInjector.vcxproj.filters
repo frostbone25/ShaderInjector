@@ -43,6 +43,9 @@
     <Filter Include="IO">
       <UniqueIdentifier>{6e42df63-7acf-42ed-9b30-047d0246d8db}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Hash">
+      <UniqueIdentifier>{0b2e6f26-8a28-4f6c-9c4e-6f7d6f8f1c8a}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Performance">
       <UniqueIdentifier>{61D6D2A3-0D2B-4B2A-BD4A-5A41E4F01939}</UniqueIdentifier>
     </Filter>
@@ -117,8 +120,8 @@
     <ClInclude Include="FPSCounter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Hash.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Hash\Hash.h">
+      <Filter>Hash</Filter>
     </ClInclude>
     <ClInclude Include="Keycodes.h">
       <Filter>Header Files</Filter>
@@ -231,7 +234,7 @@
     <ClInclude Include="Performance\PerformanceMetrics.h">
       <Filter>Performance</Filter>
     </ClInclude>
-    <ClInclude Include="IO\ProcessRunner.h">
+    <ClInclude Include="IO\ProcessResult.h">
       <Filter>IO</Filter>
     </ClInclude>
     <ClInclude Include="IO\ShaderInjectorIO.h">
@@ -275,9 +278,6 @@
     </ClInclude>
     <ClInclude Include="RenderPass\DatabaseRenderPasses.h">
       <Filter>RenderPass</Filter>
-    </ClInclude>
-    <ClInclude Include="IO\SystemInfoLogger.h">
-      <Filter>IO</Filter>
     </ClInclude>
     <ClInclude Include="ModifiedShader\DatabaseModifiedShaders.h">
       <Filter>ModifiedShader</Filter>
@@ -482,8 +482,8 @@
     <ClCompile Include="FPSCounter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Hash.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Hash\Hash.cpp">
+      <Filter>Hash</Filter>
     </ClCompile>
     <ClCompile Include="Keycodes.cpp">
       <Filter>Source Files</Filter>
@@ -779,10 +779,13 @@
     <ClCompile Include="GUI\ShaderInjectorGUI_ShaderTargets.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
-    <ClCompile Include="IO\ProcessRunner.cpp">
+    <ClCompile Include="IO\ShaderInjectorIO.cpp">
       <Filter>IO</Filter>
     </ClCompile>
-    <ClCompile Include="IO\ShaderInjectorIO.cpp">
+    <ClCompile Include="IO\ShaderInjectorIO_Process.cpp">
+      <Filter>IO</Filter>
+    </ClCompile>
+    <ClCompile Include="IO\ShaderInjectorIO_SystemInfo.cpp">
       <Filter>IO</Filter>
     </ClCompile>
     <ClCompile Include="IO\ShaderInjectorIO_Directories.cpp">
@@ -832,9 +835,6 @@
     </ClCompile>
     <ClCompile Include="RenderPass\DatabaseRenderPasses.cpp">
       <Filter>RenderPass</Filter>
-    </ClCompile>
-    <ClCompile Include="IO\SystemInfoLogger.cpp">
-      <Filter>IO</Filter>
     </ClCompile>
     <ClCompile Include="ModifiedShader\DatabaseModifiedShaders.cpp">
       <Filter>ModifiedShader</Filter>

@@ -11,6 +11,11 @@
 
 namespace DDS
 {
+	//read and validate the DDS header without loading the image payload.
+	//this is useful when the caller only needs the texture dimensions, format, mip count, or resource shape.
+	// - filePath points to the DDS file on disk.
+	// - outMetadata receives the parsed texture description when the method succeeds.
+	// - outError receives a human-readable failure reason when the method returns false.
 	bool ReadMetadata(const std::string& filePath, Metadata& outMetadata, std::string& outError)
 	{
 		outMetadata = {};
@@ -34,6 +39,10 @@ namespace DDS
 		return true;
 	}
 
+	//open a DDS file, parse its header, and load the remaining bytes as the image payload.
+	// - filePath points to the DDS file on disk.
+	// - outImage receives both the parsed metadata and the raw pixel or block-compressed bytes.
+	// - outError receives a human-readable failure reason when the method returns false.
 	bool Load(const std::string& filePath, Image& outImage, std::string& outError)
 	{
 		outImage = {};
@@ -57,6 +66,9 @@ namespace DDS
 		return true;
 	}
 
+	//translate a legacy DDS pixel format into the matching DXGI format.
+	// - format contains the channel masks or four-character compression code from the legacy header.
+	// - returns DXGI_FORMAT_UNKNOWN when the legacy format is not supported.
 	DXGI_FORMAT LegacyFormat(const DDSPixelFormat& pixelFormat)
 	{
 		//compressed legacy DDS files identify their format with a four-character code.
@@ -237,6 +249,13 @@ namespace DDS
 		return true;
 	}
 
+	//open a DDS file and leave ddsFile positioned at the first byte after its header.
+	//this helper is used by the loader so metadata parsing and payload reading share the same stream.
+	// - filePath points to the DDS file on disk.
+	// - ddsFile receives the open binary stream and remains owned by the caller.
+	// - outMetadata receives the parsed texture description.
+	// - outPixelDataOffset receives the byte offset where the image payload begins.
+	// - outError receives a human-readable failure reason when the method returns false.
 	bool OpenAndReadDDSHeader(const std::string& filePath, std::ifstream& ddsFile, Metadata& outMetadata, std::streamoff& outPixelDataOffset, std::string& outError)
 	{
 		outError.clear();

@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "IO/ShaderInjectorIO.h"
 
 namespace ModifiedShader

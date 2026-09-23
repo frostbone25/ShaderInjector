@@ -1,6 +1,7 @@
 #include "Hash.h"
 
-#include <string>
+#include <cstdio>
+#include <cstdlib>
 
 namespace Hash
 {

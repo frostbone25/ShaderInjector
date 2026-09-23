@@ -13,22 +13,22 @@ namespace HookD3D12
 	{
 		ID3D12PipelineState* pipelineState = nullptr;
 
-		uint64_t vsHash = 0;
-		SIZE_T vsSize = 0;
-		uint64_t psHash = 0;
-		SIZE_T psSize = 0;
-		uint64_t gsHash = 0;
-		SIZE_T gsSize = 0;
-		uint64_t hsHash = 0;
-		SIZE_T hsSize = 0;
-		uint64_t dsHash = 0;
-		SIZE_T dsSize = 0;
-		uint64_t csHash = 0;
-		SIZE_T csSize = 0;
-		uint64_t asHash = 0;
-		SIZE_T asSize = 0;
-		uint64_t msHash = 0;
-		SIZE_T msSize = 0;
+		uint64_t vertexShaderHash = 0;
+		SIZE_T vertexShaderBytecodeSize = 0;
+		uint64_t pixelShaderHash = 0;
+		SIZE_T pixelShaderBytecodeSize = 0;
+		uint64_t geometryShaderHash = 0;
+		SIZE_T geometryShaderBytecodeSize = 0;
+		uint64_t hullShaderHash = 0;
+		SIZE_T hullShaderBytecodeSize = 0;
+		uint64_t domainShaderHash = 0;
+		SIZE_T domainShaderBytecodeSize = 0;
+		uint64_t computeShaderHash = 0;
+		SIZE_T computeShaderBytecodeSize = 0;
+		uint64_t amplificationShaderHash = 0;
+		SIZE_T amplificationShaderBytecodeSize = 0;
+		uint64_t meshShaderHash = 0;
+		SIZE_T meshShaderBytecodeSize = 0;
 
 		bool isGraphics = false;
 		bool isCompute = false;
@@ -36,20 +36,20 @@ namespace HookD3D12
 
 		std::vector<uint8_t> streamBlob;
 
-		bool vsDisabled = false;
-		ID3D12PipelineState* psoWithoutVS = nullptr;
-		bool psDisabled = false;
-		ID3D12PipelineState* psoWithoutPS = nullptr;
-		bool csDisabled = false;
-		ID3D12PipelineState* psoWithoutCS = nullptr;
-		bool gsDisabled = false;
-		ID3D12PipelineState* psoWithoutGS = nullptr;
-		bool hsDisabled = false;
-		ID3D12PipelineState* psoWithoutHS = nullptr;
-		bool dsDisabled = false;
-		ID3D12PipelineState* psoWithoutDS = nullptr;
+		bool vertexShaderDisabled = false;
+		ID3D12PipelineState* pipelineStateWithoutVertexShader = nullptr;
+		bool pixelShaderDisabled = false;
+		ID3D12PipelineState* pipelineStateWithoutPixelShader = nullptr;
+		bool computeShaderDisabled = false;
+		ID3D12PipelineState* pipelineStateWithoutComputeShader = nullptr;
+		bool geometryShaderDisabled = false;
+		ID3D12PipelineState* pipelineStateWithoutGeometryShader = nullptr;
+		bool hullShaderDisabled = false;
+		ID3D12PipelineState* pipelineStateWithoutHullShader = nullptr;
+		bool domainShaderDisabled = false;
+		ID3D12PipelineState* pipelineStateWithoutDomainShader = nullptr;
 
-		ID3D12PipelineState* psoWithReplacement = nullptr;
+		ID3D12PipelineState* pipelineStateWithReplacement = nullptr;
 		std::string activeShaderTargetName;
 		ShaderTarget::ShaderType activeShaderTargetType = ShaderTarget::Unknown;
 		uint64_t activeShaderTargetHash = 0;
@@ -59,20 +59,20 @@ namespace HookD3D12
 
 		std::vector<D3D12_INPUT_ELEMENT_DESC> inputElements;
 		std::vector<std::string> inputElementSemanticNames;
-		std::vector<D3D12_SO_DECLARATION_ENTRY> soDeclarations;
-		std::vector<std::string> soSemanticNames;
-		std::vector<UINT> soStrides;
+		std::vector<D3D12_SO_DECLARATION_ENTRY> streamOutputDeclarations;
+		std::vector<std::string> streamOutputSemanticNames;
+		std::vector<UINT> streamOutputStrides;
 		bool hasViewInstancing = false;
 		D3D12_VIEW_INSTANCING_FLAGS viewInstancingFlags = D3D12_VIEW_INSTANCING_FLAG_NONE;
 		std::vector<D3D12_VIEW_INSTANCE_LOCATION> viewInstanceLocations;
 
-		std::vector<uint8_t> vsBytecode;
-		std::vector<uint8_t> psBytecode;
-		std::vector<uint8_t> gsBytecode;
-		std::vector<uint8_t> hsBytecode;
-		std::vector<uint8_t> dsBytecode;
-		std::vector<uint8_t> csBytecode;
-		std::vector<uint8_t> asBytecode;
-		std::vector<uint8_t> msBytecode;
+		std::vector<uint8_t> vertexShaderBytecode;
+		std::vector<uint8_t> pixelShaderBytecode;
+		std::vector<uint8_t> geometryShaderBytecode;
+		std::vector<uint8_t> hullShaderBytecode;
+		std::vector<uint8_t> domainShaderBytecode;
+		std::vector<uint8_t> computeShaderBytecode;
+		std::vector<uint8_t> amplificationShaderBytecode;
+		std::vector<uint8_t> meshShaderBytecode;
 	};
 }

@@ -13,33 +13,33 @@ namespace HookD3D12
 	{
 		ID3D12PipelineState* pipelineState = nullptr;
 
-		uint64_t vsHash = 0;
-		SIZE_T vsSize = 0;
+		uint64_t vertexShaderHash = 0;
+		SIZE_T vertexShaderBytecodeSize = 0;
 
-		uint64_t psHash = 0;
-		SIZE_T psSize = 0;
+		uint64_t pixelShaderHash = 0;
+		SIZE_T pixelShaderBytecodeSize = 0;
 
-		uint64_t gsHash = 0;
-		SIZE_T gsSize = 0;
+		uint64_t geometryShaderHash = 0;
+		SIZE_T geometryShaderBytecodeSize = 0;
 
-		uint64_t hsHash = 0;
-		SIZE_T hsSize = 0;
+		uint64_t hullShaderHash = 0;
+		SIZE_T hullShaderBytecodeSize = 0;
 
-		uint64_t dsHash = 0;
-		SIZE_T dsSize = 0;
+		uint64_t domainShaderHash = 0;
+		SIZE_T domainShaderBytecodeSize = 0;
 
-		std::vector<uint8_t> vsBytecode;
-		std::vector<uint8_t> psBytecode;
-		std::vector<uint8_t> gsBytecode;
-		std::vector<uint8_t> hsBytecode;
-		std::vector<uint8_t> dsBytecode;
+		std::vector<uint8_t> vertexShaderBytecode;
+		std::vector<uint8_t> pixelShaderBytecode;
+		std::vector<uint8_t> geometryShaderBytecode;
+		std::vector<uint8_t> hullShaderBytecode;
+		std::vector<uint8_t> domainShaderBytecode;
 
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC originalDesc = {};
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC originalDescription = {};
 
-		bool psDisabled = false;
-		ID3D12PipelineState* psoWithoutPS = nullptr;
+		bool pixelShaderDisabled = false;
+		ID3D12PipelineState* pipelineStateWithoutPixelShader = nullptr;
 
-		ID3D12PipelineState* psoWithReplacement = nullptr;
+		ID3D12PipelineState* pipelineStateWithReplacement = nullptr;
 		std::string activeShaderTargetName;
 		ShaderTarget::ShaderType activeShaderTargetType = ShaderTarget::Unknown;
 		uint64_t activeShaderTargetHash = 0;
@@ -49,8 +49,8 @@ namespace HookD3D12
 
 		std::vector<D3D12_INPUT_ELEMENT_DESC> inputElements;
 		std::vector<std::string> inputElementSemanticNames;
-		std::vector<D3D12_SO_DECLARATION_ENTRY> soDeclarations;
-		std::vector<std::string> soSemanticNames;
-		std::vector<UINT> soStrides;
+		std::vector<D3D12_SO_DECLARATION_ENTRY> streamOutputDeclarations;
+		std::vector<std::string> streamOutputSemanticNames;
+		std::vector<UINT> streamOutputStrides;
 	};
 }

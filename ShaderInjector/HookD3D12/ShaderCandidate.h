@@ -8,7 +8,7 @@ namespace HookD3D12
 {
 	struct ShaderCandidate
 	{
-		uint64_t hash = 0;
-		ShaderTarget::ShaderType type = ShaderTarget::Unknown;
+		uint64_t shaderHash = 0;
+		ShaderTarget::ShaderType shaderType = ShaderTarget::Unknown;
 	};
 }

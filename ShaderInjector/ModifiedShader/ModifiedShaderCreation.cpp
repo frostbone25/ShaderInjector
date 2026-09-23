@@ -1,7 +1,7 @@
 #include "ModifiedShader/ModifiedShaderCreation.h"
 
 #include "ModifiedShader/DatabaseModifiedShaders.h"
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "ModifiedShader/ModifiedShader.h"
 #include "ShaderAnalyzer.h"
 #include "IO/ShaderInjectorIO.h"

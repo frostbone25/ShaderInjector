@@ -4,7 +4,7 @@
 #include <cmath>
 
 //custom
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "HookD3D12.h"
 #include "ShaderInjectorGUI.h"
 #include "IO/ShaderInjectorIO.h"
@@ -102,14 +102,14 @@ namespace HookD3D12
 			return false;
 		}
 
-		if (!LoadPersistedShaderBlob(replacement.vertexShaderBlobPath, outPipeline.vsBytecode, outPipeline.vsHash, outPipeline.vsSize) ||
-			!LoadPersistedShaderBlob(replacement.pixelShaderBlobPath, outPipeline.psBytecode, outPipeline.psHash, outPipeline.psSize) ||
-			!LoadPersistedShaderBlob(replacement.computeShaderBlobPath, outPipeline.csBytecode, outPipeline.csHash, outPipeline.csSize) ||
-			!LoadPersistedShaderBlob(replacement.geometryShaderBlobPath, outPipeline.gsBytecode, outPipeline.gsHash, outPipeline.gsSize) ||
-			!LoadPersistedShaderBlob(replacement.hullShaderBlobPath, outPipeline.hsBytecode, outPipeline.hsHash, outPipeline.hsSize) ||
-			!LoadPersistedShaderBlob(replacement.domainShaderBlobPath, outPipeline.dsBytecode, outPipeline.dsHash, outPipeline.dsSize) ||
-			!LoadPersistedShaderBlob(replacement.amplificationShaderBlobPath, outPipeline.asBytecode, outPipeline.asHash, outPipeline.asSize) ||
-			!LoadPersistedShaderBlob(replacement.meshShaderBlobPath, outPipeline.msBytecode, outPipeline.msHash, outPipeline.msSize))
+		if (!LoadPersistedShaderBlob(replacement.vertexShaderBlobPath, outPipeline.vertexShaderBytecode, outPipeline.vertexShaderHash, outPipeline.vertexShaderBytecodeSize) ||
+			!LoadPersistedShaderBlob(replacement.pixelShaderBlobPath, outPipeline.pixelShaderBytecode, outPipeline.pixelShaderHash, outPipeline.pixelShaderBytecodeSize) ||
+			!LoadPersistedShaderBlob(replacement.computeShaderBlobPath, outPipeline.computeShaderBytecode, outPipeline.computeShaderHash, outPipeline.computeShaderBytecodeSize) ||
+			!LoadPersistedShaderBlob(replacement.geometryShaderBlobPath, outPipeline.geometryShaderBytecode, outPipeline.geometryShaderHash, outPipeline.geometryShaderBytecodeSize) ||
+			!LoadPersistedShaderBlob(replacement.hullShaderBlobPath, outPipeline.hullShaderBytecode, outPipeline.hullShaderHash, outPipeline.hullShaderBytecodeSize) ||
+			!LoadPersistedShaderBlob(replacement.domainShaderBlobPath, outPipeline.domainShaderBytecode, outPipeline.domainShaderHash, outPipeline.domainShaderBytecodeSize) ||
+			!LoadPersistedShaderBlob(replacement.amplificationShaderBlobPath, outPipeline.amplificationShaderBytecode, outPipeline.amplificationShaderHash, outPipeline.amplificationShaderBytecodeSize) ||
+			!LoadPersistedShaderBlob(replacement.meshShaderBlobPath, outPipeline.meshShaderBytecode, outPipeline.meshShaderHash, outPipeline.meshShaderBytecodeSize))
 		{
 			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12ReplacementTemplates->LoadPersistedStreamTemplateFromReplacement: missing original shader stage blob for " + replacement.name);
 			return false;
@@ -118,15 +118,15 @@ namespace HookD3D12
 		const bool streamRequiresAmplificationShader = PipelineStreamContainsSubobjectType(outPipeline.streamBlob, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS);
 		const bool streamRequiresMeshShader = PipelineStreamContainsSubobjectType(outPipeline.streamBlob, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS);
 
-		if ((streamRequiresAmplificationShader && outPipeline.asBytecode.empty()) ||
-			(streamRequiresMeshShader && outPipeline.msBytecode.empty()))
+		if ((streamRequiresAmplificationShader && outPipeline.amplificationShaderBytecode.empty()) ||
+			(streamRequiresMeshShader && outPipeline.meshShaderBytecode.empty()))
 		{
 			ShaderInjectorGUI::WriteToRuntimeLogWarning("HookD3D12ReplacementTemplates->LoadPersistedStreamTemplateFromReplacement: persisted stream template is missing AS/MS shader sidecars for " + replacement.name + "; recreate this shader target from a fresh capture");
 			return false;
 		}
 
-		outPipeline.isCompute = !outPipeline.csBytecode.empty();
-		outPipeline.isGraphics = !outPipeline.vsBytecode.empty() || !outPipeline.psBytecode.empty() || !outPipeline.gsBytecode.empty() || !outPipeline.hsBytecode.empty() || !outPipeline.dsBytecode.empty() || !outPipeline.asBytecode.empty() || !outPipeline.msBytecode.empty();
+		outPipeline.isCompute = !outPipeline.computeShaderBytecode.empty();
+		outPipeline.isGraphics = !outPipeline.vertexShaderBytecode.empty() || !outPipeline.pixelShaderBytecode.empty() || !outPipeline.geometryShaderBytecode.empty() || !outPipeline.hullShaderBytecode.empty() || !outPipeline.domainShaderBytecode.empty() || !outPipeline.amplificationShaderBytecode.empty() || !outPipeline.meshShaderBytecode.empty();
 
 		if (!replacement.pipelineStreamMetadataPath.empty())
 		{
@@ -148,12 +148,12 @@ namespace HookD3D12
 	{
 		switch (shaderType)
 		{
-			case ShaderTarget::VertexShader: return pipeline.vsHash;
-			case ShaderTarget::HullShader: return pipeline.hsHash;
-			case ShaderTarget::DomainShader: return pipeline.dsHash;
-			case ShaderTarget::GeometryShader: return pipeline.gsHash;
-			case ShaderTarget::PixelShader: return pipeline.psHash;
-			case ShaderTarget::ComputeShader: return pipeline.csHash;
+			case ShaderTarget::VertexShader: return pipeline.vertexShaderHash;
+			case ShaderTarget::HullShader: return pipeline.hullShaderHash;
+			case ShaderTarget::DomainShader: return pipeline.domainShaderHash;
+			case ShaderTarget::GeometryShader: return pipeline.geometryShaderHash;
+			case ShaderTarget::PixelShader: return pipeline.pixelShaderHash;
+			case ShaderTarget::ComputeShader: return pipeline.computeShaderHash;
 			default: return 0;
 		}
 	}
@@ -165,26 +165,26 @@ namespace HookD3D12
 
 	void FillPipelineTemplateCommonState(ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate, const PipelineStateInfo& pipeline)
 	{
-		pipelineTemplate.vsHash = pipeline.vsHash ? Hash::FormatHash(pipeline.vsHash) : "";
-		pipelineTemplate.psHash = pipeline.psHash ? Hash::FormatHash(pipeline.psHash) : "";
-		pipelineTemplate.csHash = pipeline.csHash ? Hash::FormatHash(pipeline.csHash) : "";
-		pipelineTemplate.gsHash = pipeline.gsHash ? Hash::FormatHash(pipeline.gsHash) : "";
-		pipelineTemplate.hsHash = pipeline.hsHash ? Hash::FormatHash(pipeline.hsHash) : "";
-		pipelineTemplate.dsHash = pipeline.dsHash ? Hash::FormatHash(pipeline.dsHash) : "";
-		pipelineTemplate.asHash = pipeline.asHash ? Hash::FormatHash(pipeline.asHash) : "";
-		pipelineTemplate.msHash = pipeline.msHash ? Hash::FormatHash(pipeline.msHash) : "";
-		pipelineTemplate.vsLength = pipeline.vsSize ? std::to_string((size_t)pipeline.vsSize) : "";
-		pipelineTemplate.psLength = pipeline.psSize ? std::to_string((size_t)pipeline.psSize) : "";
-		pipelineTemplate.csLength = pipeline.csSize ? std::to_string((size_t)pipeline.csSize) : "";
-		pipelineTemplate.gsLength = pipeline.gsSize ? std::to_string((size_t)pipeline.gsSize) : "";
-		pipelineTemplate.hsLength = pipeline.hsSize ? std::to_string((size_t)pipeline.hsSize) : "";
-		pipelineTemplate.dsLength = pipeline.dsSize ? std::to_string((size_t)pipeline.dsSize) : "";
-		pipelineTemplate.asLength = pipeline.asSize ? std::to_string((size_t)pipeline.asSize) : "";
-		pipelineTemplate.msLength = pipeline.msSize ? std::to_string((size_t)pipeline.msSize) : "";
+		pipelineTemplate.vsHash = pipeline.vertexShaderHash ? Hash::FormatHash(pipeline.vertexShaderHash) : "";
+		pipelineTemplate.psHash = pipeline.pixelShaderHash ? Hash::FormatHash(pipeline.pixelShaderHash) : "";
+		pipelineTemplate.csHash = pipeline.computeShaderHash ? Hash::FormatHash(pipeline.computeShaderHash) : "";
+		pipelineTemplate.gsHash = pipeline.geometryShaderHash ? Hash::FormatHash(pipeline.geometryShaderHash) : "";
+		pipelineTemplate.hsHash = pipeline.hullShaderHash ? Hash::FormatHash(pipeline.hullShaderHash) : "";
+		pipelineTemplate.dsHash = pipeline.domainShaderHash ? Hash::FormatHash(pipeline.domainShaderHash) : "";
+		pipelineTemplate.asHash = pipeline.amplificationShaderHash ? Hash::FormatHash(pipeline.amplificationShaderHash) : "";
+		pipelineTemplate.msHash = pipeline.meshShaderHash ? Hash::FormatHash(pipeline.meshShaderHash) : "";
+		pipelineTemplate.vsLength = pipeline.vertexShaderBytecodeSize ? std::to_string((size_t)pipeline.vertexShaderBytecodeSize) : "";
+		pipelineTemplate.psLength = pipeline.pixelShaderBytecodeSize ? std::to_string((size_t)pipeline.pixelShaderBytecodeSize) : "";
+		pipelineTemplate.csLength = pipeline.computeShaderBytecodeSize ? std::to_string((size_t)pipeline.computeShaderBytecodeSize) : "";
+		pipelineTemplate.gsLength = pipeline.geometryShaderBytecodeSize ? std::to_string((size_t)pipeline.geometryShaderBytecodeSize) : "";
+		pipelineTemplate.hsLength = pipeline.hullShaderBytecodeSize ? std::to_string((size_t)pipeline.hullShaderBytecodeSize) : "";
+		pipelineTemplate.dsLength = pipeline.domainShaderBytecodeSize ? std::to_string((size_t)pipeline.domainShaderBytecodeSize) : "";
+		pipelineTemplate.asLength = pipeline.amplificationShaderBytecodeSize ? std::to_string((size_t)pipeline.amplificationShaderBytecodeSize) : "";
+		pipelineTemplate.msLength = pipeline.meshShaderBytecodeSize ? std::to_string((size_t)pipeline.meshShaderBytecodeSize) : "";
 		pipelineTemplate.inputLayoutElementCount = std::to_string(pipeline.inputElements.size());
 		pipelineTemplate.inputLayoutSignature = InputLayoutSignature(pipeline.inputElements);
-		pipelineTemplate.streamOutputDeclarationCount = std::to_string(pipeline.soDeclarations.size());
-		pipelineTemplate.streamOutputSignature = StreamOutputSignature(pipeline.soDeclarations, pipeline.soStrides);
+		pipelineTemplate.streamOutputDeclarationCount = std::to_string(pipeline.streamOutputDeclarations.size());
+		pipelineTemplate.streamOutputSignature = StreamOutputSignature(pipeline.streamOutputDeclarations, pipeline.streamOutputStrides);
 		pipelineTemplate.pipelineStreamLength = pipeline.streamBlob.empty() ? "" : std::to_string(pipeline.streamBlob.size());
 		pipelineTemplate.pipelineStreamSubobjectTypes = PipelineStreamSubobjectTypeSignature(pipeline.streamBlob);
 
@@ -375,28 +375,28 @@ namespace HookD3D12
 			pipelineTemplate.rootSignatureBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_RootSignatureBlob" + ShaderInjectorIO::extensionBIN);
 		}
 
-		if (!pipeline.vsBytecode.empty()) pipelineTemplate.vertexShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalVertexShaderBytecode" + ShaderInjectorIO::extensionBIN);
-		if (!pipeline.psBytecode.empty()) pipelineTemplate.pixelShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalPixelShaderBytecode" + ShaderInjectorIO::extensionBIN);
-		if (!pipeline.csBytecode.empty()) pipelineTemplate.computeShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalComputeShaderBytecode" + ShaderInjectorIO::extensionBIN);
-		if (!pipeline.gsBytecode.empty()) pipelineTemplate.geometryShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalGeometryShaderBytecode" + ShaderInjectorIO::extensionBIN);
-		if (!pipeline.hsBytecode.empty()) pipelineTemplate.hullShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalHullShaderBytecode" + ShaderInjectorIO::extensionBIN);
-		if (!pipeline.dsBytecode.empty()) pipelineTemplate.domainShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalDomainShaderBytecode" + ShaderInjectorIO::extensionBIN);
-		if (!pipeline.asBytecode.empty()) pipelineTemplate.amplificationShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalAmplificationShaderBytecode" + ShaderInjectorIO::extensionBIN);
-		if (!pipeline.msBytecode.empty()) pipelineTemplate.meshShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalMeshShaderBytecode" + ShaderInjectorIO::extensionBIN);
+		if (!pipeline.vertexShaderBytecode.empty()) pipelineTemplate.vertexShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalVertexShaderBytecode" + ShaderInjectorIO::extensionBIN);
+		if (!pipeline.pixelShaderBytecode.empty()) pipelineTemplate.pixelShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalPixelShaderBytecode" + ShaderInjectorIO::extensionBIN);
+		if (!pipeline.computeShaderBytecode.empty()) pipelineTemplate.computeShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalComputeShaderBytecode" + ShaderInjectorIO::extensionBIN);
+		if (!pipeline.geometryShaderBytecode.empty()) pipelineTemplate.geometryShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalGeometryShaderBytecode" + ShaderInjectorIO::extensionBIN);
+		if (!pipeline.hullShaderBytecode.empty()) pipelineTemplate.hullShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalHullShaderBytecode" + ShaderInjectorIO::extensionBIN);
+		if (!pipeline.domainShaderBytecode.empty()) pipelineTemplate.domainShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalDomainShaderBytecode" + ShaderInjectorIO::extensionBIN);
+		if (!pipeline.amplificationShaderBytecode.empty()) pipelineTemplate.amplificationShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalAmplificationShaderBytecode" + ShaderInjectorIO::extensionBIN);
+		if (!pipeline.meshShaderBytecode.empty()) pipelineTemplate.meshShaderBlobPath = ShaderInjectorIO::JoinPath(replacement.replacementDirectory, prefix + "_OriginalMeshShaderBytecode" + ShaderInjectorIO::extensionBIN);
 
 		ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.pipelineStreamBlobPath, pipeline.streamBlob.data(), pipeline.streamBlob.size()) && ok;
 		ShaderTarget::ShaderPipelineStreamMetadataDisk metadata = BuildPipelineStreamMetadata(pipeline);
 		ok = ShaderTarget::WritePipelineStreamMetadataJson(pipelineTemplate.pipelineStreamMetadataPath, metadata) && ok;
 		if (!cachedBlob.empty() && !pipelineTemplate.pipelineCachedBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.pipelineCachedBlobPath, cachedBlob.data(), cachedBlob.size()) && ok;
 		if (!rootSignatureBlob.empty() && !pipelineTemplate.rootSignatureBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.rootSignatureBlobPath, rootSignatureBlob.data(), rootSignatureBlob.size()) && ok;
-		if (!pipeline.vsBytecode.empty() && !pipelineTemplate.vertexShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.vertexShaderBlobPath, pipeline.vsBytecode.data(), pipeline.vsBytecode.size()) && ok;
-		if (!pipeline.psBytecode.empty() && !pipelineTemplate.pixelShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.pixelShaderBlobPath, pipeline.psBytecode.data(), pipeline.psBytecode.size()) && ok;
-		if (!pipeline.csBytecode.empty() && !pipelineTemplate.computeShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.computeShaderBlobPath, pipeline.csBytecode.data(), pipeline.csBytecode.size()) && ok;
-		if (!pipeline.gsBytecode.empty() && !pipelineTemplate.geometryShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.geometryShaderBlobPath, pipeline.gsBytecode.data(), pipeline.gsBytecode.size()) && ok;
-		if (!pipeline.hsBytecode.empty() && !pipelineTemplate.hullShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.hullShaderBlobPath, pipeline.hsBytecode.data(), pipeline.hsBytecode.size()) && ok;
-		if (!pipeline.dsBytecode.empty() && !pipelineTemplate.domainShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.domainShaderBlobPath, pipeline.dsBytecode.data(), pipeline.dsBytecode.size()) && ok;
-		if (!pipeline.asBytecode.empty() && !pipelineTemplate.amplificationShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.amplificationShaderBlobPath, pipeline.asBytecode.data(), pipeline.asBytecode.size()) && ok;
-		if (!pipeline.msBytecode.empty() && !pipelineTemplate.meshShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.meshShaderBlobPath, pipeline.msBytecode.data(), pipeline.msBytecode.size()) && ok;
+		if (!pipeline.vertexShaderBytecode.empty() && !pipelineTemplate.vertexShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.vertexShaderBlobPath, pipeline.vertexShaderBytecode.data(), pipeline.vertexShaderBytecode.size()) && ok;
+		if (!pipeline.pixelShaderBytecode.empty() && !pipelineTemplate.pixelShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.pixelShaderBlobPath, pipeline.pixelShaderBytecode.data(), pipeline.pixelShaderBytecode.size()) && ok;
+		if (!pipeline.computeShaderBytecode.empty() && !pipelineTemplate.computeShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.computeShaderBlobPath, pipeline.computeShaderBytecode.data(), pipeline.computeShaderBytecode.size()) && ok;
+		if (!pipeline.geometryShaderBytecode.empty() && !pipelineTemplate.geometryShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.geometryShaderBlobPath, pipeline.geometryShaderBytecode.data(), pipeline.geometryShaderBytecode.size()) && ok;
+		if (!pipeline.hullShaderBytecode.empty() && !pipelineTemplate.hullShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.hullShaderBlobPath, pipeline.hullShaderBytecode.data(), pipeline.hullShaderBytecode.size()) && ok;
+		if (!pipeline.domainShaderBytecode.empty() && !pipelineTemplate.domainShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.domainShaderBlobPath, pipeline.domainShaderBytecode.data(), pipeline.domainShaderBytecode.size()) && ok;
+		if (!pipeline.amplificationShaderBytecode.empty() && !pipelineTemplate.amplificationShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.amplificationShaderBlobPath, pipeline.amplificationShaderBytecode.data(), pipeline.amplificationShaderBytecode.size()) && ok;
+		if (!pipeline.meshShaderBytecode.empty() && !pipelineTemplate.meshShaderBlobPath.empty()) ok = ShaderInjectorIO::WriteBinaryFile(pipelineTemplate.meshShaderBlobPath, pipeline.meshShaderBytecode.data(), pipeline.meshShaderBytecode.size()) && ok;
 
 		replacement.pipelineTemplates.push_back(pipelineTemplate);
 		return true;

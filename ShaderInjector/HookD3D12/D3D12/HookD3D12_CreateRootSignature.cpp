@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "GUI/ShaderInjectorGUI.h"
 #include "IO/ShaderInjectorIO.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
@@ -31,11 +31,11 @@ namespace HookD3D12
 		std::lock_guard<std::mutex> lock(gRootSignatureMutex);
 		auto rootSignatureIt = gRootSignatureInfoByPointer.find(rootSignature);
 
-		if (rootSignatureIt == gRootSignatureInfoByPointer.end() || rootSignatureIt->second.blob.empty())
+		if (rootSignatureIt == gRootSignatureInfoByPointer.end() || rootSignatureIt->second.rootSignatureBlob.empty())
 			return false;
 
-		blob = rootSignatureIt->second.blob;
-		hash = rootSignatureIt->second.hash;
+		blob = rootSignatureIt->second.rootSignatureBlob;
+		hash = rootSignatureIt->second.rootSignatureHash;
 		return hash != 0;
 	}
 
@@ -51,13 +51,13 @@ namespace HookD3D12
 
 		const auto rootSignatureIt = gRootSignatureInfoByPointer.find(rootSignature);
 
-		if (rootSignatureIt == gRootSignatureInfoByPointer.end() || rootSignatureIt->second.blob.empty())
+		if (rootSignatureIt == gRootSignatureInfoByPointer.end() || rootSignatureIt->second.rootSignatureBlob.empty())
 			return;
 
 		RenderPassResourceRegistry::RegisterRootSignature(
 			rootSignature,
-			rootSignatureIt->second.blob.data(),
-			rootSignatureIt->second.blob.size());
+			rootSignatureIt->second.rootSignatureBlob.data(),
+			rootSignatureIt->second.rootSignatureBlob.size());
 
 		gRenderPassRegisteredRootSignatures.insert(rootSignature);
 	}
@@ -136,8 +136,8 @@ namespace HookD3D12
 			{
 				RootSignatureInfo info{};
 				const uint8_t* bytes = static_cast<const uint8_t*>(blob);
-				info.blob.assign(bytes, bytes + blobSize);
-				info.hash = Hash::HashMemory(blob, blobSize);
+				info.rootSignatureBlob.assign(bytes, bytes + blobSize);
+				info.rootSignatureHash = Hash::HashMemory(blob, blobSize);
 
 				{
 					std::lock_guard<std::mutex> lock(gRootSignatureMutex);

@@ -1,4 +1,3 @@
-//ShaderInjectorIO.cpp
 #include "ShaderInjectorIO.h"
 
 #include <algorithm>
@@ -17,56 +16,54 @@
 	#include <shellapi.h>
 #endif
 
-//custom
-#include "ProcessRunner.h"
 #include "GUI/ShaderInjectorGUI.h"
 #include "StringHelper.h"
 
 namespace ShaderInjectorIO
 {
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| IO HELPERS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| IO HELPERS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| IO HELPERS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
-	std::filesystem::path PathFromUtf8(const std::string& path)
+	//convert UTF-8 at the filesystem boundary so callers can keep one path encoding on every platform.
+	std::filesystem::path PathFromUTF8(const std::string& pathString)
 	{
-		std::string normalizedPath = path;
+		std::string normalizedPath = pathString;
 
 		#if !defined(_WIN32)
-			//accept paths produced on Windows when running through a Unix-like host.
+			//normalize Windows separators when the same configuration is read on a Unix-like host.
 			std::replace(normalizedPath.begin(), normalizedPath.end(), '\\', '/');
 		#endif
 
 		return std::filesystem::u8path(normalizedPath);
 	}
 
-	std::string PathToUtf8(const std::filesystem::path& path)
+	std::string PathToUTF8(const std::filesystem::path& fileSystemPath)
 	{
-		return path.u8string();
+		return fileSystemPath.u8string();
 	}
 
-	bool PathExists(const std::string& path)
+	//use error_code overloads so missing paths simply report false instead of throwing.
+	bool PathExists(const std::string& pathString)
 	{
 		std::error_code error;
-		return !path.empty() && std::filesystem::exists(PathFromUtf8(path), error);
+		return !pathString.empty() && std::filesystem::exists(PathFromUTF8(pathString), error);
 	}
 
 	bool FileExists(const std::string& filePath)
 	{
 		std::error_code error;
-		return !filePath.empty() && std::filesystem::is_regular_file(PathFromUtf8(filePath), error);
+		return !filePath.empty() && std::filesystem::is_regular_file(PathFromUTF8(filePath), error);
 	}
 
+	//remove is safe to call before creating a generated file, even when no previous copy exists.
 	void DeleteFileIfExists(const std::string& filePath)
 	{
 		std::error_code error;
 
 		if (!filePath.empty())
-			std::filesystem::remove(PathFromUtf8(filePath), error);
+			std::filesystem::remove(PathFromUTF8(filePath), error);
 	}
 
 	bool CopyFileIfMissing(const std::string& sourcePath, const std::string& destinationPath)
 	{
+		//keep user-modified destination files intact; only seed files that do not exist yet.
 		if (!FileExists(sourcePath))
 			return false;
 
@@ -76,64 +73,64 @@ namespace ShaderInjectorIO
 		std::error_code error;
 
 		return std::filesystem::copy_file(
-			PathFromUtf8(sourcePath),
-			PathFromUtf8(destinationPath),
+			PathFromUTF8(sourcePath),
+			PathFromUTF8(destinationPath),
 			std::filesystem::copy_options::none,
 			error);
 	}
 
-	bool WriteBinaryFile(const std::string& filePath, const void* data, size_t size)
+	bool WriteBinaryFile(const std::string& filePath, const void* fileData, size_t dataByteCount)
 	{
-		if (!data || size == 0)
+		if (!fileData || dataByteCount == 0)
 			return false;
 
-		std::ofstream file(PathFromUtf8(filePath), std::ios::binary | std::ios::trunc);
+		std::ofstream binaryFile(PathFromUTF8(filePath), std::ios::binary | std::ios::trunc);
 
-		if (!file.is_open())
+		if (!binaryFile.is_open())
 			return false;
 
-		file.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
+		binaryFile.write(static_cast<const char*>(fileData), static_cast<std::streamsize>(dataByteCount));
 
-		return !file.fail();
+		return !binaryFile.fail();
 	}
 
-	bool ReadTextFile(const std::string& filePath, std::string& outText)
+	bool ReadTextFile(const std::string& filePath, std::string& fileText)
 	{
-		outText.clear();
-		std::ifstream file(PathFromUtf8(filePath), std::ios::in | std::ios::binary);
+		fileText.clear();
+		std::ifstream textFile(PathFromUTF8(filePath), std::ios::in | std::ios::binary);
 
-		if (!file.is_open())
+		if (!textFile.is_open())
 			return false;
 
-		outText.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+		fileText.assign(std::istreambuf_iterator<char>(textFile), std::istreambuf_iterator<char>());
 
-		return !file.bad();
+		return !textFile.bad();
 	}
 
-	bool WriteTextFile(const std::string& filePath, const std::string& text)
+	bool WriteTextFile(const std::string& filePath, const std::string& fileText)
 	{
-		std::ofstream file(PathFromUtf8(filePath), std::ios::out | std::ios::trunc | std::ios::binary);
+		std::ofstream textFile(PathFromUTF8(filePath), std::ios::out | std::ios::trunc | std::ios::binary);
 
-		if (!file.is_open())
+		if (!textFile.is_open())
 			return false;
 
-		file.write(text.data(), static_cast<std::streamsize>(text.size()));
+		textFile.write(fileText.data(), static_cast<std::streamsize>(fileText.size()));
 
-		return !file.fail();
+		return !textFile.fail();
 	}
 
-	bool WriteTextFileIfMissing(const std::string& filePath, const std::string& text)
+	bool WriteTextFileIfMissing(const std::string& filePath, const std::string& fileText)
 	{
 		if (FileExists(filePath))
 			return true;
 
-		return WriteTextFile(filePath, text);
+		return WriteTextFile(filePath, fileText);
 	}
 
 	bool DirectoryExists(const std::string& directoryPath)
 	{
 		std::error_code error;
-		return !directoryPath.empty() && std::filesystem::is_directory(PathFromUtf8(directoryPath), error);
+		return !directoryPath.empty() && std::filesystem::is_directory(PathFromUTF8(directoryPath), error);
 	}
 
 	void DirectoryCreate(const std::string& directoryPath)
@@ -142,7 +139,7 @@ namespace ShaderInjectorIO
 			return;
 
 		std::error_code error;
-		std::filesystem::create_directories(PathFromUtf8(directoryPath), error);
+		std::filesystem::create_directories(PathFromUTF8(directoryPath), error);
 	}
 
 	bool DeleteDirectoryRecursively(const std::string& directoryPath)
@@ -150,8 +147,10 @@ namespace ShaderInjectorIO
 		if (!DirectoryExists(directoryPath))
 			return false;
 
+		//remove_all deletes the directory tree; check both the error and final path state before reporting success.
 		std::error_code error;
-		std::filesystem::remove_all(PathFromUtf8(directoryPath), error);
+		std::filesystem::remove_all(PathFromUTF8(directoryPath), error);
+
 		return !error && !PathExists(directoryPath);
 	}
 
@@ -160,30 +159,30 @@ namespace ShaderInjectorIO
 		if (sourcePath.empty() || destinationPath.empty())
 			return false;
 
-		const std::filesystem::path source = PathFromUtf8(sourcePath);
-		const std::filesystem::path destination = PathFromUtf8(destinationPath);
+		const std::filesystem::path sourceFileSystemPath = PathFromUTF8(sourcePath);
+		const std::filesystem::path destinationFileSystemPath = PathFromUTF8(destinationPath);
 
-		if (source == destination)
+		if (sourceFileSystemPath == destinationFileSystemPath)
 			return true;
 
 		std::error_code error;
 
-		if (!std::filesystem::exists(source, error))
+		if (!std::filesystem::exists(sourceFileSystemPath, error))
 			return false;
 
 		error.clear();
 
-		if (std::filesystem::exists(destination, error))
+		if (std::filesystem::exists(destinationFileSystemPath, error))
 		{
 			if (!overwriteExisting)
 				return false;
 
 			error.clear();
 
-			if (std::filesystem::is_directory(destination, error))
-				std::filesystem::remove_all(destination, error);
+			if (std::filesystem::is_directory(destinationFileSystemPath, error))
+				std::filesystem::remove_all(destinationFileSystemPath, error);
 			else
-				std::filesystem::remove(destination, error);
+				std::filesystem::remove(destinationFileSystemPath, error);
 
 			if (error)
 				return false;
@@ -191,52 +190,52 @@ namespace ShaderInjectorIO
 
 		error.clear();
 
-		std::filesystem::create_directories(destination.parent_path(), error);
+		std::filesystem::create_directories(destinationFileSystemPath.parent_path(), error);
 
 		if (error)
 			return false;
 
 		error.clear();
 
-		std::filesystem::rename(source, destination, error);
+		std::filesystem::rename(sourceFileSystemPath, destinationFileSystemPath, error);
 
 		if (!error)
 			return true;
 
-		//some Wine/Proton-backed paths are fussy about rename.
-		//for files, fall back to copy+remove so users can still migrate package metadata cleanly.
+		//some Wine and Proton filesystems reject rename, so copy a file before removing the original.
 		error.clear();
 
-		if (!std::filesystem::is_regular_file(source, error))
+		if (!std::filesystem::is_regular_file(sourceFileSystemPath, error))
 			return false;
 
 		error.clear();
 
-		if (!std::filesystem::copy_file(source, destination, std::filesystem::copy_options::none, error))
+		if (!std::filesystem::copy_file(sourceFileSystemPath, destinationFileSystemPath, std::filesystem::copy_options::none, error))
 			return false;
 
 		error.clear();
 
-		std::filesystem::remove(source, error);
+		std::filesystem::remove(sourceFileSystemPath, error);
 
-		return !error && std::filesystem::exists(destination, error);
+		return !error && std::filesystem::exists(destinationFileSystemPath, error);
 	}
 
-	bool OpenExistingPath(const std::string& path)
+	//hand the native path to the desktop shell; Linux opens it through its standard desktop launcher.
+	bool OpenExistingPath(const std::string& targetPath)
 	{
 		#if defined(_WIN32)
-			const std::filesystem::path nativePath = PathFromUtf8(path);
-			const HINSTANCE result = ShellExecuteW(
+			const std::filesystem::path nativePath = PathFromUTF8(targetPath);
+			const HINSTANCE shellLaunchResult = ShellExecuteW(
 				nullptr,
 				L"open",
 				nativePath.c_str(),
 				nullptr,
 				nullptr,
 				SW_SHOWNORMAL);
-			return reinterpret_cast<INT_PTR>(result) > 32;
+			return reinterpret_cast<INT_PTR>(shellLaunchResult) > 32;
 		#else
-			const ProcessRunner::ProcessResult result = ProcessRunner::Run("/usr/bin/xdg-open", { path });
-			return result.Succeeded();
+			const ProcessResult processResult = RunProcess("/usr/bin/xdg-open", { targetPath });
+			return processResult.Succeeded();
 		#endif
 	}
 
@@ -255,70 +254,84 @@ namespace ShaderInjectorIO
 
 	std::string JoinPath(const std::string& directory, const std::string& childPath)
 	{
+		//let filesystem::path insert the platform's separator instead of building paths with string concatenation.
 		if (directory.empty())
 			return childPath;
 
 		if (childPath.empty())
 			return directory;
 
-		return PathToUtf8(PathFromUtf8(directory) / PathFromUtf8(childPath));
+		return PathToUTF8(PathFromUTF8(directory) / PathFromUTF8(childPath));
 	}
 
-	std::string DirectoryFromPath(const std::string& path)
+	std::string DirectoryFromPath(const std::string& filePath)
 	{
-		return PathToUtf8(PathFromUtf8(path).parent_path());
+		return PathToUTF8(PathFromUTF8(filePath).parent_path());
 	}
 
-	std::string FileNameFromPath(const std::string& path)
+	std::string FileNameFromPath(const std::string& filePath)
 	{
-		return PathToUtf8(PathFromUtf8(path).filename());
+		return PathToUTF8(PathFromUTF8(filePath).filename());
 	}
 
-	std::string MakeRelativePath(const std::string& path, const std::string& baseDirectory)
+	std::string MakeRelativePath(const std::string& filePath, const std::string& baseDirectory)
 	{
-		if (path.empty() || baseDirectory.empty())
+		if (filePath.empty() || baseDirectory.empty())
 			return {};
 
 		std::error_code error;
-		const std::filesystem::path relativePath = std::filesystem::relative(PathFromUtf8(path), PathFromUtf8(baseDirectory), error);
-		return error ? std::string() : PathToUtf8(relativePath);
+		const std::filesystem::path relativePath = std::filesystem::relative(PathFromUTF8(filePath), PathFromUTF8(baseDirectory), error);
+		if (error)
+			return {};
+
+		return PathToUTF8(relativePath);
 	}
 
-	bool IsAbsolutePath(const std::string& path)
+	//recognize Windows paths even when this runs on a Unix-like host that would not parse them natively.
+	bool IsAbsolutePath(const std::string& pathString)
 	{
-		if (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
+		if (pathString.size() >= 3 && std::isalpha(static_cast<unsigned char>(pathString[0])) && pathString[1] == ':' && (pathString[2] == '\\' || pathString[2] == '/'))
 			return true;
 
-		if (path.size() >= 2 && ((path[0] == '\\' && path[1] == '\\') || (path[0] == '/' && path[1] == '/')))
+		if (pathString.size() >= 2 && ((pathString[0] == '\\' && pathString[1] == '\\') || (pathString[0] == '/' && pathString[1] == '/')))
 			return true;
 
-		return !path.empty() && PathFromUtf8(path).is_absolute();
+		return !pathString.empty() && PathFromUTF8(pathString).is_absolute();
 	}
 
-	bool PathsEqual(const std::string& left, const std::string& right)
+	//normalize separators and dot segments first; Windows paths also ignore letter case.
+	bool PathsEqual(const std::string& leftPath, const std::string& rightPath)
 	{
-		const std::string normalizedLeft = PathToUtf8(PathFromUtf8(left).lexically_normal());
-		const std::string normalizedRight = PathToUtf8(PathFromUtf8(right).lexically_normal());
+		const std::string normalizedLeftPath = PathToUTF8(PathFromUTF8(leftPath).lexically_normal());
+		const std::string normalizedRightPath = PathToUTF8(PathFromUTF8(rightPath).lexically_normal());
 
 		#if defined(_WIN32)
-			return StringHelper::EqualsIgnoreCase(normalizedLeft, normalizedRight);
+			return StringHelper::EqualsIgnoreCase(normalizedLeftPath, normalizedRightPath);
 		#else
-			return normalizedLeft == normalizedRight;
+			return normalizedLeftPath == normalizedRightPath;
 		#endif
 	}
 
-	std::string SanitizeFileStem(const std::string& name)
+	std::string SanitizeFileStem(const std::string& fileStemName)
 	{
-		std::string fileStem = StringHelper::TrimWhitespace(name);
+		//replace filename characters that Windows rejects, even when the current host permits them.
+		std::string fileStem = StringHelper::TrimWhitespace(fileStemName);
 
 		for (char& character : fileStem)
 		{
 			const unsigned char unsignedCharacter = static_cast<unsigned char>(character);
+
 			const bool invalidCharacter =
 				unsignedCharacter < 32 ||
-				character == '<' || character == '>' || character == ':' ||
-				character == '"' || character == '/' || character == '\\' ||
-				character == '|' || character == '?' || character == '*';
+				character == '<' ||
+				character == '>' ||
+				character == ':' ||
+				character == '"' ||
+				character == '/' ||
+				character == '\\' ||
+				character == '|' ||
+				character == '?' ||
+				character == '*';
 
 			if (invalidCharacter)
 				character = '_';
@@ -327,10 +340,14 @@ namespace ShaderInjectorIO
 		while (!fileStem.empty() && (fileStem.back() == ' ' || fileStem.back() == '.'))
 			fileStem.pop_back();
 
+		//windows reserves device names even when an extension follows, so prefix those stems too.
 		const std::string lowercaseStem = StringHelper::LowercaseAscii(fileStem);
+
 		const bool reservedName =
-			lowercaseStem == "con" || lowercaseStem == "prn" ||
-			lowercaseStem == "aux" || lowercaseStem == "nul" ||
+			lowercaseStem == "con" ||
+			lowercaseStem == "prn" ||
+			lowercaseStem == "aux" ||
+			lowercaseStem == "nul" ||
 			(lowercaseStem.size() == 4 &&
 				(lowercaseStem.rfind("com", 0) == 0 || lowercaseStem.rfind("lpt", 0) == 0) &&
 				lowercaseStem[3] >= '1' && lowercaseStem[3] <= '9');
@@ -341,77 +358,99 @@ namespace ShaderInjectorIO
 		return fileStem;
 	}
 
-	std::string ReadRegistryString(RegistryHive hive, const std::string& subKey, const std::string& valueName)
+	std::string ReadRegistryString(RegistryHive hive, const std::string& registrySubKey, const std::string& registryValueName)
 	{
 		#if defined(_WIN32)
-			const HKEY rootKey = hive == RegistryHive::LocalMachine ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-			const std::wstring wideSubKey = StringHelper::Utf8ToWide(subKey, false);
-			const std::wstring wideValueName = StringHelper::Utf8ToWide(valueName, false);
+			HKEY rootKey = HKEY_CURRENT_USER;
+
+			if (hive == RegistryHive::LocalMachine)
+				rootKey = HKEY_LOCAL_MACHINE;
+
+			const std::wstring wideSubKey = StringHelper::Utf8ToWide(registrySubKey, false);
+			const std::wstring wideValueName = StringHelper::Utf8ToWide(registryValueName, false);
 
 			if (wideSubKey.empty())
 				return {};
 
+			//query the value size first, then allocate enough wide characters for the registry result.
 			DWORD requiredBytes = 0;
-			const wchar_t* valueNamePointer = wideValueName.empty() ? nullptr : wideValueName.c_str();
+			const wchar_t* valueNamePointer = nullptr;
+
+			if (!wideValueName.empty())
+				valueNamePointer = wideValueName.c_str();
+
 			const DWORD acceptedTypes = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ;
 			const LSTATUS sizeResult = RegGetValueW(rootKey, wideSubKey.c_str(), valueNamePointer, acceptedTypes, nullptr, nullptr, &requiredBytes);
 
 			if (sizeResult != ERROR_SUCCESS || requiredBytes < sizeof(wchar_t))
 				return {};
 
-			std::vector<wchar_t> value(requiredBytes / sizeof(wchar_t), L'\0');
-			const LSTATUS readResult = RegGetValueW(rootKey, wideSubKey.c_str(), valueNamePointer, acceptedTypes, nullptr, value.data(), &requiredBytes);
+			std::vector<wchar_t> registryValueCharacters(requiredBytes / sizeof(wchar_t), L'\0');
+			const LSTATUS readResult = RegGetValueW(rootKey, wideSubKey.c_str(), valueNamePointer, acceptedTypes, nullptr, registryValueCharacters.data(), &requiredBytes);
 
-			return readResult == ERROR_SUCCESS ? StringHelper::WideToUtf8(value.data()) : std::string();
+			if (readResult != ERROR_SUCCESS)
+				return {};
+
+			return StringHelper::WideToUtf8(registryValueCharacters.data());
 		#else
 			(void)hive;
-			(void)subKey;
-			(void)valueName;
+			(void)registrySubKey;
+			(void)registryValueName;
 			return {};
 		#endif
 	}
 
-	void CollectFilesByExtension(const std::string& directory, const std::string& extension, std::vector<std::string>& outFiles, bool recursive, bool includeFullPath)
+	void CollectFilesByExtension(const std::string& directory, const std::string& extension, std::vector<std::string>& collectedFilePaths, bool includeSubdirectories, bool includeFullPath)
 	{
 		if (directory.empty() || extension.empty() || !DirectoryExists(directory))
 			return;
 
-		const std::string expectedExtension = StringHelper::LowercaseAscii(extension.front() == '.' ? extension : "." + extension);
-		const std::filesystem::directory_options options = std::filesystem::directory_options::skip_permission_denied;
-		std::error_code error;
+		std::string expectedExtension = extension;
 
-		auto collectEntry = [&](const std::filesystem::directory_entry& entry)
+		if (expectedExtension.front() != '.')
+			expectedExtension.insert(expectedExtension.begin(), '.');
+
+		expectedExtension = StringHelper::LowercaseAscii(expectedExtension);
+		const std::filesystem::directory_options directoryIteratorOptions = std::filesystem::directory_options::skip_permission_denied;
+		std::error_code directoryIterationError;
+
+		//normalize the suffix once, then compare each regular file without regard to letter case.
+		auto collectMatchingFile = [&](const std::filesystem::directory_entry& directoryEntry)
 		{
-			if (!entry.is_regular_file(error) || StringHelper::LowercaseAscii(PathToUtf8(entry.path().extension())) != expectedExtension)
+			if (!directoryEntry.is_regular_file(directoryIterationError) || StringHelper::LowercaseAscii(PathToUTF8(directoryEntry.path().extension())) != expectedExtension)
 				return;
 
-			outFiles.push_back(PathToUtf8(includeFullPath ? entry.path() : entry.path().filename()));
+			if (includeFullPath)
+				collectedFilePaths.push_back(PathToUTF8(directoryEntry.path()));
+			else
+				collectedFilePaths.push_back(PathToUTF8(directoryEntry.path().filename()));
 		};
 
-		if (recursive)
+		//walk either this folder or its whole tree, clearing iterator errors so later files can still be checked.
+		if (includeSubdirectories)
 		{
-			for (std::filesystem::recursive_directory_iterator iterator(PathFromUtf8(directory), options, error), end; iterator != end; iterator.increment(error))
+			for (std::filesystem::recursive_directory_iterator directoryIterator(PathFromUTF8(directory), directoryIteratorOptions, directoryIterationError), endIterator; directoryIterator != endIterator; directoryIterator.increment(directoryIterationError))
 			{
-				if (error)
+				if (directoryIterationError)
 				{
-					error.clear();
+					directoryIterationError.clear();
 					continue;
 				}
 
-				collectEntry(*iterator);
+				collectMatchingFile(*directoryIterator);
 			}
 		}
 		else
 		{
-			for (std::filesystem::directory_iterator iterator(PathFromUtf8(directory), options, error), end; iterator != end; iterator.increment(error))
+			for (std::filesystem::directory_iterator directoryIterator(PathFromUTF8(directory), directoryIteratorOptions, directoryIterationError), endIterator; directoryIterator != endIterator; directoryIterator.increment(directoryIterationError))
 			{
-				if (error)
+				if (directoryIterationError)
 				{
-					error.clear();
+					directoryIterationError.clear();
 					continue;
 				}
 
-				collectEntry(*iterator);
+				collectMatchingFile(*directoryIterator);
 			}
 		}
 	}

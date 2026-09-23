@@ -19,7 +19,7 @@
 #include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "ShaderTarget/DatabaseShaderTargets.h"
 #include "Globals.h"
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "HookD3D12.h"
 #include "ShaderAnalysis.h"
 #include "ShaderDiscovery.h"
@@ -651,17 +651,17 @@ namespace ShaderAutomaticDiscovery
 
 		void RebindGraphicsPipelinePointers(HookD3D12::GraphicsPipelineInfo& pipeline)
 		{
-			pipeline.originalDesc.VS = { pipeline.vsBytecode.empty() ? nullptr : pipeline.vsBytecode.data(), pipeline.vsBytecode.size() };
-			pipeline.originalDesc.PS = { pipeline.psBytecode.empty() ? nullptr : pipeline.psBytecode.data(), pipeline.psBytecode.size() };
-			pipeline.originalDesc.GS = { pipeline.gsBytecode.empty() ? nullptr : pipeline.gsBytecode.data(), pipeline.gsBytecode.size() };
-			pipeline.originalDesc.HS = { pipeline.hsBytecode.empty() ? nullptr : pipeline.hsBytecode.data(), pipeline.hsBytecode.size() };
-			pipeline.originalDesc.DS = { pipeline.dsBytecode.empty() ? nullptr : pipeline.dsBytecode.data(), pipeline.dsBytecode.size() };
-			pipeline.originalDesc.InputLayout.pInputElementDescs = pipeline.inputElements.empty() ? nullptr : pipeline.inputElements.data();
-			pipeline.originalDesc.InputLayout.NumElements = static_cast<UINT>(pipeline.inputElements.size());
-			pipeline.originalDesc.StreamOutput.pSODeclaration = pipeline.soDeclarations.empty() ? nullptr : pipeline.soDeclarations.data();
-			pipeline.originalDesc.StreamOutput.NumEntries = static_cast<UINT>(pipeline.soDeclarations.size());
-			pipeline.originalDesc.StreamOutput.pBufferStrides = pipeline.soStrides.empty() ? nullptr : pipeline.soStrides.data();
-			pipeline.originalDesc.StreamOutput.NumStrides = static_cast<UINT>(pipeline.soStrides.size());
+			pipeline.originalDescription.VS = { pipeline.vertexShaderBytecode.empty() ? nullptr : pipeline.vertexShaderBytecode.data(), pipeline.vertexShaderBytecode.size() };
+			pipeline.originalDescription.PS = { pipeline.pixelShaderBytecode.empty() ? nullptr : pipeline.pixelShaderBytecode.data(), pipeline.pixelShaderBytecode.size() };
+			pipeline.originalDescription.GS = { pipeline.geometryShaderBytecode.empty() ? nullptr : pipeline.geometryShaderBytecode.data(), pipeline.geometryShaderBytecode.size() };
+			pipeline.originalDescription.HS = { pipeline.hullShaderBytecode.empty() ? nullptr : pipeline.hullShaderBytecode.data(), pipeline.hullShaderBytecode.size() };
+			pipeline.originalDescription.DS = { pipeline.domainShaderBytecode.empty() ? nullptr : pipeline.domainShaderBytecode.data(), pipeline.domainShaderBytecode.size() };
+			pipeline.originalDescription.InputLayout.pInputElementDescs = pipeline.inputElements.empty() ? nullptr : pipeline.inputElements.data();
+			pipeline.originalDescription.InputLayout.NumElements = static_cast<UINT>(pipeline.inputElements.size());
+			pipeline.originalDescription.StreamOutput.pSODeclaration = pipeline.streamOutputDeclarations.empty() ? nullptr : pipeline.streamOutputDeclarations.data();
+			pipeline.originalDescription.StreamOutput.NumEntries = static_cast<UINT>(pipeline.streamOutputDeclarations.size());
+			pipeline.originalDescription.StreamOutput.pBufferStrides = pipeline.streamOutputStrides.empty() ? nullptr : pipeline.streamOutputStrides.data();
+			pipeline.originalDescription.StreamOutput.NumStrides = static_cast<UINT>(pipeline.streamOutputStrides.size());
 		}
 
 		bool Enqueue(
@@ -790,11 +790,11 @@ namespace ShaderAutomaticDiscovery
 				uint64_t pipelineShaderHash = 0;
 				switch (shaderType)
 				{
-					case ShaderTarget::VertexShader: pipelineShaderHash = pipeline.vsHash; break;
-					case ShaderTarget::HullShader: pipelineShaderHash = pipeline.hsHash; break;
-					case ShaderTarget::DomainShader: pipelineShaderHash = pipeline.dsHash; break;
-					case ShaderTarget::GeometryShader: pipelineShaderHash = pipeline.gsHash; break;
-					case ShaderTarget::PixelShader: pipelineShaderHash = pipeline.psHash; break;
+					case ShaderTarget::VertexShader: pipelineShaderHash = pipeline.vertexShaderHash; break;
+					case ShaderTarget::HullShader: pipelineShaderHash = pipeline.hullShaderHash; break;
+					case ShaderTarget::DomainShader: pipelineShaderHash = pipeline.domainShaderHash; break;
+					case ShaderTarget::GeometryShader: pipelineShaderHash = pipeline.geometryShaderHash; break;
+					case ShaderTarget::PixelShader: pipelineShaderHash = pipeline.pixelShaderHash; break;
 					default: break;
 				}
 				if (pipelineShaderHash != shaderHash)
@@ -802,8 +802,8 @@ namespace ShaderAutomaticDiscovery
 
 				outPipeline = pipeline;
 
-				if (outPipeline.originalDesc.pRootSignature)
-					outPipeline.originalDesc.pRootSignature->AddRef();
+				if (outPipeline.originalDescription.pRootSignature)
+					outPipeline.originalDescription.pRootSignature->AddRef();
 
 				RebindGraphicsPipelinePointers(outPipeline);
 
@@ -934,8 +934,8 @@ namespace ShaderAutomaticDiscovery
 				{
 					CreateTargetForMatch("Graphics", pipeline, queued, modifiedShaderId, shaderAnalysis);
 
-					if (pipeline.originalDesc.pRootSignature)
-						pipeline.originalDesc.pRootSignature->Release();
+					if (pipeline.originalDescription.pRootSignature)
+						pipeline.originalDescription.pRootSignature->Release();
 				}
 			}
 			else
@@ -1358,21 +1358,21 @@ namespace ShaderAutomaticDiscovery
 
 	void ProcessCapturedGraphicsPipeline(const HookD3D12::GraphicsPipelineInfo& pipeline)
 	{
-		Enqueue(PipelineSource::Graphics, pipeline.pipelineState, -1, ShaderTarget::VertexShader, pipeline.vsHash, pipeline.vsBytecode, false);
-		Enqueue(PipelineSource::Graphics, pipeline.pipelineState, -1, ShaderTarget::PixelShader, pipeline.psHash, pipeline.psBytecode, false);
-		Enqueue(PipelineSource::Graphics, pipeline.pipelineState, -1, ShaderTarget::GeometryShader, pipeline.gsHash, pipeline.gsBytecode, false);
-		Enqueue(PipelineSource::Graphics, pipeline.pipelineState, -1, ShaderTarget::HullShader, pipeline.hsHash, pipeline.hsBytecode, false);
-		Enqueue(PipelineSource::Graphics, pipeline.pipelineState, -1, ShaderTarget::DomainShader, pipeline.dsHash, pipeline.dsBytecode, false);
+		Enqueue(PipelineSource::Graphics, pipeline.pipelineState, -1, ShaderTarget::VertexShader, pipeline.vertexShaderHash, pipeline.vertexShaderBytecode, false);
+		Enqueue(PipelineSource::Graphics, pipeline.pipelineState, -1, ShaderTarget::PixelShader, pipeline.pixelShaderHash, pipeline.pixelShaderBytecode, false);
+		Enqueue(PipelineSource::Graphics, pipeline.pipelineState, -1, ShaderTarget::GeometryShader, pipeline.geometryShaderHash, pipeline.geometryShaderBytecode, false);
+		Enqueue(PipelineSource::Graphics, pipeline.pipelineState, -1, ShaderTarget::HullShader, pipeline.hullShaderHash, pipeline.hullShaderBytecode, false);
+		Enqueue(PipelineSource::Graphics, pipeline.pipelineState, -1, ShaderTarget::DomainShader, pipeline.domainShaderHash, pipeline.domainShaderBytecode, false);
 	}
 
 	void ProcessCapturedStreamPipeline(const HookD3D12::PipelineStateInfo& pipeline)
 	{
-		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::VertexShader, pipeline.vsHash, pipeline.vsBytecode, false);
-		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::PixelShader, pipeline.psHash, pipeline.psBytecode, false);
-		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::ComputeShader, pipeline.csHash, pipeline.csBytecode, false);
-		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::GeometryShader, pipeline.gsHash, pipeline.gsBytecode, false);
-		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::HullShader, pipeline.hsHash, pipeline.hsBytecode, false);
-		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::DomainShader, pipeline.dsHash, pipeline.dsBytecode, false);
+		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::VertexShader, pipeline.vertexShaderHash, pipeline.vertexShaderBytecode, false);
+		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::PixelShader, pipeline.pixelShaderHash, pipeline.pixelShaderBytecode, false);
+		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::ComputeShader, pipeline.computeShaderHash, pipeline.computeShaderBytecode, false);
+		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::GeometryShader, pipeline.geometryShaderHash, pipeline.geometryShaderBytecode, false);
+		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::HullShader, pipeline.hullShaderHash, pipeline.hullShaderBytecode, false);
+		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::DomainShader, pipeline.domainShaderHash, pipeline.domainShaderBytecode, false);
 	}
 
 	bool ProcessCapturedShader(

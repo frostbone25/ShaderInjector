@@ -13,18 +13,15 @@
 	#include <d3dcompiler.h>
 #endif
 
-#include "ProcessRunner.h"
 #include "GUI/ShaderInjectorGUI.h"
 #include "StringHelper.h"
 
 namespace ShaderInjectorIO
 {
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SHADER |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SHADER |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SHADER |||||||||||||||||||||||||||||||||||||||||||||||||||||
+	//the shader helpers share one path for choosing a compiler, collecting diagnostics, and saving the resulting bytecode.
 
-	//given the file path of a compiled shader bytecode blob, use dxc to disassemble into a somewhat readable dxil text file
-	bool GenerateShaderTextDXIL(const std::string shaderBytecodeFilePath)
+	//disassemble a compiled shader blob so the DXIL instructions can be inspected as text.
+	bool GenerateShaderTextDXIL(const std::string& shaderBytecodeFilePath)
 	{
 		if (!FileExists(shaderBytecodeFilePath))
 		{
@@ -32,73 +29,79 @@ namespace ShaderInjectorIO
 			return false;
 		}
 
-		const std::string dxcPath = GetToolPathDXC();
+		const std::string shaderCompilerExecutablePath = GetToolPathDXC();
 
-		if (!FileExists(dxcPath))
+		if (!FileExists(shaderCompilerExecutablePath))
 		{
-			WriteToLogFileError("ShaderInjectorIO->GenerateShaderTextDXIL: DXC executable was not found: " + dxcPath);
+			WriteToLogFileError("ShaderInjectorIO->GenerateShaderTextDXIL: DXC executable was not found: " + shaderCompilerExecutablePath);
 			return false;
 		}
 
-		std::filesystem::path outputPath = PathFromUtf8(shaderBytecodeFilePath);
+		std::filesystem::path disassemblyFilePath = PathFromUTF8(shaderBytecodeFilePath);
 
-		outputPath.replace_extension(extensionDXIL);
+		disassemblyFilePath.replace_extension(extensionDXIL);
 
-		const std::string dxilTextPath = PathToUtf8(outputPath);
+		const std::string dxilTextFilePath = PathToUTF8(disassemblyFilePath);
 
-		const ProcessRunner::ProcessResult processResult = ProcessRunner::Run(dxcPath, { "-dumpbin", shaderBytecodeFilePath }, dxilTextPath);
+		//write the disassembly beside the blob so each captured shader keeps its source and readable output together.
+		const ProcessResult processResult = RunProcess(shaderCompilerExecutablePath, { "-dumpbin", shaderBytecodeFilePath }, dxilTextFilePath);
 
 		if (!processResult.Succeeded())
 		{
-			DeleteFileIfExists(dxilTextPath);
-			WriteToLogFileError("ShaderInjectorIO->GenerateShaderTextDXIL: DXC failed (exit = " + std::to_string(processResult.exitCode) + "): " + processResult.errorMessage);
+			DeleteFileIfExists(dxilTextFilePath);
+			WriteToLogFileError("ShaderInjectorIO->GenerateShaderTextDXIL: DXC failed (exit = " + std::to_string(processResult.processExitCode) + "): " + processResult.errorMessage);
 			return false;
 		}
 
-		return FileExists(dxilTextPath);
+		return FileExists(dxilTextFilePath);
 	}
 
-	//given raw bytecode from memory, serialize/dump it to the disk in a given directory
-	bool DumpShaderBytecode(const void* bytecode, size_t size, uint64_t hash, const std::string namePrefix, const std::string& directory)
+	//write bytecode under its hash so repeated captures reuse a stable file name.
+	bool DumpShaderBytecode(const void* shaderBytecode, size_t bytecodeSize, uint64_t shaderHash, const std::string& shaderNamePrefix, const std::string& dumpDirectory)
 	{
-		if (!bytecode || size == 0)
+		if (!shaderBytecode || bytecodeSize == 0)
 		{
 			WriteToLogFileError("ShaderInjectorIO->DumpShaderBytecode: error! given shader bytecode is null or size is 0!");
 			return false;
 		}
 
-		const std::string filename = StringHelper::Format("%016llX.bin", static_cast<unsigned long long>(hash));
-		const std::string path = JoinPath(directory, namePrefix + "_" + filename);
+		//the stable hash keeps repeat captures from generating duplicate bytecode names.
+		const std::string fileName = StringHelper::Format("%016llX.bin", static_cast<unsigned long long>(shaderHash));
+		const std::string shaderBytecodeFilePath = JoinPath(dumpDirectory, shaderNamePrefix + "_" + fileName);
 
-		if (!WriteBinaryFile(path, bytecode, size))
+		if (!WriteBinaryFile(shaderBytecodeFilePath, shaderBytecode, bytecodeSize))
 			return false;
 
-		return GenerateShaderTextDXIL(path);
+		return GenerateShaderTextDXIL(shaderBytecodeFilePath);
 	}
 
-	//dxc reports compilation problems on stdout/stderr. Capturing them means a failed compile
-	//can name the file, line, and reason instead of only an exit code.
-	static std::string ReadCompilerDiagnostics(const std::string& compilerOutputPath)
+	//save compiler output so failures include source locations and warning text, not only an exit code.
+	static std::string ReadCompilerDiagnostics(const std::string& compilerOutputFilePath)
 	{
-		//a single mistake can cascade into a very long error list. Keep the log file readable.
+		//trim noisy compiler output before it reaches the runtime log.
 		constexpr size_t maximumDiagnosticsLength = 4000;
 
-		std::string diagnostics;
+		std::string compilerDiagnostics;
 
-		if (!ReadTextFile(compilerOutputPath, diagnostics))
+		if (!ReadTextFile(compilerOutputFilePath, compilerDiagnostics))
 			return {};
 
-		const size_t lastContentCharacter = diagnostics.find_last_not_of(" \t\r\n");
-		diagnostics.erase(lastContentCharacter == std::string::npos ? 0 : lastContentCharacter + 1);
+		const size_t lastContentCharacter = compilerDiagnostics.find_last_not_of(" \t\r\n");
 
-		if (diagnostics.size() > maximumDiagnosticsLength)
-			diagnostics = diagnostics.substr(0, maximumDiagnosticsLength) + "\n... (truncated)";
+		if (lastContentCharacter == std::string::npos)
+			compilerDiagnostics.clear();
+		else
+			compilerDiagnostics.erase(lastContentCharacter + 1);
 
-		return diagnostics;
+		if (compilerDiagnostics.size() > maximumDiagnosticsLength)
+			compilerDiagnostics = compilerDiagnostics.substr(0, maximumDiagnosticsLength) + "\n... (truncated)";
+
+		return compilerDiagnostics;
 	}
 
 	namespace
 	{
+		//shader model 5 profiles use DXBC and the legacy compiler; newer profiles use DXC.
 		bool UsesLegacyShaderCompiler(const std::string& shaderProfile)
 		{
 			return shaderProfile.size() >= 6 && shaderProfile[3] == '5' && shaderProfile[4] == '_';
@@ -107,93 +110,95 @@ namespace ShaderInjectorIO
 #if defined(_WIN32)
 		class LegacyShaderIncludeHandler final : public ID3DInclude
 		{
+		private:
+			std::filesystem::path sourceDirectory;
+			std::filesystem::path sharedIncludesDirectory;
+			std::unordered_map<LPCVOID, std::filesystem::path> openFileDirectories;
+
 		public:
-			LegacyShaderIncludeHandler(std::filesystem::path sourceDirectory, std::filesystem::path sharedIncludesDirectory)
-				: sourceDirectory_(std::move(sourceDirectory)), sharedIncludesDirectory_(std::move(sharedIncludesDirectory))
+			LegacyShaderIncludeHandler(std::filesystem::path sourceDirectoryPath, std::filesystem::path sharedIncludesDirectoryPath)
+				: sourceDirectory(std::move(sourceDirectoryPath)), sharedIncludesDirectory(std::move(sharedIncludesDirectoryPath))
 			{
 			}
 
 			~LegacyShaderIncludeHandler()
 			{
-				for (const auto& openFile : openFileDirectories_)
-					delete[] static_cast<const char*>(openFile.first);
+				//release buffers still tracked in case the compiler did not close every include.
+				for (const auto& openIncludeFile : openFileDirectories)
+					delete[] static_cast<const char*>(openIncludeFile.first);
 			}
 
-			HRESULT STDMETHODCALLTYPE Open(
-				D3D_INCLUDE_TYPE,
-				LPCSTR fileName,
-				LPCVOID parentData,
-				LPCVOID* outData,
-				UINT* outBytes) override
+			HRESULT STDMETHODCALLTYPE Open(D3D_INCLUDE_TYPE, LPCSTR fileName, LPCVOID parentIncludeData, LPCVOID* outputIncludeData, UINT* outputIncludeByteCount) override
 			{
-				if (!fileName || !outData || !outBytes)
+				if (!fileName || !outputIncludeData || !outputIncludeByteCount)
 					return E_INVALIDARG;
 
-				std::vector<std::filesystem::path> candidates;
-				const std::filesystem::path includePath = PathFromUtf8(fileName);
+				std::vector<std::filesystem::path> candidateIncludePaths;
+				const std::filesystem::path includePath = PathFromUTF8(fileName);
 
 				if (includePath.is_absolute())
-				{
-					candidates.push_back(includePath);
-				}
+					candidateIncludePaths.push_back(includePath);
 				else
 				{
-					const auto parentIt = openFileDirectories_.find(parentData);
+					//relative includes first resolve beside their parent, then beside the shader, then in shared includes.
+					const auto parentIncludeDirectory = openFileDirectories.find(parentIncludeData);
 
-					if (parentIt != openFileDirectories_.end())
-						candidates.push_back(parentIt->second / includePath);
+					if (parentIncludeDirectory != openFileDirectories.end())
+						candidateIncludePaths.push_back(parentIncludeDirectory->second / includePath);
 
-					candidates.push_back(sourceDirectory_ / includePath);
-					candidates.push_back(sharedIncludesDirectory_ / includePath);
+					candidateIncludePaths.push_back(sourceDirectory / includePath);
+					candidateIncludePaths.push_back(sharedIncludesDirectory / includePath);
 				}
 
-				for (const std::filesystem::path& candidate : candidates)
+				for (const std::filesystem::path& candidateIncludePath : candidateIncludePaths)
 				{
-					std::ifstream file(candidate, std::ios::binary | std::ios::ate);
+					std::ifstream includeFile(candidateIncludePath, std::ios::binary | std::ios::ate);
 
-					if (!file.is_open())
+					if (!includeFile.is_open())
 						continue;
 
-					const std::streamsize fileSize = file.tellg();
+					const std::streamsize includeFileSize = includeFile.tellg();
 
-					if (fileSize < 0 || static_cast<uint64_t>(fileSize) > (std::numeric_limits<UINT>::max)())
+					if (includeFileSize < 0 || static_cast<uint64_t>(includeFileSize) > (std::numeric_limits<UINT>::max)())
 						continue;
 
-					file.seekg(0, std::ios::beg);
-					char* data = new (std::nothrow) char[fileSize > 0 ? static_cast<size_t>(fileSize) : 1u];
+					includeFile.seekg(0, std::ios::beg);
+					size_t includeAllocationSize = 1;
 
-					if (!data)
+					if (includeFileSize > 0)
+						includeAllocationSize = static_cast<size_t>(includeFileSize);
+
+					//DXC expects an owned byte buffer and returns it to Close after compilation.
+					char* includeData = new (std::nothrow) char[includeAllocationSize];
+
+					if (!includeData)
 						return E_OUTOFMEMORY;
 
-					if (fileSize > 0 && !file.read(data, fileSize))
+					if (includeFileSize > 0 && !includeFile.read(includeData, includeFileSize))
 					{
-						delete[] data;
+						delete[] includeData;
 						continue;
 					}
 
-					*outData = data;
-					*outBytes = static_cast<UINT>(fileSize);
-					openFileDirectories_[data] = candidate.parent_path();
+					*outputIncludeData = includeData;
+					*outputIncludeByteCount = static_cast<UINT>(includeFileSize);
+					openFileDirectories[includeData] = candidateIncludePath.parent_path();
 					return S_OK;
 				}
 
 				return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
 			}
 
-			HRESULT STDMETHODCALLTYPE Close(LPCVOID data) override
+			HRESULT STDMETHODCALLTYPE Close(LPCVOID includeData) override
 			{
-				openFileDirectories_.erase(data);
-				delete[] static_cast<const char*>(data);
+				openFileDirectories.erase(includeData);
+				delete[] static_cast<const char*>(includeData);
 				return S_OK;
 			}
 
-		private:
-			std::filesystem::path sourceDirectory_;
-			std::filesystem::path sharedIncludesDirectory_;
-			std::unordered_map<LPCVOID, std::filesystem::path> openFileDirectories_;
 		};
 
-		using CompileFromFileFunction = HRESULT(WINAPI*)(
+		using D3DCompileFromFileFunction = HRESULT(WINAPI*)(
 			LPCWSTR,
 			const D3D_SHADER_MACRO*,
 			ID3DInclude*,
@@ -208,14 +213,15 @@ namespace ShaderInjectorIO
 			const std::string& shaderSourceFilePath,
 			const std::string& shaderProfile,
 			const std::string& entryPoint,
-			const std::string& outputPath,
-			std::string& outDiagnostics,
-			std::string& outError)
+			const std::string& compiledBlobFilePath,
+			std::string& compilerDiagnosticsOutput,
+			std::string& compilerErrorOutput)
 		{
-			outDiagnostics.clear();
-			outError.clear();
+			compilerDiagnosticsOutput.clear();
+			compilerErrorOutput.clear();
 
-			constexpr const wchar_t* compilerNames[] =
+			//try installed compiler DLL versions from newest to oldest and use the first one with the required export.
+			constexpr const wchar_t* compilerLibraryNames[] =
 			{
 				L"d3dcompiler_47.dll",
 				L"d3dcompiler_46.dll",
@@ -225,38 +231,40 @@ namespace ShaderInjectorIO
 			};
 
 			HMODULE compilerModule = nullptr;
-			CompileFromFileFunction compileFromFile = nullptr;
+			D3DCompileFromFileFunction compileShaderFromFile = nullptr;
 
-			for (const wchar_t* compilerName : compilerNames)
+			for (const wchar_t* compilerLibraryName : compilerLibraryNames)
 			{
-				compilerModule = LoadLibraryW(compilerName);
+				compilerModule = LoadLibraryW(compilerLibraryName);
 
 				if (!compilerModule)
 					continue;
 
-				compileFromFile = reinterpret_cast<CompileFromFileFunction>(GetProcAddress(compilerModule, "D3DCompileFromFile"));
+				compileShaderFromFile = reinterpret_cast<D3DCompileFromFileFunction>(GetProcAddress(compilerModule, "D3DCompileFromFile"));
 
-				if (compileFromFile)
+				if (compileShaderFromFile)
 					break;
 
 				FreeLibrary(compilerModule);
 				compilerModule = nullptr;
 			}
 
-			if (!compilerModule || !compileFromFile)
+			if (!compilerModule || !compileShaderFromFile)
 			{
-				outError = "No compatible d3dcompiler DLL exposing D3DCompileFromFile was found.";
+				compilerErrorOutput = "No compatible d3dcompiler DLL exposing D3DCompileFromFile was found.";
 				return false;
 			}
 
 			LegacyShaderIncludeHandler includeHandler(
-				PathFromUtf8(DirectoryFromPath(shaderSourceFilePath)),
-				PathFromUtf8(GetModifiedShadersIncludesDirectory()));
+				PathFromUTF8(DirectoryFromPath(shaderSourceFilePath)),
+				PathFromUTF8(GetModifiedShadersIncludesDirectory()));
+
 			ID3DBlob* shaderBlob = nullptr;
 			ID3DBlob* errorBlob = nullptr;
-			const std::wstring sourcePath = PathFromUtf8(shaderSourceFilePath).wstring();
-			const HRESULT result = compileFromFile(
-				sourcePath.c_str(),
+			const std::wstring shaderSourcePath = PathFromUTF8(shaderSourceFilePath).wstring();
+			//the include handler lets this compile find local files and the injector's shared include folder.
+			const HRESULT compilationResult = compileShaderFromFile(
+				shaderSourcePath.c_str(),
 				nullptr,
 				&includeHandler,
 				entryPoint.c_str(),
@@ -268,45 +276,50 @@ namespace ShaderInjectorIO
 
 			if (errorBlob && errorBlob->GetBufferPointer() && errorBlob->GetBufferSize() > 0)
 			{
-				outDiagnostics.assign(static_cast<const char*>(errorBlob->GetBufferPointer()), errorBlob->GetBufferSize());
-				const size_t lastContentCharacter = outDiagnostics.find_last_not_of("\0 \t\r\n");
-				outDiagnostics.erase(lastContentCharacter == std::string::npos ? 0 : lastContentCharacter + 1);
+				compilerDiagnosticsOutput.assign(static_cast<const char*>(errorBlob->GetBufferPointer()), errorBlob->GetBufferSize());
+				const size_t lastContentCharacter = compilerDiagnosticsOutput.find_last_not_of("\0 \t\r\n");
+
+				if (lastContentCharacter == std::string::npos)
+					compilerDiagnosticsOutput.clear();
+				else
+					compilerDiagnosticsOutput.erase(lastContentCharacter + 1);
+
 				constexpr size_t maximumDiagnosticsLength = 4000;
 
-				if (outDiagnostics.size() > maximumDiagnosticsLength)
-					outDiagnostics = outDiagnostics.substr(0, maximumDiagnosticsLength) + "\n... (truncated)";
+				if (compilerDiagnosticsOutput.size() > maximumDiagnosticsLength)
+					compilerDiagnosticsOutput = compilerDiagnosticsOutput.substr(0, maximumDiagnosticsLength) + "\n... (truncated)";
 			}
 
 			if (errorBlob)
 				errorBlob->Release();
 
-			bool succeeded = SUCCEEDED(result) && shaderBlob && shaderBlob->GetBufferPointer() && shaderBlob->GetBufferSize() > 0;
+			bool compilationSucceeded = SUCCEEDED(compilationResult) && shaderBlob && shaderBlob->GetBufferPointer() && shaderBlob->GetBufferSize() > 0;
 
-			if (succeeded)
+			if (compilationSucceeded)
 			{
-				succeeded = WriteBinaryFile(outputPath, shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize());
+				compilationSucceeded = WriteBinaryFile(compiledBlobFilePath, shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize());
 
-				if (!succeeded)
-					outError = "Could not write the compiled shader blob: " + outputPath;
+				if (!compilationSucceeded)
+					compilerErrorOutput = "Could not write the compiled shader blob: " + compiledBlobFilePath;
 			}
 			else
-				outError = "D3DCompileFromFile failed: " + StringHelper::FormatHRESULT(result);
+				compilerErrorOutput = "D3DCompileFromFile failed: " + StringHelper::FormatHRESULT(compilationResult);
 
 			if (shaderBlob)
 				shaderBlob->Release();
 
 			FreeLibrary(compilerModule);
-			return succeeded;
+			return compilationSucceeded;
 		}
 #endif
 	}
 
-	//given HLSL source, compile SM5 profiles to DXBC and SM6 profiles to DXIL.
+	//compile SM5 sources with the legacy compiler and newer shader models with DXC.
 	bool CompileSourceToDXILBlob(
 		const std::string& shaderSourceFilePath,
 		const std::string& shaderProfile,
 		const std::string& entryPoint,
-		std::string& outBlobPath,
+		std::string& compiledBlobFilePath,
 		ShaderSignaturePacking signaturePacking)
 	{
 		if (!FileExists(shaderSourceFilePath))
@@ -315,17 +328,18 @@ namespace ShaderInjectorIO
 			return false;
 		}
 
-		if (outBlobPath.empty())
+		if (compiledBlobFilePath.empty())
 		{
-			std::filesystem::path blobPath = PathFromUtf8(shaderSourceFilePath);
-			blobPath.replace_extension(extensionBLOB);
-			outBlobPath = PathToUtf8(blobPath);
+			std::filesystem::path compiledBlobFileSystemPath = PathFromUTF8(shaderSourceFilePath);
+			compiledBlobFileSystemPath.replace_extension(extensionBLOB);
+			compiledBlobFilePath = PathToUTF8(compiledBlobFileSystemPath);
 		}
 
-		const std::string temporaryBlobPath = outBlobPath + ".compiling";
-		const std::string compilerOutputPath = temporaryBlobPath + ".log";
-		DeleteFileIfExists(temporaryBlobPath);
-		DeleteFileIfExists(compilerOutputPath);
+		//compile to temporary files so an error never replaces the last working blob.
+		const std::string temporaryBlobFilePath = compiledBlobFilePath + ".compiling";
+		const std::string compilerOutputFilePath = temporaryBlobFilePath + ".log";
+		DeleteFileIfExists(temporaryBlobFilePath);
+		DeleteFileIfExists(compilerOutputFilePath);
 
 		std::string compilerDiagnostics;
 
@@ -338,11 +352,11 @@ namespace ShaderInjectorIO
 					shaderSourceFilePath,
 					shaderProfile,
 					entryPoint,
-					temporaryBlobPath,
+					temporaryBlobFilePath,
 					compilerDiagnostics,
 					compilerError))
 				{
-					DeleteFileIfExists(temporaryBlobPath);
+					DeleteFileIfExists(temporaryBlobFilePath);
 					ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: legacy compiler failed: " + compilerError);
 
 					if (!compilerDiagnostics.empty())
@@ -357,37 +371,40 @@ namespace ShaderInjectorIO
 		}
 		else
 		{
-			const std::string dxcPath = GetToolPathDXC();
+			const std::string shaderCompilerExecutablePath = GetToolPathDXC();
 
-			if (!FileExists(dxcPath))
+			if (!FileExists(shaderCompilerExecutablePath))
 			{
-				ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: DXC executable was not found: " + dxcPath);
+				ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: DXC executable was not found: " + shaderCompilerExecutablePath);
 				return false;
 			}
 
 			const std::string shaderSourceDirectory = DirectoryFromPath(shaderSourceFilePath);
 			const std::string modifiedShaderIncludesDirectory = GetModifiedShadersIncludesDirectory();
-			std::vector<std::string> dxcArguments =
+			const char* signaturePackingArgument = "-pack-prefix-stable";
+
+			if (signaturePacking == ShaderSignaturePacking::Optimized)
+				signaturePackingArgument = "-pack-optimized";
+
+			std::vector<std::string> shaderCompilerArguments =
 			{
 				"-T", shaderProfile,
 				"-E", entryPoint,
-				signaturePacking == ShaderSignaturePacking::Optimized
-					? "-pack-optimized"
-					: "-pack-prefix-stable",
+				signaturePackingArgument,
 				"-I", shaderSourceDirectory,
 				"-I", modifiedShaderIncludesDirectory,
 				shaderSourceFilePath,
-				"-Fo", temporaryBlobPath
+				"-Fo", temporaryBlobFilePath
 			};
 
-			const ProcessRunner::ProcessResult processResult = ProcessRunner::Run(dxcPath, dxcArguments, compilerOutputPath);
-			compilerDiagnostics = ReadCompilerDiagnostics(compilerOutputPath);
-			DeleteFileIfExists(compilerOutputPath);
+			const ProcessResult processResult = RunProcess(shaderCompilerExecutablePath, shaderCompilerArguments, compilerOutputFilePath);
+			compilerDiagnostics = ReadCompilerDiagnostics(compilerOutputFilePath);
+			DeleteFileIfExists(compilerOutputFilePath);
 
 			if (!processResult.Succeeded())
 			{
-				DeleteFileIfExists(temporaryBlobPath);
-				ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: DXC failed (exit = " + std::to_string(processResult.exitCode) + "): " + processResult.errorMessage);
+				DeleteFileIfExists(temporaryBlobFilePath);
+				ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: DXC failed (exit = " + std::to_string(processResult.processExitCode) + "): " + processResult.errorMessage);
 
 				if (!compilerDiagnostics.empty())
 					ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath + " reported:\n" + compilerDiagnostics);
@@ -396,42 +413,42 @@ namespace ShaderInjectorIO
 			}
 		}
 
-		//a compile can succeed and still warn about something that explains an unexpected result in game.
+		//keep warnings because they can explain differences between the source and game output.
 		if (!compilerDiagnostics.empty())
 			ShaderInjectorGUI::WriteToRuntimeLogWarning("ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath + " reported:\n" + compilerDiagnostics);
 
-		if (!FileExists(temporaryBlobPath))
+		if (!FileExists(temporaryBlobFilePath))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: shader compiler reported success but did not create " + temporaryBlobPath);
+			ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: shader compiler reported success but did not create " + temporaryBlobFilePath);
 			return false;
 		}
 
 		std::error_code replaceError;
 		std::filesystem::copy_file(
-			PathFromUtf8(temporaryBlobPath),
-			PathFromUtf8(outBlobPath),
+			PathFromUTF8(temporaryBlobFilePath),
+			PathFromUTF8(compiledBlobFilePath),
 			std::filesystem::copy_options::overwrite_existing,
 			replaceError);
 
-		DeleteFileIfExists(temporaryBlobPath);
+		DeleteFileIfExists(temporaryBlobFilePath);
 
 		if (replaceError)
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: could not replace compiled blob " + outBlobPath + ": " + replaceError.message());
+			ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: could not replace compiled blob " + compiledBlobFilePath + ": " + replaceError.message());
 			return false;
 		}
 
-		if (!FileExists(outBlobPath))
+		if (!FileExists(compiledBlobFilePath))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: compiled blob is missing after replacement: " + outBlobPath);
+			ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: compiled blob is missing after replacement: " + compiledBlobFilePath);
 			return false;
 		}
 
 		return true;
 	}
 
-	//given the path of a compiled shader blob, load it into memory
-	bool LoadDXILBlobFromDisk(const std::string& shaderBlobFilePath, std::vector<uint8_t>& outBlob)
+	//load a compiled blob into memory for pipeline creation.
+	bool LoadDXILBlobFromDisk(const std::string& shaderBlobFilePath, std::vector<uint8_t>& shaderBlobBytes)
 	{
 		if (!FileExists(shaderBlobFilePath))
 		{
@@ -439,21 +456,21 @@ namespace ShaderInjectorIO
 			return false;
 		}
 
-		//clear stale bytes before loading the compiled DXIL blob into memory.
-		outBlob.clear();
+		//clear previous bytes so a failed load cannot leave stale shader data behind.
+		shaderBlobBytes.clear();
 
-		std::ifstream shaderBlobFile(PathFromUtf8(shaderBlobFilePath), std::ios::binary | std::ios::ate);
+		std::ifstream shaderBlobFile(PathFromUTF8(shaderBlobFilePath), std::ios::binary | std::ios::ate);
 
 		if (!shaderBlobFile.is_open())
 			return false;
 
-		const std::streamsize fileSize = shaderBlobFile.tellg();
+		const std::streamsize shaderBlobFileSize = shaderBlobFile.tellg();
 
-		if (fileSize <= 0)
+		if (shaderBlobFileSize <= 0)
 			return false;
 
-		outBlob.resize(static_cast<size_t>(fileSize));
+		shaderBlobBytes.resize(static_cast<size_t>(shaderBlobFileSize));
 		shaderBlobFile.seekg(0, std::ios::beg);
-		return static_cast<bool>(shaderBlobFile.read(reinterpret_cast<char*>(outBlob.data()), fileSize));
+		return static_cast<bool>(shaderBlobFile.read(reinterpret_cast<char*>(shaderBlobBytes.data()), shaderBlobFileSize));
 	}
 }

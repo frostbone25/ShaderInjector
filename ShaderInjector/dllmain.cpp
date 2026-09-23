@@ -17,7 +17,6 @@
 #include "RenderDoc/RenderDocIntegration.h"
 #include "ShaderInjectorVersion.h"
 #include "ShaderInjectorInternalResources.h"
-#include "IO/SystemInfoLogger.h"
 
 //||||||||||||||||||||||||||||||| ON ATTACH |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| ON ATTACH |||||||||||||||||||||||||||||||
@@ -84,7 +83,7 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 	ShaderInjectorIO::Initialize();
 
 	//record machine, executable, and display diagnostics for user bug reports
-	SystemInfoLogger::LogProcessAndSystemInfo();
+	ShaderInjectorIO::LogProcessAndSystemInfo();
 
 	//collect modified shaders stored in "ShaderInjector/ModifiedShaders"
 	DatabaseModifiedShaders::RefreshModifiedShaders();

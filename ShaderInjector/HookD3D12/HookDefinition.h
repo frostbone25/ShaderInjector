@@ -6,7 +6,7 @@ namespace HookD3D12
 {
 	struct HookDefinition
 	{
-		size_t vtableIndex;
+		size_t vTableIndex;
 		void* hookFunction;
 		void** originalFunction;
 	};

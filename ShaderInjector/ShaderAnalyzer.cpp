@@ -13,7 +13,7 @@
 #include <dxcapi.h>
 #include <wrl/client.h>
 
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 

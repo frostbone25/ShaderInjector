@@ -4,7 +4,7 @@
 #include <unordered_map>
 
 //custom
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "ShaderTarget/DatabaseShaderTargets.h"
 #include "HookD3D12.h"
 #include "CachedBlobContentMatch.h"
@@ -118,12 +118,12 @@ namespace HookD3D12
 
 	struct CapturedShaderKey
 	{
-		uint64_t hash = 0;
-		ShaderTarget::ShaderType type = ShaderTarget::Unknown;
+		uint64_t shaderHash = 0;
+		ShaderTarget::ShaderType shaderType = ShaderTarget::Unknown;
 
 		bool operator==(const CapturedShaderKey& other) const
 		{
-			return hash == other.hash && type == other.type;
+			return shaderHash == other.shaderHash && shaderType == other.shaderType;
 		}
 	};
 
@@ -131,13 +131,13 @@ namespace HookD3D12
 	{
 		size_t operator()(const CapturedShaderKey& key) const
 		{
-			return static_cast<size_t>(key.hash ^ (static_cast<uint64_t>(key.type) << 57));
+			return static_cast<size_t>(key.shaderHash ^ (static_cast<uint64_t>(key.shaderType) << 57));
 		}
 	};
 
 	struct CapturedShaderLocation
 	{
-		bool streamPipeline = false;
+		bool isStreamPipeline = false;
 		size_t pipelineIndex = 0;
 	};
 
@@ -149,11 +149,11 @@ namespace HookD3D12
 	{
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return pipeline.vsHash;
-		case ShaderTarget::PixelShader: return pipeline.psHash;
-		case ShaderTarget::GeometryShader: return pipeline.gsHash;
-		case ShaderTarget::HullShader: return pipeline.hsHash;
-		case ShaderTarget::DomainShader: return pipeline.dsHash;
+		case ShaderTarget::VertexShader: return pipeline.vertexShaderHash;
+		case ShaderTarget::PixelShader: return pipeline.pixelShaderHash;
+		case ShaderTarget::GeometryShader: return pipeline.geometryShaderHash;
+		case ShaderTarget::HullShader: return pipeline.hullShaderHash;
+		case ShaderTarget::DomainShader: return pipeline.domainShaderHash;
 		default: return 0;
 		}
 	}
@@ -163,11 +163,11 @@ namespace HookD3D12
 		static const std::vector<uint8_t> emptyBytecode;
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return pipeline.vsBytecode;
-		case ShaderTarget::PixelShader: return pipeline.psBytecode;
-		case ShaderTarget::GeometryShader: return pipeline.gsBytecode;
-		case ShaderTarget::HullShader: return pipeline.hsBytecode;
-		case ShaderTarget::DomainShader: return pipeline.dsBytecode;
+		case ShaderTarget::VertexShader: return pipeline.vertexShaderBytecode;
+		case ShaderTarget::PixelShader: return pipeline.pixelShaderBytecode;
+		case ShaderTarget::GeometryShader: return pipeline.geometryShaderBytecode;
+		case ShaderTarget::HullShader: return pipeline.hullShaderBytecode;
+		case ShaderTarget::DomainShader: return pipeline.domainShaderBytecode;
 		default: return emptyBytecode;
 		}
 	}
@@ -177,12 +177,12 @@ namespace HookD3D12
 		static const std::vector<uint8_t> emptyBytecode;
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return pipeline.vsBytecode;
-		case ShaderTarget::PixelShader: return pipeline.psBytecode;
-		case ShaderTarget::ComputeShader: return pipeline.csBytecode;
-		case ShaderTarget::GeometryShader: return pipeline.gsBytecode;
-		case ShaderTarget::HullShader: return pipeline.hsBytecode;
-		case ShaderTarget::DomainShader: return pipeline.dsBytecode;
+		case ShaderTarget::VertexShader: return pipeline.vertexShaderBytecode;
+		case ShaderTarget::PixelShader: return pipeline.pixelShaderBytecode;
+		case ShaderTarget::ComputeShader: return pipeline.computeShaderBytecode;
+		case ShaderTarget::GeometryShader: return pipeline.geometryShaderBytecode;
+		case ShaderTarget::HullShader: return pipeline.hullShaderBytecode;
+		case ShaderTarget::DomainShader: return pipeline.domainShaderBytecode;
 		default: return emptyBytecode;
 		}
 	}
@@ -248,7 +248,7 @@ namespace HookD3D12
 		if (location == gCapturedShaderLocations.end())
 			return nullptr;
 
-		outStreamPipeline = location->second.streamPipeline;
+		outStreamPipeline = location->second.isStreamPipeline;
 		if (outStreamPipeline)
 		{
 			if (location->second.pipelineIndex >= gPipelineStates.size())
@@ -832,21 +832,21 @@ namespace HookD3D12
 
 	bool GraphicsPipelineMatchesReplacementTemplate(const GraphicsPipelineInfo& pipeline, const ShaderTarget::ShaderTargetDisk& replacement)
 	{
-		return ReplacementHashMatches(pipeline.vsHash, replacement.vsHash) &&
-			ReplacementHashMatches(pipeline.psHash, replacement.psHash) &&
-			ReplacementHashMatches(pipeline.gsHash, replacement.gsHash) &&
-			ReplacementHashMatches(pipeline.hsHash, replacement.hsHash) &&
-			ReplacementHashMatches(pipeline.dsHash, replacement.dsHash);
+		return ReplacementHashMatches(pipeline.vertexShaderHash, replacement.vsHash) &&
+			ReplacementHashMatches(pipeline.pixelShaderHash, replacement.psHash) &&
+			ReplacementHashMatches(pipeline.geometryShaderHash, replacement.gsHash) &&
+			ReplacementHashMatches(pipeline.hullShaderHash, replacement.hsHash) &&
+			ReplacementHashMatches(pipeline.domainShaderHash, replacement.dsHash);
 	}
 
 	bool StreamPipelineMatchesReplacementTemplate(const PipelineStateInfo& pipeline, const ShaderTarget::ShaderTargetDisk& replacement)
 	{
-		return ReplacementHashMatches(pipeline.vsHash, replacement.vsHash) &&
-			ReplacementHashMatches(pipeline.psHash, replacement.psHash) &&
-			ReplacementHashMatches(pipeline.csHash, replacement.csHash) &&
-			ReplacementHashMatches(pipeline.gsHash, replacement.gsHash) &&
-			ReplacementHashMatches(pipeline.hsHash, replacement.hsHash) &&
-			ReplacementHashMatches(pipeline.dsHash, replacement.dsHash);
+		return ReplacementHashMatches(pipeline.vertexShaderHash, replacement.vsHash) &&
+			ReplacementHashMatches(pipeline.pixelShaderHash, replacement.psHash) &&
+			ReplacementHashMatches(pipeline.computeShaderHash, replacement.csHash) &&
+			ReplacementHashMatches(pipeline.geometryShaderHash, replacement.gsHash) &&
+			ReplacementHashMatches(pipeline.hullShaderHash, replacement.hsHash) &&
+			ReplacementHashMatches(pipeline.domainShaderHash, replacement.dsHash);
 	}
 
 	D3D12_PIPELINE_STATE_SUBOBJECT_TYPE SubobjectTypeForShaderType(ShaderTarget::ShaderType shaderType)

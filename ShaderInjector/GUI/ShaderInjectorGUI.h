@@ -12,7 +12,7 @@
 //custom
 #include "HookD3D12.h"
 #include "IO/ShaderInjectorIO.h"
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "Globals.h"
 #include "ShaderTarget/ShaderTarget.h"
 

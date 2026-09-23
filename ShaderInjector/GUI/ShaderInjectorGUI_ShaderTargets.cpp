@@ -15,7 +15,7 @@
 //custom
 #include "HookD3D12.h"
 #include "IO/ShaderInjectorIO.h"
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "Globals.h"
 #include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "RenderPass/DatabaseRenderPasses.h"
@@ -409,7 +409,7 @@ namespace ShaderInjectorGUI
 		ImGui::Text("%s #%d", sourceList, index);
 		ImGui::SameLine();
 		ImGui::Text("Original: %p", pipeline.pipelineState);
-		ImGui::Text("Replacement: %p", pipeline.psoWithReplacement);
+		ImGui::Text("Replacement: %p", pipeline.pipelineStateWithReplacement);
 		ImGui::SameLine();
 		ImGui::Text("Type: %s", StringHelper::ShaderTypeToString(pipeline.activeShaderTargetType).c_str());
 		ImGui::Text("Hash: %s", Hash::FormatHash(pipeline.activeShaderTargetHash).c_str());
@@ -445,7 +445,7 @@ namespace ShaderInjectorGUI
 	template<typename PipelineT>
 	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderTarget::ShaderTargetDisk& replacement)
 	{
-		if (!HookD3D12::IsShaderTargetEffectivelyEnabled(replacement) || !pipeline.psoWithReplacement)
+		if (!HookD3D12::IsShaderTargetEffectivelyEnabled(replacement) || !pipeline.pipelineStateWithReplacement)
 			return false;
 
 		return pipeline.activeShaderTargetType == replacement.shaderType

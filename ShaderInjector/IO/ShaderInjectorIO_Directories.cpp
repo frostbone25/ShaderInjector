@@ -1,16 +1,12 @@
 #include "ShaderInjectorIO.h"
 
-#include "ProcessRunner.h"
-
 namespace ShaderInjectorIO
 {
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| DIRECTORIES |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| DIRECTORIES |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| DIRECTORIES |||||||||||||||||||||||||||||||||||||||||||||||||||||
+	//keep application paths derived from the executable so installs can live in any game folder.
 
 	std::string GetGameDirectory()
 	{
-		return DirectoryFromPath(ProcessRunner::GetCurrentExecutablePath());
+		return DirectoryFromPath(GetCurrentExecutablePath());
 	}
 
 	std::string GetShaderInjectorDirectory()

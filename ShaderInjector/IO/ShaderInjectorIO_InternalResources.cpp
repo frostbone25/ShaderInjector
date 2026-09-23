@@ -4,10 +4,7 @@
 
 namespace ShaderInjectorIO
 {
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SHADER INTERNAL RESOURCES |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SHADER INTERNAL RESOURCES |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SHADER INTERNAL RESOURCES |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
+	//write embedded shader templates before compilation so these resources can always be rebuilt.
 	std::string GetInternalMarkerPixelShaderSourceCodeFilePath()
 	{
 		return JoinPath(GetInternalDirectory(), internalMarkerPixelShaderName + extensionHLSL);
@@ -38,12 +35,12 @@ namespace ShaderInjectorIO
 		return JoinPath(GetInternalDirectory(), internalMarkerComputeShaderName + extensionBLOB);
 	}
 
-	bool WriteInternalShaderSourceCodeToDisk(std::string shaderSourceFilePath, const char* shaderSourceCode)
+	bool WriteInternalShaderSourceCodeToDisk(const std::string& shaderSourceFilePath, const std::string& shaderSourceText)
 	{
-		//internal sources are regenerated from the built-in templates so tampered or missing files cannot affect injector startup.
-		if (!WriteTextFile(shaderSourceFilePath, shaderSourceCode ? shaderSourceCode : ""))
+		//restore embedded templates on disk so a missing or edited copy cannot block startup.
+		if (!WriteTextFile(shaderSourceFilePath, shaderSourceText))
 		{
-			WriteToLogFileError("ShaderInjectorIO->WriteInternalShaderCodeToDisk: failed to write file: " + shaderSourceFilePath);
+			WriteToLogFileError("ShaderInjectorIO->WriteInternalShaderSourceCodeToDisk: failed to write file: " + shaderSourceFilePath);
 			return false;
 		}
 

@@ -32,11 +32,11 @@ namespace RenderPassRuntime
 
 namespace HookD3D12
 {
-	template<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type, typename PayloadT>
+	template<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type, typename PayloadType>
 	struct alignas(void*) PSOSubobject
 	{
-		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE type;
-		PayloadT payload;
+		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE subobjectType;
+		PayloadType payloadData;
 	};
 
 	static const size_t kSubobjectSizes[] =
@@ -81,8 +81,8 @@ namespace HookD3D12
 	bool MarkUntrackedBoundPipelineStateLocked(ID3D12PipelineState* pipelineStateObject);
 
 	// Pipeline stream layout parsing and replacement metadata helpers.
-	void FillCommonReplacementHashes(ShaderTarget::ShaderTargetDisk& replacement, uint64_t vsHash, uint64_t psHash, uint64_t csHash, uint64_t gsHash, uint64_t hsHash, uint64_t dsHash);
-	void FillCommonReplacementStageLengths(ShaderTarget::ShaderTargetDisk& replacement, SIZE_T vsSize, SIZE_T psSize, SIZE_T csSize, SIZE_T gsSize, SIZE_T hsSize, SIZE_T dsSize);
+	void FillCommonReplacementHashes(ShaderTarget::ShaderTargetDisk& replacement, uint64_t vertexShaderHash, uint64_t pixelShaderHash, uint64_t computeShaderHash, uint64_t geometryShaderHash, uint64_t hullShaderHash, uint64_t domainShaderHash);
+	void FillCommonReplacementStageLengths(ShaderTarget::ShaderTargetDisk& replacement, SIZE_T vertexShaderBytecodeSize, SIZE_T pixelShaderBytecodeSize, SIZE_T computeShaderBytecodeSize, SIZE_T geometryShaderBytecodeSize, SIZE_T hullShaderBytecodeSize, SIZE_T domainShaderBytecodeSize);
 	std::string HashStructText(const void* data, size_t size);
 	std::string JoinUIntValues(const UINT* values, UINT count);
 	std::string RenderTargetFormatsSignature(const DXGI_FORMAT* formats, UINT count);
@@ -90,7 +90,7 @@ namespace HookD3D12
 	std::string StreamOutputSignature(const std::vector<D3D12_SO_DECLARATION_ENTRY>& declarations, const std::vector<UINT>& strides);
 	std::string PipelineStreamSubobjectTypeSignature(const std::vector<uint8_t>& streamBlob);
 	uint64_t CanonicalPipelineFixedFunctionStateHash(const std::vector<uint8_t>& streamBlob);
-	void FillInputAndStreamOutputSignatures(ShaderTarget::ShaderTargetDisk& replacement, const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputElements, const std::vector<D3D12_SO_DECLARATION_ENTRY>& soDeclarations, const std::vector<UINT>& soStrides);
+	void FillInputAndStreamOutputSignatures(ShaderTarget::ShaderTargetDisk& replacement, const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputElements, const std::vector<D3D12_SO_DECLARATION_ENTRY>& streamOutputDeclarations, const std::vector<UINT>& streamOutputStrides);
 	void FillGraphicsReplacementPortableState(ShaderTarget::ShaderTargetDisk& replacement, const GraphicsPipelineInfo& pipeline);
 	void FillStreamReplacementPortableStateFromBlob(ShaderTarget::ShaderTargetDisk& replacement, const PipelineStateInfo& pipeline);
 	RenderPassRuntime::PipelineOutputState ExtractPipelineOutputState(const PipelineStateInfo& pipeline);

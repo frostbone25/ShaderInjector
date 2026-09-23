@@ -59,9 +59,9 @@ namespace HookD3D12
 			return false;
 		}
 
-		HWND outputWindow = outDesc.OutputWindow;
+		HWND outputWindowHandle = outDesc.OutputWindow;
 
-		if (!outputWindow || !IsWindow(outputWindow) || IsIconic(outputWindow))
+		if (!outputWindowHandle || !IsWindow(outputWindowHandle) || IsIconic(outputWindowHandle))
 		{
 			ResetOverlayStartupGate();
 			return false;
@@ -75,7 +75,7 @@ namespace HookD3D12
 
 		RECT clientRect{};
 
-		if (!GetClientRect(outputWindow, &clientRect))
+		if (!GetClientRect(outputWindowHandle, &clientRect))
 		{
 			ResetOverlayStartupGate();
 			return false;
@@ -106,35 +106,35 @@ namespace HookD3D12
 		gLoggedResizeCooldown = false;
 
 		bool swapChainChanged =
-			gOverlayStartupGate.outputWindow != outputWindow ||
+			gOverlayStartupGate.outputWindowHandle != outputWindowHandle ||
 			gOverlayStartupGate.bufferCount != outDesc.BufferCount ||
-			gOverlayStartupGate.format != outDesc.BufferDesc.Format ||
-			gOverlayStartupGate.flags != outDesc.Flags ||
+			gOverlayStartupGate.swapChainFormat != outDesc.BufferDesc.Format ||
+			gOverlayStartupGate.swapChainFlags != outDesc.Flags ||
 			gOverlayStartupGate.clientWidth != clientWidth ||
 			gOverlayStartupGate.clientHeight != clientHeight;
 
 		if (swapChainChanged)
 		{
-			gOverlayStartupGate.outputWindow = outputWindow;
+			gOverlayStartupGate.outputWindowHandle = outputWindowHandle;
 			gOverlayStartupGate.bufferCount = outDesc.BufferCount;
-			gOverlayStartupGate.format = outDesc.BufferDesc.Format;
-			gOverlayStartupGate.flags = outDesc.Flags;
+			gOverlayStartupGate.swapChainFormat = outDesc.BufferDesc.Format;
+			gOverlayStartupGate.swapChainFlags = outDesc.Flags;
 			gOverlayStartupGate.clientWidth = clientWidth;
 			gOverlayStartupGate.clientHeight = clientHeight;
-			gOverlayStartupGate.stableFrames = 1;
+			gOverlayStartupGate.stableFrameCount = 1;
 			gOverlayStartupGate.firstStableTick = now;
 			return false;
 		}
 
 		if (!ProbeSwapChainBuffers(swapChain, outDesc.BufferCount))
 		{
-			gOverlayStartupGate.stableFrames = 0;
+			gOverlayStartupGate.stableFrameCount = 0;
 			gOverlayStartupGate.firstStableTick = now;
 			return false;
 		}
 
-		++gOverlayStartupGate.stableFrames;
-		return gOverlayStartupGate.stableFrames >= kOverlayStartupStableFrameLimit &&
+		++gOverlayStartupGate.stableFrameCount;
+		return gOverlayStartupGate.stableFrameCount >= kOverlayStartupStableFrameLimit &&
 			(now - gOverlayStartupGate.firstStableTick) >= kOverlayStartupMinimumStableMs;
 	}
 

@@ -49,13 +49,13 @@ namespace HookD3D12
 		const uint64_t generation = gPipelineStateRegistryGeneration.load(std::memory_order_acquire);
 		KnownPipelineCacheEntry& cacheEntry = gKnownPipelineCache[(reinterpret_cast<uintptr_t>(pipelineStateObject) >> 4) % gKnownPipelineCache.size()];
 
-		if (cacheEntry.pipelineState == pipelineStateObject && cacheEntry.generation == generation)
-			return cacheEntry.known;
+		if (cacheEntry.pipelineState == pipelineStateObject && cacheEntry.overrideGeneration == generation)
+			return cacheEntry.isKnown;
 
 		std::shared_lock<std::shared_mutex> lock(gPipelineStateRegistryMutex);
-		const bool known = gKnownPipelineStates.find(pipelineStateObject) != gKnownPipelineStates.end();
-		cacheEntry = { pipelineStateObject, generation, known };
-		return known;
+		const bool isKnown = gKnownPipelineStates.find(pipelineStateObject) != gKnownPipelineStates.end();
+		cacheEntry = { pipelineStateObject, generation, isKnown };
+		return isKnown;
 	}
 
 	bool MarkUntrackedBoundPipelineStateLocked(ID3D12PipelineState* pipelineStateObject)

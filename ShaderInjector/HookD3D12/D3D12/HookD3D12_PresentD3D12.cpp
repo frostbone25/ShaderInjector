@@ -170,7 +170,7 @@ namespace HookD3D12
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
 			for (UINT i = 0; i < gBufferCount; ++i)
 			{
-				if (FAILED(gDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gFrameContexts[i].allocator)))) 
+				if (FAILED(gDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gFrameContexts[i].commandAllocator))))
 				{
 					ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: CreateCommandAllocator fail");
 					return CallOriginalPresent();
@@ -209,8 +209,8 @@ namespace HookD3D12
 					continue;
 
 				gDevice->CreateRenderTargetView(back, nullptr, rtvHandle);
-				gFrameContexts[i].renderTarget = back;
-				gFrameContexts[i].rtvHandle = rtvHandle;
+				gFrameContexts[i].renderTargetResource = back;
+				gFrameContexts[i].renderTargetViewHandle = rtvHandle;
 				rtvHandle.ptr += rtvSize;
 			}
 
@@ -420,7 +420,7 @@ namespace HookD3D12
 
 			FrameContext& ctx = gFrameContexts[frameIdx];
 
-			if (!ctx.allocator || !ctx.renderTarget)
+			if (!ctx.commandAllocator || !ctx.renderTargetResource)
 			{
 				ImGui::EndFrame();
 				return CallOriginalPresent();
@@ -469,7 +469,7 @@ namespace HookD3D12
 			}
 
 			// Reset allocator and command list using frame-specific allocator
-			HRESULT hr = ctx.allocator->Reset();
+			HRESULT hr = ctx.commandAllocator->Reset();
 
 			if (FAILED(hr)) 
 			{
@@ -480,7 +480,7 @@ namespace HookD3D12
 
 			if (!gCommandList) 
 			{
-				hr = gDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, ctx.allocator, nullptr, IID_PPV_ARGS(&gCommandList));
+				hr = gDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, ctx.commandAllocator, nullptr, IID_PPV_ARGS(&gCommandList));
 				
 				if (FAILED(hr)) 
 				{
@@ -492,7 +492,7 @@ namespace HookD3D12
 				gCommandList->Close();
 			}
 
-			hr = gCommandList->Reset(ctx.allocator, nullptr);
+			hr = gCommandList->Reset(ctx.commandAllocator, nullptr);
 
 			if (FAILED(hr)) 
 			{
@@ -504,12 +504,12 @@ namespace HookD3D12
 			// Transition to render target
 			D3D12_RESOURCE_BARRIER barrier = {};
 			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Transition.pResource = ctx.renderTarget;
+			barrier.Transition.pResource = ctx.renderTargetResource;
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
 			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
 			gCommandList->ResourceBarrier(1, &barrier);
 
-			gCommandList->OMSetRenderTargets(1, &ctx.rtvHandle, FALSE, nullptr);
+			gCommandList->OMSetRenderTargets(1, &ctx.renderTargetViewHandle, FALSE, nullptr);
 			ID3D12DescriptorHeap* heaps[] = { gHeapSRV };
 			gCommandList->SetDescriptorHeaps(1, heaps);
 

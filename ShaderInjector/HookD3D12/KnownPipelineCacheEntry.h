@@ -9,7 +9,7 @@ namespace HookD3D12
 	struct KnownPipelineCacheEntry
 	{
 		ID3D12PipelineState* pipelineState = nullptr;
-		uint64_t generation = 0;
-		bool known = false;
+		uint64_t overrideGeneration = 0;
+		bool isKnown = false;
 	};
 }

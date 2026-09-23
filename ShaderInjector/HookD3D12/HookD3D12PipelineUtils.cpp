@@ -7,7 +7,7 @@
 #include <dxgi1_6.h>
 
 //custom
-#include "Hash.h"
+#include "Hash/Hash.h"
 #include "ShaderModelDetector.h"
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderInjectorGUI.h"
@@ -16,24 +16,24 @@
 
 namespace HookD3D12
 {
-	void FillCommonReplacementHashes(ShaderTarget::ShaderTargetDisk& replacement, uint64_t vsHash, uint64_t psHash, uint64_t csHash, uint64_t gsHash, uint64_t hsHash, uint64_t dsHash)
+	void FillCommonReplacementHashes(ShaderTarget::ShaderTargetDisk& replacement, uint64_t vertexShaderHash, uint64_t pixelShaderHash, uint64_t computeShaderHash, uint64_t geometryShaderHash, uint64_t hullShaderHash, uint64_t domainShaderHash)
 	{
-		replacement.vsHash = vsHash ? Hash::FormatHash(vsHash) : "";
-		replacement.psHash = psHash ? Hash::FormatHash(psHash) : "";
-		replacement.csHash = csHash ? Hash::FormatHash(csHash) : "";
-		replacement.gsHash = gsHash ? Hash::FormatHash(gsHash) : "";
-		replacement.hsHash = hsHash ? Hash::FormatHash(hsHash) : "";
-		replacement.dsHash = dsHash ? Hash::FormatHash(dsHash) : "";
+		replacement.vsHash = vertexShaderHash ? Hash::FormatHash(vertexShaderHash) : "";
+		replacement.psHash = pixelShaderHash ? Hash::FormatHash(pixelShaderHash) : "";
+		replacement.csHash = computeShaderHash ? Hash::FormatHash(computeShaderHash) : "";
+		replacement.gsHash = geometryShaderHash ? Hash::FormatHash(geometryShaderHash) : "";
+		replacement.hsHash = hullShaderHash ? Hash::FormatHash(hullShaderHash) : "";
+		replacement.dsHash = domainShaderHash ? Hash::FormatHash(domainShaderHash) : "";
 	}
 
-	void FillCommonReplacementStageLengths(ShaderTarget::ShaderTargetDisk& replacement, SIZE_T vsSize, SIZE_T psSize, SIZE_T csSize, SIZE_T gsSize, SIZE_T hsSize, SIZE_T dsSize)
+	void FillCommonReplacementStageLengths(ShaderTarget::ShaderTargetDisk& replacement, SIZE_T vertexShaderBytecodeSize, SIZE_T pixelShaderBytecodeSize, SIZE_T computeShaderBytecodeSize, SIZE_T geometryShaderBytecodeSize, SIZE_T hullShaderBytecodeSize, SIZE_T domainShaderBytecodeSize)
 	{
-		replacement.vsLength = vsSize ? std::to_string((size_t)vsSize) : "";
-		replacement.psLength = psSize ? std::to_string((size_t)psSize) : "";
-		replacement.csLength = csSize ? std::to_string((size_t)csSize) : "";
-		replacement.gsLength = gsSize ? std::to_string((size_t)gsSize) : "";
-		replacement.hsLength = hsSize ? std::to_string((size_t)hsSize) : "";
-		replacement.dsLength = dsSize ? std::to_string((size_t)dsSize) : "";
+		replacement.vsLength = vertexShaderBytecodeSize ? std::to_string((size_t)vertexShaderBytecodeSize) : "";
+		replacement.psLength = pixelShaderBytecodeSize ? std::to_string((size_t)pixelShaderBytecodeSize) : "";
+		replacement.csLength = computeShaderBytecodeSize ? std::to_string((size_t)computeShaderBytecodeSize) : "";
+		replacement.gsLength = geometryShaderBytecodeSize ? std::to_string((size_t)geometryShaderBytecodeSize) : "";
+		replacement.hsLength = hullShaderBytecodeSize ? std::to_string((size_t)hullShaderBytecodeSize) : "";
+		replacement.dsLength = domainShaderBytecodeSize ? std::to_string((size_t)domainShaderBytecodeSize) : "";
 	}
 
 	std::string HashStructText(const void* data, size_t size)
@@ -198,40 +198,40 @@ namespace HookD3D12
 		return stream.str();
 	}
 
-	void FillInputAndStreamOutputSignatures(ShaderTarget::ShaderTargetDisk& replacement, const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputElements, const std::vector<D3D12_SO_DECLARATION_ENTRY>& soDeclarations, const std::vector<UINT>& soStrides)
+	void FillInputAndStreamOutputSignatures(ShaderTarget::ShaderTargetDisk& replacement, const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputElements, const std::vector<D3D12_SO_DECLARATION_ENTRY>& streamOutputDeclarations, const std::vector<UINT>& streamOutputStrides)
 	{
 		replacement.inputLayoutElementCount = std::to_string(inputElements.size());
 		replacement.inputLayoutSignature = InputLayoutSignature(inputElements);
-		replacement.streamOutputDeclarationCount = std::to_string(soDeclarations.size());
-		replacement.streamOutputSignature = StreamOutputSignature(soDeclarations, soStrides);
+		replacement.streamOutputDeclarationCount = std::to_string(streamOutputDeclarations.size());
+		replacement.streamOutputSignature = StreamOutputSignature(streamOutputDeclarations, streamOutputStrides);
 	}
 
 	void FillGraphicsReplacementPortableState(ShaderTarget::ShaderTargetDisk& replacement, const GraphicsPipelineInfo& pipeline)
 	{
-		FillCommonReplacementStageLengths(replacement, pipeline.vsSize, pipeline.psSize, 0, pipeline.gsSize, pipeline.hsSize, pipeline.dsSize);
-		FillInputAndStreamOutputSignatures(replacement, pipeline.inputElements, pipeline.soDeclarations, pipeline.soStrides);
+		FillCommonReplacementStageLengths(replacement, pipeline.vertexShaderBytecodeSize, pipeline.pixelShaderBytecodeSize, 0, pipeline.geometryShaderBytecodeSize, pipeline.hullShaderBytecodeSize, pipeline.domainShaderBytecodeSize);
+		FillInputAndStreamOutputSignatures(replacement, pipeline.inputElements, pipeline.streamOutputDeclarations, pipeline.streamOutputStrides);
 
-		replacement.renderTargetFormat0 = std::to_string((UINT)pipeline.originalDesc.RTVFormats[0]);
-		replacement.renderTargetFormats = RenderTargetFormatsSignature(pipeline.originalDesc.RTVFormats, pipeline.originalDesc.NumRenderTargets);
-		replacement.numRenderTargets = std::to_string(pipeline.originalDesc.NumRenderTargets);
-		replacement.depthStencilFormat = std::to_string((UINT)pipeline.originalDesc.DSVFormat);
-		replacement.primitiveTopologyType = std::to_string((UINT)pipeline.originalDesc.PrimitiveTopologyType);
-		replacement.sampleCount = std::to_string(pipeline.originalDesc.SampleDesc.Count);
-		replacement.sampleQuality = std::to_string(pipeline.originalDesc.SampleDesc.Quality);
-		replacement.sampleMask = std::to_string(pipeline.originalDesc.SampleMask);
-		replacement.blendStateHash = HashStructText(&pipeline.originalDesc.BlendState, sizeof(pipeline.originalDesc.BlendState));
-		replacement.rasterizerStateHash = HashStructText(&pipeline.originalDesc.RasterizerState, sizeof(pipeline.originalDesc.RasterizerState));
-		replacement.depthStencilStateHash = HashStructText(&pipeline.originalDesc.DepthStencilState, sizeof(pipeline.originalDesc.DepthStencilState));
+		replacement.renderTargetFormat0 = std::to_string((UINT)pipeline.originalDescription.RTVFormats[0]);
+		replacement.renderTargetFormats = RenderTargetFormatsSignature(pipeline.originalDescription.RTVFormats, pipeline.originalDescription.NumRenderTargets);
+		replacement.numRenderTargets = std::to_string(pipeline.originalDescription.NumRenderTargets);
+		replacement.depthStencilFormat = std::to_string((UINT)pipeline.originalDescription.DSVFormat);
+		replacement.primitiveTopologyType = std::to_string((UINT)pipeline.originalDescription.PrimitiveTopologyType);
+		replacement.sampleCount = std::to_string(pipeline.originalDescription.SampleDesc.Count);
+		replacement.sampleQuality = std::to_string(pipeline.originalDescription.SampleDesc.Quality);
+		replacement.sampleMask = std::to_string(pipeline.originalDescription.SampleMask);
+		replacement.blendStateHash = HashStructText(&pipeline.originalDescription.BlendState, sizeof(pipeline.originalDescription.BlendState));
+		replacement.rasterizerStateHash = HashStructText(&pipeline.originalDescription.RasterizerState, sizeof(pipeline.originalDescription.RasterizerState));
+		replacement.depthStencilStateHash = HashStructText(&pipeline.originalDescription.DepthStencilState, sizeof(pipeline.originalDescription.DepthStencilState));
 	}
 
 	void FillStreamReplacementPortableStateFromBlob(ShaderTarget::ShaderTargetDisk& replacement, const PipelineStateInfo& pipeline)
 	{
-		FillCommonReplacementStageLengths(replacement, pipeline.vsSize, pipeline.psSize, pipeline.csSize, pipeline.gsSize, pipeline.hsSize, pipeline.dsSize);
-		replacement.asLength = pipeline.asSize ? std::to_string((size_t)pipeline.asSize) : "";
-		replacement.msLength = pipeline.msSize ? std::to_string((size_t)pipeline.msSize) : "";
-		replacement.asHash = pipeline.asHash ? Hash::FormatHash(pipeline.asHash) : "";
-		replacement.msHash = pipeline.msHash ? Hash::FormatHash(pipeline.msHash) : "";
-		FillInputAndStreamOutputSignatures(replacement, pipeline.inputElements, pipeline.soDeclarations, pipeline.soStrides);
+		FillCommonReplacementStageLengths(replacement, pipeline.vertexShaderBytecodeSize, pipeline.pixelShaderBytecodeSize, pipeline.computeShaderBytecodeSize, pipeline.geometryShaderBytecodeSize, pipeline.hullShaderBytecodeSize, pipeline.domainShaderBytecodeSize);
+		replacement.asLength = pipeline.amplificationShaderBytecodeSize ? std::to_string((size_t)pipeline.amplificationShaderBytecodeSize) : "";
+		replacement.msLength = pipeline.meshShaderBytecodeSize ? std::to_string((size_t)pipeline.meshShaderBytecodeSize) : "";
+		replacement.asHash = pipeline.amplificationShaderHash ? Hash::FormatHash(pipeline.amplificationShaderHash) : "";
+		replacement.msHash = pipeline.meshShaderHash ? Hash::FormatHash(pipeline.meshShaderHash) : "";
+		FillInputAndStreamOutputSignatures(replacement, pipeline.inputElements, pipeline.streamOutputDeclarations, pipeline.streamOutputStrides);
 		replacement.pipelineStreamLength = pipeline.streamBlob.empty() ? "" : std::to_string(pipeline.streamBlob.size());
 		replacement.pipelineStreamSubobjectTypes = PipelineStreamSubobjectTypeSignature(pipeline.streamBlob);
 		const uint64_t fixedFunctionStateHash = CanonicalPipelineFixedFunctionStateHash(pipeline.streamBlob);
@@ -261,37 +261,37 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND:
 				{
 					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND, D3D12_BLEND_DESC>*>(ptr);
-					replacement.blendStateHash = HashStructText(&subobject->payload, sizeof(subobject->payload));
+					replacement.blendStateHash = HashStructText(&subobject->payloadData, sizeof(subobject->payloadData));
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK:
 				{
 					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK, UINT>*>(ptr);
-					replacement.sampleMask = std::to_string(subobject->payload);
+					replacement.sampleMask = std::to_string(subobject->payloadData);
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER:
 				{
 					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER, D3D12_RASTERIZER_DESC>*>(ptr);
-					replacement.rasterizerStateHash = HashStructText(&subobject->payload, sizeof(subobject->payload));
+					replacement.rasterizerStateHash = HashStructText(&subobject->payloadData, sizeof(subobject->payloadData));
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL:
 				{
 					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL, D3D12_DEPTH_STENCIL_DESC>*>(ptr);
-					replacement.depthStencilStateHash = HashStructText(&subobject->payload, sizeof(subobject->payload));
+					replacement.depthStencilStateHash = HashStructText(&subobject->payloadData, sizeof(subobject->payloadData));
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY:
 				{
 					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY, D3D12_PRIMITIVE_TOPOLOGY_TYPE>*>(ptr);
-					replacement.primitiveTopologyType = std::to_string((UINT)subobject->payload);
+					replacement.primitiveTopologyType = std::to_string((UINT)subobject->payloadData);
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS:
 				{
 					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS, D3D12_RT_FORMAT_ARRAY>*>(ptr);
-					const D3D12_RT_FORMAT_ARRAY& formats = subobject->payload;
+					const D3D12_RT_FORMAT_ARRAY& formats = subobject->payloadData;
 					replacement.numRenderTargets = std::to_string(formats.NumRenderTargets);
 					replacement.renderTargetFormat0 = formats.NumRenderTargets > 0 ? std::to_string((UINT)formats.RTFormats[0]) : "";
 					replacement.renderTargetFormats = RenderTargetFormatsSignature(formats.RTFormats, formats.NumRenderTargets);
@@ -300,20 +300,20 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT:
 				{
 					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT, DXGI_FORMAT>*>(ptr);
-					replacement.depthStencilFormat = std::to_string((UINT)subobject->payload);
+					replacement.depthStencilFormat = std::to_string((UINT)subobject->payloadData);
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC:
 				{
 					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC, DXGI_SAMPLE_DESC>*>(ptr);
-					replacement.sampleCount = std::to_string(subobject->payload.Count);
-					replacement.sampleQuality = std::to_string(subobject->payload.Quality);
+					replacement.sampleCount = std::to_string(subobject->payloadData.Count);
+					replacement.sampleQuality = std::to_string(subobject->payloadData.Quality);
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL1:
 				{
 					const auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL1, D3D12_DEPTH_STENCIL_DESC1>*>(ptr);
-					replacement.depthStencilStateHash = HashStructText(&subobject->payload, sizeof(subobject->payload));
+					replacement.depthStencilStateHash = HashStructText(&subobject->payloadData, sizeof(subobject->payloadData));
 					break;
 				}
 				default:
@@ -352,10 +352,10 @@ namespace HookD3D12
 						D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS,
 						D3D12_RT_FORMAT_ARRAY>*>(streamPosition);
 					outputState.renderTargetCount = (std::min)(
-						subobject->payload.NumRenderTargets,
+						subobject->payloadData.NumRenderTargets,
 						static_cast<UINT>(D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT));
 					for (UINT index = 0; index < outputState.renderTargetCount; ++index)
-						outputState.renderTargetFormats[index] = subobject->payload.RTFormats[index];
+						outputState.renderTargetFormats[index] = subobject->payloadData.RTFormats[index];
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT:
@@ -363,7 +363,7 @@ namespace HookD3D12
 					const auto* subobject = reinterpret_cast<const PSOSubobject<
 						D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT,
 						DXGI_FORMAT>*>(streamPosition);
-					outputState.depthStencilFormat = subobject->payload;
+					outputState.depthStencilFormat = subobject->payloadData;
 					break;
 				}
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC:
@@ -371,8 +371,8 @@ namespace HookD3D12
 					const auto* subobject = reinterpret_cast<const PSOSubobject<
 						D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC,
 						DXGI_SAMPLE_DESC>*>(streamPosition);
-					outputState.sampleCount = subobject->payload.Count ? subobject->payload.Count : 1;
-					outputState.sampleQuality = subobject->payload.Quality;
+					outputState.sampleCount = subobject->payloadData.Count ? subobject->payloadData.Count : 1;
+					outputState.sampleQuality = subobject->payloadData.Quality;
 					break;
 				}
 				default:
@@ -402,7 +402,7 @@ namespace HookD3D12
 			metadata.inputElements.push_back(diskElement);
 		}
 
-		for (const D3D12_SO_DECLARATION_ENTRY& entry : pipeline.soDeclarations)
+		for (const D3D12_SO_DECLARATION_ENTRY& entry : pipeline.streamOutputDeclarations)
 		{
 			ShaderTarget::ShaderStreamOutputDeclarationDisk diskEntry{};
 			diskEntry.semanticName = entry.SemanticName ? entry.SemanticName : "";
@@ -413,7 +413,7 @@ namespace HookD3D12
 			metadata.streamOutputDeclarations.push_back(diskEntry);
 		}
 
-		for (UINT stride : pipeline.soStrides)
+		for (UINT stride : pipeline.streamOutputStrides)
 			metadata.streamOutputStrides.push_back(stride);
 
 		metadata.hasViewInstancing = pipeline.hasViewInstancing;
@@ -431,9 +431,9 @@ namespace HookD3D12
 	{
 		pipeline.inputElements.clear();
 		pipeline.inputElementSemanticNames.clear();
-		pipeline.soDeclarations.clear();
-		pipeline.soSemanticNames.clear();
-		pipeline.soStrides.clear();
+		pipeline.streamOutputDeclarations.clear();
+		pipeline.streamOutputSemanticNames.clear();
+		pipeline.streamOutputStrides.clear();
 		pipeline.hasViewInstancing = metadata.hasViewInstancing;
 		pipeline.viewInstancingFlags = static_cast<D3D12_VIEW_INSTANCING_FLAGS>(metadata.viewInstancingFlags);
 		pipeline.viewInstanceLocations.clear();
@@ -456,24 +456,24 @@ namespace HookD3D12
 			pipeline.inputElements.push_back(element);
 		}
 
-		pipeline.soDeclarations.reserve(metadata.streamOutputDeclarations.size());
-		pipeline.soSemanticNames.reserve(metadata.streamOutputDeclarations.size());
+		pipeline.streamOutputDeclarations.reserve(metadata.streamOutputDeclarations.size());
+		pipeline.streamOutputSemanticNames.reserve(metadata.streamOutputDeclarations.size());
 
 		for (const ShaderTarget::ShaderStreamOutputDeclarationDisk& diskEntry : metadata.streamOutputDeclarations)
 		{
-			pipeline.soSemanticNames.push_back(diskEntry.semanticName);
+			pipeline.streamOutputSemanticNames.push_back(diskEntry.semanticName);
 
 			D3D12_SO_DECLARATION_ENTRY entry{};
-			entry.SemanticName = pipeline.soSemanticNames.back().c_str();
+			entry.SemanticName = pipeline.streamOutputSemanticNames.back().c_str();
 			entry.SemanticIndex = diskEntry.semanticIndex;
 			entry.StartComponent = (BYTE)diskEntry.startComponent;
 			entry.ComponentCount = (BYTE)diskEntry.componentCount;
 			entry.OutputSlot = (BYTE)diskEntry.outputSlot;
-			pipeline.soDeclarations.push_back(entry);
+			pipeline.streamOutputDeclarations.push_back(entry);
 		}
 
 		for (uint32_t stride : metadata.streamOutputStrides)
-			pipeline.soStrides.push_back((UINT)stride);
+			pipeline.streamOutputStrides.push_back((UINT)stride);
 
 		if (metadata.viewInstanceViewportArrayIndices.size() ==
 			metadata.viewInstanceRenderTargetArrayIndices.size())
@@ -499,10 +499,10 @@ namespace HookD3D12
 				info.inputElements[i].SemanticName = info.inputElementSemanticNames[i].c_str();
 		}
 
-		if (info.soSemanticNames.size() == info.soDeclarations.size())
+		if (info.streamOutputSemanticNames.size() == info.streamOutputDeclarations.size())
 		{
-			for (size_t i = 0; i < info.soDeclarations.size(); ++i)
-				info.soDeclarations[i].SemanticName = info.soSemanticNames[i].c_str();
+			for (size_t i = 0; i < info.streamOutputDeclarations.size(); ++i)
+				info.streamOutputDeclarations[i].SemanticName = info.streamOutputSemanticNames[i].c_str();
 		}
 
 		if (!info.hasViewInstancing || info.streamBlob.empty())
@@ -573,19 +573,19 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE:
 				{
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE, ID3D12RootSignature*>*>(ptr);
-					info.rootSignature = subobj->payload;
+					info.rootSignature = subobj->payloadData;
 					break;
 				}
 
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS:
 				{
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, D3D12_SHADER_BYTECODE>*>(ptr);
-					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
+					if (subobj->payloadData.pShaderBytecode && subobj->payloadData.BytecodeLength)
 					{
-						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::VertexShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.vsHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.vsSize = subobj->payload.BytecodeLength;
-						info.vsBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::VertexShader, subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.vertexShaderHash = Hash::HashMemory(subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.vertexShaderBytecodeSize = subobj->payloadData.BytecodeLength;
+						info.vertexShaderBytecode.assign((const uint8_t*)subobj->payloadData.pShaderBytecode, (const uint8_t*)subobj->payloadData.pShaderBytecode + subobj->payloadData.BytecodeLength);
 					}
 					info.isGraphics = true;
 					break;
@@ -594,12 +594,12 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS:
 				{
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, D3D12_SHADER_BYTECODE>*>(ptr);
-					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
+					if (subobj->payloadData.pShaderBytecode && subobj->payloadData.BytecodeLength)
 					{
-						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::PixelShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.psHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.psSize = subobj->payload.BytecodeLength;
-						info.psBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::PixelShader, subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.pixelShaderHash = Hash::HashMemory(subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.pixelShaderBytecodeSize = subobj->payloadData.BytecodeLength;
+						info.pixelShaderBytecode.assign((const uint8_t*)subobj->payloadData.pShaderBytecode, (const uint8_t*)subobj->payloadData.pShaderBytecode + subobj->payloadData.BytecodeLength);
 					}
 					info.isGraphics = true;
 					break;
@@ -608,12 +608,12 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS:
 				{
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, D3D12_SHADER_BYTECODE>*>(ptr);
-					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
+					if (subobj->payloadData.pShaderBytecode && subobj->payloadData.BytecodeLength)
 					{
-						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::GeometryShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.gsHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.gsSize = subobj->payload.BytecodeLength;
-						info.gsBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::GeometryShader, subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.geometryShaderHash = Hash::HashMemory(subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.geometryShaderBytecodeSize = subobj->payloadData.BytecodeLength;
+						info.geometryShaderBytecode.assign((const uint8_t*)subobj->payloadData.pShaderBytecode, (const uint8_t*)subobj->payloadData.pShaderBytecode + subobj->payloadData.BytecodeLength);
 					}
 					info.isGraphics = true;
 					break;
@@ -622,12 +622,12 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS:
 				{
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, D3D12_SHADER_BYTECODE>*>(ptr);
-					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
+					if (subobj->payloadData.pShaderBytecode && subobj->payloadData.BytecodeLength)
 					{
-						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::HullShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.hsHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.hsSize = subobj->payload.BytecodeLength;
-						info.hsBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::HullShader, subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.hullShaderHash = Hash::HashMemory(subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.hullShaderBytecodeSize = subobj->payloadData.BytecodeLength;
+						info.hullShaderBytecode.assign((const uint8_t*)subobj->payloadData.pShaderBytecode, (const uint8_t*)subobj->payloadData.pShaderBytecode + subobj->payloadData.BytecodeLength);
 					}
 					info.isGraphics = true;
 					break;
@@ -636,12 +636,12 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS:
 				{
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, D3D12_SHADER_BYTECODE>*>(ptr);
-					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
+					if (subobj->payloadData.pShaderBytecode && subobj->payloadData.BytecodeLength)
 					{
-						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::DomainShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.dsHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.dsSize = subobj->payload.BytecodeLength;
-						info.dsBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::DomainShader, subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.domainShaderHash = Hash::HashMemory(subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.domainShaderBytecodeSize = subobj->payloadData.BytecodeLength;
+						info.domainShaderBytecode.assign((const uint8_t*)subobj->payloadData.pShaderBytecode, (const uint8_t*)subobj->payloadData.pShaderBytecode + subobj->payloadData.BytecodeLength);
 					}
 					info.isGraphics = true;
 					break;
@@ -650,12 +650,12 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS:
 				{
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS, D3D12_SHADER_BYTECODE>*>(ptr);
-					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
+					if (subobj->payloadData.pShaderBytecode && subobj->payloadData.BytecodeLength)
 					{
-						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::ComputeShader, subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.csHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.csSize = subobj->payload.BytecodeLength;
-						info.csBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::ComputeShader, subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.computeShaderHash = Hash::HashMemory(subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.computeShaderBytecodeSize = subobj->payloadData.BytecodeLength;
+						info.computeShaderBytecode.assign((const uint8_t*)subobj->payloadData.pShaderBytecode, (const uint8_t*)subobj->payloadData.pShaderBytecode + subobj->payloadData.BytecodeLength);
 					}
 					info.isCompute = true;
 					break;
@@ -663,11 +663,11 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS:
 				{
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS, D3D12_SHADER_BYTECODE>*>(ptr);
-					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
+					if (subobj->payloadData.pShaderBytecode && subobj->payloadData.BytecodeLength)
 					{
-						info.asHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.asSize = subobj->payload.BytecodeLength;
-						info.asBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
+						info.amplificationShaderHash = Hash::HashMemory(subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.amplificationShaderBytecodeSize = subobj->payloadData.BytecodeLength;
+						info.amplificationShaderBytecode.assign((const uint8_t*)subobj->payloadData.pShaderBytecode, (const uint8_t*)subobj->payloadData.pShaderBytecode + subobj->payloadData.BytecodeLength);
 					}
 					info.isGraphics = true;
 					break;
@@ -675,11 +675,11 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS:
 				{
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS, D3D12_SHADER_BYTECODE>*>(ptr);
-					if (subobj->payload.pShaderBytecode && subobj->payload.BytecodeLength)
+					if (subobj->payloadData.pShaderBytecode && subobj->payloadData.BytecodeLength)
 					{
-						info.msHash = Hash::HashMemory(subobj->payload.pShaderBytecode, subobj->payload.BytecodeLength);
-						info.msSize = subobj->payload.BytecodeLength;
-						info.msBytecode.assign((const uint8_t*)subobj->payload.pShaderBytecode, (const uint8_t*)subobj->payload.pShaderBytecode + subobj->payload.BytecodeLength);
+						info.meshShaderHash = Hash::HashMemory(subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
+						info.meshShaderBytecodeSize = subobj->payloadData.BytecodeLength;
+						info.meshShaderBytecode.assign((const uint8_t*)subobj->payloadData.pShaderBytecode, (const uint8_t*)subobj->payloadData.pShaderBytecode + subobj->payloadData.BytecodeLength);
 					}
 					info.isGraphics = true;
 					break;
@@ -687,9 +687,9 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT:
 				{
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT, D3D12_INPUT_LAYOUT_DESC>*> (ptr);
-					if (subobj->payload.pInputElementDescs && subobj->payload.NumElements > 0)
+					if (subobj->payloadData.pInputElementDescs && subobj->payloadData.NumElements > 0)
 					{
-						info.inputElements.assign(subobj->payload.pInputElementDescs, subobj->payload.pInputElementDescs + subobj->payload.NumElements);
+						info.inputElements.assign(subobj->payloadData.pInputElementDescs, subobj->payloadData.pInputElementDescs + subobj->payloadData.NumElements);
 						info.inputElementSemanticNames.clear();
 						info.inputElementSemanticNames.reserve(info.inputElements.size());
 						for (const D3D12_INPUT_ELEMENT_DESC& element : info.inputElements)
@@ -702,19 +702,19 @@ namespace HookD3D12
 				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_STREAM_OUTPUT:
 				{
 					auto* subobj = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_STREAM_OUTPUT, D3D12_STREAM_OUTPUT_DESC>* > (ptr);
-					if (subobj->payload.pSODeclaration && subobj->payload.NumEntries > 0)
+					if (subobj->payloadData.pSODeclaration && subobj->payloadData.NumEntries > 0)
 					{
-						info.soDeclarations.assign(subobj->payload.pSODeclaration, subobj->payload.pSODeclaration + subobj->payload.NumEntries);
-						info.soSemanticNames.clear();
-						info.soSemanticNames.reserve(info.soDeclarations.size());
-						for (const D3D12_SO_DECLARATION_ENTRY& entry : info.soDeclarations)
-							info.soSemanticNames.push_back(entry.SemanticName ? entry.SemanticName : "");
-						for (size_t i = 0; i < info.soDeclarations.size(); ++i)
-							info.soDeclarations[i].SemanticName = info.soSemanticNames[i].c_str();
+						info.streamOutputDeclarations.assign(subobj->payloadData.pSODeclaration, subobj->payloadData.pSODeclaration + subobj->payloadData.NumEntries);
+						info.streamOutputSemanticNames.clear();
+						info.streamOutputSemanticNames.reserve(info.streamOutputDeclarations.size());
+						for (const D3D12_SO_DECLARATION_ENTRY& entry : info.streamOutputDeclarations)
+							info.streamOutputSemanticNames.push_back(entry.SemanticName ? entry.SemanticName : "");
+						for (size_t i = 0; i < info.streamOutputDeclarations.size(); ++i)
+							info.streamOutputDeclarations[i].SemanticName = info.streamOutputSemanticNames[i].c_str();
 					}
-					if (subobj->payload.pBufferStrides && subobj->payload.NumStrides > 0)
+					if (subobj->payloadData.pBufferStrides && subobj->payloadData.NumStrides > 0)
 					{
-						info.soStrides.assign(subobj->payload.pBufferStrides, subobj->payload.pBufferStrides + subobj->payload.NumStrides);
+						info.streamOutputStrides.assign(subobj->payloadData.pBufferStrides, subobj->payloadData.pBufferStrides + subobj->payloadData.NumStrides);
 					}
 					break;
 				}
@@ -722,12 +722,12 @@ namespace HookD3D12
 				{
 					auto* subobject = reinterpret_cast<const PSOSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING, D3D12_VIEW_INSTANCING_DESC>*>(ptr);
 					info.hasViewInstancing = true;
-					info.viewInstancingFlags = subobject->payload.Flags;
-					if (subobject->payload.pViewInstanceLocations && subobject->payload.ViewInstanceCount > 0)
+					info.viewInstancingFlags = subobject->payloadData.Flags;
+					if (subobject->payloadData.pViewInstanceLocations && subobject->payloadData.ViewInstanceCount > 0)
 					{
 						info.viewInstanceLocations.assign(
-							subobject->payload.pViewInstanceLocations,
-							subobject->payload.pViewInstanceLocations + subobject->payload.ViewInstanceCount);
+							subobject->payloadData.pViewInstanceLocations,
+							subobject->payloadData.pViewInstanceLocations + subobject->payloadData.ViewInstanceCount);
 					}
 					break;
 				}
@@ -749,10 +749,10 @@ namespace HookD3D12
 		DXGI_SWAP_CHAIN_DESC desc{};
 		swapChain->GetDesc(&desc);
 
-		pipelineInfo.swapChainBuffers = desc.BufferCount;
+		pipelineInfo.swapChainBufferCount = desc.BufferCount;
 		pipelineInfo.swapChainFormat = desc.BufferDesc.Format;
 
-		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineUtils->GatherD3D12PipelineInfo: swapChainBuffers: " + std::to_string(pipelineInfo.swapChainBuffers));
+		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineUtils->GatherD3D12PipelineInfo: swapChainBuffers: " + std::to_string(pipelineInfo.swapChainBufferCount));
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineUtils->GatherD3D12PipelineInfo: swapChainFormat: " + std::to_string(pipelineInfo.swapChainFormat));
 
 		IDXGIDevice* dxgiDevice = nullptr;
@@ -766,12 +766,12 @@ namespace HookD3D12
 				DXGI_ADAPTER_DESC adapterDesc{};
 				adapter->GetDesc(&adapterDesc);
 
-				char gpuName[256]{};
-				wcstombs_s(nullptr, gpuName, adapterDesc.Description, sizeof(gpuName));
+				char graphicsProcessorName[256]{};
+				wcstombs_s(nullptr, graphicsProcessorName, adapterDesc.Description, sizeof(graphicsProcessorName));
 
-				pipelineInfo.gpuName = gpuName;
-				pipelineInfo.vendorId = adapterDesc.VendorId;
-				pipelineInfo.deviceId = adapterDesc.DeviceId;
+				pipelineInfo.graphicsProcessorName = graphicsProcessorName;
+				pipelineInfo.vendorID = adapterDesc.VendorId;
+				pipelineInfo.deviceID = adapterDesc.DeviceId;
 				pipelineInfo.dedicatedVideoMemory = adapterDesc.DedicatedVideoMemory;
 				pipelineInfo.dedicatedSystemMemory = adapterDesc.DedicatedSystemMemory;
 				pipelineInfo.sharedSystemMemory = adapterDesc.SharedSystemMemory;
@@ -788,7 +788,7 @@ namespace HookD3D12
 
 			if (FAILED(hr))
 			{
-				pipelineInfo.gpuName = "CreateDXGIFactory1 failed";
+				pipelineInfo.graphicsProcessorName = "CreateDXGIFactory1 failed";
 				return;
 			}
 
@@ -805,12 +805,12 @@ namespace HookD3D12
 					continue;
 				}
 
-				char gpuName[256];
-				wcstombs_s(nullptr, gpuName, sizeof(gpuName), desc.Description, _TRUNCATE);
+				char graphicsProcessorName[256];
+				wcstombs_s(nullptr, graphicsProcessorName, sizeof(graphicsProcessorName), desc.Description, _TRUNCATE);
 
-				pipelineInfo.gpuName = gpuName;
-				pipelineInfo.vendorId = desc.VendorId;
-				pipelineInfo.deviceId = desc.DeviceId;
+				pipelineInfo.graphicsProcessorName = graphicsProcessorName;
+				pipelineInfo.vendorID = desc.VendorId;
+				pipelineInfo.deviceID = desc.DeviceId;
 				pipelineInfo.dedicatedVideoMemory = desc.DedicatedVideoMemory;
 				pipelineInfo.dedicatedSystemMemory = desc.DedicatedSystemMemory;
 				pipelineInfo.sharedSystemMemory = desc.SharedSystemMemory;
