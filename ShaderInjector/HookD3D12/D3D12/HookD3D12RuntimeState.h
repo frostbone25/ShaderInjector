@@ -62,4 +62,4 @@ namespace HookD3D12
 	bool InstallRTSSSwapChainCompatibility(IDXGISwapChain3* swapChain);
 	bool WaitForOverlayGPUIdle(DWORD timeoutMilliseconds = 2000);
 	void ReleaseOverlaySwapChainResources(bool shutdownImGuiBackend);
-}
+} //namespace HookD3D12

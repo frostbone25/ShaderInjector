@@ -1,10 +1,7 @@
-//dllmain.cpp
 #include <windows.h>
 
-//3RD PARTY
 #include "MinHook.h"
 
-//custom
 #include "Globals.h"
 #include "HookD3D12.h"
 #include "Hooks.h"
@@ -18,29 +15,14 @@
 #include "ShaderInjectorVersion.h"
 #include "ShaderInjectorInternalResources.h"
 
-//||||||||||||||||||||||||||||||| ON ATTACH |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| ON ATTACH |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| ON ATTACH |||||||||||||||||||||||||||||||
-
-//thread entry: initialize MinHook and start hook setup
+//dllmain starts this worker so hook setup can wait for the game without holding the loader lock.
 static DWORD WINAPI OnAttachDLL(LPVOID)
 {
-	//IMPORTANT NOTE 1: The game's D3D12 device already exists before our proxy loads.
-
-	//since we proxy dsound dll, we should go ahead and load the real deal now
+	//load the real sound library first so forwarded exports are ready during setup.
 	LoadRealDsoundDll();
 
-	//||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| LOGS |||||||||||||||||||||||||||||||
-
-	//since we are currently starting with the new process again, check for a "current" log file
-	//it will become the "previous" log file to better retain any information about potential crashing/issues
+	//keep the previous run's log available when startup fails or the game crashes.
 	ShaderInjectorIO::RotateLogFiles();
-
-	//||||||||||||||||||||||||||||||| RENDERDOC |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| RENDERDOC |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| RENDERDOC |||||||||||||||||||||||||||||||
 
 	//read settings before initializing the optional RenderDoc bridge.
 	//unless AutoAttach is explicitly enabled, initialization only detects an already injected RenderDoc module.
@@ -49,166 +31,93 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 
 	RenderDocIntegration::Initialize();
 
-	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
+	//initialize MinHook before the delay so early swap chains can be observed.
+	//the rendering hooks are installed later, after packages and internal shaders are ready.
+	MH_STATUS minHookStatus = MH_Initialize();
 
-	//FIX: initialize MinHook before the startup delay so an OptiScaler factory can be captured before it creates its frame-generation swap chain.
-	//no shader or rendering callbacks are enabled by this step alone.
-	MH_STATUS minhookStatus = MH_Initialize();
-
-	if (minhookStatus != MH_OK)
+	if (minHookStatus != MH_OK)
 	{
-		ShaderInjectorIO::WriteToLogFileError(StringHelper::Format("dllmain->OnAttachDLL: MH_Initialize failed: %s", MH_StatusToString(minhookStatus)));
+		ShaderInjectorIO::WriteToLogFileError(StringHelper::Format("dllmain->OnAttachDLL: MH_Initialize failed: %s", MH_StatusToString(minHookStatus)));
 		return 0;
 	}
 
-	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: minhook initalized!");
-
-	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| MINHOOK |||||||||||||||||||||||||||||||
+	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: MinHook initialized.");
 
 	Hooks::PrepareSwapChainCapture();
 
-	//NOTE TO SELF: not a fan of this, even though it helps...
-	//this is just to ensure we don't get crazy crashes or timing issues with d3d12 because im sick and tired of crashing
+	//give the game's D3D12 startup time to settle before installing the remaining hooks.
 	Sleep(5000);
 
-	//||||||||||||||||||||||||||||||| INITALIZE IO |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| INITALIZE IO |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| INITALIZE IO |||||||||||||||||||||||||||||||
-
-	//initalize IO operations (folders, files, internal shader files)
+	//prepare the injector's folders, settings files, and bundled shader sources.
 	ShaderInjectorIO::Initialize();
 
-	//record machine, executable, and display diagnostics for user bug reports
+	//record machine, executable, and display details for diagnosing startup issues.
 	ShaderInjectorIO::LogProcessAndSystemInfo();
 
-	//collect modified shaders stored in "ShaderInjector/ModifiedShaders"
+	//load shader packages before matching targets against game pipelines.
 	DatabaseModifiedShaders::RefreshModifiedShaders();
 
-	//load shader targets before installing the D3D12 hooks
-	//warm-cache games can bind important opaque PSOs immediately after hook installation
-	//publishing the targets here lets those first observations use the strongest available hash/template identity instead of relying only on a later recovery scan.
+	//warm-cache games can bind pipelines immediately after hook installation.
+	//publish targets now so those first binds have the strongest saved identity available.
 	HookD3D12::RefreshLoadedShaderTargets();
 
-	//collect custom render-pass timing and resource-tracking definitions
+	//load the graph definitions before a hooked draw can trigger an injected pass.
 	DatabaseRenderPasses::RefreshRenderPasses();
 
-	//IMPORTANT NOTE 2: We are able to create and run this thread, so this does execute and work!
-	//NOTE 1: keep this comment around for sanity check please!
-	//NOTE 2: because this is on a seperate thread, popping a message box will not freeze the application!
-	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: dsound thread initalized!");
+	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: startup worker initialized.");
 
 	//prepare, compile, and load the internal marker/null shaders before the D3D12 hooks can observe any game pipeline state.
 	ShaderInjectorInternalResources::Initialize();
 
-	//||||||||||||||||||||||||||||||| D3D12 CHECK |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| D3D12 CHECK |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| D3D12 CHECK |||||||||||||||||||||||||||||||
+	//the device hook needs the D3D12 module that the game has already loaded.
+	HMODULE d3d12Module = GetModuleHandleA("d3d12.dll");
 
-	//NOTE: sanity check, ensure that we have d3d12.dll
-	HMODULE d3d12 = GetModuleHandleA("d3d12.dll");
-
-	if (!d3d12)
+	if (!d3d12Module)
 	{
 		ShaderInjectorIO::WriteToLogFileError("dllmain->OnAttachDLL: d3d12.dll handle not found!");
 		return 0;
 	}
 
-	//IMPORTANT NOTE 4: We can infact find the d3d12.dll and get a handle on it!
-	//NOTE: keep this comment around for sanity check please!
-	ShaderInjectorIO::WriteToLogFile(StringHelper::Format("dllmain->OnAttachDLL: d3d12.dll = %p", d3d12));
+	ShaderInjectorIO::WriteToLogFile(StringHelper::Format("dllmain->OnAttachDLL: d3d12.dll = %p", d3d12Module));
 
-	//||||||||||||||||||||||||||||||| D3D12 HOOKS |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| D3D12 HOOKS |||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||| D3D12 HOOKS |||||||||||||||||||||||||||||||
-
-	//this is where the real madness begins...
-	//hook into d3d12 device creation and start hooking into many of it's calls
-	HookD3D12::InstallD3D12CreateDeviceHook(d3d12);
+	//install the device entry hook, then publish the runtime-ready flag after setup completes.
+	HookD3D12::InstallD3D12CreateDeviceHook(d3d12Module);
 
 	Hooks::Initialize();
 	HookD3D12::SetRuntimeReady(true);
 
-	//log to make sure we're done hooking!
 	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: hook initialization complete.");
 
 	return 0;
 }
 
-//||||||||||||||||||||||||||||||| DLL MAIN |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| DLL MAIN |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| DLL MAIN |||||||||||||||||||||||||||||||
-//ref - https://learn.microsoft.com/en-us/windows/win32/dlls/dllmain
-
-//hModule: handle to DLL module
-//reason: reason for calling function
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
+//keep dll entry work small; the worker handles setup after the loader lock is released.
+BOOL APIENTRY DllMain(HMODULE dllModule, DWORD callReason, LPVOID)
 {
-	//perform actions based on the reason for calling.
-	switch (reason)
+	switch (callReason)
 	{
-		//||||||||||||||||||||||||||||||| DLL ATTACHMENT |||||||||||||||||||||||||||||||
-		//||||||||||||||||||||||||||||||| DLL ATTACHMENT |||||||||||||||||||||||||||||||
-		//||||||||||||||||||||||||||||||| DLL ATTACHMENT |||||||||||||||||||||||||||||||
-		//DLL is being loaded into the virtual address space of the current process as a result of the process starting up or as a result of a call to LoadLibrary.
-		case DLL_PROCESS_ATTACH:
-			DisableThreadLibraryCalls(hModule);
+	case DLL_PROCESS_ATTACH:
+		DisableThreadLibraryCalls(dllModule);
+		Globals::mainModule = dllModule;
 
-			Globals::mainModule = hModule;
+		//the case scope keeps the thread handle local to process attachment.
+		{
+			HANDLE initializationThread = CreateThread(nullptr, 0, OnAttachDLL, nullptr, 0, nullptr);
+			if (initializationThread)
+				CloseHandle(initializationThread);
+			else
+				MessageBoxA(nullptr, "[ERROR] dllmain->DllMain: Failed to create hook thread!", "Shader Injector", MB_OK);
+		}
+		break;
 
-			//FIX: surrounded most of this with brackets, as we get a wierd scoping issue involving the thread
-			//Error	C2360: initialization of 'hookThread' is skipped by 'case' label
-			{
-				//it's important that we create a seperate thread for hooking, otherwise we block the application from loading at all!
-				HANDLE hookThread = CreateThread(
-					nullptr,
-					0,
-					OnAttachDLL,
-					nullptr,
-					0,
-					nullptr);
-
-				if (hookThread)
-				{
-					CloseHandle(hookThread);
-
-					//NOTE 1: keep this comment around just in case we hit headaches later, sanity check to verify if we are even creating a hook thread
-					//NOTE 2: popping a message box here will freeze the application!
-					//MessageBoxA(nullptr, "dllmain->DllMain: Created hook thread!", "Shader Injector", MB_OK);
-				}
-				else
-				{
-					//NOTE 1: keep this comment around just in case we hit headaches later, sanity check to verify when we aren't able to create a hook thread
-					//NOTE 2: popping a message box here will freeze the application!
-					MessageBoxA(nullptr, "[ERROR] dllmain->DllMain: Failed to create hook thread!", "Shader Injector", MB_OK);
-				}
-	
-
-				//NOTE 1: keep this comment around just in case we hit headaches later, sanity check to verify if the dll is even getting attached
-				//NOTE 2: popping a message box here will freeze the application!
-				//MessageBoxA(nullptr, "dllmain->DllMain: dsound attached!", "Shader Injector", MB_OK);
-			}
-
-			break;
-
-		//||||||||||||||||||||||||||||||| DLL DETATCHMENT |||||||||||||||||||||||||||||||
-		//||||||||||||||||||||||||||||||| DLL DETATCHMENT |||||||||||||||||||||||||||||||
-		//||||||||||||||||||||||||||||||| DLL DETATCHMENT |||||||||||||||||||||||||||||||
-		//The DLL is being unloaded from the virtual address space of the calling process because it was loaded unsuccessfully or the reference count has reached zero (the processes has either terminated or called FreeLibrary one time for each time it called LoadLibrary).
-		case DLL_PROCESS_DETACH:
-
-			FreeRealDsoundDll();
-
-			//cleanup minhook
-			MH_DisableHook(MH_ALL_HOOKS);
-			MH_RemoveHook(MH_ALL_HOOKS);
-			MH_Uninitialize();
-
-			break;
+	case DLL_PROCESS_DETACH:
+		//release the proxy and remove hooks while the process detaches.
+		FreeRealDsoundDll();
+		MH_DisableHook(MH_ALL_HOOKS);
+		MH_RemoveHook(MH_ALL_HOOKS);
+		MH_Uninitialize();
+		break;
 	}
 
-	return TRUE; //successful DLL_PROCESS_ATTACH.
+	return TRUE;
 }

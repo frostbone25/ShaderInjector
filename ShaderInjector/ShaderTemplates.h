@@ -13,10 +13,6 @@ namespace ShaderTemplates
 	//But... I do not trust users... so for sanity sake these will remain in memory.
 	//That way if anything goes wrong, we can just rebuild some of these shaders and it should still work...
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| PIXEL SHADER |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| PIXEL SHADER |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| PIXEL SHADER |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
 	//NOTE TO SELF: watch those spaces!
 	static const char* internalMarkerPixelShaderSourceCode = R"(
 float4 main() : SV_Target0
@@ -41,13 +37,9 @@ float4 main() : SV_Target0
 }
 )";
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| COMPUTE SHADER |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| COMPUTE SHADER |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| COMPUTE SHADER |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
 	//NOTE TO SELF: watch those spaces!
 	static const char* internalMarkerComputeShaderSourceCode = R"(
-struct InputStruct 
+struct InputStruct
 {
 	uint3 DispatchThreadID : SV_DispatchThreadID;
 };
@@ -59,4 +51,4 @@ void main(in InputStruct IN)
 }
 )";
 
-}
+} //namespace ShaderTemplates

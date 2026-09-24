@@ -10,4 +10,4 @@ namespace DatabaseShaderConfigurations
 		std::string temporaryPath;
 		std::string sourceText;
 	};
-}
+} //namespace DatabaseShaderConfigurations

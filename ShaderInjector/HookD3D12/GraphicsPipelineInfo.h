@@ -53,4 +53,4 @@ namespace HookD3D12
 		std::vector<std::string> streamOutputSemanticNames;
 		std::vector<UINT> streamOutputStrides;
 	};
-}
+} //namespace HookD3D12

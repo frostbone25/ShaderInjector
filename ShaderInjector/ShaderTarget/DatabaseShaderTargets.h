@@ -15,4 +15,4 @@ namespace HookD3D12
 	void RefreshLoadedShaderTargets();
 
 	void SyncShaderTargetNameBuffer();
-}
+} //namespace HookD3D12

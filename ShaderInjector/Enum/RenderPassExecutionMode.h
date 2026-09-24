@@ -12,9 +12,9 @@ namespace RenderPass
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(ExecutionMode,
-	{
-		{ ExecutionMode::Automatic, "Automatic" },
-		{ ExecutionMode::FullscreenPixel, "FullscreenPixel" },
-		{ ExecutionMode::Compute, "Compute" },
-	})
-}
+								 {
+									 {ExecutionMode::Automatic, "Automatic"},
+									 {ExecutionMode::FullscreenPixel, "FullscreenPixel"},
+									 {ExecutionMode::Compute, "Compute"},
+								 })
+} //namespace RenderPass

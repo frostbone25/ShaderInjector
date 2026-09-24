@@ -87,4 +87,4 @@ namespace ModifiedShaderCreation
 		outMessage = "Created Modified Shader template: " + packageDirectory;
 		return true;
 	}
-}
+} //namespace ModifiedShaderCreation

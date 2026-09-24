@@ -11,4 +11,4 @@ namespace HookD3D12
 	{
 		return Original_GetSerializedSize(library);
 	}
-}
+} //namespace HookD3D12

@@ -12,4 +12,4 @@ namespace DDS
 		Metadata metadata;
 		std::vector<uint8_t> pixels;
 	};
-}
+} //namespace DDS

@@ -13,4 +13,4 @@ namespace RenderPassRuntime
 		UnorderedAccessView,
 		Constants
 	};
-}
+} //namespace RenderPassRuntime

@@ -6,8 +6,8 @@ namespace HookD3D12
 {
 	enum class ShaderTargetApplyResult : uint8_t
 	{
-	NoMatch,
-	Applied,
-	RetryableFailure
+		NoMatch,
+		Applied,
+		RetryableFailure
 	};
-}
+} //namespace HookD3D12

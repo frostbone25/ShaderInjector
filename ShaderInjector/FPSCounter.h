@@ -7,4 +7,4 @@ namespace FPSCounter
 	extern double gCurrentFrameTimeMilliseconds;
 
 	void UpdateFPSCounter();
-}
+} //namespace FPSCounter

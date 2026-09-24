@@ -16,4 +16,4 @@ namespace ShaderTarget
 	bool WritePipelineStreamMetadataJson(const std::string& path, const ShaderPipelineStreamMetadataDisk& metadata);
 	bool LoadPipelineStreamMetadataJson(const std::string& path, ShaderPipelineStreamMetadataDisk& outMetadata);
 	void CollectShaderTargetJsonFiles(const std::string& directory, std::vector<std::string>& outJsonFiles);
-}
+} //namespace ShaderTarget

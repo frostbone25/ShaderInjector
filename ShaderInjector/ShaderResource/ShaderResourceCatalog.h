@@ -17,4 +17,4 @@ namespace ShaderResourceCatalog
 	void RemoveRuntimeResourcesByOwner(const std::string& ownerRenderPassId);
 	void ClearRuntimeResources();
 	std::vector<ShaderResource::CatalogEntry> GetSnapshot();
-}
+} //namespace ShaderResourceCatalog

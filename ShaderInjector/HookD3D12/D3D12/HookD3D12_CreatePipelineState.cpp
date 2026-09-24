@@ -28,7 +28,15 @@ namespace HookD3D12
 
 			if (shouldLog)
 			{
-				const HRESULT removedReason = device ? device->GetDeviceRemovedReason() : E_POINTER;
+				HRESULT removedReason = E_POINTER;
+
+				if (device)
+					removedReason = device->GetDeviceRemovedReason();
+
+				uint64_t streamByteCount = 0;
+
+				if (description)
+					streamByteCount = description->SizeInBytes;
 
 				ShaderInjectorIO::WriteToLogFileError(StringHelper::Format(
 					"HookD3D12->Hook_CreatePipelineState: original call failed count = %llu result = %s deviceRemovedReason = %s device = %p streamBytes = %llu thread = %lu activePipelineCalls = %u",
@@ -36,7 +44,7 @@ namespace HookD3D12
 					StringHelper::FormatHRESULT(result).c_str(),
 					StringHelper::FormatHRESULT(removedReason).c_str(),
 					device,
-					static_cast<unsigned long long>(description ? description->SizeInBytes : 0),
+					static_cast<unsigned long long>(streamByteCount),
 					static_cast<unsigned long>(GetCurrentThreadId()),
 					static_cast<unsigned int>(gActivePipelineActivityCount.load(std::memory_order_acquire))));
 			}
@@ -53,4 +61,4 @@ namespace HookD3D12
 		CapturePipelineStateStream(description, static_cast<ID3D12PipelineState*>(*pipelineState));
 		return result;
 	}
-}
+} //namespace HookD3D12

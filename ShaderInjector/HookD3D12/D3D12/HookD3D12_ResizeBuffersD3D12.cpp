@@ -121,8 +121,8 @@ namespace HookD3D12
 		sprintf_s(buffer, "HookD3D12->Hook_ResizeBuffersD3D12: ResizeBuffers %ux%u Buffers=%u", Width, Height, BufferCount);
 		ShaderInjectorGUI::WriteToRuntimeLog(buffer);
 
-		// Release every overlay object that depends on swap-chain buffers or descriptor heaps before ResizeBuffers.
-		// ImGui owns a font texture/SRV through the DX12 backend, so a partial back-buffer release can corrupt the UI after resize.
+		//Release every overlay object that depends on swap-chain buffers or descriptor heaps before ResizeBuffers.
+		//ImGui owns a font texture/SRV through the DX12 backend, so a partial back-buffer release can corrupt the UI after resize.
 		gOverlayRenderingDisabled = true;
 
 		if (gInitialized || gFrameContexts || gHeapRTV || gHeapSRV || gCommandList)
@@ -131,12 +131,15 @@ namespace HookD3D12
 			ReleaseOverlaySwapChainResources(true);
 		}
 
-		FunctionResizeBuffersD3D12 resizeBuffers = resizeBuffersOverride
-			? resizeBuffersOverride
-			: Original_ResizeBuffersD3D12;
-		HRESULT hr = resizeBuffers
-			? resizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags)
-			: E_POINTER;
+		FunctionResizeBuffersD3D12 resizeBuffers = Original_ResizeBuffersD3D12;
+
+		if (resizeBuffersOverride)
+			resizeBuffers = resizeBuffersOverride;
+
+		HRESULT hr = E_POINTER;
+
+		if (resizeBuffers)
+			hr = resizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
 
 		if (FAILED(hr))
 		{
@@ -180,9 +183,12 @@ namespace HookD3D12
 				SwapChainFlags);
 
 		if (!gRuntimeReady.load(std::memory_order_acquire))
-			return Original_ResizeBuffersD3D12
-				? Original_ResizeBuffersD3D12(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags)
-				: E_POINTER;
+		{
+			if (Original_ResizeBuffersD3D12)
+				return Original_ResizeBuffersD3D12(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+
+			return E_POINTER;
+		}
 
 		return HandleResizeBuffersD3D12(
 			pSwapChain,
@@ -208,9 +214,12 @@ namespace HookD3D12
 		}
 
 		if (!downstreamResizeBuffers)
-			return Original_ResizeBuffersD3D12
-				? Original_ResizeBuffersD3D12(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags)
-				: E_POINTER;
+		{
+			if (Original_ResizeBuffersD3D12)
+				return Original_ResizeBuffersD3D12(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+
+			return E_POINTER;
+		}
 
 		if (!gRuntimeReady.load(std::memory_order_acquire))
 		{
@@ -253,4 +262,4 @@ namespace HookD3D12
 	{
 		return Handle_RTSSCompatibilityResizeBuffers(swapChain, bufferCount, width, height, format, flags);
 	}
-}
+} //namespace HookD3D12

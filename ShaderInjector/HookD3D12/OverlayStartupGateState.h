@@ -16,4 +16,4 @@ namespace HookD3D12
 		int stableFrameCount = 0;
 		ULONGLONG firstStableTick = 0;
 	};
-}
+} //namespace HookD3D12

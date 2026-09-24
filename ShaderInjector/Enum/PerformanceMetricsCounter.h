@@ -31,4 +31,4 @@ namespace PerformanceMetrics
 		ShaderResourceBindSucceeded,
 		Count,
 	};
-}
+} //namespace PerformanceMetrics

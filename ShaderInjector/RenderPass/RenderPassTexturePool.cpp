@@ -1,4 +1,14 @@
 #include "RenderPass/RenderPassTexturePool.h"
+#include "RenderPass/ThreadTextureCacheEntry.h"
+#include "RenderPass/ThreadTextureLookup.h"
+#include "RenderPass/TexturePool/DefinitionRecord.h"
+#include "RenderPass/TexturePool/HistoryBootstrapTexture.h"
+#include "RenderPass/TexturePool/InputTextureOverride.h"
+#include "RenderPass/TexturePool/QueueFence.h"
+#include "RenderPass/TexturePool/RecordedTextureVersion.h"
+#include "RenderPass/TexturePool/SubmittedTextures.h"
+#include "RenderPass/TexturePool/TextureEntry.h"
+#include "RenderPass/TexturePool/TextureVersion.h"
 
 #include <algorithm>
 #include <array>
@@ -20,89 +30,33 @@ namespace RenderPassTexturePool
 	{
 		using Microsoft::WRL::ComPtr;
 
-		struct DefinitionRecord
-		{
-			std::string ownerRenderPassId;
-			RenderPass::RuntimeResourceDefinitionDisk definition;
-		};
-
-		struct TextureVersion
-		{
-			bool written = false;
-			ComPtr<ID3D12Resource> resource;
-			ComPtr<ID3D12DescriptorHeap> shaderViewHeap;
-			ComPtr<ID3D12DescriptorHeap> renderTargetViewHeap;
-			D3D12_CPU_DESCRIPTOR_HANDLE shaderResourceView{};
-			D3D12_CPU_DESCRIPTOR_HANDLE unorderedAccessView{};
-			D3D12_CPU_DESCRIPTOR_HANDLE renderTargetView{};
-		};
-
-		struct TextureEntry
-		{
-			ComPtr<ID3D12Device> device;
-			DefinitionRecord definition;
-			ResolvedTextureDescription description;
-			std::array<TextureVersion, 2> versions;
-			uint32_t versionCount = 0;
-			uint64_t generation = 0;
-			uint64_t allocationBytes = 0;
-		};
-		struct RecordedTextureVersion
-		{
-			ComPtr<ID3D12Resource> resource;
-			ComPtr<ID3D12DescriptorHeap> shaderViewHeap;
-			ComPtr<ID3D12DescriptorHeap> renderTargetViewHeap;
-			uint64_t allocationBytes = 0;
-		};
-		struct SubmittedTextures
-		{
-			ComPtr<ID3D12Fence> fence;
-			UINT64 fenceValue = 0;
-			std::vector<RecordedTextureVersion> versions;
-		};
-		struct QueueFence
-		{
-			ComPtr<ID3D12CommandQueue> queue;
-			ComPtr<ID3D12Fence> fence;
-			UINT64 nextValue = 0;
-		};
-
 		std::mutex gPoolMutex;
 		std::unordered_map<std::string, DefinitionRecord> gDefinitions;
 		std::unordered_map<std::string, TextureEntry> gTextures;
 		std::unordered_map<ID3D12GraphicsCommandList*, std::unordered_map<ID3D12Resource*, RecordedTextureVersion>> gRecordedTextures;
 		std::unordered_map<ID3D12CommandQueue*, QueueFence> gQueueFences;
 		std::unordered_map<ID3D12CommandQueue*, std::unordered_map<ID3D12Resource*, RecordedTextureVersion>> gPendingQueueTextures;
-		std::atomic<bool> gHasPendingQueueTextures{ false };
+		std::atomic<bool> gHasPendingQueueTextures{false};
 		std::vector<SubmittedTextures> gSubmittedTextures;
-		std::atomic<bool> gHasSubmittedTextures{ false };
+		std::atomic<bool> gHasSubmittedTextures{false};
 		std::vector<RecordedTextureVersion> gUnretirableTextures;
-		std::atomic<size_t> gRecordedCommandListCount{ 0 };
+		std::atomic<size_t> gRecordedCommandListCount{0};
 		using RecordingEpoch = std::shared_ptr<std::atomic<uint64_t>>;
 		std::unordered_map<ID3D12GraphicsCommandList*, RecordingEpoch> gRecordingEpochs;
-		struct HistoryBootstrapTexture
-		{
-			ComPtr<ID3D12Device> device;
-			TextureView texture;
-		};
 		std::unordered_map<std::string, HistoryBootstrapTexture> gHistoryBootstrapTextures;
-		std::atomic<uint64_t> gConfigurationGeneration{ 1 };
-		std::atomic<uint64_t> gTextureGeneration{ 1 };
-		std::atomic<uint64_t> gFrameIndex{ 0 };
-		std::atomic<bool> gHasHistoryResources{ false };
-		struct InputTextureOverride
-		{
-			std::string resourceId;
-			ShaderResource::TemporalView temporalView;
-			TextureView texture;
-		};
+		std::atomic<uint64_t> gConfigurationGeneration{1};
+		std::atomic<uint64_t> gTextureGeneration{1};
+		std::atomic<uint64_t> gFrameIndex{0};
+		std::atomic<bool> gHasHistoryResources{false};
 		thread_local std::vector<InputTextureOverride> gInputTextureOverrides;
 		thread_local size_t gExecutionScopeDepth = 0;
 		thread_local uint64_t gExecutionFrameIndex = 0;
 		thread_local ID3D12GraphicsCommandList* gExecutionCommandList = nullptr;
 		uint64_t CurrentFrameIndex()
 		{
-			return gExecutionScopeDepth ? gExecutionFrameIndex : gFrameIndex.load(std::memory_order_acquire);
+			if (gExecutionScopeDepth)
+				return gExecutionFrameIndex;
+			return gFrameIndex.load(std::memory_order_acquire);
 		}
 		constexpr D3D12_RESOURCE_STATES shaderReadState =
 			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
@@ -129,19 +83,20 @@ namespace RenderPassTexturePool
 				const TextureVersion& version = entry.versions[versionIndex];
 				if (!version.resource)
 					continue;
-			recording->second.try_emplace(version.resource.Get(), RecordedTextureVersion{
-					version.resource, version.shaderViewHeap, version.renderTargetViewHeap,
-					entry.allocationBytes / entry.versionCount });
+				recording->second.try_emplace(version.resource.Get(), RecordedTextureVersion{
+																		  version.resource, version.shaderViewHeap, version.renderTargetViewHeap,
+																		  entry.allocationBytes / entry.versionCount});
 			}
 		}
 
 		void PruneSubmittedTexturesLocked()
 		{
 			gSubmittedTextures.erase(std::remove_if(gSubmittedTextures.begin(), gSubmittedTextures.end(),
-				[](const SubmittedTextures& submission)
-				{
-					return submission.fence->GetCompletedValue() >= submission.fenceValue;
-				}), gSubmittedTextures.end());
+													[](const SubmittedTextures& submission)
+													{
+														return submission.fence->GetCompletedValue() >= submission.fenceValue;
+													}),
+									 gSubmittedTextures.end());
 			gHasSubmittedTextures.store(!gSubmittedTextures.empty(), std::memory_order_release);
 		}
 
@@ -150,16 +105,16 @@ namespace RenderPassTexturePool
 			const ResolvedTextureDescription& right)
 		{
 			return left.dimension == right.dimension &&
-				left.format == right.format &&
-				left.shaderViewFormat == right.shaderViewFormat &&
-				left.width == right.width &&
-				left.height == right.height &&
-				left.depth == right.depth &&
-				left.arraySize == right.arraySize &&
-				left.mipLevels == right.mipLevels &&
-				left.sampleCount == right.sampleCount &&
-				left.lifetime == right.lifetime &&
-				left.flags == right.flags;
+				   left.format == right.format &&
+				   left.shaderViewFormat == right.shaderViewFormat &&
+				   left.width == right.width &&
+				   left.height == right.height &&
+				   left.depth == right.depth &&
+				   left.arraySize == right.arraySize &&
+				   left.mipLevels == right.mipLevels &&
+				   left.sampleCount == right.sampleCount &&
+				   left.lifetime == right.lifetime &&
+				   left.flags == right.flags;
 		}
 
 		uint32_t CalculateFullMipCount(uint32_t width, uint32_t height, uint32_t depth)
@@ -181,27 +136,25 @@ namespace RenderPassTexturePool
 			std::string& outError)
 		{
 			outDescription = {};
-			outDescription.dimension = source.matchReferenceTexture
-				? referenceExtent.dimension
-				: source.dimension;
-			outDescription.format = source.matchReferenceTexture
-				? referenceExtent.fallbackFormat
-				: (source.format
-					? static_cast<DXGI_FORMAT>(source.format)
-					: referenceExtent.fallbackFormat);
-			outDescription.shaderViewFormat = source.matchReferenceTexture &&
-				referenceExtent.fallbackShaderViewFormat != DXGI_FORMAT_UNKNOWN
-				? referenceExtent.fallbackShaderViewFormat
-				: outDescription.format;
-			outDescription.depth = source.matchReferenceTexture
-				? (std::max)(1u, referenceExtent.depth)
-				: (std::max)(1u, source.depth);
-			outDescription.arraySize = source.matchReferenceTexture
-				? (std::max)(1u, referenceExtent.arraySize)
-				: (std::max)(1u, source.arraySize);
-			outDescription.sampleCount = source.matchReferenceTexture
-				? (std::max)(1u, referenceExtent.sampleCount)
-				: (std::max)(1u, source.sampleCount);
+			//copy the explicit texture shape first; matching the reference replaces those fields below.
+			outDescription.dimension = source.dimension;
+			outDescription.format = referenceExtent.fallbackFormat;
+			if (source.format)
+				outDescription.format = static_cast<DXGI_FORMAT>(source.format);
+			outDescription.depth = (std::max)(1u, source.depth);
+			outDescription.arraySize = (std::max)(1u, source.arraySize);
+			outDescription.sampleCount = (std::max)(1u, source.sampleCount);
+			if (source.matchReferenceTexture)
+			{
+				outDescription.dimension = referenceExtent.dimension;
+				outDescription.format = referenceExtent.fallbackFormat;
+				outDescription.depth = (std::max)(1u, referenceExtent.depth);
+				outDescription.arraySize = (std::max)(1u, referenceExtent.arraySize);
+				outDescription.sampleCount = (std::max)(1u, referenceExtent.sampleCount);
+			}
+			outDescription.shaderViewFormat = outDescription.format;
+			if (source.matchReferenceTexture && referenceExtent.fallbackShaderViewFormat != DXGI_FORMAT_UNKNOWN)
+				outDescription.shaderViewFormat = referenceExtent.fallbackShaderViewFormat;
 			outDescription.lifetime = source.lifetime;
 
 			if (source.matchReferenceTexture)
@@ -209,8 +162,9 @@ namespace RenderPassTexturePool
 				outDescription.width = referenceExtent.width;
 				outDescription.height = referenceExtent.height;
 			}
-			else switch (source.resolution.mode)
-			{
+			else
+				switch (source.resolution.mode)
+				{
 				case ShaderResource::ResolutionMode::Explicit:
 					outDescription.width = source.resolution.width;
 					outDescription.height = source.resolution.height;
@@ -223,12 +177,12 @@ namespace RenderPassTexturePool
 						return false;
 					}
 					const uint32_t factor = source.resolution.downscaleFactor;
-					outDescription.width = referenceExtent.width
-						? (referenceExtent.width + factor - 1) / factor
-						: 0;
-					outDescription.height = referenceExtent.height
-						? (referenceExtent.height + factor - 1) / factor
-						: 0;
+					outDescription.width = 0;
+					outDescription.height = 0;
+					if (referenceExtent.width)
+						outDescription.width = (referenceExtent.width + factor - 1) / factor;
+					if (referenceExtent.height)
+						outDescription.height = (referenceExtent.height + factor - 1) / factor;
 					break;
 				}
 				case ShaderResource::ResolutionMode::Inherit:
@@ -236,7 +190,7 @@ namespace RenderPassTexturePool
 					outDescription.width = referenceExtent.width;
 					outDescription.height = referenceExtent.height;
 					break;
-			}
+				}
 
 			if (!outDescription.width || !outDescription.height)
 			{
@@ -267,25 +221,25 @@ namespace RenderPassTexturePool
 			if (outDescription.dimension == ShaderResource::TextureDimension::Texture3D)
 				outDescription.arraySize = 1;
 
-			outDescription.mipLevels = source.matchReferenceTexture
-				? (std::max)(1u, referenceExtent.mipLevels)
-				: (source.mipLevels
-					? source.mipLevels
-					: CalculateFullMipCount(
-					outDescription.width,
-					outDescription.height,
-					outDescription.dimension == ShaderResource::TextureDimension::Texture3D
-						? outDescription.depth
-						: 1u));
+			outDescription.mipLevels = source.mipLevels;
+			if (source.matchReferenceTexture)
+				outDescription.mipLevels = (std::max)(1u, referenceExtent.mipLevels);
+			else if (!source.mipLevels)
+			{
+				uint32_t mipDepth = 1;
+				if (outDescription.dimension == ShaderResource::TextureDimension::Texture3D)
+					mipDepth = outDescription.depth;
+				outDescription.mipLevels = CalculateFullMipCount(outDescription.width, outDescription.height, mipDepth);
+			}
 			if (source.allowRenderTarget)
 				outDescription.flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 			if (source.allowUnorderedAccess)
 				outDescription.flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 			if (outDescription.sampleCount > 1 &&
 				(outDescription.mipLevels > 1 || source.allowUnorderedAccess ||
-				outDescription.dimension == ShaderResource::TextureDimension::Texture3D ||
-				outDescription.dimension == ShaderResource::TextureDimension::TextureCube ||
-				outDescription.dimension == ShaderResource::TextureDimension::TextureCubeArray))
+				 outDescription.dimension == ShaderResource::TextureDimension::Texture3D ||
+				 outDescription.dimension == ShaderResource::TextureDimension::TextureCube ||
+				 outDescription.dimension == ShaderResource::TextureDimension::TextureCubeArray))
 			{
 				outError = "Multisampled runtime textures cannot have mip levels, UAVs, or a Texture3D layout.";
 				return false;
@@ -303,18 +257,17 @@ namespace RenderPassTexturePool
 		D3D12_RESOURCE_DESC BuildD3D12Description(const ResolvedTextureDescription& description)
 		{
 			D3D12_RESOURCE_DESC resourceDescription{};
-			resourceDescription.Dimension = description.dimension == ShaderResource::TextureDimension::Texture3D
-				? D3D12_RESOURCE_DIMENSION_TEXTURE3D
-				: D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+			resourceDescription.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+			if (description.dimension == ShaderResource::TextureDimension::Texture3D)
+				resourceDescription.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
 			resourceDescription.Width = description.width;
 			resourceDescription.Height = description.height;
-			resourceDescription.DepthOrArraySize = static_cast<UINT16>(
-				description.dimension == ShaderResource::TextureDimension::Texture3D
-					? description.depth
-					: description.arraySize);
+			resourceDescription.DepthOrArraySize = static_cast<UINT16>(description.arraySize);
+			if (description.dimension == ShaderResource::TextureDimension::Texture3D)
+				resourceDescription.DepthOrArraySize = static_cast<UINT16>(description.depth);
 			resourceDescription.MipLevels = static_cast<UINT16>(description.mipLevels);
 			resourceDescription.Format = description.format;
-			resourceDescription.SampleDesc = { description.sampleCount, 0 };
+			resourceDescription.SampleDesc = {description.sampleCount, 0};
 			resourceDescription.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 			resourceDescription.Flags = description.flags;
 			return resourceDescription;
@@ -329,42 +282,42 @@ namespace RenderPassTexturePool
 			view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 			switch (description.dimension)
 			{
-				case ShaderResource::TextureDimension::Texture2DArray:
-					if (description.sampleCount > 1)
-					{
-						view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY;
-						view.Texture2DMSArray.ArraySize = description.arraySize;
-					}
-					else
-					{
-						view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-						view.Texture2DArray.MipLevels = description.mipLevels;
-						view.Texture2DArray.ArraySize = description.arraySize;
-					}
-					break;
-				case ShaderResource::TextureDimension::TextureCube:
-					view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-					view.TextureCube.MipLevels = description.mipLevels;
-					break;
-				case ShaderResource::TextureDimension::TextureCubeArray:
-					view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
-					view.TextureCubeArray.MipLevels = description.mipLevels;
-					view.TextureCubeArray.NumCubes = description.arraySize / 6;
-					break;
-				case ShaderResource::TextureDimension::Texture3D:
-					view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
-					view.Texture3D.MipLevels = description.mipLevels;
-					break;
-				case ShaderResource::TextureDimension::Texture2D:
-				default:
-					if (description.sampleCount > 1)
-						view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
-					else
-					{
-						view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-						view.Texture2D.MipLevels = description.mipLevels;
-					}
-					break;
+			case ShaderResource::TextureDimension::Texture2DArray:
+				if (description.sampleCount > 1)
+				{
+					view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY;
+					view.Texture2DMSArray.ArraySize = description.arraySize;
+				}
+				else
+				{
+					view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+					view.Texture2DArray.MipLevels = description.mipLevels;
+					view.Texture2DArray.ArraySize = description.arraySize;
+				}
+				break;
+			case ShaderResource::TextureDimension::TextureCube:
+				view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+				view.TextureCube.MipLevels = description.mipLevels;
+				break;
+			case ShaderResource::TextureDimension::TextureCubeArray:
+				view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+				view.TextureCubeArray.MipLevels = description.mipLevels;
+				view.TextureCubeArray.NumCubes = description.arraySize / 6;
+				break;
+			case ShaderResource::TextureDimension::Texture3D:
+				view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+				view.Texture3D.MipLevels = description.mipLevels;
+				break;
+			case ShaderResource::TextureDimension::Texture2D:
+			default:
+				if (description.sampleCount > 1)
+					view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
+				else
+				{
+					view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+					view.Texture2D.MipLevels = description.mipLevels;
+				}
+				break;
 			}
 		}
 
@@ -376,20 +329,20 @@ namespace RenderPassTexturePool
 			view.Format = description.format;
 			switch (description.dimension)
 			{
-				case ShaderResource::TextureDimension::Texture2DArray:
-				case ShaderResource::TextureDimension::TextureCube:
-				case ShaderResource::TextureDimension::TextureCubeArray:
-					view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-					view.Texture2DArray.ArraySize = description.arraySize;
-					break;
-				case ShaderResource::TextureDimension::Texture3D:
-					view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-					view.Texture3D.WSize = description.depth;
-					break;
-				case ShaderResource::TextureDimension::Texture2D:
-				default:
-					view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-					break;
+			case ShaderResource::TextureDimension::Texture2DArray:
+			case ShaderResource::TextureDimension::TextureCube:
+			case ShaderResource::TextureDimension::TextureCubeArray:
+				view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+				view.Texture2DArray.ArraySize = description.arraySize;
+				break;
+			case ShaderResource::TextureDimension::Texture3D:
+				view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+				view.Texture3D.WSize = description.depth;
+				break;
+			case ShaderResource::TextureDimension::Texture2D:
+			default:
+				view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+				break;
 			}
 		}
 
@@ -401,29 +354,29 @@ namespace RenderPassTexturePool
 			view.Format = description.format;
 			switch (description.dimension)
 			{
-				case ShaderResource::TextureDimension::Texture2DArray:
-					if (description.sampleCount > 1)
-					{
-						view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMSARRAY;
-						view.Texture2DMSArray.ArraySize = description.arraySize;
-						break;
-					}
-					[[fallthrough]];
-				case ShaderResource::TextureDimension::TextureCube:
-				case ShaderResource::TextureDimension::TextureCubeArray:
-					view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
-					view.Texture2DArray.ArraySize = description.arraySize;
+			case ShaderResource::TextureDimension::Texture2DArray:
+				if (description.sampleCount > 1)
+				{
+					view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMSARRAY;
+					view.Texture2DMSArray.ArraySize = description.arraySize;
 					break;
-				case ShaderResource::TextureDimension::Texture3D:
-					view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE3D;
-					view.Texture3D.WSize = description.depth;
-					break;
-				case ShaderResource::TextureDimension::Texture2D:
-				default:
-					view.ViewDimension = description.sampleCount > 1
-						? D3D12_RTV_DIMENSION_TEXTURE2DMS
-						: D3D12_RTV_DIMENSION_TEXTURE2D;
-					break;
+				}
+				[[fallthrough]];
+			case ShaderResource::TextureDimension::TextureCube:
+			case ShaderResource::TextureDimension::TextureCubeArray:
+				view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+				view.Texture2DArray.ArraySize = description.arraySize;
+				break;
+			case ShaderResource::TextureDimension::Texture3D:
+				view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE3D;
+				view.Texture3D.WSize = description.depth;
+				break;
+			case ShaderResource::TextureDimension::Texture2D:
+			default:
+				view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+				if (description.sampleCount > 1)
+					view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS;
+				break;
 			}
 		}
 
@@ -434,18 +387,16 @@ namespace RenderPassTexturePool
 			TextureVersion& outVersion,
 			std::string& outError)
 		{
-			D3D12_FEATURE_DATA_FORMAT_SUPPORT formatSupport{ description.shaderViewFormat };
-			const D3D12_FORMAT_SUPPORT1 requiredDimensionSupport =
-				description.dimension == ShaderResource::TextureDimension::Texture3D
-					? D3D12_FORMAT_SUPPORT1_TEXTURE3D
-					: (description.dimension == ShaderResource::TextureDimension::TextureCube ||
-						description.dimension == ShaderResource::TextureDimension::TextureCubeArray
-							? D3D12_FORMAT_SUPPORT1_TEXTURECUBE
-							: D3D12_FORMAT_SUPPORT1_TEXTURE2D);
+			D3D12_FEATURE_DATA_FORMAT_SUPPORT formatSupport{description.shaderViewFormat};
+			D3D12_FORMAT_SUPPORT1 requiredDimensionSupport = D3D12_FORMAT_SUPPORT1_TEXTURE2D;
+			if (description.dimension == ShaderResource::TextureDimension::Texture3D)
+				requiredDimensionSupport = D3D12_FORMAT_SUPPORT1_TEXTURE3D;
+			else if (description.dimension == ShaderResource::TextureDimension::TextureCube || description.dimension == ShaderResource::TextureDimension::TextureCubeArray)
+				requiredDimensionSupport = D3D12_FORMAT_SUPPORT1_TEXTURECUBE;
 			if (FAILED(device->CheckFeatureSupport(
-				D3D12_FEATURE_FORMAT_SUPPORT,
-				&formatSupport,
-				sizeof(formatSupport))) ||
+					D3D12_FEATURE_FORMAT_SUPPORT,
+					&formatSupport,
+					sizeof(formatSupport))) ||
 				(formatSupport.Support1 & requiredDimensionSupport) == 0 ||
 				(formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE) == 0)
 			{
@@ -460,7 +411,7 @@ namespace RenderPassTexturePool
 			}
 			if ((description.flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0 &&
 				((formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) == 0 ||
-					(formatSupport.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE) == 0))
+				 (formatSupport.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE) == 0))
 			{
 				outError = "Runtime texture format does not support typed UAV writes.";
 				return false;
@@ -488,15 +439,16 @@ namespace RenderPassTexturePool
 			outVersion.resource->SetName(wideName.c_str());
 			D3D12_DESCRIPTOR_HEAP_DESC shaderHeapDescription{};
 			shaderHeapDescription.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-			shaderHeapDescription.NumDescriptors =
-				(description.flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0 ? 2u : 1u;
+			shaderHeapDescription.NumDescriptors = 1;
+			if ((description.flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0)
+				shaderHeapDescription.NumDescriptors = 2;
 			result = device->CreateDescriptorHeap(
 				&shaderHeapDescription,
 				IID_PPV_ARGS(&outVersion.shaderViewHeap));
 			if (FAILED(result) || !outVersion.shaderViewHeap)
 			{
 				outError = "Runtime texture descriptor-heap creation failed with " +
-					StringHelper::FormatHRESULT(result);
+						   StringHelper::FormatHRESULT(result);
 				return false;
 			}
 
@@ -533,7 +485,7 @@ namespace RenderPassTexturePool
 				if (FAILED(result) || !outVersion.renderTargetViewHeap)
 				{
 					outError = "Runtime RTV descriptor-heap creation failed with " +
-						StringHelper::FormatHRESULT(result);
+							   StringHelper::FormatHRESULT(result);
 					return false;
 				}
 				outVersion.renderTargetView =
@@ -587,21 +539,26 @@ namespace RenderPassTexturePool
 					return true;
 				}
 
-				newEntry.versionCount = resolvedDescription.lifetime == ShaderResource::ResourceLifetime::History
-					? 2u : 1u;
+				newEntry.versionCount = 1;
+				if (resolvedDescription.lifetime == ShaderResource::ResourceLifetime::History)
+					newEntry.versionCount = 2;
 				for (uint32_t versionIndex = 0; versionIndex < newEntry.versionCount; ++versionIndex)
 				{
-					const std::string resourceName = "Shader Injector Runtime: " +
-						(definition.definition.name.empty() ? resourceId : definition.definition.name) +
-						(newEntry.versionCount > 1 ? " [" + std::to_string(versionIndex) + "]" : "");
+					std::string resourceName = "Shader Injector Runtime: ";
+					if (definition.definition.name.empty())
+						resourceName += resourceId;
+					else
+						resourceName += definition.definition.name;
+					if (newEntry.versionCount > 1)
+						resourceName += " [" + std::to_string(versionIndex) + "]";
 					if (!CreateTextureVersion(device, resourceName, resolvedDescription,
-						newEntry.versions[versionIndex], outError))
+											  newEntry.versions[versionIndex], outError))
 						return false;
 				}
 
 				const D3D12_RESOURCE_DESC allocationDescription = BuildD3D12Description(resolvedDescription);
 				newEntry.allocationBytes = device->GetResourceAllocationInfo(0, 1, &allocationDescription).SizeInBytes *
-					newEntry.versionCount;
+										   newEntry.versionCount;
 			}
 			newEntry.device = device;
 			newEntry.definition = definition;
@@ -617,14 +574,14 @@ namespace RenderPassTexturePool
 				textureIt = gTextures.emplace(resourceId, std::move(newEntry)).first;
 			}
 
-			// Publish invalidation after the replacement is visible under the pool lock.
+			//Publish invalidation after the replacement is visible under the pool lock.
 			gTextureGeneration.store(textureIt->second.generation, std::memory_order_release);
 			const TextureEntry& activeEntry = textureIt->second;
 			ShaderResource::CatalogEntry catalogEntry{};
 			catalogEntry.id = resourceId;
-			catalogEntry.name = definition.definition.name.empty()
-				? resourceId
-				: definition.definition.name;
+			catalogEntry.name = definition.definition.name;
+			if (catalogEntry.name.empty())
+				catalogEntry.name = resourceId;
 			catalogEntry.origin = ShaderResource::ResourceOrigin::Runtime;
 			catalogEntry.lifetime = resolvedDescription.lifetime;
 			catalogEntry.ownerRenderPassId = definition.ownerRenderPassId;
@@ -643,13 +600,15 @@ namespace RenderPassTexturePool
 			else
 				catalogEntry.status = "Allocated";
 			ShaderResourceCatalog::Upsert(catalogEntry);
+			std::string reuseDescription;
+			if (!reuseSourceId.empty())
+				reuseDescription = " reusedFrom=" + reuseSourceId;
 			ShaderInjectorIO::WriteToLogFile(
 				"RenderPassTexturePool->EnsureTextureLocked: resolved id=" + resourceId +
 				" extent=" + std::to_string(resolvedDescription.width) + "x" +
 				std::to_string(resolvedDescription.height) +
 				" mips=" + std::to_string(resolvedDescription.mipLevels) +
-				" versions=" + std::to_string(activeEntry.versionCount) +
-				(reuseSourceId.empty() ? std::string() : " reusedFrom=" + reuseSourceId));
+				" versions=" + std::to_string(activeEntry.versionCount) + reuseDescription);
 			return true;
 		}
 
@@ -667,9 +626,9 @@ namespace RenderPassTexturePool
 			{
 				const uint32_t currentIndex = static_cast<uint32_t>(
 					CurrentFrameIndex() % entry.versionCount);
-				versionIndex = temporalView == ShaderResource::TemporalView::Previous
-					? (currentIndex + entry.versionCount - 1) % entry.versionCount
-					: currentIndex;
+				versionIndex = currentIndex;
+				if (temporalView == ShaderResource::TemporalView::Previous)
+					versionIndex = (currentIndex + entry.versionCount - 1) % entry.versionCount;
 			}
 
 			const TextureVersion& version = entry.versions[versionIndex];
@@ -687,15 +646,15 @@ namespace RenderPassTexturePool
 			outTexture.generation = entry.generation;
 			return outTexture.resource != nullptr;
 		}
-	}
+	} //namespace
 
 	ScopedInputTextureOverrides::ScopedInputTextureOverrides(ID3D12GraphicsCommandList* commandList)
 		: previousCount(gInputTextureOverrides.size()), previousCommandList(gExecutionCommandList)
 	{
 		if (commandList)
 			gExecutionCommandList = commandList;
-		// Present may advance on another thread while this graph is recorded.
-		// Keep every input/output in this execution on the same history pair.
+		//Present may advance on another thread while this graph is recorded.
+		//Keep every input/output in this execution on the same history pair.
 		if (gExecutionScopeDepth++ == 0)
 			gExecutionFrameIndex = gFrameIndex.load(std::memory_order_acquire);
 	}
@@ -712,7 +671,7 @@ namespace RenderPassTexturePool
 		ShaderResource::TemporalView temporalView,
 		const TextureView& texture)
 	{
-		gInputTextureOverrides.push_back({ resourceId, temporalView, texture });
+		gInputTextureOverrides.push_back({resourceId, temporalView, texture});
 	}
 
 	bool GetInputTexture(
@@ -745,7 +704,7 @@ namespace RenderPassTexturePool
 					continue;
 				const auto inserted = definitions.emplace(
 					definition.id,
-					DefinitionRecord{ renderPass.id, definition });
+					DefinitionRecord{renderPass.id, definition});
 				if (!inserted.second)
 				{
 					ShaderInjectorIO::WriteToLogFileWarning(
@@ -753,16 +712,16 @@ namespace RenderPassTexturePool
 						definition.id);
 				}
 				hasHistoryResources = hasHistoryResources ||
-					definition.texture.lifetime == ShaderResource::ResourceLifetime::History;
+									  definition.texture.lifetime == ShaderResource::ResourceLifetime::History;
 			}
 		}
-		// The first producer creates the allocation; include write capabilities needed by later aliases.
+		//The first producer creates the allocation; include write capabilities needed by later aliases.
 		for (const auto& [resourceId, record] : definitions)
 		{
 			if (record.definition.reuseFromResourceId.empty())
 				continue;
 			std::string sourceId = record.definition.reuseFromResourceId;
-			std::unordered_set<std::string> visited{ resourceId };
+			std::unordered_set<std::string> visited{resourceId};
 			while (visited.insert(sourceId).second)
 			{
 				const auto source = definitions.find(sourceId);
@@ -817,8 +776,9 @@ namespace RenderPassTexturePool
 			const auto& source = definition->second.definition.texture;
 			TextureView texture;
 			texture.description.dimension = source.dimension;
-			texture.description.format = source.format
-				? static_cast<DXGI_FORMAT>(source.format) : DXGI_FORMAT_R32G32B32A32_FLOAT;
+			texture.description.format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+			if (source.format)
+				texture.description.format = static_cast<DXGI_FORMAT>(source.format);
 			texture.description.shaderViewFormat = texture.description.format;
 			texture.description.width = texture.description.height = texture.description.depth = 1;
 			texture.description.arraySize = (std::max)(1u, source.arraySize);
@@ -835,7 +795,7 @@ namespace RenderPassTexturePool
 				return false;
 			texture.shaderResourceView = texture.shaderViewHeap->GetCPUDescriptorHandleForHeapStart();
 			device->CreateShaderResourceView(nullptr, &view, texture.shaderResourceView);
-			bootstrap = { device, std::move(texture) };
+			bootstrap = {device, std::move(texture)};
 			ShaderInjectorIO::WriteToLogFile(
 				"RenderPassTexturePool->GetHistoryBootstrapTexture: zero history for first use id=" + resourceId);
 		}
@@ -846,7 +806,8 @@ namespace RenderPassTexturePool
 	void MarkPassOutputsWritten(const RenderPass::RenderPassDisk& renderPass)
 	{
 		const bool ownsHistory = std::any_of(renderPass.runtimeResources.begin(), renderPass.runtimeResources.end(),
-			[](const auto& definition) { return definition.texture.lifetime == ShaderResource::ResourceLifetime::History; });
+											 [](const auto& definition)
+											 { return definition.texture.lifetime == ShaderResource::ResourceLifetime::History; });
 		if (!ownsHistory)
 			return;
 		std::lock_guard<std::mutex> lock(gPoolMutex);
@@ -880,19 +841,7 @@ namespace RenderPassTexturePool
 
 		const uint64_t configurationGeneration =
 			gConfigurationGeneration.load(std::memory_order_acquire);
-		struct ThreadCacheEntry
-		{
-			const RenderPass::RenderPassDisk* renderPass = nullptr;
-			ID3D12GraphicsCommandList* commandList = nullptr;
-			uint64_t configurationGeneration = 0;
-			uint64_t textureEpoch = 0;
-			RecordingEpoch recordingEpoch;
-			uint64_t recordingValue = 0;
-			ReferenceExtent referenceExtent;
-			bool succeeded = false;
-			std::string error;
-		};
-		thread_local std::unordered_map<const RenderPass::RenderPassDisk*, ThreadCacheEntry> cache;
+		thread_local std::unordered_map<const RenderPass::RenderPassDisk*, ThreadTextureCacheEntry> cache;
 		thread_local uint64_t cachedConfigurationGeneration = 0;
 		if (cachedConfigurationGeneration != configurationGeneration)
 		{
@@ -902,7 +851,7 @@ namespace RenderPassTexturePool
 		const auto cached = cache.find(&renderPass);
 		if (cached != cache.end())
 		{
-			const ThreadCacheEntry& cacheEntry = cached->second;
+			const ThreadTextureCacheEntry& cacheEntry = cached->second;
 			if (cacheEntry.renderPass == &renderPass &&
 				cacheEntry.commandList == commandList &&
 				cacheEntry.configurationGeneration == configurationGeneration &&
@@ -958,19 +907,19 @@ namespace RenderPassTexturePool
 			textureEpoch = gTextureGeneration.load(std::memory_order_relaxed);
 		}
 
-		// Failed allocations are not permanent: a referenced texture may be produced
-		// later in this graph execution. Successful entries cover the whole graph,
-		// rather than evicting one another once a chain grows beyond eight passes.
+		//Failed allocations are not permanent: a referenced texture may be produced
+		//later in this graph execution. Successful entries cover the whole graph,
+		//rather than evicting one another once a chain grows beyond eight passes.
 		if (resourcesReady) cache[&renderPass] = {
-			&renderPass,
-			commandList,
-			configurationGeneration,
-			textureEpoch,
-			recordingEpoch,
-			recordingEpoch->load(std::memory_order_relaxed),
-			referenceExtent,
-			resourcesReady,
-			outError };
+								&renderPass,
+								commandList,
+								configurationGeneration,
+								textureEpoch,
+								recordingEpoch,
+								recordingEpoch->load(std::memory_order_relaxed),
+								referenceExtent,
+								resourcesReady,
+								outError};
 		return resourcesReady;
 	}
 
@@ -980,16 +929,6 @@ namespace RenderPassTexturePool
 		TextureView& outTexture)
 	{
 		outTexture = {};
-		struct ThreadTextureLookup
-		{
-			uint64_t textureEpoch = 0;
-			uint64_t frameIndex = 0;
-			RecordingEpoch recordingEpoch;
-			uint64_t recordingValue = 0;
-			ID3D12GraphicsCommandList* recordedCommandList = nullptr;
-			bool frameSensitive = false;
-			TextureView texture;
-		};
 		thread_local std::unordered_map<std::string, std::array<ThreadTextureLookup, 2>> cache;
 		thread_local uint64_t cachedConfigurationGeneration = 0;
 		const uint64_t configurationGeneration = gConfigurationGeneration.load(std::memory_order_acquire);
@@ -1000,15 +939,17 @@ namespace RenderPassTexturePool
 		}
 		const uint64_t textureEpoch = gTextureGeneration.load(std::memory_order_acquire);
 		const uint64_t frameIndex = CurrentFrameIndex();
-		const size_t temporalIndex = temporalView == ShaderResource::TemporalView::Previous ? 1 : 0;
+		size_t temporalIndex = 0;
+		if (temporalView == ShaderResource::TemporalView::Previous)
+			temporalIndex = 1;
 		const auto cached = cache.find(resourceId);
 		if (cached != cache.end())
 		{
 			const ThreadTextureLookup& lookup = cached->second[temporalIndex];
 			if (lookup.textureEpoch == textureEpoch &&
 				(!gExecutionCommandList || (lookup.recordedCommandList == gExecutionCommandList &&
-					lookup.recordingEpoch &&
-					lookup.recordingValue == lookup.recordingEpoch->load(std::memory_order_acquire))) &&
+											lookup.recordingEpoch &&
+											lookup.recordingValue == lookup.recordingEpoch->load(std::memory_order_acquire))) &&
 				(!lookup.frameSensitive || lookup.frameIndex == frameIndex))
 			{
 				outTexture = lookup.texture;
@@ -1026,14 +967,17 @@ namespace RenderPassTexturePool
 		RecordingEpoch recordingEpoch;
 		if (gExecutionCommandList)
 			recordingEpoch = GetRecordingEpochLocked(gExecutionCommandList);
+		uint64_t recordingValue = 0;
+		if (recordingEpoch)
+			recordingValue = recordingEpoch->load(std::memory_order_relaxed);
 		cache[resourceId][temporalIndex] = {
 			gTextureGeneration.load(std::memory_order_relaxed),
 			frameIndex,
 			recordingEpoch,
-			recordingEpoch ? recordingEpoch->load(std::memory_order_relaxed) : 0,
+			recordingValue,
 			gExecutionCommandList,
 			textureIt->second.versionCount > 1,
-			outTexture };
+			outTexture};
 		return true;
 	}
 
@@ -1073,16 +1017,14 @@ namespace RenderPassTexturePool
 			outError = "Upsample-chain destination must not be smaller than its source.";
 			return false;
 		}
-		const bool destinationWritable = computePipeline
-			? (destination.flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0 &&
-				destinationTexture.unorderedAccessView.ptr != 0
-			: (destination.flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0 &&
-				destinationTexture.renderTargetView.ptr != 0;
+		bool destinationWritable = (destination.flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0 && destinationTexture.renderTargetView.ptr != 0;
+		if (computePipeline)
+			destinationWritable = (destination.flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0 && destinationTexture.unorderedAccessView.ptr != 0;
 		if (!destinationWritable)
 		{
-			outError = computePipeline
-				? "Compute upsample-chain destination must allow unordered-access writes."
-				: "Fullscreen upsample-chain destination must allow render-target writes.";
+			outError = "Fullscreen upsample-chain destination must allow render-target writes.";
+			if (computePipeline)
+				outError = "Compute upsample-chain destination must allow unordered-access writes.";
 			return false;
 		}
 
@@ -1108,9 +1050,9 @@ namespace RenderPassTexturePool
 
 			RenderPass::RuntimeResourceDefinitionDisk intermediate{};
 			intermediate.id = renderPass.id + ":UpsampleStage:" +
-				std::to_string(nextWidth) + "x" + std::to_string(nextHeight);
+							  std::to_string(nextWidth) + "x" + std::to_string(nextHeight);
 			intermediate.name = renderPass.name + " Upsample " +
-				std::to_string(nextWidth) + "x" + std::to_string(nextHeight);
+								std::to_string(nextWidth) + "x" + std::to_string(nextHeight);
 			intermediate.texture.dimension = ShaderResource::TextureDimension::Texture2D;
 			intermediate.texture.format = static_cast<uint32_t>(destination.format);
 			intermediate.texture.resolution.mode = ShaderResource::ResolutionMode::Explicit;
@@ -1122,7 +1064,7 @@ namespace RenderPassTexturePool
 			intermediate.texture.allowRenderTarget = !computePipeline;
 			intermediate.texture.allowUnorderedAccess = computePipeline;
 
-			DefinitionRecord definition{ renderPass.id, intermediate };
+			DefinitionRecord definition{renderPass.id, intermediate};
 			gDefinitions[intermediate.id] = definition;
 			ReferenceExtent explicitExtent{};
 			explicitExtent.dimension = ShaderResource::TextureDimension::Texture2D;
@@ -1301,4 +1243,4 @@ namespace RenderPassTexturePool
 			liveTextures, static_cast<unsigned long long>(liveBytes),
 			retiredTextures, static_cast<unsigned long long>(retiredBytes)));
 	}
-}
+} //namespace RenderPassTexturePool

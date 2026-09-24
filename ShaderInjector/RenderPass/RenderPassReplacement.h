@@ -14,4 +14,4 @@ namespace RenderPassReplacement
 		std::string& outError);
 	void InvalidateFailedPipelines();
 	void ReleaseResources();
-}
+} //namespace RenderPassReplacement

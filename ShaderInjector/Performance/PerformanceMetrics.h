@@ -1,6 +1,7 @@
 #pragma once
 #include "Enum/PerformanceMetricsCounter.h"
 #include "Enum/PerformanceMetricsTiming.h"
+#include "Performance/TimingAccumulator.h"
 
 #include <cstdint>
 
@@ -8,24 +9,21 @@ namespace PerformanceMetrics
 {
 	void Increment(Counter counter, uint64_t amount = 1);
 
-	// Hot paths may request sampled timing. Invocation counts remain exact, while
-	// only every Nth call pays for two high-resolution clock reads.
+	//hot paths count every call, but only sampled calls read the clock twice.
 	class ScopedTimer
 	{
-	public:
+		TimingAccumulator* timingAccumulator = nullptr;
+		uint64_t startTicks = 0;
+		bool sampled = false;
+
+	  public:
 		explicit ScopedTimer(Timing timing, uint32_t sampleEvery = 1);
 		~ScopedTimer();
 
 		ScopedTimer(const ScopedTimer&) = delete;
 		ScopedTimer& operator=(const ScopedTimer&) = delete;
-
-	private:
-		void* accumulator_ = nullptr;
-		uint64_t startTicks_ = 0;
-		bool sampled_ = false;
 	};
 
-	// Called once from the Present path. It records the frame and emits one
-	// aggregate report after each five-second measurement window.
+	//the present hook records a frame and writes a combined report every five seconds.
 	bool RecordPresentAndMaybeLog();
-}
+} //namespace PerformanceMetrics

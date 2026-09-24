@@ -9,4 +9,4 @@ namespace ShaderConfiguration::Internal
 		std::string content;
 		std::string ending;
 	};
-}
+} //namespace ShaderConfiguration::Internal

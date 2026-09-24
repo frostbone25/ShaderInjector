@@ -1,4 +1,4 @@
-// capture pipeline-state streams and preserve the raw stream for later rebuilds.
+//capture pipeline-state streams and preserve the raw stream for later rebuilds.
 
 #include <mutex>
 #include <vector>
@@ -39,4 +39,4 @@ namespace HookD3D12
 		//analyze after the database entry is stored so discovery can use the captured stream immediately.
 		ShaderAutomaticDiscovery::ProcessCapturedStreamPipeline(capturedStreamPipeline);
 	}
-}
+} //namespace HookD3D12

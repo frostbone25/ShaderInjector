@@ -76,15 +76,15 @@ namespace DDS
 		{
 			switch (pixelFormat.fourCC)
 			{
-				case fourCC_DXT1: 
+				case fourCC_DXT1:
 					return DXGI_FORMAT_BC1_UNORM;
-				case fourCC_DXT3: 
+				case fourCC_DXT3:
 					return DXGI_FORMAT_BC2_UNORM;
-				case fourCC_DXT5: 
+				case fourCC_DXT5:
 					return DXGI_FORMAT_BC3_UNORM;
-				case fourCC_ATI1: 
+				case fourCC_ATI1:
 					return DXGI_FORMAT_BC4_UNORM;
-				case fourCC_ATI2: 
+				case fourCC_ATI2:
 					return DXGI_FORMAT_BC5_UNORM;
 			}
 		}
@@ -275,4 +275,4 @@ namespace DDS
 
 		return true;
 	}
-}
+} //namespace DDS

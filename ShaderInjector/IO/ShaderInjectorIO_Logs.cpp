@@ -31,11 +31,11 @@ namespace ShaderInjectorIO
 		const std::time_t currentTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 		std::tm localTime{};
 
-		#if defined(_WIN32)
-			localtime_s(&localTime, &currentTime);
-		#else
-			localtime_r(&currentTime, &localTime);
-		#endif
+#if defined(_WIN32)
+		localtime_s(&localTime, &currentTime);
+#else
+		localtime_r(&currentTime, &localTime);
+#endif
 
 		char timestamp[16]{};
 		if (std::strftime(timestamp, sizeof(timestamp), "%H:%M:%S", &localTime) == 0)
@@ -131,4 +131,4 @@ namespace ShaderInjectorIO
 	{
 		WriteLogEntry("[WARNING] " + logText, true);
 	}
-}
+} //namespace ShaderInjectorIO

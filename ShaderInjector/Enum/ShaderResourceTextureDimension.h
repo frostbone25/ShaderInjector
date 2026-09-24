@@ -16,12 +16,12 @@ namespace ShaderResource
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(TextureDimension,
-	{
-		{ TextureDimension::Unknown, "Unknown" },
-		{ TextureDimension::Texture2D, "Texture2D" },
-		{ TextureDimension::Texture2DArray, "Texture2DArray" },
-		{ TextureDimension::TextureCube, "TextureCube" },
-		{ TextureDimension::TextureCubeArray, "TextureCubeArray" },
-		{ TextureDimension::Texture3D, "Texture3D" },
-	})
-}
+								 {
+									 {TextureDimension::Unknown, "Unknown"},
+									 {TextureDimension::Texture2D, "Texture2D"},
+									 {TextureDimension::Texture2DArray, "Texture2DArray"},
+									 {TextureDimension::TextureCube, "TextureCube"},
+									 {TextureDimension::TextureCubeArray, "TextureCubeArray"},
+									 {TextureDimension::Texture3D, "Texture3D"},
+								 })
+} //namespace ShaderResource

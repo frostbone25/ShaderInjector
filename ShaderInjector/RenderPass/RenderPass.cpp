@@ -14,9 +14,9 @@ namespace RenderPass
 		if (renderPass.executionMode != ExecutionMode::Automatic)
 			return renderPass.executionMode;
 
-		return renderPass.type == RenderPassType::ReplacementComputeShader
-			? ExecutionMode::Compute
-			: ExecutionMode::FullscreenPixel;
+		if (renderPass.type == RenderPassType::ReplacementComputeShader)
+			return ExecutionMode::Compute;
+		return ExecutionMode::FullscreenPixel;
 	}
 
 	PassOperation ResolvePassOperation(const RenderPassDisk& renderPass)
@@ -26,12 +26,16 @@ namespace RenderPass
 
 		switch (renderPass.type)
 		{
-			case RenderPassType::MipChain: return PassOperation::MipChain;
-			case RenderPassType::TemporalHistory: return PassOperation::TemporalHistory;
-			case RenderPassType::ReplacementPixelShader:
-			case RenderPassType::ReplacementComputeShader: return PassOperation::ReplaceOriginal;
-			case RenderPassType::Custom:
-			default: return PassOperation::Custom;
+		case RenderPassType::MipChain:
+			return PassOperation::MipChain;
+		case RenderPassType::TemporalHistory:
+			return PassOperation::TemporalHistory;
+		case RenderPassType::ReplacementPixelShader:
+		case RenderPassType::ReplacementComputeShader:
+			return PassOperation::ReplaceOriginal;
+		case RenderPassType::Custom:
+		default:
+			return PassOperation::Custom;
 		}
 	}
 
@@ -95,9 +99,9 @@ namespace RenderPass
 			definitionIt = std::prev(renderPass.runtimeResources.end());
 		}
 
-		definitionIt->name = renderPass.name.empty()
-			? "Temporal History"
-			: renderPass.name + " History";
+		definitionIt->name = "Temporal History";
+		if (!renderPass.name.empty())
+			definitionIt->name = renderPass.name + " History";
 
 		definitionIt->texture.matchReferenceTexture = true;
 		definitionIt->texture.lifetime = ShaderResource::ResourceLifetime::History;
@@ -206,7 +210,6 @@ namespace RenderPass
 		}
 	}
 
-
 	bool IsTimingValid(const std::string& timing)
 	{
 		return timing == timingBefore || timing == timingAfter;
@@ -303,10 +306,19 @@ namespace RenderPass
 
 	void ResolveShaderPaths(RenderPassDisk& renderPass)
 	{
-		renderPass.vertexShaderSourcePath = renderPass.vertexShaderSourceFile.empty() ? std::string() : ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.vertexShaderSourceFile);
-		renderPass.fragmentShaderSourcePath = renderPass.fragmentShaderSourceFile.empty() ? std::string() : ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.fragmentShaderSourceFile);
-		renderPass.vertexShaderCompiledBlobPath = renderPass.vertexShaderCompiledBlobFile.empty() ? std::string() : ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.vertexShaderCompiledBlobFile);
-		renderPass.fragmentShaderCompiledBlobPath = renderPass.fragmentShaderCompiledBlobFile.empty() ? std::string() : ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.fragmentShaderCompiledBlobFile);
+		//resolve only the shader files named by the portable pass configuration.
+		renderPass.vertexShaderSourcePath.clear();
+		renderPass.fragmentShaderSourcePath.clear();
+		renderPass.vertexShaderCompiledBlobPath.clear();
+		renderPass.fragmentShaderCompiledBlobPath.clear();
+		if (!renderPass.vertexShaderSourceFile.empty())
+			renderPass.vertexShaderSourcePath = ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.vertexShaderSourceFile);
+		if (!renderPass.fragmentShaderSourceFile.empty())
+			renderPass.fragmentShaderSourcePath = ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.fragmentShaderSourceFile);
+		if (!renderPass.vertexShaderCompiledBlobFile.empty())
+			renderPass.vertexShaderCompiledBlobPath = ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.vertexShaderCompiledBlobFile);
+		if (!renderPass.fragmentShaderCompiledBlobFile.empty())
+			renderPass.fragmentShaderCompiledBlobPath = ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.fragmentShaderCompiledBlobFile);
 	}
 
 	bool LoadCompiledShaderBlobs(RenderPassDisk& renderPass)
@@ -330,7 +342,9 @@ namespace RenderPass
 		if (!vertexLoaded || !fragmentLoaded || !HasCompiledShaders(renderPass))
 			return false;
 
-		renderPass.vertexShaderBlobHash = renderPass.vertexShaderBlob.empty() ? 0 : Hash::HashMemory(renderPass.vertexShaderBlob.data(), renderPass.vertexShaderBlob.size());
+		renderPass.vertexShaderBlobHash = 0;
+		if (!renderPass.vertexShaderBlob.empty())
+			renderPass.vertexShaderBlobHash = Hash::HashMemory(renderPass.vertexShaderBlob.data(), renderPass.vertexShaderBlob.size());
 		renderPass.fragmentShaderBlobHash = Hash::HashMemory(renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size());
 
 		return true;
@@ -345,9 +359,9 @@ namespace RenderPass
 		}
 
 		return !renderPass.vertexShaderSourcePath.empty() &&
-			!renderPass.fragmentShaderSourcePath.empty() &&
-			ShaderInjectorIO::FileExists(renderPass.vertexShaderSourcePath) &&
-			ShaderInjectorIO::FileExists(renderPass.fragmentShaderSourcePath);
+			   !renderPass.fragmentShaderSourcePath.empty() &&
+			   ShaderInjectorIO::FileExists(renderPass.vertexShaderSourcePath) &&
+			   ShaderInjectorIO::FileExists(renderPass.fragmentShaderSourcePath);
 	}
 
 	bool HasCompiledShaders(const RenderPassDisk& renderPass)
@@ -362,6 +376,6 @@ namespace RenderPass
 	bool IsReplacementPass(RenderPassType type)
 	{
 		return type == RenderPassType::ReplacementPixelShader ||
-			type == RenderPassType::ReplacementComputeShader;
+			   type == RenderPassType::ReplacementComputeShader;
 	}
-}
+} //namespace RenderPass

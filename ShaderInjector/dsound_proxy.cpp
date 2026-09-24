@@ -110,52 +110,69 @@ void FreeRealDsoundDll()
 
 extern "C"
 {
+	//forward each DirectSound export after loading the real DLL; preserve its API failure code if the export is missing.
 	HRESULT WINAPI DirectSoundCaptureCreate(LPCGUID pcGuidDevice, LPDIRECTSOUNDCAPTURE* ppDSC, LPUNKNOWN pUnkOuter)
 	{
 		EnsureRealDsoundDllLoaded();
-		return gDirectSoundCaptureCreate ? gDirectSoundCaptureCreate(pcGuidDevice, ppDSC, pUnkOuter) : E_FAIL;
+		if (gDirectSoundCaptureCreate)
+			return gDirectSoundCaptureCreate(pcGuidDevice, ppDSC, pUnkOuter);
+		return E_FAIL;
 	}
 
 	HRESULT WINAPI DirectSoundCaptureCreate8(LPCGUID pcGuidDevice, LPDIRECTSOUNDCAPTURE8* ppDSC8, LPUNKNOWN pUnkOuter)
 	{
 		EnsureRealDsoundDllLoaded();
-		return gDirectSoundCaptureCreate8 ? gDirectSoundCaptureCreate8(pcGuidDevice, ppDSC8, pUnkOuter) : E_FAIL;
+		if (gDirectSoundCaptureCreate8)
+			return gDirectSoundCaptureCreate8(pcGuidDevice, ppDSC8, pUnkOuter);
+		return E_FAIL;
 	}
 
 	HRESULT WINAPI DirectSoundCaptureEnumerateA(LPDSENUMCALLBACKA pDSEnumCallback, LPVOID pContext)
 	{
 		EnsureRealDsoundDllLoaded();
-		return gDirectSoundCaptureEnumerateA ? gDirectSoundCaptureEnumerateA(pDSEnumCallback, pContext) : E_FAIL;
+		if (gDirectSoundCaptureEnumerateA)
+			return gDirectSoundCaptureEnumerateA(pDSEnumCallback, pContext);
+		return E_FAIL;
 	}
 
 	HRESULT WINAPI DirectSoundCaptureEnumerateW(LPDSENUMCALLBACKW pDSEnumCallback, LPVOID pContext)
 	{
 		EnsureRealDsoundDllLoaded();
-		return gDirectSoundCaptureEnumerateW ? gDirectSoundCaptureEnumerateW(pDSEnumCallback, pContext) : E_FAIL;
+		if (gDirectSoundCaptureEnumerateW)
+			return gDirectSoundCaptureEnumerateW(pDSEnumCallback, pContext);
+		return E_FAIL;
 	}
 
 	HRESULT WINAPI DirectSoundCreate(LPCGUID pcGuidDevice, LPDIRECTSOUND* ppDS, LPUNKNOWN pUnkOuter)
 	{
 		EnsureRealDsoundDllLoaded();
-		return gDirectSoundCreate ? gDirectSoundCreate(pcGuidDevice, ppDS, pUnkOuter) : E_FAIL;
+		if (gDirectSoundCreate)
+			return gDirectSoundCreate(pcGuidDevice, ppDS, pUnkOuter);
+		return E_FAIL;
 	}
 
 	HRESULT WINAPI DirectSoundCreate8(LPCGUID pcGuidDevice, LPDIRECTSOUND8* ppDS8, LPUNKNOWN pUnkOuter)
 	{
 		EnsureRealDsoundDllLoaded();
-		return gDirectSoundCreate8 ? gDirectSoundCreate8(pcGuidDevice, ppDS8, pUnkOuter) : E_FAIL;
+		if (gDirectSoundCreate8)
+			return gDirectSoundCreate8(pcGuidDevice, ppDS8, pUnkOuter);
+		return E_FAIL;
 	}
 
 	HRESULT WINAPI DirectSoundEnumerateA(LPDSENUMCALLBACKA pDSEnumCallback, LPVOID pContext)
 	{
 		EnsureRealDsoundDllLoaded();
-		return gDirectSoundEnumerateA ? gDirectSoundEnumerateA(pDSEnumCallback, pContext) : E_FAIL;
+		if (gDirectSoundEnumerateA)
+			return gDirectSoundEnumerateA(pDSEnumCallback, pContext);
+		return E_FAIL;
 	}
 
 	HRESULT WINAPI DirectSoundEnumerateW(LPDSENUMCALLBACKW pDSEnumCallback, LPVOID pContext)
 	{
 		EnsureRealDsoundDllLoaded();
-		return gDirectSoundEnumerateW ? gDirectSoundEnumerateW(pDSEnumCallback, pContext) : E_FAIL;
+		if (gDirectSoundEnumerateW)
+			return gDirectSoundEnumerateW(pDSEnumCallback, pContext);
+		return E_FAIL;
 	}
 
 	HRESULT WINAPI DirectSoundFullDuplexCreate(
@@ -171,36 +188,32 @@ extern "C"
 		LPUNKNOWN pUnkOuter)
 	{
 		EnsureRealDsoundDllLoaded();
-		return gDirectSoundFullDuplexCreate
-			? gDirectSoundFullDuplexCreate(
-				pcGuidCaptureDevice,
-				pcGuidRenderDevice,
-				pcDSCBufferDesc,
-				pcDSBufferDesc,
-				hWnd,
-				dwLevel,
-				ppDSFD,
-				ppDSCBuffer8,
-				ppDSBuffer8,
-				pUnkOuter)
-			: E_FAIL;
+		if (gDirectSoundFullDuplexCreate)
+			return gDirectSoundFullDuplexCreate(pcGuidCaptureDevice, pcGuidRenderDevice, pcDSCBufferDesc, pcDSBufferDesc, hWnd, dwLevel, ppDSFD, ppDSCBuffer8, ppDSBuffer8, pUnkOuter);
+		return E_FAIL;
 	}
 
 	HRESULT WINAPI DllCanUnloadNow()
 	{
 		EnsureRealDsoundDllLoaded();
-		return gDllCanUnloadNow ? gDllCanUnloadNow() : S_FALSE;
+		if (gDllCanUnloadNow)
+			return gDllCanUnloadNow();
+		return S_FALSE;
 	}
 
 	HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv)
 	{
 		EnsureRealDsoundDllLoaded();
-		return gDllGetClassObject ? gDllGetClassObject(rclsid, riid, ppv) : CLASS_E_CLASSNOTAVAILABLE;
+		if (gDllGetClassObject)
+			return gDllGetClassObject(rclsid, riid, ppv);
+		return CLASS_E_CLASSNOTAVAILABLE;
 	}
 
 	HRESULT WINAPI GetDeviceID(LPCGUID pGuidSrc, LPGUID pGuidDest)
 	{
 		EnsureRealDsoundDllLoaded();
-		return gGetDeviceID ? gGetDeviceID(pGuidSrc, pGuidDest) : E_FAIL;
+		if (gGetDeviceID)
+			return gGetDeviceID(pGuidSrc, pGuidDest);
+		return E_FAIL;
 	}
 }

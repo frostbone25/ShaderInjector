@@ -12,9 +12,9 @@ namespace RenderPass
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(DispatchMode,
-	{
-		{ DispatchMode::InheritOriginal, "InheritOriginal" },
-		{ DispatchMode::ScaleByResolution, "ScaleByResolution" },
-		{ DispatchMode::ExplicitThreadGroups, "ExplicitThreadGroups" },
-	})
-}
+								 {
+									 {DispatchMode::InheritOriginal, "InheritOriginal"},
+									 {DispatchMode::ScaleByResolution, "ScaleByResolution"},
+									 {DispatchMode::ExplicitThreadGroups, "ExplicitThreadGroups"},
+								 })
+} //namespace RenderPass

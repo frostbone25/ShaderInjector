@@ -17,4 +17,4 @@ namespace DDS
 		uint32_t arraySize = 1;
 		uint32_t mipLevels = 1;
 	};
-}
+} //namespace DDS

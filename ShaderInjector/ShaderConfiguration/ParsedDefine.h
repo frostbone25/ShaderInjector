@@ -10,4 +10,4 @@ namespace ShaderConfiguration::Internal
 		std::string value;
 		bool commentedOut = false;
 	};
-}
+} //namespace ShaderConfiguration::Internal

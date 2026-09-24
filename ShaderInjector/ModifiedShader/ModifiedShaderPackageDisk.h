@@ -22,7 +22,7 @@ namespace ModifiedShader
 		std::string compiledBlobFile;
 		std::vector<ModifiedShaderTargetDisk> targets;
 
-		// Runtime-only resolved paths. They are normalized before JSON is written.
+		//Runtime-only resolved paths. They are normalized before JSON is written.
 		std::string packageDirectory;
 		std::string jsonPath;
 		std::string sourcePath;
@@ -51,4 +51,4 @@ namespace ModifiedShader
 			sourcePath,
 			compiledBlobPath)
 	};
-}
+} //namespace ModifiedShader

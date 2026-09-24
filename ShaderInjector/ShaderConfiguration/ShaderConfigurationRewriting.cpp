@@ -66,7 +66,7 @@ namespace ShaderConfiguration::Internal
 
 		return value;
 	}
-}
+} //namespace ShaderConfiguration::Internal
 
 namespace ShaderConfiguration
 {
@@ -119,7 +119,10 @@ namespace ShaderConfiguration
 					{
 						bool enabled = true;
 						TryGetBoolean(property, enabled);
-						content = prefix + (enabled ? "#define " : "// #define ") + property.name;
+						std::string directive = "// #define ";
+						if (enabled)
+							directive = "#define ";
+						content = prefix + directive + property.name;
 					}
 					else
 					{
@@ -129,7 +132,9 @@ namespace ShaderConfiguration
 						{
 							bool enabled = false;
 							TryGetBoolean(property, enabled);
-							defineValue = enabled ? "1" : "0";
+							defineValue = "0";
+							if (enabled)
+								defineValue = "1";
 						}
 
 						content = prefix + "#define " + property.name;
@@ -158,4 +163,4 @@ namespace ShaderConfiguration
 		outSourceText = std::move(rewrittenSource);
 		return true;
 	}
-}
+} //namespace ShaderConfiguration

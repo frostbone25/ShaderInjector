@@ -22,12 +22,18 @@ namespace HookD3D12
 	{
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return pipeline.vertexShaderHash;
-		case ShaderTarget::HullShader: return pipeline.hullShaderHash;
-		case ShaderTarget::DomainShader: return pipeline.domainShaderHash;
-		case ShaderTarget::GeometryShader: return pipeline.geometryShaderHash;
-		case ShaderTarget::PixelShader: return pipeline.pixelShaderHash;
-		default: return 0;
+			case ShaderTarget::VertexShader:
+				return pipeline.vertexShaderHash;
+			case ShaderTarget::HullShader:
+				return pipeline.hullShaderHash;
+			case ShaderTarget::DomainShader:
+				return pipeline.domainShaderHash;
+			case ShaderTarget::GeometryShader:
+				return pipeline.geometryShaderHash;
+			case ShaderTarget::PixelShader:
+				return pipeline.pixelShaderHash;
+			default:
+				return 0;
 		}
 	}
 
@@ -54,11 +60,13 @@ namespace HookD3D12
 		const bool pipelineContainsRequestedShader =
 			(graphicsInfo && GraphicsShaderHashForType(*graphicsInfo, shaderType) == shaderHash) ||
 			(streamInfo && StreamPipelineHasShaderHash(*streamInfo, shaderType, shaderHash));
+
 		if (!pipelineContainsRequestedShader)
 		{
 			ShaderInjectorGUI::WriteToRuntimeLogError(
 				"HookD3D12ReplacementCreation->CreateReplacementShaderTemplate: refusing mismatched pipeline for " +
 				StringHelper::ShaderTypeToString(shaderType) + " " + Hash::FormatHash(shaderHash));
+
 			return false;
 		}
 
@@ -79,8 +87,8 @@ namespace HookD3D12
 
 		ShaderTarget::ShaderTargetDisk replacement{};
 		replacement.schemaVersion = 6;
-		// Replacements remain enabled unless the user explicitly disables them.
-		// Matching safety is enforced by exact hashes and verified blob content.
+		//Replacements remain enabled unless the user explicitly disables them.
+		//Matching safety is enforced by exact hashes and verified blob content.
 		replacement.enabled = true;
 		replacement.name = replacementName;
 		replacement.shaderType = shaderType;
@@ -91,8 +99,11 @@ namespace HookD3D12
 		replacement.replacementDirectory = replacementDirectory;
 		replacement.originalShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalShaderBytecode" + ShaderInjectorIO::extensionBIN);
 		replacement.modifiedShaderId = modifiedShaderId;
+
 		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
-		replacement.modifiedShaderBlobPath = modifiedShader ? modifiedShader->compiledBlobPath : "";
+
+		if (modifiedShader)
+			replacement.modifiedShaderBlobPath = modifiedShader->compiledBlobPath;
 
 		if (originalShaderAnalysis && originalShaderAnalysis->succeeded)
 		{
@@ -104,10 +115,15 @@ namespace HookD3D12
 				"HookD3D12ReplacementCreation->CreateReplacementShaderTemplate: shader analysis unavailable for " +
 				replacementName + ": " + replacement.originalShaderAnalysis.error);
 		}
+
 		replacement.jsonPath = ShaderInjectorIO::JoinPath(replacementDirectory, "ShaderTarget" + ShaderInjectorIO::extensionJSON);
 		replacement.sourceList = sourceList;
 		replacement.pipelineIndex = std::to_string(pipelineIndex);
-		replacement.pipelineStateType = sourceList == "Stream" ? "PipelineStateStream" : "GraphicsPipelineStateDesc";
+		replacement.pipelineStateType = "GraphicsPipelineStateDesc";
+
+		if (sourceList == "Stream")
+			replacement.pipelineStateType = "PipelineStateStream";
+
 		replacement.psoPointer = StringHelper::PointerToString(pipelineState);
 
 		uint64_t cachedBlobHash = 0;
@@ -202,6 +218,7 @@ namespace HookD3D12
 		{
 			std::vector<uint8_t> rootSignatureBlob;
 			uint64_t rootSignatureHash = 0;
+
 			if (GetRootSignatureBlob(streamInfo->rootSignature, rootSignatureBlob, rootSignatureHash))
 				ok = ShaderInjectorIO::WriteBinaryFile(replacement.rootSignatureBlobPath, rootSignatureBlob.data(), rootSignatureBlob.size()) && ok;
 		}
@@ -232,6 +249,7 @@ namespace HookD3D12
 
 		if (generateShaderDisassembly)
 			ok = ShaderInjectorIO::GenerateShaderTextDXIL(replacement.originalShaderBlobPath) && ok;
+
 		ok = ShaderTarget::WriteShaderTargetJson(replacement) && ok;
 
 		if (!ok)
@@ -242,19 +260,21 @@ namespace HookD3D12
 
 		const ULONGLONG creationDurationMs = GetTickCount64() - creationStartTick;
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12ReplacementCreation->CreateReplacementShaderTemplate: Created replacement shader template: " + replacement.jsonPath + " durationMs=" + std::to_string(creationDurationMs));
+
 		if (gLoadedShaderTargetsOnce)
 		{
 			const auto existingTarget = std::find_if(gLoadedShaderTargets.begin(), gLoadedShaderTargets.end(),
-				[&replacement](const ShaderTarget::ShaderTargetDisk& loadedTarget)
-				{
-					return loadedTarget.jsonPath == replacement.jsonPath ||
-						(loadedTarget.shaderType == replacement.shaderType &&
-							loadedTarget.originalShaderBytecodeHash == replacement.originalShaderBytecodeHash);
-				});
+													 [&replacement](const ShaderTarget::ShaderTargetDisk& loadedTarget)
+													 {
+														 return loadedTarget.jsonPath == replacement.jsonPath ||
+																(loadedTarget.shaderType == replacement.shaderType &&
+																 loadedTarget.originalShaderBytecodeHash == replacement.originalShaderBytecodeHash);
+													 });
 
 			if (existingTarget == gLoadedShaderTargets.end())
 			{
 				std::vector<uint8_t> compiledReplacementBlob;
+
 				if (modifiedShader && modifiedShader->enabled && modifiedShader->shaderType == replacement.shaderType)
 					compiledReplacementBlob = modifiedShader->compiledBlob;
 
@@ -296,4 +316,4 @@ namespace HookD3D12
 	{
 		return CreateShaderTarget(sourceList, pipelineIndex, shaderType, shaderHash, shaderBytecodeLength, shaderBytecode, pipeline.pipelineState, nullptr, &pipeline, modifiedShaderId, generateShaderDisassembly, originalShaderAnalysis);
 	}
-}
+} //namespace HookD3D12

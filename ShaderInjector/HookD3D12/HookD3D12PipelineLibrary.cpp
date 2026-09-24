@@ -46,4 +46,4 @@ namespace HookD3D12
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineLibrary->HookPipelineLibrary: Pipeline library hooks installed");
 	}
 
-}
+} //namespace HookD3D12

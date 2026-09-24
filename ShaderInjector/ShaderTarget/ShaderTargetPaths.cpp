@@ -23,25 +23,25 @@ namespace ShaderTarget::Internal
 
 	std::vector<std::string*> PathFields(ShaderTarget::ShaderTargetDisk& replacement)
 	{
-		// These fields are stored beside the replacement JSON. Keeping them in one list
-		// makes save/load path normalization consistent for current and future metadata.
+		//These fields are stored beside the replacement JSON. Keeping them in one list
+		//makes save/load path normalization consistent for current and future metadata.
 		std::vector<std::string*> pathFields =
-		{
-			&replacement.originalShaderBlobPath,
-			&replacement.jsonPath,
-			&replacement.pipelineCachedBlobPath,
-			&replacement.pipelineStreamBlobPath,
-			&replacement.pipelineStreamMetadataPath,
-			&replacement.rootSignatureBlobPath,
-			&replacement.vertexShaderBlobPath,
-			&replacement.pixelShaderBlobPath,
-			&replacement.computeShaderBlobPath,
-			&replacement.geometryShaderBlobPath,
-			&replacement.hullShaderBlobPath,
-			&replacement.domainShaderBlobPath,
-			&replacement.amplificationShaderBlobPath,
-			&replacement.meshShaderBlobPath,
-		};
+			{
+				&replacement.originalShaderBlobPath,
+				&replacement.jsonPath,
+				&replacement.pipelineCachedBlobPath,
+				&replacement.pipelineStreamBlobPath,
+				&replacement.pipelineStreamMetadataPath,
+				&replacement.rootSignatureBlobPath,
+				&replacement.vertexShaderBlobPath,
+				&replacement.pixelShaderBlobPath,
+				&replacement.computeShaderBlobPath,
+				&replacement.geometryShaderBlobPath,
+				&replacement.hullShaderBlobPath,
+				&replacement.domainShaderBlobPath,
+				&replacement.amplificationShaderBlobPath,
+				&replacement.meshShaderBlobPath,
+			};
 
 		for (ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
 		{
@@ -80,4 +80,4 @@ namespace ShaderTarget::Internal
 
 		replacement.jsonPath = jsonPath;
 	}
-}
+} //namespace ShaderTarget::Internal

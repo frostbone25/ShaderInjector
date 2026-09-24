@@ -30,4 +30,4 @@ namespace ShaderTarget
 			return false;
 		}
 	}
-}
+} //namespace ShaderTarget

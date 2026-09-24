@@ -126,4 +126,4 @@ namespace ShaderTarget
 			streamOutputDeclarationCount,
 			streamOutputSignature)
 	};
-}
+} //namespace ShaderTarget

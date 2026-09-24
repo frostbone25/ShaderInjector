@@ -26,4 +26,4 @@ namespace RenderDocIntegration
 	uint32_t GetCaptureCount();
 	uint32_t GetReplayUiProcessId();
 	std::string GetLatestCapturePath();
-}
+} //namespace RenderDocIntegration

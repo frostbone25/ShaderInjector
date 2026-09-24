@@ -4,11 +4,11 @@ namespace HookD3D12
 {
 	class ScopedRenderPassInjection
 	{
-	public:
+	  public:
 		ScopedRenderPassInjection();
 		~ScopedRenderPassInjection();
 
 		ScopedRenderPassInjection(const ScopedRenderPassInjection&) = delete;
 		ScopedRenderPassInjection& operator=(const ScopedRenderPassInjection&) = delete;
 	};
-}
+} //namespace HookD3D12

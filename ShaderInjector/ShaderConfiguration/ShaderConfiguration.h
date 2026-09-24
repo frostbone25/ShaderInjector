@@ -32,4 +32,4 @@ namespace ShaderConfiguration
 	void SetInteger(PropertyDisk& property, int value);
 	void SetFloatComponents(PropertyDisk& property, const float* values, size_t componentCount);
 	size_t ComponentCount(const PropertyDisk& property);
-}
+} //namespace ShaderConfiguration

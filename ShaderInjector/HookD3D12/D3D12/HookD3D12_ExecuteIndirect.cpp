@@ -53,4 +53,4 @@ namespace HookD3D12
 		if ((boundaryMask & 2u) != 0)
 			RenderPassRuntime::RecordExecutionBoundary(commandList, false, RenderPassRuntime::ExecutionBoundary::After, "ExecuteIndirect");
 	}
-}
+} //namespace HookD3D12

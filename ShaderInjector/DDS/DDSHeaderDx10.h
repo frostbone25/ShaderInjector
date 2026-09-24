@@ -17,7 +17,7 @@ namespace DDS
 		//the following values for this member are a subset of the values in the D3D10_RESOURCE_DIMENSION or D3D11_RESOURCE_DIMENSION enumeration:
 		uint32_t resourceDimension;
 
-		//identifies other, less common options for resources. 
+		//identifies other, less common options for resources.
 		//the following value for this member is a subset of the values in the D3D10_RESOURCE_MISC_FLAG or D3D11_RESOURCE_MISC_FLAG enumeration:
 		uint32_t miscFlag;
 
@@ -37,4 +37,4 @@ namespace DDS
 #pragma pack(pop)
 
 	static_assert(sizeof(DDSHeaderDX10) == 20, "Unexpected DDS DX10 header size.");
-}
+} //namespace DDS

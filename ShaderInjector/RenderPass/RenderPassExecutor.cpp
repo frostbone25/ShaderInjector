@@ -8,6 +8,8 @@
 
 #include "HookD3D12.h"
 #include "RenderPass/RenderPassMipChain.h"
+#include "RenderPass/RenderTargetState.h"
+#include "RenderPass/ExecutorThreadPipelineLookup.h"
 #include "RenderPass/RenderPassReplacement.h"
 #include "RenderPass/RenderPassTexturePool.h"
 #include "ShaderResource/ShaderResourceRuntime.h"
@@ -23,22 +25,6 @@ namespace RenderPassExecutor
 	std::unordered_map<std::string, std::string> gPipelineCreationErrors;
 	std::atomic<bool> gLoggedExecutionDuringActiveCapture = false;
 	std::atomic<uint64_t> gLoggedCaptureRequestSequence = 0;
-
-	struct RenderTargetState
-	{
-		UINT count = 0;
-		DXGI_FORMAT formats[D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
-		UINT sampleCount = 1;
-		UINT sampleQuality = 0;
-	};
-
-	struct ThreadPipelineLookup
-	{
-		const RenderPass::RenderPassDisk* renderPass = nullptr;
-		ID3D12RootSignature* rootSignature = nullptr;
-		RenderTargetState renderTargets;
-		ID3D12PipelineState* pipelineState = nullptr;
-	};
 
 	thread_local std::array<ThreadPipelineLookup, 16> gThreadPipelineLookups;
 	thread_local size_t gNextThreadPipelineLookup = 0;
@@ -71,12 +57,12 @@ namespace RenderPassExecutor
 		{
 			if (lookup.renderPass == &renderPass && lookup.rootSignature == rootSignature)
 			{
-				lookup = { &renderPass, rootSignature, renderTargets, pipelineState };
+				lookup = {&renderPass, rootSignature, renderTargets, pipelineState};
 				return;
 			}
 		}
 		gThreadPipelineLookups[gNextThreadPipelineLookup] = {
-			&renderPass, rootSignature, renderTargets, pipelineState };
+			&renderPass, rootSignature, renderTargets, pipelineState};
 		gNextThreadPipelineLookup = (gNextThreadPipelineLookup + 1) % gThreadPipelineLookups.size();
 	}
 
@@ -136,12 +122,15 @@ namespace RenderPassExecutor
 		ID3D12GraphicsCommandList* commandList,
 		const RenderPassMipChain::GraphicsStateSnapshot& gameState)
 	{
-		const D3D12_CPU_DESCRIPTOR_HANDLE* depthStencil = gameState.depthStencil.ptr
-			? &gameState.depthStencil
-			: nullptr;
+		const D3D12_CPU_DESCRIPTOR_HANDLE* depthStencil = nullptr;
+		if (gameState.depthStencil.ptr)
+			depthStencil = &gameState.depthStencil;
+		const D3D12_CPU_DESCRIPTOR_HANDLE* renderTargets = nullptr;
+		if (!gameState.renderTargets.empty())
+			renderTargets = gameState.renderTargets.data();
 		commandList->OMSetRenderTargets(
 			static_cast<UINT>(gameState.renderTargets.size()),
-			gameState.renderTargets.empty() ? nullptr : gameState.renderTargets.data(),
+			renderTargets,
 			FALSE,
 			depthStencil);
 		if (!gameState.viewports.empty())
@@ -158,10 +147,10 @@ namespace RenderPassExecutor
 		const RenderTargetState& renderTargets)
 	{
 		std::string key = renderPass.id + ':' + StringHelper::PointerToString(rootSignature) + ':' +
-			std::to_string(renderPass.vertexShaderBlobHash) + ':' +
-			std::to_string(renderPass.fragmentShaderBlobHash) + ':' +
-			std::to_string(renderTargets.sampleCount) + ':' +
-			std::to_string(renderTargets.sampleQuality);
+						  std::to_string(renderPass.vertexShaderBlobHash) + ':' +
+						  std::to_string(renderPass.fragmentShaderBlobHash) + ':' +
+						  std::to_string(renderTargets.sampleCount) + ':' +
+						  std::to_string(renderTargets.sampleQuality);
 		for (UINT renderTargetIndex = 0; renderTargetIndex < renderTargets.count; ++renderTargetIndex)
 			key += ':' + std::to_string(static_cast<UINT>(renderTargets.formats[renderTargetIndex]));
 		return key;
@@ -171,8 +160,8 @@ namespace RenderPassExecutor
 	{
 		D3D12_BLEND_DESC blendState{};
 		for (UINT renderTargetIndex = 0;
-			renderTargetIndex < (std::min)(renderTargetCount, static_cast<UINT>(D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT));
-			++renderTargetIndex)
+			 renderTargetIndex < (std::min)(renderTargetCount, static_cast<UINT>(D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT));
+			 ++renderTargetIndex)
 		{
 			D3D12_RENDER_TARGET_BLEND_DESC& target = blendState.RenderTarget[renderTargetIndex];
 			target.BlendEnable = FALSE;
@@ -248,8 +237,8 @@ namespace RenderPassExecutor
 
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC description{};
 		description.pRootSignature = rootSignature;
-		description.VS = { renderPass.vertexShaderBlob.data(), renderPass.vertexShaderBlob.size() };
-		description.PS = { renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size() };
+		description.VS = {renderPass.vertexShaderBlob.data(), renderPass.vertexShaderBlob.size()};
+		description.PS = {renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size()};
 		description.BlendState = BuildBlendState(renderTargets.count);
 		description.SampleMask = UINT_MAX;
 		description.RasterizerState = BuildRasterizerState(renderTargets.sampleCount);
@@ -257,14 +246,14 @@ namespace RenderPassExecutor
 		description.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
 		description.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
 		description.DepthStencilState.StencilEnable = FALSE;
-		description.InputLayout = { nullptr, 0 };
+		description.InputLayout = {nullptr, 0};
 		description.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
 		description.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		description.NumRenderTargets = renderTargets.count;
 		for (UINT renderTargetIndex = 0; renderTargetIndex < renderTargets.count; ++renderTargetIndex)
 			description.RTVFormats[renderTargetIndex] = renderTargets.formats[renderTargetIndex];
 		description.DSVFormat = DXGI_FORMAT_UNKNOWN;
-		description.SampleDesc = { renderTargets.sampleCount, renderTargets.sampleQuality };
+		description.SampleDesc = {renderTargets.sampleCount, renderTargets.sampleQuality};
 
 		ID3D12PipelineState* pipelineState = nullptr;
 		HRESULT result = E_FAIL;
@@ -334,18 +323,20 @@ namespace RenderPassExecutor
 		}
 
 		if (runtimeOutput && (!gameStateToRestore ||
-			gameStateToRestore->renderTargets.empty() ||
-			gameStateToRestore->viewports.empty() ||
-			gameStateToRestore->scissorRectangles.empty()))
+							  gameStateToRestore->renderTargets.empty() ||
+							  gameStateToRestore->viewports.empty() ||
+							  gameStateToRestore->scissorRectangles.empty()))
 		{
 			outError = "Runtime output requires captured render-target, viewport, and scissor state.";
 			return false;
 		}
 
 		RenderTargetState renderTargets{};
-		const bool renderTargetStateAvailable = runtimeOutput
-			? BuildRenderTargetState(*runtimeOutput, renderTargets)
-			: BuildRenderTargetState(outputBindings, renderTargets);
+		bool renderTargetStateAvailable = false;
+		if (runtimeOutput)
+			renderTargetStateAvailable = BuildRenderTargetState(*runtimeOutput, renderTargets);
+		else
+			renderTargetStateAvailable = BuildRenderTargetState(outputBindings, renderTargets);
 
 		if (!renderTargetStateAvailable)
 		{
@@ -374,10 +365,13 @@ namespace RenderPassExecutor
 				captureRequestSequence,
 				std::memory_order_relaxed))
 		{
+			unsigned int captureActive = 0;
+			if (renderDocCaptureActive)
+				captureActive = 1;
 			ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
 				"RenderPassExecutor->ExecuteFullscreenTriangle: first pass execution after capture request sequence=%llu captureActive=%u pass=%s commandList=%p",
 				static_cast<unsigned long long>(captureRequestSequence),
-				renderDocCaptureActive ? 1u : 0u,
+				captureActive,
 				renderPass.name.c_str(),
 				commandList));
 		}
@@ -418,12 +412,12 @@ namespace RenderPassExecutor
 					static_cast<float>(runtimeOutput->description.width),
 					static_cast<float>(runtimeOutput->description.height),
 					0.0f,
-					1.0f };
+					1.0f};
 				const D3D12_RECT scissor{
 					0,
 					0,
 					static_cast<LONG>(runtimeOutput->description.width),
-					static_cast<LONG>(runtimeOutput->description.height) };
+					static_cast<LONG>(runtimeOutput->description.height)};
 				commandList->RSSetViewports(1, &viewport);
 				commandList->RSSetScissorRects(1, &scissor);
 			}
@@ -629,4 +623,4 @@ namespace RenderPassExecutor
 		gEventNameRenderPass = nullptr;
 		gEventName.clear();
 	}
-}
+} //namespace RenderPassExecutor

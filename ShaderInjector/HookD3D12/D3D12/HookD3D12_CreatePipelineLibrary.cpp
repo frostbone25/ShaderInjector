@@ -44,4 +44,4 @@ namespace HookD3D12
 
 		return result;
 	}
-}
+} //namespace HookD3D12

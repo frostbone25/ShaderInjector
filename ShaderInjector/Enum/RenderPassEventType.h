@@ -11,8 +11,8 @@ namespace RenderPass
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(EventType,
-	{
-		{ EventType::ModifiedShader, "ModifiedShader" },
-		{ EventType::RenderPass, "RenderPass" },
-	})
-}
+								 {
+									 {EventType::ModifiedShader, "ModifiedShader"},
+									 {EventType::RenderPass, "RenderPass"},
+								 })
+} //namespace RenderPass

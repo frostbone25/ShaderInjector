@@ -13,9 +13,9 @@ namespace ShaderResource
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(ResolutionMode,
-	{
-		{ ResolutionMode::Inherit, "Inherit" },
-		{ ResolutionMode::DownscalePowerOfTwo, "DownscalePowerOfTwo" },
-		{ ResolutionMode::Explicit, "Explicit" },
-	})
-}
+								 {
+									 {ResolutionMode::Inherit, "Inherit"},
+									 {ResolutionMode::DownscalePowerOfTwo, "DownscalePowerOfTwo"},
+									 {ResolutionMode::Explicit, "Explicit"},
+								 })
+} //namespace ShaderResource

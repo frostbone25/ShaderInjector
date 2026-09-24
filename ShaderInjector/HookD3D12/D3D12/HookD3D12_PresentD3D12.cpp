@@ -27,6 +27,7 @@ namespace HookD3D12
 		FunctionPresent1D3D12 present1Override = nullptr)
 	{
 		FPSCounter::UpdateFPSCounter();
+
 		if (PerformanceMetrics::RecordPresentAndMaybeLog())
 			RenderPassRuntime::LogPerformanceSnapshot();
 
@@ -48,8 +49,14 @@ namespace HookD3D12
 		{
 			HRESULT presentResult = E_FAIL;
 
-			FunctionPresentD3D12 present = presentOverride ? presentOverride : Original_PresentD3D12;
-			FunctionPresent1D3D12 present1 = present1Override ? present1Override : Original_Present1D3D12;
+			FunctionPresentD3D12 present = Original_PresentD3D12;
+			FunctionPresent1D3D12 present1 = Original_Present1D3D12;
+
+			if (presentOverride)
+				present = presentOverride;
+
+			if (present1Override)
+				present1 = present1Override;
 
 			if (usePresent1 && present1)
 				presentResult = present1(pSwapChain, SyncInterval, Flags, pParams);
@@ -57,7 +64,14 @@ namespace HookD3D12
 				presentResult = present(pSwapChain, SyncInterval, Flags);
 
 			if (FAILED(presentResult))
-				LogOverlayDeviceFailure(usePresent1 ? "Present1" : "Present", presentResult);
+			{
+				const char* operation = "Present";
+
+				if (usePresent1)
+					operation = "Present1";
+
+				LogOverlayDeviceFailure(operation, presentResult);
+			}
 
 			return presentResult;
 		};
@@ -67,16 +81,16 @@ namespace HookD3D12
 
 		RenderPassRuntime::AdvanceFrame();
 
-		// ExecuteCommandLists records the most recently submitted direct queue. The queue
-		// immediately preceding Present is the safest fallback when the swap chain was
-		// created before this DLL installed its hooks.
+		//ExecuteCommandLists records the most recently submitted direct queue. The queue
+		//immediately preceding Present is the safest fallback when the swap chain was
+		//created before this DLL installed its hooks.
 		AdoptMostRecentDirectCommandQueue(pSwapChain);
 
 		if (!gCommandQueue)
 		{
 			//DebugLog("[HookD3D12] CommandQueue not yet captured, skipping frame");
 
-			if (!gDevice) 
+			if (!gDevice)
 			{
 				pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice);
 			}
@@ -86,10 +100,10 @@ namespace HookD3D12
 
 		//IMPORTANT NOTE: it appears that when first starting the application gInitialized is false
 		//if (gInitialized)
-			//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: gInitialized = TRUE");
+		//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: gInitialized = TRUE");
 		//else
-			//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: gInitialized = FALSE");
-	
+		//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: gInitialized = FALSE");
+
 		DXGI_SWAP_CHAIN_DESC startupSwapChainDesc = {};
 
 		if (!gInitialized && !IsSwapChainReadyForOverlayInitialization(pSwapChain, startupSwapChainDesc))
@@ -99,24 +113,20 @@ namespace HookD3D12
 		//MessageBoxA(nullptr, "Hook_Present1D3D12: startup frames beyond 300, continuing", "Shader Injector", MB_OK);
 
 		{
-			PerformanceMetrics::ScopedTimer maintenanceTimer(
-				PerformanceMetrics::Timing::PresentShaderMaintenance,
-				16);
-			ProcessPendingRebuilds(); // <-- add here, before gInitialized check and before ImGui
+			PerformanceMetrics::ScopedTimer maintenanceTimer(PerformanceMetrics::Timing::PresentShaderMaintenance, 16);
+			ProcessPendingRebuilds(); //<-- add here, before gInitialized check and before ImGui
 			ApplyShaderTargetPSOs();
 		}
 
 		if (gOverlayRenderingDisabled)
 			return CallOriginalPresent();
 
-		///*
-		//this will execute first because when application starts, this is not set to true
+		//the first present creates overlay resources after the game has supplied a swap chain.
 		if (!gInitialized)
 		{
-			//ShaderInjectorGUI::WriteToRuntimeLog("[HookD3D12] Initializing ImGui on first Present1.");
 
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
-			if (!gDevice && FAILED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice))) 
+			if (!gDevice && FAILED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice)))
 			{
 				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: GetDevice fail");
 				return CallOriginalPresent();
@@ -132,7 +142,7 @@ namespace HookD3D12
 				}
 			}
 
-			// Swap Chain description
+			//Swap Chain description
 			DXGI_SWAP_CHAIN_DESC desc = startupSwapChainDesc;
 
 			if (!desc.OutputWindow)
@@ -140,13 +150,13 @@ namespace HookD3D12
 
 			gBufferCount = desc.BufferCount;
 
-			// Create descriptor heaps
+			//Create descriptor heaps
 			D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
 			heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 			heapDesc.NumDescriptors = gBufferCount;
 
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
-			if (FAILED(gDevice->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&gHeapRTV)))) 
+			if (FAILED(gDevice->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&gHeapRTV))))
 			{
 				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: CreateDescriptorHeap RTV fail");
 				return CallOriginalPresent();
@@ -156,17 +166,17 @@ namespace HookD3D12
 			heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
-			if (FAILED(gDevice->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&gHeapSRV)))) 
+			if (FAILED(gDevice->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&gHeapSRV))))
 			{
 				ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: CreateDescriptorHeap SRV fail");
 				return CallOriginalPresent();
 			}
 
-			// Allocate frame contexts
+			//Allocate frame contexts
 			gFrameContexts = new FrameContext[gBufferCount];
 			ZeroMemory(gFrameContexts, sizeof(FrameContext) * gBufferCount);
 
-			// Create command allocator for each frame
+			//Create command allocator for each frame
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
 			for (UINT i = 0; i < gBufferCount; ++i)
 			{
@@ -177,52 +187,33 @@ namespace HookD3D12
 				}
 			}
 
-			// Create RTVs for each back buffer
-			UINT rtvSize = gDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-			auto rtvHandle = gHeapRTV->GetCPUDescriptorHandleForHeapStart();
+			//each swap-chain back buffer needs its own render-target view for overlay drawing.
+			const UINT renderTargetDescriptorSize = gDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+			D3D12_CPU_DESCRIPTOR_HANDLE renderTargetHandle = gHeapRTV->GetCPUDescriptorHandleForHeapStart();
 
-			for (UINT i = 0; i < gBufferCount; ++i) 
+			for (UINT bufferIndex = 0; bufferIndex < gBufferCount; ++bufferIndex)
 			{
-				ID3D12Resource* back = nullptr;
+				ID3D12Resource* backBuffer = nullptr;
+				const HRESULT bufferResult = pSwapChain->GetBuffer(bufferIndex, IID_PPV_ARGS(&backBuffer));
 
-				//IMPORTANT NOTE: WE DONT HIT THIS ERROR ANYMORE
-				//============================ ERROR POINT ===========================
-				/*
-				The ff7rebirth has crashed and will close
-				---------------------------
-				LowLevelFatalError [File:Unknown] [Line: 952]
-				SwapChain1->ResizeBuffers(NumBackBuffers, SizeX, SizeY, GetRenderTargetFormat(PixelFormat), SwapChainFlags) failed
-				 at D:/End/j/workspace/E2/PC/e2p_BuW64MSt/cw/Engine/Source/Runtime/D3D12RHI/Private/Windows/WindowsD3D12Viewport.cpp:453
-				 with error DXGI_ERROR_INVALID_CALL
-				Num=3, Size=(1920,1080), PF=18, DXGIFormat=0x18, Flags=0x802
-				*/
-				HRESULT hr = pSwapChain->GetBuffer(i, IID_PPV_ARGS(&back)); //<---------- this is where the error happens
-
-				//this was a supposed fix, apparently the error isn't happening anymore but keeping this around for sanity sake
-				//if (back)
-				//{
-					//back->Release();
-					//back = nullptr;
-				//}
-
-				if (FAILED(hr))
+				//a buffer may be unavailable while the game is rebuilding its swap chain.
+				if (FAILED(bufferResult))
 					continue;
 
-				gDevice->CreateRenderTargetView(back, nullptr, rtvHandle);
-				gFrameContexts[i].renderTargetResource = back;
-				gFrameContexts[i].renderTargetViewHandle = rtvHandle;
-				rtvHandle.ptr += rtvSize;
+				gDevice->CreateRenderTargetView(backBuffer, nullptr, renderTargetHandle);
+				gFrameContexts[bufferIndex].renderTargetResource = backBuffer;
+				gFrameContexts[bufferIndex].renderTargetViewHandle = renderTargetHandle;
+				renderTargetHandle.ptr += renderTargetDescriptorSize;
 			}
 
-
-			// ImGui setup
+			//ImGui setup
 			//NOTE: we did a test to see if the context of imgui is the same as the one later when we actually draw. it seems that it is infact the same
 			ImGui::CreateContext();
-			ImGuiIO& io = ImGui::GetIO(); 
+			ImGuiIO& io = ImGui::GetIO();
 			io.IniFilename = ShaderInjectorIO::imguiSettingsName;
 
 			//NOTE: we did a test here to see if we had fonts (io.Fonts->Fonts.Size), turns out we dont
-			
+
 			//FIX: we forcefully add a font
 			io.Fonts->AddFontDefault();
 
@@ -247,10 +238,10 @@ namespace HookD3D12
 			}
 
 			const bool imguiDX12Initialized = ImGui_ImplDX12_Init(gDevice, gBufferCount,
-				desc.BufferDesc.Format, //test: d3d12 desc buffdesc format | format is 24
-				gHeapSRV,
-				gHeapSRV->GetCPUDescriptorHandleForHeapStart(),
-				gHeapSRV->GetGPUDescriptorHandleForHeapStart()); //this also seemingly initalizes fine
+																  desc.BufferDesc.Format, //test: d3d12 desc buffdesc format | format is 24
+																  gHeapSRV,
+																  gHeapSRV->GetCPUDescriptorHandleForHeapStart(),
+																  gHeapSRV->GetGPUDescriptorHandleForHeapStart()); //this also seemingly initalizes fine
 
 			if (!imguiDX12Initialized)
 			{
@@ -264,19 +255,19 @@ namespace HookD3D12
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
 			//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: ImGui initialized");
 
-			HookInput::Initalize(desc.OutputWindow);
+			HookInput::Initialize(desc.OutputWindow);
 
-			if (!gOverlayFence) 
+			if (!gOverlayFence)
 			{
 				//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
-				if (FAILED(gDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gOverlayFence)))) 
+				if (FAILED(gDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gOverlayFence))))
 				{
 					ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: CreateFence fail");
 					return CallOriginalPresent();
 				}
 			}
 
-			if (!gFenceEvent) 
+			if (!gFenceEvent)
 			{
 				gFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
@@ -291,8 +282,8 @@ namespace HookD3D12
 
 			GatherPipelineInfo(pSwapChain);
 			InstallPipelineHooks();
-		
-			// Hook CommandQueue and Fence are already captured by minhook
+
+			//Hook CommandQueue and Fence are already captured by minhook
 			gInitialized = true;
 
 			if (!gOverlayInitializedTick)
@@ -309,7 +300,6 @@ namespace HookD3D12
 		InstallDeferredRenderPassHooks(gDevice);
 		RenderDocIntegration::PollCaptureStatus();
 
-
 		if (!Globals::gShowShaderInjectorGUI || gOverlayRenderingDisabled)
 			return CallOriginalPresent();
 
@@ -324,9 +314,9 @@ namespace HookD3D12
 			return CallOriginalPresent();
 		}
 
-		// Protect only the first overlay submission from overlapping an active PSO creation call.
-		// Once the overlay has submitted successfully, normal runtime pipeline creation must not
-		// make the menu disappear or wait for the broader shader-rebuild quiet period.
+		//Protect only the first overlay submission from overlapping an active PSO creation call.
+		//Once the overlay has submitted successfully, normal runtime pipeline creation must not
+		//make the menu disappear or wait for the broader shader-rebuild quiet period.
 		if (gOverlaySubmissionCount == 0 &&
 			gActivePipelineActivityCount.load(std::memory_order_acquire) != 0)
 		{
@@ -335,6 +325,7 @@ namespace HookD3D12
 				ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
 					"HookD3D12->HandlePresentD3D12: active game pipeline call; delaying first overlay GPU submission activePipelineCalls=%u",
 					static_cast<unsigned int>(gActivePipelineActivityCount.load(std::memory_order_acquire))));
+
 				gLoggedOverlayPipelineActivityDelay = true;
 			}
 
@@ -343,12 +334,11 @@ namespace HookD3D12
 
 		if (gLoggedOverlayPipelineActivityDelay)
 		{
-			ShaderInjectorIO::WriteToLogFile(
-				"HookD3D12->HandlePresentD3D12: active game pipeline call completed; first overlay GPU submission resumed");
+			ShaderInjectorIO::WriteToLogFile("HookD3D12->HandlePresentD3D12: active game pipeline call completed; first overlay GPU submission resumed");
 			gLoggedOverlayPipelineActivityDelay = false;
 		}
 
-		if (!gShutdown) 
+		if (!gShutdown)
 		{
 			if (!gOverlayDeviceObjectsCreated)
 			{
@@ -358,10 +348,12 @@ namespace HookD3D12
 
 				if (!deviceObjectsCreated)
 				{
-					const HRESULT removedReason = gDevice ? gDevice->GetDeviceRemovedReason() : E_POINTER;
-					ShaderInjectorIO::WriteToLogFileError(
-						"HookD3D12->HandlePresentD3D12: ImGui device-object creation failed; overlay disabled deviceRemovedReason=" +
-						StringHelper::FormatHRESULT(removedReason));
+					HRESULT removedReason = E_POINTER;
+
+					if (gDevice)
+						removedReason = gDevice->GetDeviceRemovedReason();
+
+					ShaderInjectorIO::WriteToLogFileError("HookD3D12->HandlePresentD3D12: ImGui device-object creation failed; overlay disabled deviceRemovedReason = " + StringHelper::FormatHRESULT(removedReason));
 					gOverlayRenderingDisabled = true;
 					return CallOriginalPresent();
 				}
@@ -369,11 +361,11 @@ namespace HookD3D12
 				gOverlayDeviceObjectsCreated = true;
 			}
 
-			// Render ImGui
+			//Render ImGui
 			//Apply MenuScale before NewFrame so font and layout metrics update together on the
 			//frame after the user edits the live scale control.
-			ShaderInjectorGUI::UI_ApplyStyle();
-			ImGui_ImplDX12_NewFrame(); //this seems fine
+			ShaderInjectorGUI::ApplyGUIStyle();
+			ImGui_ImplDX12_NewFrame();	//this seems fine
 			ImGui_ImplWin32_NewFrame(); //this seems fine
 
 			ImGuiContext* imguiContext = ImGui::GetCurrentContext();
@@ -401,11 +393,11 @@ namespace HookD3D12
 			ShaderInjectorGUI::MainWindowContext guiContext{};
 			guiContext.showWindow = &Globals::gShowShaderInjectorGUI;
 			guiContext.injectorEnabled = Globals::gShaderInjectorEnabled;
-			guiContext.fpsCounterActive = &FPSCounter::gIsFPSCounterActive;
-			guiContext.fps = FPSCounter::gCurrentFramesPerSecond;
-			guiContext.frameTimeMs = FPSCounter::gCurrentFrameTimeMilliseconds;
+			guiContext.framesPerSecondCounterActive = &FPSCounter::gIsFPSCounterActive;
+			guiContext.framesPerSecond = FPSCounter::gCurrentFramesPerSecond;
+			guiContext.frameTimeMilliseconds = FPSCounter::gCurrentFrameTimeMilliseconds;
 			guiContext.runtimeLogText = &ShaderInjectorGUI::runtimeLogText;
-			guiContext.drawMenu = &ShaderInjectorGUI::UI_ShaderInjectorMenu;
+			guiContext.drawMenu = &ShaderInjectorGUI::DrawShaderInjectorMenu;
 			ShaderInjectorGUI::DrawMainWindow(guiContext);
 
 			//=========================================== IMGUI END ===========================================
@@ -426,21 +418,21 @@ namespace HookD3D12
 				return CallOriginalPresent();
 			}
 
-			// Each allocator can only be reset after the GPU has completed the overlay
-			// submission that used that specific back buffer.
+			//Each allocator can only be reset after the GPU has completed the overlay
+			//submission that used that specific back buffer.
 			bool canRender = true;
 
-			if (!gOverlayFence || !gFenceEvent) 
+			if (!gOverlayFence || !gFenceEvent)
 			{
-				// Missing synchronization objects, skip waiting
+				//Missing synchronization objects, skip waiting
 			}
 			else if (ctx.fenceValue != 0 && gOverlayFence->GetCompletedValue() < ctx.fenceValue)
 			{
 				HRESULT hr = gOverlayFence->SetEventOnCompletion(ctx.fenceValue, gFenceEvent);
 
-				if (SUCCEEDED(hr)) 
+				if (SUCCEEDED(hr))
 				{
-					const DWORD waitTimeoutMs = 0; // Never stall the game present path for overlay rendering
+					const DWORD waitTimeoutMs = 0; //Never stall the game present path for overlay rendering
 					DWORD waitRes = WaitForSingleObject(gFenceEvent, waitTimeoutMs);
 
 					if (waitRes == WAIT_TIMEOUT)
@@ -448,41 +440,41 @@ namespace HookD3D12
 						//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: WaitForSingleObject timeout");
 						canRender = false;
 					}
-					else if (waitRes != WAIT_OBJECT_0) 
+					else if (waitRes != WAIT_OBJECT_0)
 					{
 						//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: WaitForSingleObject failed: %lu", GetLastError());
 						canRender = false;
 					}
 				}
-				else 
+				else
 				{
 					//LogHRESULT("SetEventOnCompletion", hr);
 					canRender = false;
 				}
 			}
 
-			if (!canRender) 
+			if (!canRender)
 			{
 				//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: Skipping ImGui render for this frame");
 				ImGui::EndFrame();
 				return CallOriginalPresent();
 			}
 
-			// Reset allocator and command list using frame-specific allocator
+			//Reset allocator and command list using frame-specific allocator
 			HRESULT hr = ctx.commandAllocator->Reset();
 
-			if (FAILED(hr)) 
+			if (FAILED(hr))
 			{
 				//LogHRESULT("CommandAllocator->Reset", hr);
 				ImGui::EndFrame();
 				return CallOriginalPresent();
 			}
 
-			if (!gCommandList) 
+			if (!gCommandList)
 			{
 				hr = gDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, ctx.commandAllocator, nullptr, IID_PPV_ARGS(&gCommandList));
-				
-				if (FAILED(hr)) 
+
+				if (FAILED(hr))
 				{
 					//LogHRESULT("CreateCommandList", hr);
 					ImGui::EndFrame();
@@ -494,14 +486,14 @@ namespace HookD3D12
 
 			hr = gCommandList->Reset(ctx.commandAllocator, nullptr);
 
-			if (FAILED(hr)) 
+			if (FAILED(hr))
 			{
 				//LogHRESULT("CommandList->Reset", hr);
 				ImGui::EndFrame();
 				return CallOriginalPresent();
 			}
 
-			// Transition to render target
+			//Transition to render target
 			D3D12_RESOURCE_BARRIER barrier = {};
 			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 			barrier.Transition.pResource = ctx.renderTargetResource;
@@ -510,13 +502,13 @@ namespace HookD3D12
 			gCommandList->ResourceBarrier(1, &barrier);
 
 			gCommandList->OMSetRenderTargets(1, &ctx.renderTargetViewHandle, FALSE, nullptr);
-			ID3D12DescriptorHeap* heaps[] = { gHeapSRV };
+			ID3D12DescriptorHeap* heaps[] = {gHeapSRV};
 			gCommandList->SetDescriptorHeaps(1, heaps);
 
 			ImGui::Render();
 			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), gCommandList);
 
-			// Transition back to present
+			//Transition back to present
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
 			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
 			gCommandList->ResourceBarrier(1, &barrier);
@@ -529,8 +521,8 @@ namespace HookD3D12
 				return CallOriginalPresent();
 			}
 
-			// Execute
-			if (!gCommandQueue) 
+			//Execute
+			if (!gCommandQueue)
 			{
 				//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: CommandQueue not set, skipping ExecuteCommandLists.");
 			}
@@ -540,7 +532,7 @@ namespace HookD3D12
 
 				if (gOverlayFence)
 				{
-					// Call Signal directly on the command queue to synchronize the internal overlay.
+					//Call Signal directly on the command queue to synchronize the internal overlay.
 					const UINT64 submittedFenceValue = ++gOverlayFenceValue;
 					HRESULT hr = gCommandQueue->Signal(gOverlayFence, submittedFenceValue);
 
@@ -551,11 +543,7 @@ namespace HookD3D12
 
 						if (gOverlaySubmissionCount == 1)
 						{
-							ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
-								"HookD3D12->HandlePresentD3D12: first overlay submission queue=%p backBuffer=%u fence=%llu",
-								gCommandQueue,
-								frameIdx,
-								static_cast<unsigned long long>(submittedFenceValue)));
+							ShaderInjectorIO::WriteToLogFile(StringHelper::Format("HookD3D12->HandlePresentD3D12: first overlay submission queue = %p backBuffer = %u fence = %llu", gCommandQueue, frameIdx, static_cast<unsigned long long>(submittedFenceValue)));
 						}
 					}
 					else
@@ -572,16 +560,19 @@ namespace HookD3D12
 
 	HRESULT STDMETHODCALLTYPE Handle_PresentD3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags)
 	{
-		// RTSS may call the process-wide MinHook detour while our private vtable
-		// wrapper is forwarding to it. Continue through MinHook's trampoline in
-		// that case so the overlay chain executes exactly once.
+		//RTSS may call the process-wide MinHook detour while our private vtable
+		//wrapper is forwarding to it. Continue through MinHook's trampoline in
+		//that case so the overlay chain executes exactly once.
 		if (gInsideSwapChainCompatibilityCall && Original_PresentD3D12)
 			return Original_PresentD3D12(pSwapChain, SyncInterval, Flags);
 
 		if (!gRuntimeReady.load(std::memory_order_acquire))
-			return Original_PresentD3D12
-				? Original_PresentD3D12(pSwapChain, SyncInterval, Flags)
-				: E_POINTER;
+		{
+			if (Original_PresentD3D12)
+				return Original_PresentD3D12(pSwapChain, SyncInterval, Flags);
+
+			return E_POINTER;
+		}
 
 		return HandlePresentD3D12(pSwapChain, SyncInterval, Flags, nullptr, false);
 	}
@@ -592,9 +583,12 @@ namespace HookD3D12
 			return Original_Present1D3D12(pSwapChain, SyncInterval, Flags, pParams);
 
 		if (!gRuntimeReady.load(std::memory_order_acquire))
-			return Original_Present1D3D12
-				? Original_Present1D3D12(pSwapChain, SyncInterval, Flags, pParams)
-				: E_POINTER;
+		{
+			if (Original_Present1D3D12)
+				return Original_Present1D3D12(pSwapChain, SyncInterval, Flags, pParams);
+
+			return E_POINTER;
+		}
 
 		return HandlePresentD3D12(pSwapChain, SyncInterval, Flags, pParams, true);
 	}
@@ -611,9 +605,12 @@ namespace HookD3D12
 		}
 
 		if (!downstreamPresent)
-			return Original_PresentD3D12
-				? Original_PresentD3D12(pSwapChain, SyncInterval, Flags)
-				: E_POINTER;
+		{
+			if (Original_PresentD3D12)
+				return Original_PresentD3D12(pSwapChain, SyncInterval, Flags);
+
+			return E_POINTER;
+		}
 
 		if (!gRuntimeReady.load(std::memory_order_acquire))
 			return downstreamPresent(pSwapChain, SyncInterval, Flags);
@@ -642,9 +639,12 @@ namespace HookD3D12
 		}
 
 		if (!downstreamPresent1)
-			return Original_Present1D3D12
-				? Original_Present1D3D12(pSwapChain, SyncInterval, Flags, pParams)
-				: E_POINTER;
+		{
+			if (Original_Present1D3D12)
+				return Original_Present1D3D12(pSwapChain, SyncInterval, Flags, pParams);
+
+			return E_POINTER;
+		}
 
 		if (!gRuntimeReady.load(std::memory_order_acquire))
 			return downstreamPresent1(pSwapChain, SyncInterval, Flags, pParams);
@@ -679,4 +679,4 @@ namespace HookD3D12
 	{
 		return Handle_RTSSCompatibilityPresent1(swapChain, syncInterval, flags, parameters);
 	}
-}
+} //namespace HookD3D12

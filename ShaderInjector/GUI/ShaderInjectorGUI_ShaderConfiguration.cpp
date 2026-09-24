@@ -60,7 +60,7 @@ namespace ShaderInjectorGUI
 		return displayName;
 	}
 
-	bool UI_ShaderConfigurationProperty(ShaderConfiguration::PropertyDisk& property)
+	bool DrawShaderConfigurationProperty(ShaderConfiguration::PropertyDisk& property)
 	{
 		bool changed = false;
 		ImGui::PushID(property.id.c_str());
@@ -128,13 +128,12 @@ namespace ShaderInjectorGUI
 			float minimum = 0.0f;
 			float maximum = 0.0f;
 			const bool hasRange = ShaderConfiguration::TryGetRange(property, minimum, maximum);
-			const bool valueChanged = hasRange
-				? ImGui::SliderInt(
-					"##Value",
-					&value,
-					static_cast<int>(minimum),
-					static_cast<int>(maximum))
-				: ImGui::DragInt("##Value", &value, 1.0f);
+			bool valueChanged = false;
+
+			if (hasRange)
+				valueChanged = ImGui::SliderInt("##Value", &value, static_cast<int>(minimum), static_cast<int>(maximum));
+			else
+				valueChanged = ImGui::DragInt("##Value", &value, 1.0f);
 
 			if (valueChanged)
 			{
@@ -155,6 +154,7 @@ namespace ShaderInjectorGUI
 			}
 
 			float values[4]{};
+
 			for (size_t index = 0; index < componentCount && index < parsedValues.size(); ++index)
 			{
 				values[index] = parsedValues[index];
@@ -163,30 +163,38 @@ namespace ShaderInjectorGUI
 			float minimum = 0.0f;
 			float maximum = 0.0f;
 			const bool hasRange = ShaderConfiguration::TryGetRange(property, minimum, maximum);
-			const float dragSpeed = hasRange ? (std::max)(0.001f, (maximum - minimum) / 200.0f) : 0.01f;
+			float dragSpeed = 0.01f;
+
+			if (hasRange)
+				dragSpeed = (std::max)(0.001f, (maximum - minimum) / 200.0f);
+
 			bool valueChanged = false;
 
 			switch (componentCount)
 			{
 				case 1:
-					valueChanged = hasRange
-						? ImGui::SliderFloat("##Value", values, minimum, maximum)
-						: ImGui::DragFloat("##Value", values, dragSpeed);
+					if (hasRange)
+						valueChanged = ImGui::SliderFloat("##Value", values, minimum, maximum);
+					else
+						valueChanged = ImGui::DragFloat("##Value", values, dragSpeed);
 					break;
 				case 2:
-					valueChanged = hasRange
-						? ImGui::SliderFloat2("##Value", values, minimum, maximum)
-						: ImGui::DragFloat2("##Value", values, dragSpeed);
+					if (hasRange)
+						valueChanged = ImGui::SliderFloat2("##Value", values, minimum, maximum);
+					else
+						valueChanged = ImGui::DragFloat2("##Value", values, dragSpeed);
 					break;
 				case 3:
-					valueChanged = hasRange
-						? ImGui::SliderFloat3("##Value", values, minimum, maximum)
-						: ImGui::DragFloat3("##Value", values, dragSpeed);
+					if (hasRange)
+						valueChanged = ImGui::SliderFloat3("##Value", values, minimum, maximum);
+					else
+						valueChanged = ImGui::DragFloat3("##Value", values, dragSpeed);
 					break;
 				case 4:
-					valueChanged = hasRange
-						? ImGui::SliderFloat4("##Value", values, minimum, maximum)
-						: ImGui::DragFloat4("##Value", values, dragSpeed);
+					if (hasRange)
+						valueChanged = ImGui::SliderFloat4("##Value", values, minimum, maximum);
+					else
+						valueChanged = ImGui::DragFloat4("##Value", values, dragSpeed);
 					break;
 				default:
 					ImGui::TextDisabled("Unsupported configuration type: %s", property.type.c_str());
@@ -206,12 +214,12 @@ namespace ShaderInjectorGUI
 		return changed;
 	}
 
-	void UI_ShaderConfiguration()
+	void DrawShaderConfiguration()
 	{
 		DatabaseShaderConfigurations::EnsureLoaded();
 		ShaderConfiguration::DocumentDisk& configurationDocument = DatabaseShaderConfigurations::GetEditableDocument();
-		const std::string shaderConfigurationHeader =
-			"Shader Configuration: " + std::to_string(configurationDocument.properties.size()) + "###ShaderConfiguration";
+
+		const std::string shaderConfigurationHeader = "Shader Configuration: " + std::to_string(configurationDocument.properties.size()) + "###ShaderConfiguration";
 
 		if (!ImGui::CollapsingHeader(shaderConfigurationHeader.c_str()))
 			return;
@@ -238,11 +246,13 @@ namespace ShaderInjectorGUI
 			else
 			{
 				gShaderConfigurationDirty = false;
+
 				WriteToRuntimeLogSuccess(
 					"Applied Shader Configuration properties=" +
 					std::to_string(applyResult.propertyCount) +
 					" sourceFiles=" +
 					std::to_string(applyResult.sourceFileCount));
+
 				RecompileModifiedShaders(false);
 			}
 		}
@@ -330,7 +340,7 @@ namespace ShaderInjectorGUI
 
 							++visiblePropertyCount;
 
-							if (UI_ShaderConfigurationProperty(property))
+							if (DrawShaderConfigurationProperty(property))
 								gShaderConfigurationDirty = true;
 						}
 
@@ -362,4 +372,4 @@ namespace ShaderInjectorGUI
 		ImGui::Spacing();
 		ImGui::Unindent(indentSpace);
 	}
-}
+} //namespace ShaderInjectorGUI

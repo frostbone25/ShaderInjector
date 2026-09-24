@@ -31,4 +31,4 @@ namespace ModifiedShader
 			originalShaderBytecodeLength,
 			shaderAnalysis)
 	};
-}
+} //namespace ModifiedShader

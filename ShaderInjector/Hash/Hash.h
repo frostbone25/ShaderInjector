@@ -11,4 +11,4 @@ namespace Hash
 	std::string FormatHash(uint64_t hash);
 
 	uint64_t ParseHashText(const std::string& hashText);
-}
+} //namespace Hash

@@ -150,4 +150,4 @@ namespace DatabaseModifiedShaders
 
 		return true;
 	}
-}
+} //namespace DatabaseModifiedShaders

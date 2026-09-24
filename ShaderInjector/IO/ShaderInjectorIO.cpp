@@ -11,9 +11,9 @@
 #include <vector>
 
 #if defined(_WIN32)
-	#include <Windows.h>
-	#include <d3dcompiler.h>
-	#include <shellapi.h>
+#include <Windows.h>
+#include <d3dcompiler.h>
+#include <shellapi.h>
 #endif
 
 #include "GUI/ShaderInjectorGUI.h"
@@ -26,10 +26,10 @@ namespace ShaderInjectorIO
 	{
 		std::string normalizedPath = pathString;
 
-		#if !defined(_WIN32)
-			//normalize Windows separators when the same configuration is read on a Unix-like host.
-			std::replace(normalizedPath.begin(), normalizedPath.end(), '\\', '/');
-		#endif
+#if !defined(_WIN32)
+		//normalize Windows separators when the same configuration is read on a Unix-like host.
+		std::replace(normalizedPath.begin(), normalizedPath.end(), '\\', '/');
+#endif
 
 		return std::filesystem::u8path(normalizedPath);
 	}
@@ -223,20 +223,20 @@ namespace ShaderInjectorIO
 	//hand the native path to the desktop shell; Linux opens it through its standard desktop launcher.
 	bool OpenExistingPath(const std::string& targetPath)
 	{
-		#if defined(_WIN32)
-			const std::filesystem::path nativePath = PathFromUTF8(targetPath);
-			const HINSTANCE shellLaunchResult = ShellExecuteW(
-				nullptr,
-				L"open",
-				nativePath.c_str(),
-				nullptr,
-				nullptr,
-				SW_SHOWNORMAL);
-			return reinterpret_cast<INT_PTR>(shellLaunchResult) > 32;
-		#else
-			const ProcessResult processResult = RunProcess("/usr/bin/xdg-open", { targetPath });
-			return processResult.Succeeded();
-		#endif
+#if defined(_WIN32)
+		const std::filesystem::path nativePath = PathFromUTF8(targetPath);
+		const HINSTANCE shellLaunchResult = ShellExecuteW(
+			nullptr,
+			L"open",
+			nativePath.c_str(),
+			nullptr,
+			nullptr,
+			SW_SHOWNORMAL);
+		return reinterpret_cast<INT_PTR>(shellLaunchResult) > 32;
+#else
+		const ProcessResult processResult = RunProcess("/usr/bin/xdg-open", {targetPath});
+		return processResult.Succeeded();
+#endif
 	}
 
 	bool OpenFile(const std::string& filePath)
@@ -281,6 +281,7 @@ namespace ShaderInjectorIO
 
 		std::error_code error;
 		const std::filesystem::path relativePath = std::filesystem::relative(PathFromUTF8(filePath), PathFromUTF8(baseDirectory), error);
+
 		if (error)
 			return {};
 
@@ -305,11 +306,11 @@ namespace ShaderInjectorIO
 		const std::string normalizedLeftPath = PathToUTF8(PathFromUTF8(leftPath).lexically_normal());
 		const std::string normalizedRightPath = PathToUTF8(PathFromUTF8(rightPath).lexically_normal());
 
-		#if defined(_WIN32)
-			return StringHelper::EqualsIgnoreCase(normalizedLeftPath, normalizedRightPath);
-		#else
-			return normalizedLeftPath == normalizedRightPath;
-		#endif
+#if defined(_WIN32)
+		return StringHelper::EqualsIgnoreCase(normalizedLeftPath, normalizedRightPath);
+#else
+		return normalizedLeftPath == normalizedRightPath;
+#endif
 	}
 
 	std::string SanitizeFileStem(const std::string& fileStemName)
@@ -349,8 +350,8 @@ namespace ShaderInjectorIO
 			lowercaseStem == "aux" ||
 			lowercaseStem == "nul" ||
 			(lowercaseStem.size() == 4 &&
-				(lowercaseStem.rfind("com", 0) == 0 || lowercaseStem.rfind("lpt", 0) == 0) &&
-				lowercaseStem[3] >= '1' && lowercaseStem[3] <= '9');
+			 (lowercaseStem.rfind("com", 0) == 0 || lowercaseStem.rfind("lpt", 0) == 0) &&
+			 lowercaseStem[3] >= '1' && lowercaseStem[3] <= '9');
 
 		if (reservedName)
 			fileStem.insert(fileStem.begin(), '_');
@@ -360,44 +361,44 @@ namespace ShaderInjectorIO
 
 	std::string ReadRegistryString(RegistryHive hive, const std::string& registrySubKey, const std::string& registryValueName)
 	{
-		#if defined(_WIN32)
-			HKEY rootKey = HKEY_CURRENT_USER;
+#if defined(_WIN32)
+		HKEY rootKey = HKEY_CURRENT_USER;
 
-			if (hive == RegistryHive::LocalMachine)
-				rootKey = HKEY_LOCAL_MACHINE;
+		if (hive == RegistryHive::LocalMachine)
+			rootKey = HKEY_LOCAL_MACHINE;
 
-			const std::wstring wideSubKey = StringHelper::Utf8ToWide(registrySubKey, false);
-			const std::wstring wideValueName = StringHelper::Utf8ToWide(registryValueName, false);
+		const std::wstring wideSubKey = StringHelper::Utf8ToWide(registrySubKey, false);
+		const std::wstring wideValueName = StringHelper::Utf8ToWide(registryValueName, false);
 
-			if (wideSubKey.empty())
-				return {};
-
-			//query the value size first, then allocate enough wide characters for the registry result.
-			DWORD requiredBytes = 0;
-			const wchar_t* valueNamePointer = nullptr;
-
-			if (!wideValueName.empty())
-				valueNamePointer = wideValueName.c_str();
-
-			const DWORD acceptedTypes = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ;
-			const LSTATUS sizeResult = RegGetValueW(rootKey, wideSubKey.c_str(), valueNamePointer, acceptedTypes, nullptr, nullptr, &requiredBytes);
-
-			if (sizeResult != ERROR_SUCCESS || requiredBytes < sizeof(wchar_t))
-				return {};
-
-			std::vector<wchar_t> registryValueCharacters(requiredBytes / sizeof(wchar_t), L'\0');
-			const LSTATUS readResult = RegGetValueW(rootKey, wideSubKey.c_str(), valueNamePointer, acceptedTypes, nullptr, registryValueCharacters.data(), &requiredBytes);
-
-			if (readResult != ERROR_SUCCESS)
-				return {};
-
-			return StringHelper::WideToUtf8(registryValueCharacters.data());
-		#else
-			(void)hive;
-			(void)registrySubKey;
-			(void)registryValueName;
+		if (wideSubKey.empty())
 			return {};
-		#endif
+
+		//query the value size first, then allocate enough wide characters for the registry result.
+		DWORD requiredBytes = 0;
+		const wchar_t* valueNamePointer = nullptr;
+
+		if (!wideValueName.empty())
+			valueNamePointer = wideValueName.c_str();
+
+		const DWORD acceptedTypes = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ;
+		const LSTATUS sizeResult = RegGetValueW(rootKey, wideSubKey.c_str(), valueNamePointer, acceptedTypes, nullptr, nullptr, &requiredBytes);
+
+		if (sizeResult != ERROR_SUCCESS || requiredBytes < sizeof(wchar_t))
+			return {};
+
+		std::vector<wchar_t> registryValueCharacters(requiredBytes / sizeof(wchar_t), L'\0');
+		const LSTATUS readResult = RegGetValueW(rootKey, wideSubKey.c_str(), valueNamePointer, acceptedTypes, nullptr, registryValueCharacters.data(), &requiredBytes);
+
+		if (readResult != ERROR_SUCCESS)
+			return {};
+
+		return StringHelper::WideToUtf8(registryValueCharacters.data());
+#else
+		(void)hive;
+		(void)registrySubKey;
+		(void)registryValueName;
+		return {};
+#endif
 	}
 
 	void CollectFilesByExtension(const std::string& directory, const std::string& extension, std::vector<std::string>& collectedFilePaths, bool includeSubdirectories, bool includeFullPath)
@@ -454,4 +455,4 @@ namespace ShaderInjectorIO
 			}
 		}
 	}
-}
+} //namespace ShaderInjectorIO

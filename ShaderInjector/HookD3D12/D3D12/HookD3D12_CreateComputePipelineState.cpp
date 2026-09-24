@@ -15,12 +15,12 @@ namespace HookD3D12
 
 		HRESULT result = Original_CreateComputePipelineState(device, description, interfaceId, pipelineState);
 
-		if (SUCCEEDED(result) && 
-			description && 
-			pipelineState && 
+		if (SUCCEEDED(result) &&
+			description &&
+			pipelineState &&
 			*pipelineState)
 			CaptureComputePipelineState(description, static_cast<ID3D12PipelineState*>(*pipelineState), true);
 
 		return result;
 	}
-}
+} //namespace HookD3D12

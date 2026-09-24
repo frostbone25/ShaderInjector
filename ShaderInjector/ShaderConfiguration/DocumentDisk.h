@@ -21,4 +21,4 @@ namespace ShaderConfiguration
 			format,
 			properties)
 	};
-}
+} //namespace ShaderConfiguration

@@ -14,11 +14,11 @@ namespace RenderPass
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(RenderPassType,
-	{
-		{ RenderPassType::Custom, "Custom" },
-		{ RenderPassType::MipChain, "MipChain" },
-		{ RenderPassType::TemporalHistory, "TemporalHistory" },
-		{ RenderPassType::ReplacementPixelShader, "ReplacementPixelShader" },
-		{ RenderPassType::ReplacementComputeShader, "ReplacementComputeShader" },
-	})
-}
+								 {
+									 {RenderPassType::Custom, "Custom"},
+									 {RenderPassType::MipChain, "MipChain"},
+									 {RenderPassType::TemporalHistory, "TemporalHistory"},
+									 {RenderPassType::ReplacementPixelShader, "ReplacementPixelShader"},
+									 {RenderPassType::ReplacementComputeShader, "ReplacementComputeShader"},
+								 })
+} //namespace RenderPass

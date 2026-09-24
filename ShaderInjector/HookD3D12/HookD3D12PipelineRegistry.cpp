@@ -54,7 +54,7 @@ namespace HookD3D12
 
 		std::shared_lock<std::shared_mutex> lock(gPipelineStateRegistryMutex);
 		const bool isKnown = gKnownPipelineStates.find(pipelineStateObject) != gKnownPipelineStates.end();
-		cacheEntry = { pipelineStateObject, generation, isKnown };
+		cacheEntry = {pipelineStateObject, generation, isKnown};
 		return isKnown;
 	}
 
@@ -63,4 +63,4 @@ namespace HookD3D12
 		std::unique_lock<std::shared_mutex> lock(gPipelineStateRegistryMutex);
 		return pipelineStateObject && gUntrackedBoundPipelineStates.insert(pipelineStateObject).second;
 	}
-}
+} //namespace HookD3D12

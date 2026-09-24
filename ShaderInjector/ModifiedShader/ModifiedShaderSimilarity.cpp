@@ -23,7 +23,9 @@ namespace ModifiedShader
 				++sharedHashCount;
 		}
 
-		return combinedHashes.empty() ? 1.0 : static_cast<double>(sharedHashCount) / static_cast<double>(combinedHashes.size());
+		if (combinedHashes.empty())
+			return 1.0;
+		return static_cast<double>(sharedHashCount) / static_cast<double>(combinedHashes.size());
 	}
 
 	double ModifiedShaderTargetDisk::CalculateSimilarityScore(const ModifiedShaderTargetDisk& other) const
@@ -60,4 +62,4 @@ namespace ModifiedShader
 	{
 		return SimilarityScore::CalculateCollectionSimilarityScore(left, right);
 	}
-}
+} //namespace ModifiedShader

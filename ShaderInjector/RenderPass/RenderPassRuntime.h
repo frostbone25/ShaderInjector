@@ -8,20 +8,11 @@
 #include <d3d12.h>
 
 #include "RenderPass/RenderPass.h"
+#include "RenderPass/PipelineOutputState.h"
 #include "ShaderTarget/ShaderTarget.h"
 
 namespace RenderPassRuntime
 {
-	struct PipelineOutputState
-	{
-		UINT renderTargetCount = 0;
-		DXGI_FORMAT renderTargetFormats[D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
-		DXGI_FORMAT depthStencilFormat = DXGI_FORMAT_UNKNOWN;
-		UINT sampleCount = 1;
-		UINT sampleQuality = 0;
-	};
-
-
 	void PublishRenderPassConfigurations(const std::vector<RenderPass::RenderPassDisk>& renderPasses);
 	bool HasEnabledRenderPasses();
 	bool HasEnabledMipChainPasses();
@@ -126,4 +117,4 @@ namespace RenderPassRuntime
 
 	RenderPass::RuntimeDiagnostics GetDiagnostics(const std::string& renderPassId);
 	void ClearDiagnostics(const std::string& renderPassId);
-}
+} //namespace RenderPassRuntime

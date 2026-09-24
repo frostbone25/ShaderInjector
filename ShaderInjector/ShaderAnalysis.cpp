@@ -6,12 +6,12 @@ namespace ShaderAnalysis
 {
 	namespace
 	{
-		#define DEFINE_COLLECTION_SCORE(Type) \
-			double Type::CalculateSimilarityScore(const std::vector<Type>& left, const std::vector<Type>& right) \
-			{ \
-				return SimilarityScore::CalculateCollectionSimilarityScore(left, right); \
-			}
+#define DEFINE_COLLECTION_SCORE(Type)                                                                    \
+	double Type::CalculateSimilarityScore(const std::vector<Type>& left, const std::vector<Type>& right) \
+	{                                                                                                    \
+		return SimilarityScore::CalculateCollectionSimilarityScore(left, right);                         \
 	}
+	} //namespace
 
 	double ContainerPartDisk::CalculateSimilarityScore(const ContainerPartDisk& other) const
 	{
@@ -183,5 +183,5 @@ namespace ShaderAnalysis
 	}
 	DEFINE_COLLECTION_SCORE(ShaderAnalysisDisk)
 
-	#undef DEFINE_COLLECTION_SCORE
-}
+#undef DEFINE_COLLECTION_SCORE
+} //namespace ShaderAnalysis

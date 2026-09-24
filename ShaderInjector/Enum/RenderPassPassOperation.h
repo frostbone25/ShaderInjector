@@ -18,15 +18,15 @@ namespace RenderPass
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(PassOperation,
-	{
-		{ PassOperation::Automatic, "Automatic" },
-		{ PassOperation::Custom, "Custom" },
-		{ PassOperation::ReplaceOriginal, "ReplaceOriginal" },
-		{ PassOperation::MipChain, "MipChain" },
-		{ PassOperation::Downsample, "Downsample" },
-		{ PassOperation::UpsampleChain, "UpsampleChain" },
-		{ PassOperation::Copy, "Copy" },
-		{ PassOperation::TemporalHistory, "TemporalHistory" },
-		{ PassOperation::Resolve, "Resolve" },
-	})
-}
+								 {
+									 {PassOperation::Automatic, "Automatic"},
+									 {PassOperation::Custom, "Custom"},
+									 {PassOperation::ReplaceOriginal, "ReplaceOriginal"},
+									 {PassOperation::MipChain, "MipChain"},
+									 {PassOperation::Downsample, "Downsample"},
+									 {PassOperation::UpsampleChain, "UpsampleChain"},
+									 {PassOperation::Copy, "Copy"},
+									 {PassOperation::TemporalHistory, "TemporalHistory"},
+									 {PassOperation::Resolve, "Resolve"},
+								 })
+} //namespace RenderPass

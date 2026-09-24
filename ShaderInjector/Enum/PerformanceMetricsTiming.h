@@ -32,4 +32,4 @@ namespace PerformanceMetrics
 		RetireMipSubmissions,
 		Count,
 	};
-}
+} //namespace PerformanceMetrics

@@ -26,11 +26,10 @@ namespace DatabaseShaderConfigurations
 		while (componentStart <= normalizedPath.size())
 		{
 			const size_t separator = normalizedPath.find('/', componentStart);
-			const std::string component = normalizedPath.substr(
-				componentStart,
-				separator == std::string::npos
-				? std::string::npos
-				: separator - componentStart);
+			size_t componentLength = std::string::npos;
+			if (separator != std::string::npos)
+				componentLength = separator - componentStart;
+			const std::string component = normalizedPath.substr(componentStart, componentLength);
 
 			if (component == "..")
 				return false;
@@ -65,7 +64,7 @@ namespace DatabaseShaderConfigurations
 			document.properties.begin(),
 			document.properties.end(),
 			[](const ShaderConfiguration::PropertyDisk& left,
-				const ShaderConfiguration::PropertyDisk& right)
+			   const ShaderConfiguration::PropertyDisk& right)
 			{
 				if (left.sourcePath != right.sourcePath)
 					return left.sourcePath < right.sourcePath;
@@ -151,4 +150,4 @@ namespace DatabaseShaderConfigurations
 		return gDocument;
 	}
 
-}
+} //namespace DatabaseShaderConfigurations

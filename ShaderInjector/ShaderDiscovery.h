@@ -32,4 +32,4 @@ namespace ShaderDiscovery
 		const std::vector<uint8_t>& shaderBytecode,
 		const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& modifiedShaders,
 		ShaderAnalysis::ShaderAnalysisDisk* outCandidateAnalysis = nullptr);
-}
+} //namespace ShaderDiscovery

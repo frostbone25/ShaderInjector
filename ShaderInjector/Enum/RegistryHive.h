@@ -1,6 +1,5 @@
 #pragma once
 
-
 namespace ShaderInjectorIO
 {
 	enum class RegistryHive
@@ -8,4 +7,4 @@ namespace ShaderInjectorIO
 		CurrentUser,
 		LocalMachine,
 	};
-}
+} //namespace ShaderInjectorIO

@@ -16,11 +16,11 @@ namespace ShaderConfiguration::Internal
 		else if (type == "integer")
 			type = "int";
 
-		if (type == "bool" || 
-			type == "int" || 
+		if (type == "bool" ||
+			type == "int" ||
 			type == "float" ||
-			type == "float2" || 
-			type == "float3" || 
+			type == "float2" ||
+			type == "float3" ||
 			type == "float4")
 		{
 			return type;
@@ -31,7 +31,7 @@ namespace ShaderConfiguration::Internal
 		if (lowercaseValue.empty() || lowercaseValue == "true" || lowercaseValue == "false")
 			return "bool";
 
-		for (const char* vectorType : { "float2", "float3", "float4" })
+		for (const char* vectorType : {"float2", "float3", "float4"})
 		{
 			if (StartsWith(lowercaseValue, std::string(vectorType) + "("))
 				return vectorType;
@@ -61,7 +61,9 @@ namespace ShaderConfiguration::Internal
 		if (type == "float4")
 			return 4;
 
-		return type == "float" ? 1 : 0;
+		if (type == "float")
+			return 1;
+		return 0;
 	}
 
 	bool ParseBooleanText(const std::string& text, bool fallbackValue)
@@ -83,12 +85,16 @@ namespace ShaderConfiguration::Internal
 		const std::string& fallbackValue,
 		bool fallbackBoolean)
 	{
-		const std::string candidate = StringHelper::TrimWhitespace(value).empty()
-			? fallbackValue
-			: value;
+		std::string candidate = value;
+		if (StringHelper::TrimWhitespace(value).empty())
+			candidate = fallbackValue;
 
 		if (type == "bool")
-			return ParseBooleanText(candidate, fallbackBoolean) ? "true" : "false";
+		{
+			if (ParseBooleanText(candidate, fallbackBoolean))
+				return "true";
+			return "false";
+		}
 
 		if (type == "int")
 		{
@@ -120,8 +126,8 @@ namespace ShaderConfiguration::Internal
 		if (components.size() != componentCount)
 			components.assign(componentCount, 0.0f);
 
-		return componentCount == 1
-			? FormatFloat(components.front())
-			: FormatFloatComponents(components.data(), components.size());
+		if (componentCount == 1)
+			return FormatFloat(components.front());
+		return FormatFloatComponents(components.data(), components.size());
 	}
-}
+} //namespace ShaderConfiguration::Internal

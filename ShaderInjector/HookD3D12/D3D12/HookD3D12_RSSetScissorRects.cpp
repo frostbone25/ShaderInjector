@@ -17,4 +17,4 @@ namespace HookD3D12
 
 		Original_RSSetScissorRects(commandList, rectangleCount, rectangles);
 	}
-}
+} //namespace HookD3D12

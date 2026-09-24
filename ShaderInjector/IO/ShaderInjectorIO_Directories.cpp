@@ -51,11 +51,11 @@ namespace ShaderInjectorIO
 
 	std::string GetToolPathDXC()
 	{
-		#if defined(_WIN32)
-			return JoinPath(GetToolsDirectory(), "dxc" + extensionEXE);
-		#else
-			return JoinPath(GetToolsDirectory(), "dxc");
-		#endif
+#if defined(_WIN32)
+		return JoinPath(GetToolsDirectory(), "dxc" + extensionEXE);
+#else
+		return JoinPath(GetToolsDirectory(), "dxc");
+#endif
 	}
 
 	std::string GetToolPathDXCompiler()
@@ -97,4 +97,4 @@ namespace ShaderInjectorIO
 	{
 		return JoinPath(GetGameDirectory(), injectorSettingsName);
 	}
-}
+} //namespace ShaderInjectorIO

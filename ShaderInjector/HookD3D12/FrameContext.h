@@ -11,4 +11,4 @@ namespace HookD3D12
 		D3D12_CPU_DESCRIPTOR_HANDLE renderTargetViewHandle = {};
 		UINT64 fenceValue = 0;
 	};
-}
+} //namespace HookD3D12

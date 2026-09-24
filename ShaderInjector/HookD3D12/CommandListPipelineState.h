@@ -12,4 +12,4 @@ namespace HookD3D12
 		std::atomic<ID3D12RootSignature*> computeRootSignature = nullptr;
 		std::atomic<ID3D12PipelineState*> pipelineState = nullptr;
 	};
-}
+} //namespace HookD3D12

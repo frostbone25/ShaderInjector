@@ -12,8 +12,8 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_OMSetRenderTargets(ID3D12GraphicsCommandList* commandList, UINT renderTargetCount, const D3D12_CPU_DESCRIPTOR_HANDLE* renderTargetDescriptors, BOOL descriptorsAreContiguous, const D3D12_CPU_DESCRIPTOR_HANDLE* depthStencilDescriptor)
 	{
-		if (Globals::gShaderInjectorEnabled && 
-			!IsInsideRenderPassInjection() && 
+		if (Globals::gShaderInjectorEnabled &&
+			!IsInsideRenderPassInjection() &&
 			RenderPassRuntime::IsGraphicsStateTrackingRequired())
 		{
 			RenderPassRuntime::TrackRenderTargets(commandList, renderTargetCount, renderTargetDescriptors, descriptorsAreContiguous, depthStencilDescriptor);
@@ -21,4 +21,4 @@ namespace HookD3D12
 
 		Original_OMSetRenderTargets(commandList, renderTargetCount, renderTargetDescriptors, descriptorsAreContiguous, depthStencilDescriptor);
 	}
-}
+} //namespace HookD3D12

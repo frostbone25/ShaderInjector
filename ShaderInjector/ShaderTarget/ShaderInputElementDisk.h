@@ -32,4 +32,4 @@ namespace ShaderTarget
 			inputSlotClass,
 			instanceDataStepRate)
 	};
-}
+} //namespace ShaderTarget

@@ -40,4 +40,4 @@ namespace ShaderConfiguration
 			return false;
 		}
 	}
-}
+} //namespace ShaderConfiguration

@@ -9,4 +9,4 @@ namespace ShaderAutomaticDiscovery
 		Graphics,
 		Stream,
 	};
-}
+} //namespace ShaderAutomaticDiscovery

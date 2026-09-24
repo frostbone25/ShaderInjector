@@ -82,9 +82,12 @@ namespace HookD3D12
 
 		ID3D12RootSignature* rootSignature = nullptr;
 
-		HRESULT result = Original_CreateRootSignature
-			? Original_CreateRootSignature(device, 0, blob.data(), blob.size(), IID_PPV_ARGS(&rootSignature))
-			: device->CreateRootSignature(0, blob.data(), blob.size(), IID_PPV_ARGS(&rootSignature));
+		HRESULT result = E_FAIL;
+
+		if (Original_CreateRootSignature)
+			result = Original_CreateRootSignature(device, 0, blob.data(), blob.size(), IID_PPV_ARGS(&rootSignature));
+		else
+			result = device->CreateRootSignature(0, blob.data(), blob.size(), IID_PPV_ARGS(&rootSignature));
 
 		if (FAILED(result) || !rootSignature)
 		{
@@ -157,4 +160,4 @@ namespace HookD3D12
 
 		return result;
 	}
-}
+} //namespace HookD3D12

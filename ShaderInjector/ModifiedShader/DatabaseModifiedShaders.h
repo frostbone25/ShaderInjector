@@ -28,4 +28,4 @@ namespace DatabaseModifiedShaders
 	bool CompiledShaderMatchesTargetInterface(
 		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 		const ShaderAnalysis::ShaderAnalysisDisk& targetAnalysis);
-}
+} //namespace DatabaseModifiedShaders

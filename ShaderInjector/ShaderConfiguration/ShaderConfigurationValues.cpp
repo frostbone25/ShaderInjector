@@ -57,7 +57,9 @@ namespace ShaderConfiguration
 
 	void SetBoolean(PropertyDisk& property, bool value)
 	{
-		property.value = value ? "true" : "false";
+		property.value = "false";
+		if (value)
+			property.value = "true";
 	}
 
 	void SetInteger(PropertyDisk& property, int value)
@@ -70,13 +72,14 @@ namespace ShaderConfiguration
 		if (!values || componentCount == 0)
 			return;
 
-		property.value = componentCount == 1
-			? FormatFloat(values[0])
-			: FormatFloatComponents(values, componentCount);
+		if (componentCount == 1)
+			property.value = FormatFloat(values[0]);
+		else
+			property.value = FormatFloatComponents(values, componentCount);
 	}
 
 	size_t ComponentCount(const PropertyDisk& property)
 	{
 		return ComponentCountForType(property.type);
 	}
-}
+} //namespace ShaderConfiguration

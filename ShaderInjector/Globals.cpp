@@ -49,4 +49,4 @@ namespace Globals
 	std::vector<uint8_t> nullPixelShaderBlob;
 	std::vector<uint8_t> markerPixelShaderBlob;
 	std::vector<uint8_t> markerComputeShaderBlob;
-}
+} //namespace Globals

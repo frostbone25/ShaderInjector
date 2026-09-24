@@ -14,10 +14,10 @@ namespace ShaderResource
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(ResourceLifetime,
-	{
-		{ ResourceLifetime::Immutable, "Immutable" },
-		{ ResourceLifetime::Transient, "Transient" },
-		{ ResourceLifetime::Persistent, "Persistent" },
-		{ ResourceLifetime::History, "History" },
-	})
-}
+								 {
+									 {ResourceLifetime::Immutable, "Immutable"},
+									 {ResourceLifetime::Transient, "Transient"},
+									 {ResourceLifetime::Persistent, "Persistent"},
+									 {ResourceLifetime::History, "History"},
+								 })
+} //namespace ShaderResource

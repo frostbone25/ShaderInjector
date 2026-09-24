@@ -1,81 +1,58 @@
-//HookInput.cpp
 #include "HookInput.h"
 
-//custom
+#include <map>
+
+#include "imgui.h"
+#include "imgui_impl_win32.h"
 #include "Globals.h"
 #include "HookD3D12.h"
 
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+//the imgui Win32 backend keeps this declaration disabled in its header to avoid a Windows include.
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND windowHandle, UINT message, WPARAM wordParameter, LPARAM longParameter);
 
 namespace HookInput
 {
-	// Maps each hooked window handle to its original WndProc.
-	// Using a map instead of a single static variable ensures that:
-	//   - Each window correctly forwards messages to its own original WndProc.
-	//   - Remove() restores every hooked window individually.
-	//   - No window is left pointing to unloaded DLL code after removal.
+	//each window keeps its own original procedure so messages and removal go to the right owner.
 	static std::map<HWND, WNDPROC> sOriginalWindowProcedures;
 
-	void Initalize(HWND windowHandle)
+	void Initialize(HWND windowHandle)
 	{
-		//DebugLog("[inputhook] Initializing input hook for window %p\n", windowHandle);
-
-		// Skip windows that were already subclassed by this DLL.
-		if (sOriginalWindowProcedures.count(windowHandle)) 
-		{
-			//DebugLog("[inputhook] Window %p is already hooked, skipping.\n", windowHandle);
+		//a window can appear more than once during swap-chain discovery, so hook it only once.
+		if (sOriginalWindowProcedures.count(windowHandle))
 			return;
-		}
 
-		// The GUI and shutdown paths need to know which game window currently owns ImGui input.
+		//the overlay needs the active game window for input and shutdown.
 		Globals::mainWindow = windowHandle;
 
 		WNDPROC originalWindowProcedure = (WNDPROC)SetWindowLongPtr(windowHandle, GWLP_WNDPROC, (LONG_PTR)WndProc);
 
-		if (!originalWindowProcedure) 
-		{
-			//DebugLog("[inputhook] Failed to set WndProc for window %p: %d\n", windowHandle, GetLastError());
-		}
-		else 
-		{
+		if (originalWindowProcedure)
 			sOriginalWindowProcedures[windowHandle] = originalWindowProcedure;
-			//DebugLog("[inputhook] WndProc hook set for window %p. Original WndProc=%p\n", windowHandle, originalWindowProcedure);
-		}
 	}
 
 	void Remove(HWND windowHandle)
 	{
 		auto originalWindowProcedureIterator = sOriginalWindowProcedures.find(windowHandle);
 
-		if (originalWindowProcedureIterator == sOriginalWindowProcedures.end()) 
-		{
-			//DebugLog("[inputhook] WndProc hook for window %p was already removed or never set.\n", windowHandle);
+		if (originalWindowProcedureIterator == sOriginalWindowProcedures.end())
 			return;
-		}
 
-		//DebugLog("[inputhook] Removing input hook for window %p\n", windowHandle);
-
-		if (SetWindowLongPtr(windowHandle, GWLP_WNDPROC, (LONG_PTR)originalWindowProcedureIterator->second) == 0) 
-		{
-			//DebugLog("[inputhook] Failed to restore WndProc for window %p: %d\n", windowHandle, GetLastError());
-		}
-		else 
-		{
-			//DebugLog("[inputhook] WndProc restored to %p for window %p\n", originalWindowProcedureIterator->second, windowHandle);
-		}
-
+		//restore the procedure before forgetting its mapping.
+		SetWindowLongPtr(windowHandle, GWLP_WNDPROC, (LONG_PTR)originalWindowProcedureIterator->second);
 		sOriginalWindowProcedures.erase(originalWindowProcedureIterator);
 
-		// Only clear the shared window handle when this hook owned it.
+		//another window may have become active since this one was hooked.
 		if (Globals::mainWindow == windowHandle)
 			Globals::mainWindow = nullptr;
 	}
 
 	LRESULT APIENTRY WndProc(HWND windowHandle, UINT message, WPARAM wordParameter, LPARAM longParameter)
 	{
-		// Messages must be forwarded to the original WndProc for the same HWND that received them.
+		//forward messages to the procedure captured for this specific window.
 		auto originalWindowProcedureIterator = sOriginalWindowProcedures.find(windowHandle);
-		WNDPROC originalWindowProcedure = (originalWindowProcedureIterator != sOriginalWindowProcedures.end()) ? originalWindowProcedureIterator->second : nullptr;
+		WNDPROC originalWindowProcedure = nullptr;
+		if (originalWindowProcedureIterator != sOriginalWindowProcedures.end())
+			originalWindowProcedure = originalWindowProcedureIterator->second;
 
 		const bool isFreshKeyDown = (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) && (longParameter & 0x40000000) == 0;
 
@@ -104,7 +81,7 @@ namespace HookInput
 
 			ImGuiIO& imguiInputOutput = ImGui::GetIO();
 
-			// When ImGui wants input, swallow it so the game does not also react to menu clicks/typing.
+			//when the overlay owns input, keep its clicks and typing away from the game.
 			if (imguiInputOutput.WantCaptureMouse || imguiInputOutput.WantCaptureKeyboard)
 				return TRUE;
 		}
@@ -114,4 +91,4 @@ namespace HookInput
 
 		return DefWindowProc(windowHandle, message, wordParameter, longParameter);
 	}
-}
+} //namespace HookInput

@@ -1,4 +1,6 @@
 #include "ShaderDiscovery.h"
+#include "ShaderTarget/ShaderIdentityKey.h"
+#include "ShaderTarget/ShaderIdentityKeyHasher.h"
 
 #include <algorithm>
 #include <cmath>
@@ -16,38 +18,22 @@
 
 namespace ShaderDiscovery
 {
+	using ShaderTarget::ShaderIdentityKey;
+	using ShaderTarget::ShaderIdentityKeyHasher;
+
 	namespace
 	{
-		// The validated old/new sample pairs differ by less than one percent. A five
-		// percent window leaves room for ordinary compiler drift while keeping the
-		// one-time semantic analysis candidate set small.
+		//The validated old/new sample pairs differ by less than one percent. A five
+		//percent window leaves room for ordinary compiler drift while keeping the
+		//one-time semantic analysis candidate set small.
 		constexpr double maximumByteLengthDifferenceRatio = 0.05;
 
-		struct ShaderKey
-		{
-			uint64_t hash = 0;
-			ShaderTarget::ShaderType type = ShaderTarget::Unknown;
-
-			bool operator==(const ShaderKey& other) const
-			{
-				return hash == other.hash && type == other.type;
-			}
-		};
-
-		struct ShaderKeyHasher
-		{
-			size_t operator()(const ShaderKey& key) const
-			{
-				return static_cast<size_t>(key.hash ^ (static_cast<uint64_t>(key.type) << 57));
-			}
-		};
-
-		std::unordered_map<ShaderKey, int, ShaderKeyHasher> gDiscoveredReplacementAliases;
-		std::unordered_set<ShaderKey, ShaderKeyHasher> gAttemptedCandidates;
-		std::unordered_map<ShaderKey, ShaderAnalysis::ShaderAnalysisDisk, ShaderKeyHasher> gReplacementCandidateAnalyses;
-		std::unordered_map<ShaderKey, ShaderAnalysis::ShaderAnalysisDisk, ShaderKeyHasher> gModifiedCandidateAnalyses;
-		std::unordered_map<ShaderKey, std::string, ShaderKeyHasher> gDiscoveredModifiedShaders;
-		std::unordered_set<ShaderKey, ShaderKeyHasher> gAttemptedModifiedShaders;
+		std::unordered_map<ShaderIdentityKey, int, ShaderIdentityKeyHasher> gDiscoveredReplacementAliases;
+		std::unordered_set<ShaderIdentityKey, ShaderIdentityKeyHasher> gAttemptedCandidates;
+		std::unordered_map<ShaderIdentityKey, ShaderAnalysis::ShaderAnalysisDisk, ShaderIdentityKeyHasher> gReplacementCandidateAnalyses;
+		std::unordered_map<ShaderIdentityKey, ShaderAnalysis::ShaderAnalysisDisk, ShaderIdentityKeyHasher> gModifiedCandidateAnalyses;
+		std::unordered_map<ShaderIdentityKey, std::string, ShaderIdentityKeyHasher> gDiscoveredModifiedShaders;
+		std::unordered_set<ShaderIdentityKey, ShaderIdentityKeyHasher> gAttemptedModifiedShaders;
 		std::mutex gModifiedDiscoveryMutex;
 
 		bool HasPlausibleByteLength(size_t candidateLength, const ShaderTarget::ShaderTargetDisk& replacement)
@@ -70,11 +56,11 @@ namespace ShaderDiscovery
 		bool HasStrictCrossVersionIdentity(const ShaderAnalysis::ShaderAnalysisDisk& analysis)
 		{
 			return analysis.succeeded &&
-				!analysis.portableReflectionIdentityHash.empty() &&
-				!analysis.semanticInstructionSetHash.empty() &&
-				!analysis.crossVersionIdentityHash.empty();
+				   !analysis.portableReflectionIdentityHash.empty() &&
+				   !analysis.semanticInstructionSetHash.empty() &&
+				   !analysis.crossVersionIdentityHash.empty();
 		}
-	}
+	} //namespace
 
 	void ResetRuntimeCache()
 	{
@@ -152,7 +138,7 @@ namespace ShaderDiscovery
 		if (shaderHash == 0 || shaderBytecode.empty())
 			return -1;
 
-		const ShaderKey candidateKey{ shaderHash, shaderType };
+		const ShaderIdentityKey candidateKey{shaderHash, shaderType};
 		const auto discoveredAlias = gDiscoveredReplacementAliases.find(candidateKey);
 
 		if (discoveredAlias != gDiscoveredReplacementAliases.end())
@@ -177,9 +163,9 @@ namespace ShaderDiscovery
 				HasPlausibleByteLength(shaderBytecode.size(), replacement))
 			{
 				hasPlausibleReplacement = true;
-				// crossVersionIdentityHash always incorporates portableReflectionIdentityHash, so
-				// a candidate whose portableReflectionIdentityHash isn't among these can never
-				// produce an exact or fuzzy match below - safe to use as a cheap pre-filter.
+				//crossVersionIdentityHash always incorporates portableReflectionIdentityHash, so
+				//a candidate whose portableReflectionIdentityHash isn't among these can never
+				//produce an exact or fuzzy match below - safe to use as a cheap pre-filter.
 				acceptablePortableReflectionHashes.insert(replacement.originalShaderAnalysis.portableReflectionIdentityHash);
 			}
 		}
@@ -209,7 +195,9 @@ namespace ShaderDiscovery
 
 			if (!candidateAnalysis.succeeded)
 			{
-				failureReason = candidateAnalysis.error.empty() ? "analysis did not succeed" : candidateAnalysis.error;
+				failureReason = candidateAnalysis.error;
+				if (failureReason.empty())
+					failureReason = "analysis did not succeed";
 			}
 			else
 			{
@@ -234,9 +222,12 @@ namespace ShaderDiscovery
 					failureReason = "unknown";
 			}
 
+			std::string failureContext = "analysis failed for ";
+			if (candidateAnalysis.succeeded)
+				failureContext = "incomplete cross-version identity for ";
 			ShaderInjectorGUI::WriteToRuntimeLogError(
 				"ShaderDiscovery->DiscoverEnabledReplacement: " +
-				std::string(candidateAnalysis.succeeded ? "incomplete cross-version identity for " : "analysis failed for ") +
+				failureContext +
 				Hash::FormatHash(shaderHash) +
 				" type=" + StringHelper::ShaderTypeToString(shaderType) +
 				": " + failureReason);
@@ -319,14 +310,14 @@ namespace ShaderDiscovery
 					const ShaderAnalysis::ShaderAnalysisDisk& bestAnalysis = replacements[bestFuzzyReplacementIndex].originalShaderAnalysis;
 
 					auto appendDiff = [&](const char* label, const std::string& left, const std::string& right)
+					{
+						if (left != right)
 						{
-							if (left != right)
-							{
-								if (!identityDiff.empty())
-									identityDiff += ", ";
-								identityDiff += std::string(label) + "=" + left + "!=" + right;
-							}
-						};
+							if (!identityDiff.empty())
+								identityDiff += ", ";
+							identityDiff += std::string(label) + "=" + left + "!=" + right;
+						}
+					};
 
 					appendDiff("portableReflection", candidateAnalysis.portableReflectionIdentityHash, bestAnalysis.portableReflectionIdentityHash);
 					appendDiff("semanticInstructionSet", candidateAnalysis.semanticInstructionSetHash, bestAnalysis.semanticInstructionSetHash);
@@ -334,14 +325,18 @@ namespace ShaderDiscovery
 					appendDiff("entryFunction", candidateAnalysis.entryFunctionName, bestAnalysis.entryFunctionName);
 				}
 
+				std::string identityDetails;
+				std::string bestCandidateDetails;
+				if (!identityDiff.empty())
+					identityDetails = " identityDiff={" + identityDiff + "}";
+				if (bestFuzzyReplacementIndex >= 0)
+					bestCandidateDetails = " bestCandidate=" + replacements[bestFuzzyReplacementIndex].name;
 				ShaderInjectorGUI::WriteToRuntimeLogError(
 					"ShaderDiscovery->DiscoverEnabledReplacement: fuzzy match rejected for " +
 					Hash::FormatHash(shaderHash) +
 					" bestScore=" + std::to_string(bestFuzzyScore) +
 					" secondBestScore=" + std::to_string(secondBestFuzzyScore) +
-					(identityDiff.empty() ? "" : " identityDiff={" + identityDiff + "}") +
-					(bestFuzzyReplacementIndex >= 0 ?
-						" bestCandidate=" + replacements[bestFuzzyReplacementIndex].name : ""));
+					identityDetails + bestCandidateDetails);
 			}
 
 			gAttemptedCandidates.insert(candidateKey);
@@ -371,12 +366,12 @@ namespace ShaderDiscovery
 		if (shaderHash == 0 || shaderBytecode.empty())
 			return -1;
 
-		const ShaderKey candidateKey{ shaderHash, shaderType };
+		const ShaderIdentityKey candidateKey{shaderHash, shaderType};
 
-		// gModifiedDiscoveryMutex only protects the shared caches below (gDiscoveredModifiedShaders,
-		// gAttemptedModifiedShaders, gModifiedCandidateAnalyses). It is deliberately NOT held across
-		// the expensive DXIL analysis or scoring work further down, so multiple worker threads can
-		// actually analyze different candidates at the same time instead of queuing up behind one lock.
+		//gModifiedDiscoveryMutex only protects the shared caches below (gDiscoveredModifiedShaders,
+		//gAttemptedModifiedShaders, gModifiedCandidateAnalyses). It is deliberately NOT held across
+		//the expensive DXIL analysis or scoring work further down, so multiple worker threads can
+		//actually analyze different candidates at the same time instead of queuing up behind one lock.
 		{
 			std::lock_guard<std::mutex> lock(gModifiedDiscoveryMutex);
 			const auto cachedMatch = gDiscoveredModifiedShaders.find(candidateKey);
@@ -486,10 +481,10 @@ namespace ShaderDiscovery
 
 		if (!haveCachedAnalysis)
 		{
-			// Cross-version matches always share an exact portableReflectionIdentityHash (cheap,
-			// no disassembly needed), so collecting the identities of compatible targets first
-			// lets Analyze() skip its expensive disassembly step for candidates that can never
-			// match anything - which is most of them.
+			//Cross-version matches always share an exact portableReflectionIdentityHash (cheap,
+			//no disassembly needed), so collecting the identities of compatible targets first
+			//lets Analyze() skip its expensive disassembly step for candidates that can never
+			//match anything - which is most of them.
 			std::unordered_set<std::string> acceptablePortableReflectionHashes;
 
 			for (const ModifiedShader::ModifiedShaderPackageDisk& package : modifiedShaders)
@@ -504,8 +499,8 @@ namespace ShaderDiscovery
 				}
 			}
 
-			// This is the expensive part (DXIL reflection + disassembly), intentionally run
-			// without holding gModifiedDiscoveryMutex so worker threads run it concurrently.
+			//This is the expensive part (DXIL reflection + disassembly), intentionally run
+			//without holding gModifiedDiscoveryMutex so worker threads run it concurrently.
 			ShaderAnalyzer::Analyze(shaderBytecode.data(), shaderBytecode.size(), candidateAnalysis, &acceptablePortableReflectionHashes);
 			std::lock_guard<std::mutex> lock(gModifiedDiscoveryMutex);
 			gModifiedCandidateAnalyses.emplace(candidateKey, candidateAnalysis);
@@ -594,32 +589,37 @@ namespace ShaderDiscovery
 				if (bestTargetAnalysis)
 				{
 					auto appendDiff = [&](const char* label, const std::string& left, const std::string& right)
+					{
+						if (left != right)
 						{
-							if (left != right)
-							{
-								if (!identityDiff.empty())
-									identityDiff += ", ";
-								identityDiff += std::string(label) + "=" + left + "!=" + right;
-							}
-						};
+							if (!identityDiff.empty())
+								identityDiff += ", ";
+							identityDiff += std::string(label) + "=" + left + "!=" + right;
+						}
+					};
 					appendDiff("portableReflection", candidateAnalysis.portableReflectionIdentityHash, bestTargetAnalysis->portableReflectionIdentityHash);
 					appendDiff("semanticInstructionSet", candidateAnalysis.semanticInstructionSetHash, bestTargetAnalysis->semanticInstructionSetHash);
 					appendDiff("crossVersionIdentity", candidateAnalysis.crossVersionIdentityHash, bestTargetAnalysis->crossVersionIdentityHash);
 					appendDiff("entryFunction", candidateAnalysis.entryFunctionName, bestTargetAnalysis->entryFunctionName);
 				}
 
+				std::string identityDetails;
+				if (!identityDiff.empty())
+					identityDetails = " identityDiff={" + identityDiff + "}";
 				ShaderInjectorGUI::WriteToRuntimeLogError(
 					"ShaderDiscovery->DiscoverEnabledModifiedShader: analysis match rejected for " +
 					Hash::FormatHash(shaderHash) +
 					" bestScore=" + std::to_string(bestScore) +
 					" secondBestScore=" + std::to_string(secondBestScore) +
-					(identityDiff.empty() ? "" : " identityDiff={" + identityDiff + "}") +
+					identityDetails +
 					" bestCandidate=" + bestPackage.id);
 			}
 		}
 		else
 		{
-			const std::string failureReason = candidateAnalysis.error.empty() ? "analysis did not succeed" : candidateAnalysis.error;
+			std::string failureReason = candidateAnalysis.error;
+			if (failureReason.empty())
+				failureReason = "analysis did not succeed";
 			ShaderInjectorGUI::WriteToRuntimeLogError(
 				"ShaderDiscovery->DiscoverEnabledModifiedShader: analysis failed for " +
 				Hash::FormatHash(shaderHash) +
@@ -631,4 +631,4 @@ namespace ShaderDiscovery
 		gAttemptedModifiedShaders.insert(candidateKey);
 		return -1;
 	}
-}
+} //namespace ShaderDiscovery

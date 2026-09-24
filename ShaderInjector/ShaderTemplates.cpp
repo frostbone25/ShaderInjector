@@ -68,20 +68,20 @@ void main(triangle Vertex input[3], inout TriangleStream<Vertex> outputStream)
 	{
 		switch (shaderType)
 		{
-			case ShaderTarget::VertexShader:
-				return vertexShaderTemplate;
-			case ShaderTarget::HullShader: 
-				return hullShaderTemplate;
-			case ShaderTarget::DomainShader: 
-				return domainShaderTemplate;
-			case ShaderTarget::GeometryShader: 
-				return geometryShaderTemplate;
-			case ShaderTarget::PixelShader: 
-				return internalGreenPixelShaderSourceCode;
-			case ShaderTarget::ComputeShader:
-				return internalMarkerComputeShaderSourceCode;
-			default: 
-				return nullptr;
+		case ShaderTarget::VertexShader:
+			return vertexShaderTemplate;
+		case ShaderTarget::HullShader:
+			return hullShaderTemplate;
+		case ShaderTarget::DomainShader:
+			return domainShaderTemplate;
+		case ShaderTarget::GeometryShader:
+			return geometryShaderTemplate;
+		case ShaderTarget::PixelShader:
+			return internalGreenPixelShaderSourceCode;
+		case ShaderTarget::ComputeShader:
+			return internalMarkerComputeShaderSourceCode;
+		default:
+			return nullptr;
 		}
 	}
-}
+} //namespace ShaderTemplates

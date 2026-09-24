@@ -14,33 +14,33 @@ namespace RenderPassRuntime
 		{
 			case RootBindingType::DescriptorTable:
 				return "Descriptor Table";
-			case RootBindingType::ConstantBufferView: 
+			case RootBindingType::ConstantBufferView:
 				return "CBV";
-			case RootBindingType::ShaderResourceView: 
+			case RootBindingType::ShaderResourceView:
 				return "SRV";
-			case RootBindingType::UnorderedAccessView: 
+			case RootBindingType::UnorderedAccessView:
 				return "UAV";
-			case RootBindingType::Constants: 
+			case RootBindingType::Constants:
 				return "Root Constants";
-			default: 
+			default:
 				return "";
 		}
 	}
-}
+} //namespace RenderPassRuntime
 
 std::string GetProcessorArchitectureName(WORD architecture)
 {
 	switch (architecture)
 	{
-		case PROCESSOR_ARCHITECTURE_AMD64: 
+		case PROCESSOR_ARCHITECTURE_AMD64:
 			return "x64";
-		case PROCESSOR_ARCHITECTURE_ARM: 
+		case PROCESSOR_ARCHITECTURE_ARM:
 			return "ARM";
-		case PROCESSOR_ARCHITECTURE_ARM64: 
+		case PROCESSOR_ARCHITECTURE_ARM64:
 			return "ARM64";
-		case PROCESSOR_ARCHITECTURE_INTEL: 
+		case PROCESSOR_ARCHITECTURE_INTEL:
 			return "x86";
-		default: 
+		default:
 			return "Unknown";
 	}
 }
@@ -49,17 +49,17 @@ std::string D3DFeatureLevelToString(D3D_FEATURE_LEVEL featureLevel)
 {
 	switch (featureLevel)
 	{
-		case D3D_FEATURE_LEVEL_12_2: 
+		case D3D_FEATURE_LEVEL_12_2:
 			return "12_2";
-		case D3D_FEATURE_LEVEL_12_1: 
+		case D3D_FEATURE_LEVEL_12_1:
 			return "12_1";
-		case D3D_FEATURE_LEVEL_12_0: 
+		case D3D_FEATURE_LEVEL_12_0:
 			return "12_0";
-		case D3D_FEATURE_LEVEL_11_1: 
+		case D3D_FEATURE_LEVEL_11_1:
 			return "11_1";
-		case D3D_FEATURE_LEVEL_11_0: 
+		case D3D_FEATURE_LEVEL_11_0:
 			return "11_0";
-		default: 
+		default:
 			return std::to_string((UINT)featureLevel);
 	}
 }
@@ -70,21 +70,21 @@ std::string D3DShaderModelToString(D3D_SHADER_MODEL shaderModel)
 	{
 		case D3D_SHADER_MODEL_6_7:
 			return "6_7";
-		case D3D_SHADER_MODEL_6_6: 
+		case D3D_SHADER_MODEL_6_6:
 			return "6_6";
-		case D3D_SHADER_MODEL_6_5: 
+		case D3D_SHADER_MODEL_6_5:
 			return "6_5";
-		case D3D_SHADER_MODEL_6_4: 
+		case D3D_SHADER_MODEL_6_4:
 			return "6_4";
-		case D3D_SHADER_MODEL_6_3: 
+		case D3D_SHADER_MODEL_6_3:
 			return "6_3";
-		case D3D_SHADER_MODEL_6_2: 
+		case D3D_SHADER_MODEL_6_2:
 			return "6_2";
 		case D3D_SHADER_MODEL_6_1:
 			return "6_1";
-		case D3D_SHADER_MODEL_6_0: 
+		case D3D_SHADER_MODEL_6_0:
 			return "6_0";
-		default: 
+		default:
 			return std::to_string((UINT)shaderModel);
 	}
 }
@@ -93,21 +93,21 @@ const char* RenderDocAvailabilityText(RenderDocAvailability availability)
 {
 	switch (availability)
 	{
-		case RenderDocAvailability::Disabled: 
+		case RenderDocAvailability::Disabled:
 			return "Disabled";
-		case RenderDocAvailability::NotAttached: 
+		case RenderDocAvailability::NotAttached:
 			return "Not attached";
-		case RenderDocAvailability::InstallationNotFound: 
+		case RenderDocAvailability::InstallationNotFound:
 			return "RenderDoc installation was not found";
 		case RenderDocAvailability::ModuleLoadFailed:
 			return "RenderDoc library failed to load";
-		case RenderDocAvailability::ApiEntryPointMissing: 
+		case RenderDocAvailability::ApiEntryPointMissing:
 			return "RENDERDOC_GetAPI is unavailable";
-		case RenderDocAvailability::ApiVersionUnsupported: 
+		case RenderDocAvailability::ApiVersionUnsupported:
 			return "RenderDoc API version is unsupported";
-		case RenderDocAvailability::Ready: 
+		case RenderDocAvailability::Ready:
 			return "Ready";
-		default: 
+		default:
 			return "Unavailable";
 	}
 }
@@ -118,19 +118,19 @@ namespace StringHelper
 	{
 		switch (shaderType)
 		{
-			case ShaderTarget::VertexShader: 
+			case ShaderTarget::VertexShader:
 				return "VertexShader";
-			case ShaderTarget::HullShader: 
+			case ShaderTarget::HullShader:
 				return "HullShader";
-			case ShaderTarget::DomainShader: 
+			case ShaderTarget::DomainShader:
 				return "DomainShader";
-			case ShaderTarget::GeometryShader: 
+			case ShaderTarget::GeometryShader:
 				return "GeometryShader";
-			case ShaderTarget::PixelShader: 
+			case ShaderTarget::PixelShader:
 				return "PixelShader";
-			case ShaderTarget::ComputeShader: 
+			case ShaderTarget::ComputeShader:
 				return "ComputeShader";
-			default: 
+			default:
 				return "Unknown";
 		}
 	}
@@ -139,29 +139,29 @@ namespace StringHelper
 	{
 		switch (shaderModel)
 		{
-			case Globals::ShaderModel::ShaderModel5_0: 
+			case Globals::ShaderModel::ShaderModel5_0:
 				return "5_0";
-			case Globals::ShaderModel::ShaderModel5_1: 
+			case Globals::ShaderModel::ShaderModel5_1:
 				return "5_1";
-			case Globals::ShaderModel::ShaderModel6_0: 
+			case Globals::ShaderModel::ShaderModel6_0:
 				return "6_0";
-			case Globals::ShaderModel::ShaderModel6_1: 
+			case Globals::ShaderModel::ShaderModel6_1:
 				return "6_1";
-			case Globals::ShaderModel::ShaderModel6_2: 
+			case Globals::ShaderModel::ShaderModel6_2:
 				return "6_2";
-			case Globals::ShaderModel::ShaderModel6_3: 
+			case Globals::ShaderModel::ShaderModel6_3:
 				return "6_3";
-			case Globals::ShaderModel::ShaderModel6_4: 
+			case Globals::ShaderModel::ShaderModel6_4:
 				return "6_4";
-			case Globals::ShaderModel::ShaderModel6_5: 
+			case Globals::ShaderModel::ShaderModel6_5:
 				return "6_5";
-			case Globals::ShaderModel::ShaderModel6_6: 
+			case Globals::ShaderModel::ShaderModel6_6:
 				return "6_6";
-			default: 
+			default:
 				return "6_6";
 		}
 	}
-}
+} //namespace StringHelper
 
 namespace RenderPass
 {
@@ -169,16 +169,16 @@ namespace RenderPass
 	{
 		switch (type)
 		{
-			case RenderPassType::MipChain: 
+			case RenderPassType::MipChain:
 				return "MipChain";
-			case RenderPassType::TemporalHistory: 
+			case RenderPassType::TemporalHistory:
 				return "Temporal History";
-			case RenderPassType::ReplacementPixelShader: 
+			case RenderPassType::ReplacementPixelShader:
 				return "Replacement Pixel Shader";
-			case RenderPassType::ReplacementComputeShader: 
+			case RenderPassType::ReplacementComputeShader:
 				return "Replacement Compute Shader";
 			case RenderPassType::Custom:
-			default: 
+			default:
 				return "Custom";
 		}
 	}
@@ -187,12 +187,12 @@ namespace RenderPass
 	{
 		switch (mode)
 		{
-			case ExecutionMode::FullscreenPixel: 
+			case ExecutionMode::FullscreenPixel:
 				return "Fullscreen Pixel";
-			case ExecutionMode::Compute: 
+			case ExecutionMode::Compute:
 				return "Compute";
 			case ExecutionMode::Automatic:
-			default: 
+			default:
 				return "Automatic";
 		}
 	}
@@ -201,24 +201,24 @@ namespace RenderPass
 	{
 		switch (operation)
 		{
-			case PassOperation::Custom: 
+			case PassOperation::Custom:
 				return "Custom";
-			case PassOperation::ReplaceOriginal: 
+			case PassOperation::ReplaceOriginal:
 				return "Replace Original";
-			case PassOperation::MipChain: 
+			case PassOperation::MipChain:
 				return "Mip Chain";
-			case PassOperation::Downsample: 
+			case PassOperation::Downsample:
 				return "Downsample";
-			case PassOperation::UpsampleChain: 
+			case PassOperation::UpsampleChain:
 				return "Upsample Chain";
-			case PassOperation::Copy: 
+			case PassOperation::Copy:
 				return "Copy";
-			case PassOperation::TemporalHistory: 
+			case PassOperation::TemporalHistory:
 				return "Temporal History Copy";
-			case PassOperation::Resolve: 
+			case PassOperation::Resolve:
 				return "Resolve";
 			case PassOperation::Automatic:
-			default: 
+			default:
 				return "Automatic";
 		}
 	}
@@ -230,11 +230,11 @@ namespace RenderPass
 			case EventType::RenderPass:
 				return "Render Pass";
 			case EventType::ModifiedShader:
-			default: 
+			default:
 				return "Modified Shader";
 		}
 	}
-}
+} //namespace RenderPass
 
 namespace ShaderResource
 {
@@ -242,12 +242,12 @@ namespace ShaderResource
 	{
 		switch (origin)
 		{
-			case ResourceOrigin::Game: 
+			case ResourceOrigin::Game:
 				return "Game Runtime";
-			case ResourceOrigin::Runtime: 
+			case ResourceOrigin::Runtime:
 				return "Injector Runtime";
 			case ResourceOrigin::Disk:
-			default: 
+			default:
 				return "Offline / Disk";
 		}
 	}
@@ -256,14 +256,14 @@ namespace ShaderResource
 	{
 		switch (lifetime)
 		{
-			case ResourceLifetime::Transient: 
+			case ResourceLifetime::Transient:
 				return "Transient";
-			case ResourceLifetime::Persistent: 
+			case ResourceLifetime::Persistent:
 				return "Persistent";
-			case ResourceLifetime::History: 
+			case ResourceLifetime::History:
 				return "History";
 			case ResourceLifetime::Immutable:
-			default: 
+			default:
 				return "Immutable";
 		}
 	}
@@ -272,18 +272,18 @@ namespace ShaderResource
 	{
 		switch (dimension)
 		{
-			case TextureDimension::Texture2D: 
+			case TextureDimension::Texture2D:
 				return "Texture2D";
-			case TextureDimension::Texture2DArray: 
+			case TextureDimension::Texture2DArray:
 				return "Texture2DArray";
-			case TextureDimension::TextureCube: 
+			case TextureDimension::TextureCube:
 				return "TextureCube";
-			case TextureDimension::TextureCubeArray: 
+			case TextureDimension::TextureCubeArray:
 				return "TextureCubeArray";
-			case TextureDimension::Texture3D: 
+			case TextureDimension::Texture3D:
 				return "Texture3D";
 			case TextureDimension::Unknown:
-			default: 
+			default:
 				return "Unknown";
 		}
 	}
@@ -292,18 +292,18 @@ namespace ShaderResource
 	{
 		switch (dimension)
 		{
-			case TextureDimension::Texture2DArray: 
+			case TextureDimension::Texture2DArray:
 				return "Texture2DArray<float4>";
-			case TextureDimension::TextureCube: 
+			case TextureDimension::TextureCube:
 				return "TextureCube<float4>";
-			case TextureDimension::TextureCubeArray: 
+			case TextureDimension::TextureCubeArray:
 				return "TextureCubeArray<float4>";
-			case TextureDimension::Texture3D: 
+			case TextureDimension::Texture3D:
 				return "Texture3D<float4>";
 			case TextureDimension::Texture2D:
 			case TextureDimension::Unknown:
-			default: 
+			default:
 				return "Texture2D<float4>";
 		}
 	}
-}
+} //namespace ShaderResource

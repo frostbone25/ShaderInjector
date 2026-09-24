@@ -25,7 +25,7 @@ namespace DDS
 		uint32_t width;
 
 		//the pitch or number of bytes per scan line in an uncompressed texture
-		//the total number of bytes in the top level texture for a compressed texture. 
+		//the total number of bytes in the top level texture for a compressed texture.
 		//for information about how to compute the pitch, see the DDS File Layout section of the Programming Guide for DDS.
 		uint32_t pitchOrLinearSize;
 
@@ -57,4 +57,4 @@ namespace DDS
 #pragma pack(pop)
 
 	static_assert(sizeof(DDSHeader) == 124, "Unexpected DDS header size.");
-}
+} //namespace DDS

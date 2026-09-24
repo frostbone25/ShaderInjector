@@ -28,4 +28,4 @@ namespace ShaderTarget
 			componentCount,
 			outputSlot)
 	};
-}
+} //namespace ShaderTarget

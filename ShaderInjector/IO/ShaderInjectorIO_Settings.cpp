@@ -50,7 +50,7 @@ namespace ShaderInjectorIO
 	static const char* const settingsNameMinimumSimilarityScore = "MinimumSimilarityScore";
 	static const char* const settingsNameSimilarityAmbiguityMargin = "SimilarityAmbiguityMargin";
 
-	template<typename ValueType>
+	template <typename ValueType>
 	ValueType ReadIniValueOrDefault(
 		ini::IniFile& iniFile,
 		const char* sectionName,
@@ -192,7 +192,8 @@ namespace ShaderInjectorIO
 
 			WriteToLogFile(
 				"ShaderInjectorIO->ReadInjectorSettings: parsed injector settings"
-				" renderDocEnabled=" + std::to_string(Globals::gRenderDocIntegrationEnabled) +
+				" renderDocEnabled=" +
+				std::to_string(Globals::gRenderDocIntegrationEnabled) +
 				" renderDocAutoAttach=" + std::to_string(Globals::gRenderDocAutoAttachEnabled) +
 				" disableLogs=" + std::to_string(Globals::gDisableLogs) +
 				" verboseLog=" + std::to_string(Globals::gVerboseLog) +
@@ -315,4 +316,4 @@ namespace ShaderInjectorIO
 			return false;
 		}
 	}
-}
+} //namespace ShaderInjectorIO

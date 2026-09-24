@@ -10,4 +10,4 @@ namespace HookD3D12
 		void* hookFunction;
 		void** originalFunction;
 	};
-}
+} //namespace HookD3D12

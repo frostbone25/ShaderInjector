@@ -12,8 +12,8 @@ namespace ShaderResource
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(TemporalView,
-	{
-		{ TemporalView::Current, "Current" },
-		{ TemporalView::Previous, "Previous" },
-	})
-}
+								 {
+									 {TemporalView::Current, "Current"},
+									 {TemporalView::Previous, "Previous"},
+								 })
+} //namespace ShaderResource

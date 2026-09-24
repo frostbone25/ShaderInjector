@@ -15,9 +15,9 @@ namespace HookD3D12
 	{
 		Original_CreateRenderTargetView(device, resource, description, destination);
 
-		if (Globals::gShaderInjectorEnabled && 
-			!IsInsideRenderPassInjection() && 
+		if (Globals::gShaderInjectorEnabled &&
+			!IsInsideRenderPassInjection() &&
 			RenderPassRuntime::IsResourceTrackingRequired())
 			RenderPassResourceRegistry::RegisterRenderTargetView(resource, description, destination);
 	}
-}
+} //namespace HookD3D12

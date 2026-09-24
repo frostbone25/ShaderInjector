@@ -46,8 +46,13 @@ namespace ModifiedShader
 			return false;
 
 		ModifiedShaderPackageDisk portablePackage = package;
-		portablePackage.sourceFile = ShaderInjectorIO::FileNameFromPath(portablePackage.sourceFile.empty() ? portablePackage.sourcePath : portablePackage.sourceFile);
-		portablePackage.compiledBlobFile = ShaderInjectorIO::FileNameFromPath(portablePackage.compiledBlobFile.empty() ? portablePackage.compiledBlobPath : portablePackage.compiledBlobFile);
+		//store file names so packages can move without changing their saved paths.
+		if (portablePackage.sourceFile.empty())
+			portablePackage.sourceFile = portablePackage.sourcePath;
+		portablePackage.sourceFile = ShaderInjectorIO::FileNameFromPath(portablePackage.sourceFile);
+		if (portablePackage.compiledBlobFile.empty())
+			portablePackage.compiledBlobFile = portablePackage.compiledBlobPath;
+		portablePackage.compiledBlobFile = ShaderInjectorIO::FileNameFromPath(portablePackage.compiledBlobFile);
 		portablePackage.packageDirectory = ".";
 		portablePackage.jsonPath = ShaderInjectorIO::FileNameFromPath(package.jsonPath);
 		portablePackage.sourcePath = portablePackage.sourceFile;
@@ -76,9 +81,13 @@ namespace ModifiedShader
 			package.jsonPath = jsonPath;
 			package.packageDirectory = ShaderInjectorIO::DirectoryFromPath(jsonPath);
 			package.sourceFile = ShaderInjectorIO::FileNameFromPath(package.sourceFile);
-			package.sourcePath = package.sourceFile.empty() ? "" : ShaderInjectorIO::JoinPath(package.packageDirectory, package.sourceFile);
+			package.sourcePath.clear();
+			if (!package.sourceFile.empty())
+				package.sourcePath = ShaderInjectorIO::JoinPath(package.packageDirectory, package.sourceFile);
 			package.compiledBlobFile = ShaderInjectorIO::FileNameFromPath(package.compiledBlobFile);
-			package.compiledBlobPath = package.compiledBlobFile.empty() ? "" : ShaderInjectorIO::JoinPath(package.packageDirectory, package.compiledBlobFile);
+			package.compiledBlobPath.clear();
+			if (!package.compiledBlobFile.empty())
+				package.compiledBlobPath = ShaderInjectorIO::JoinPath(package.packageDirectory, package.compiledBlobFile);
 
 			if (package.id.empty())
 				package.id = ShaderInjectorIO::FileNameFromPath(package.packageDirectory);
@@ -122,4 +131,4 @@ namespace ModifiedShader
 
 		return target;
 	}
-}
+} //namespace ModifiedShader

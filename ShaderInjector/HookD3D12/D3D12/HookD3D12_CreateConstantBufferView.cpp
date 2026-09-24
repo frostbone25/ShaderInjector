@@ -15,9 +15,9 @@ namespace HookD3D12
 	{
 		Original_CreateConstantBufferView(device, description, destination);
 
-		if (Globals::gShaderInjectorEnabled && 
-			!IsInsideRenderPassInjection() && 
+		if (Globals::gShaderInjectorEnabled &&
+			!IsInsideRenderPassInjection() &&
 			RenderPassRuntime::IsResourceTrackingRequired())
 			RenderPassResourceRegistry::RegisterConstantBufferView(description, destination);
 	}
-}
+} //namespace HookD3D12

@@ -1,4 +1,5 @@
 #include "ShaderModelDetector.h"
+#include "ShaderModelStageObservations.h"
 
 #include <array>
 #include <atomic>
@@ -12,9 +13,9 @@ namespace ShaderModelDetector
 		constexpr uint32_t MakeFourCharacterCode(char a, char b, char c, char d)
 		{
 			return static_cast<uint32_t>(static_cast<uint8_t>(a)) |
-				(static_cast<uint32_t>(static_cast<uint8_t>(b)) << 8) |
-				(static_cast<uint32_t>(static_cast<uint8_t>(c)) << 16) |
-				(static_cast<uint32_t>(static_cast<uint8_t>(d)) << 24);
+				   (static_cast<uint32_t>(static_cast<uint8_t>(b)) << 8) |
+				   (static_cast<uint32_t>(static_cast<uint8_t>(c)) << 16) |
+				   (static_cast<uint32_t>(static_cast<uint8_t>(d)) << 24);
 		}
 
 		constexpr uint32_t directXBytecodeContainerFourCharacterCode = MakeFourCharacterCode('D', 'X', 'B', 'C');
@@ -24,24 +25,20 @@ namespace ShaderModelDetector
 
 		constexpr size_t shaderStageCount = static_cast<size_t>(ShaderTarget::Unknown);
 		constexpr std::array<Globals::ShaderModel, 9> supportedShaderModels =
-		{
-			Globals::ShaderModel::ShaderModel5_0,
-			Globals::ShaderModel::ShaderModel5_1,
-			Globals::ShaderModel::ShaderModel6_0,
-			Globals::ShaderModel::ShaderModel6_1,
-			Globals::ShaderModel::ShaderModel6_2,
-			Globals::ShaderModel::ShaderModel6_3,
-			Globals::ShaderModel::ShaderModel6_4,
-			Globals::ShaderModel::ShaderModel6_5,
-			Globals::ShaderModel::ShaderModel6_6,
+			{
+				Globals::ShaderModel::ShaderModel5_0,
+				Globals::ShaderModel::ShaderModel5_1,
+				Globals::ShaderModel::ShaderModel6_0,
+				Globals::ShaderModel::ShaderModel6_1,
+				Globals::ShaderModel::ShaderModel6_2,
+				Globals::ShaderModel::ShaderModel6_3,
+				Globals::ShaderModel::ShaderModel6_4,
+				Globals::ShaderModel::ShaderModel6_5,
+				Globals::ShaderModel::ShaderModel6_6,
 		};
 
-		struct StageObservations
-		{
-			std::array<std::atomic<uint32_t>, supportedShaderModels.size()> modelCounts{};
-		};
-
-		std::array<StageObservations, shaderStageCount> stageObservations{};
+		static_assert(supportedShaderModels.size() == supportedShaderModelCount);
+		std::array<ShaderModelStageObservations, shaderStageCount> stageObservations{};
 
 		bool ReadUInt32(const uint8_t* bytes, size_t byteCount, size_t offset, uint32_t& value)
 		{
@@ -62,13 +59,26 @@ namespace ShaderModelDetector
 
 			switch (encodedShaderType)
 			{
-				case 0: decodedShaderType = ShaderTarget::PixelShader; break;
-				case 1: decodedShaderType = ShaderTarget::VertexShader; break;
-				case 2: decodedShaderType = ShaderTarget::GeometryShader; break;
-				case 3: decodedShaderType = ShaderTarget::HullShader; break;
-				case 4: decodedShaderType = ShaderTarget::DomainShader; break;
-				case 5: decodedShaderType = ShaderTarget::ComputeShader; break;
-				default: return false;
+			case 0:
+				decodedShaderType = ShaderTarget::PixelShader;
+				break;
+			case 1:
+				decodedShaderType = ShaderTarget::VertexShader;
+				break;
+			case 2:
+				decodedShaderType = ShaderTarget::GeometryShader;
+				break;
+			case 3:
+				decodedShaderType = ShaderTarget::HullShader;
+				break;
+			case 4:
+				decodedShaderType = ShaderTarget::DomainShader;
+				break;
+			case 5:
+				decodedShaderType = ShaderTarget::ComputeShader;
+				break;
+			default:
+				return false;
 			}
 
 			if (decodedShaderType != expectedShaderType)
@@ -104,8 +114,8 @@ namespace ShaderModelDetector
 			if (!ReadUInt32(bytes, shaderBytecodeSize, 0, containerFourCharacterCode))
 				return false;
 
-			// D3DCompiler and DXC both emit a DXBC container. The container's chunk
-			// table points to either legacy SHDR/SHEX tokens or a DXIL program header.
+			//D3DCompiler and DXC both emit a DXBC container. The container's chunk
+			//table points to either legacy SHDR/SHEX tokens or a DXIL program header.
 			if (containerFourCharacterCode == directXBytecodeContainerFourCharacterCode)
 			{
 				constexpr size_t chunkCountOffset = 28;
@@ -114,9 +124,9 @@ namespace ShaderModelDetector
 				if (!ReadUInt32(bytes, shaderBytecodeSize, chunkCountOffset, chunkCount))
 					return false;
 
-				const size_t maximumChunkCount = shaderBytecodeSize >= chunkOffsetsOffset
-					? (shaderBytecodeSize - chunkOffsetsOffset) / sizeof(uint32_t)
-					: 0;
+				size_t maximumChunkCount = 0;
+				if (shaderBytecodeSize >= chunkOffsetsOffset)
+					maximumChunkCount = (shaderBytecodeSize - chunkOffsetsOffset) / sizeof(uint32_t);
 				if (chunkCount > maximumChunkCount)
 					return false;
 
@@ -160,8 +170,8 @@ namespace ShaderModelDetector
 				return false;
 			}
 
-			// Retain support for a raw legacy token stream even though D3D12 games
-			// normally submit a complete DXBC container.
+			//Retain support for a raw legacy token stream even though D3D12 games
+			//normally submit a complete DXBC container.
 			return TryDecodeShaderVersionToken(containerFourCharacterCode, expectedShaderType, shaderModel);
 		}
 
@@ -175,7 +185,7 @@ namespace ShaderModelDetector
 
 			return supportedShaderModels.size();
 		}
-	}
+	} //namespace
 
 	void ObserveShaderBytecode(
 		ShaderTarget::ShaderType expectedShaderType,
@@ -230,8 +240,8 @@ namespace ShaderModelDetector
 			return configuredShaderModel;
 
 		Globals::ShaderModel detectedShaderModel = configuredShaderModel;
-		return TryGetDetectedShaderModel(shaderType, detectedShaderModel)
-			? detectedShaderModel
-			: configuredShaderModel;
+		if (TryGetDetectedShaderModel(shaderType, detectedShaderModel))
+			return detectedShaderModel;
+		return configuredShaderModel;
 	}
-}
+} //namespace ShaderModelDetector

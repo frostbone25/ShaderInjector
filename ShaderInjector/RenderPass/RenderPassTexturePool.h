@@ -9,63 +9,13 @@
 #include <wrl/client.h>
 
 #include "RenderPass/RenderPass.h"
+#include "RenderPass/ReferenceExtent.h"
+#include "RenderPass/ResolvedTextureDescription.h"
+#include "RenderPass/ScopedInputTextureOverrides.h"
+#include "RenderPass/TextureView.h"
 
 namespace RenderPassTexturePool
 {
-	struct ReferenceExtent
-	{
-		ShaderResource::TextureDimension dimension = ShaderResource::TextureDimension::Unknown;
-		uint32_t width = 0;
-		uint32_t height = 0;
-		uint32_t depth = 1;
-		uint32_t arraySize = 1;
-		uint32_t mipLevels = 1;
-		uint32_t sampleCount = 1;
-		DXGI_FORMAT fallbackFormat = DXGI_FORMAT_UNKNOWN;
-		DXGI_FORMAT fallbackShaderViewFormat = DXGI_FORMAT_UNKNOWN;
-	};
-
-	struct ResolvedTextureDescription
-	{
-		ShaderResource::TextureDimension dimension = ShaderResource::TextureDimension::Unknown;
-		DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
-		DXGI_FORMAT shaderViewFormat = DXGI_FORMAT_UNKNOWN;
-		uint32_t width = 0;
-		uint32_t height = 0;
-		uint32_t depth = 1;
-		uint32_t arraySize = 1;
-		uint32_t mipLevels = 1;
-		uint32_t sampleCount = 1;
-		ShaderResource::ResourceLifetime lifetime = ShaderResource::ResourceLifetime::Transient;
-		D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE;
-	};
-
-	struct TextureView
-	{
-		Microsoft::WRL::ComPtr<ID3D12Resource> resource;
-		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> shaderViewHeap;
-		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> renderTargetViewHeap;
-		D3D12_CPU_DESCRIPTOR_HANDLE shaderResourceView{};
-		D3D12_CPU_DESCRIPTOR_HANDLE unorderedAccessView{};
-		D3D12_CPU_DESCRIPTOR_HANDLE renderTargetView{};
-		ResolvedTextureDescription description;
-		D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON;
-		uint64_t generation = 0;
-	};
-
-	// Overrides are local to one graph execution, never global across command lists
-	// or frames. Output writes still resolve the original pooled allocation.
-	class ScopedInputTextureOverrides
-	{
-	public:
-		explicit ScopedInputTextureOverrides(ID3D12GraphicsCommandList* commandList = nullptr);
-		~ScopedInputTextureOverrides();
-		ScopedInputTextureOverrides(const ScopedInputTextureOverrides&) = delete;
-		ScopedInputTextureOverrides& operator=(const ScopedInputTextureOverrides&) = delete;
-	private:
-		size_t previousCount = 0;
-		ID3D12GraphicsCommandList* previousCommandList = nullptr;
-	};
 	void OverrideInputTexture(
 		const std::string& resourceId,
 		ShaderResource::TemporalView temporalView,
@@ -74,8 +24,8 @@ namespace RenderPassTexturePool
 		const std::string& resourceId,
 		ShaderResource::TemporalView temporalView,
 		TextureView& outTexture);
-	// A previous-frame input has no producer on the first frame. A typed null SRV
-	// reads zero without inventing a current-frame dependency or a GPU allocation.
+	//A previous-frame input has no producer on the first frame. A typed null SRV
+	//reads zero without inventing a current-frame dependency or a GPU allocation.
 	bool GetHistoryBootstrapTexture(
 		ID3D12Device* device,
 		const std::string& resourceId,
@@ -106,4 +56,4 @@ namespace RenderPassTexturePool
 	void NotifyCommandListsSubmitted(ID3D12CommandQueue* commandQueue, UINT commandListCount, ID3D12CommandList* const* commandLists);
 	void LogPerformanceStatistics();
 	void ReleaseResources();
-}
+} //namespace RenderPassTexturePool

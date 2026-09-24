@@ -6,7 +6,7 @@ namespace HookD3D12
 
 	class ScopedSwapChainCompatibilityCall
 	{
-	public:
+	  public:
 		ScopedSwapChainCompatibilityCall()
 		{
 			gInsideSwapChainCompatibilityCall = true;
@@ -17,4 +17,4 @@ namespace HookD3D12
 			gInsideSwapChainCompatibilityCall = false;
 		}
 	};
-}
+} //namespace HookD3D12

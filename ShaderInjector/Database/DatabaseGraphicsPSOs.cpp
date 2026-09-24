@@ -1,4 +1,4 @@
-// capture graphics pipeline state objects and preserve all data needed for later rebuilds.
+//capture graphics pipeline state objects and preserve all data needed for later rebuilds.
 
 #include <mutex>
 #include <vector>
@@ -162,4 +162,4 @@ namespace HookD3D12
 		//run discovery after the durable capture has been registered.
 		ShaderAutomaticDiscovery::ProcessCapturedGraphicsPipeline(capturedGraphicsPipeline);
 	}
-}
+} //namespace HookD3D12

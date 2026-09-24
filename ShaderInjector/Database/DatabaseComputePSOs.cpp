@@ -1,4 +1,4 @@
-// capture compute pipeline state objects and keep the data needed for later rebuilds.
+//capture compute pipeline state objects and keep the data needed for later rebuilds.
 
 #include <mutex>
 #include <vector>
@@ -55,4 +55,4 @@ namespace HookD3D12
 
 		gComputePipelines.push_back(capturedComputePipeline);
 	}
-}
+} //namespace HookD3D12

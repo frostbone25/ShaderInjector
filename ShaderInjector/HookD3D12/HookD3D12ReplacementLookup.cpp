@@ -6,18 +6,24 @@
 //custom
 #include "Hash/Hash.h"
 #include "ShaderTarget/DatabaseShaderTargets.h"
+#include "ShaderTarget/ShaderIdentityKey.h"
+#include "ShaderTarget/ShaderIdentityKeyHasher.h"
 #include "HookD3D12.h"
 #include "CachedBlobContentMatch.h"
+#include "CapturedShaderLocation.h"
 #include "ShaderDiscovery.h"
 #include "IO/ShaderInjectorIO.h"
 
 namespace HookD3D12
 {
-	// Very small driver cache records can be mostly common bookkeeping with only
-	// a few identifying bytes. Records at or above 2 KiB still have to satisfy the
-	// strict byte-ratio, stable-run, and cross-target ambiguity checks below. This
-	// includes compact persisted graphics PSOs that would otherwise never recover
-	// on a warm-cache launch.
+	using ShaderTarget::ShaderIdentityKey;
+	using ShaderTarget::ShaderIdentityKeyHasher;
+
+	//Very small driver cache records can be mostly common bookkeeping with only
+	//a few identifying bytes. Records at or above 2 KiB still have to satisfy the
+	//strict byte-ratio, stable-run, and cross-target ambiguity checks below. This
+	//includes compact persisted graphics PSOs that would otherwise never recover
+	//on a warm-cache launch.
 	constexpr size_t minimumContentMatchSize = 2048;
 	constexpr double minimumMatchingByteRatio = 0.98;
 	constexpr double minimumStableRunRatio = 0.50;
@@ -32,13 +38,20 @@ namespace HookD3D12
 	{
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return Hash::ParseHashText(pipelineEntry.vsHash);
-		case ShaderTarget::HullShader: return Hash::ParseHashText(pipelineEntry.hsHash);
-		case ShaderTarget::DomainShader: return Hash::ParseHashText(pipelineEntry.dsHash);
-		case ShaderTarget::GeometryShader: return Hash::ParseHashText(pipelineEntry.gsHash);
-		case ShaderTarget::PixelShader: return Hash::ParseHashText(pipelineEntry.psHash);
-		case ShaderTarget::ComputeShader: return Hash::ParseHashText(pipelineEntry.csHash);
-		default: return 0;
+			case ShaderTarget::VertexShader:
+				return Hash::ParseHashText(pipelineEntry.vsHash);
+			case ShaderTarget::HullShader:
+				return Hash::ParseHashText(pipelineEntry.hsHash);
+			case ShaderTarget::DomainShader:
+				return Hash::ParseHashText(pipelineEntry.dsHash);
+			case ShaderTarget::GeometryShader:
+				return Hash::ParseHashText(pipelineEntry.gsHash);
+			case ShaderTarget::PixelShader:
+				return Hash::ParseHashText(pipelineEntry.psHash);
+			case ShaderTarget::ComputeShader:
+				return Hash::ParseHashText(pipelineEntry.csHash);
+			default:
+				return 0;
 		}
 	}
 
@@ -48,13 +61,20 @@ namespace HookD3D12
 	{
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return Hash::ParseHashText(pipelineEntry.vsHash);
-		case ShaderTarget::HullShader: return Hash::ParseHashText(pipelineEntry.hsHash);
-		case ShaderTarget::DomainShader: return Hash::ParseHashText(pipelineEntry.dsHash);
-		case ShaderTarget::GeometryShader: return Hash::ParseHashText(pipelineEntry.gsHash);
-		case ShaderTarget::PixelShader: return Hash::ParseHashText(pipelineEntry.psHash);
-		case ShaderTarget::ComputeShader: return Hash::ParseHashText(pipelineEntry.csHash);
-		default: return 0;
+			case ShaderTarget::VertexShader:
+				return Hash::ParseHashText(pipelineEntry.vsHash);
+			case ShaderTarget::HullShader:
+				return Hash::ParseHashText(pipelineEntry.hsHash);
+			case ShaderTarget::DomainShader:
+				return Hash::ParseHashText(pipelineEntry.dsHash);
+			case ShaderTarget::GeometryShader:
+				return Hash::ParseHashText(pipelineEntry.gsHash);
+			case ShaderTarget::PixelShader:
+				return Hash::ParseHashText(pipelineEntry.psHash);
+			case ShaderTarget::ComputeShader:
+				return Hash::ParseHashText(pipelineEntry.csHash);
+			default:
+				return 0;
 		}
 	}
 
@@ -84,8 +104,10 @@ namespace HookD3D12
 	{
 		if (!cachedBlobHash)
 			return false;
+
 		if (Hash::ParseHashText(primaryHash) == cachedBlobHash)
 			return true;
+
 		return std::any_of(
 			hashAliases.begin(),
 			hashAliases.end(),
@@ -101,10 +123,12 @@ namespace HookD3D12
 			return 0;
 
 		const auto cachedHash = gPipelineStreamSidecarHashes.find(path);
+
 		if (cachedHash != gPipelineStreamSidecarHashes.end())
 			return cachedHash->second;
 
 		std::vector<uint8_t> streamBlob;
+
 		if (!ShaderInjectorIO::LoadDXILBlobFromDisk(path, streamBlob) || streamBlob.empty())
 		{
 			gPipelineStreamSidecarHashes.emplace(path, 0);
@@ -116,32 +140,7 @@ namespace HookD3D12
 		return streamHash;
 	}
 
-	struct CapturedShaderKey
-	{
-		uint64_t shaderHash = 0;
-		ShaderTarget::ShaderType shaderType = ShaderTarget::Unknown;
-
-		bool operator==(const CapturedShaderKey& other) const
-		{
-			return shaderHash == other.shaderHash && shaderType == other.shaderType;
-		}
-	};
-
-	struct CapturedShaderKeyHasher
-	{
-		size_t operator()(const CapturedShaderKey& key) const
-		{
-			return static_cast<size_t>(key.shaderHash ^ (static_cast<uint64_t>(key.shaderType) << 57));
-		}
-	};
-
-	struct CapturedShaderLocation
-	{
-		bool isStreamPipeline = false;
-		size_t pipelineIndex = 0;
-	};
-
-	std::unordered_map<CapturedShaderKey, CapturedShaderLocation, CapturedShaderKeyHasher> gCapturedShaderLocations;
+	std::unordered_map<ShaderIdentityKey, CapturedShaderLocation, ShaderIdentityKeyHasher> gCapturedShaderLocations;
 	size_t gIndexedGraphicsPipelineCount = 0;
 	size_t gIndexedStreamPipelineCount = 0;
 
@@ -149,47 +148,69 @@ namespace HookD3D12
 	{
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return pipeline.vertexShaderHash;
-		case ShaderTarget::PixelShader: return pipeline.pixelShaderHash;
-		case ShaderTarget::GeometryShader: return pipeline.geometryShaderHash;
-		case ShaderTarget::HullShader: return pipeline.hullShaderHash;
-		case ShaderTarget::DomainShader: return pipeline.domainShaderHash;
-		default: return 0;
+			case ShaderTarget::VertexShader:
+				return pipeline.vertexShaderHash;
+			case ShaderTarget::PixelShader:
+				return pipeline.pixelShaderHash;
+			case ShaderTarget::GeometryShader:
+				return pipeline.geometryShaderHash;
+			case ShaderTarget::HullShader:
+				return pipeline.hullShaderHash;
+			case ShaderTarget::DomainShader:
+				return pipeline.domainShaderHash;
+			default:
+				return 0;
 		}
 	}
 
 	const std::vector<uint8_t>& GraphicsShaderBytecode(const GraphicsPipelineInfo& pipeline, ShaderTarget::ShaderType shaderType)
 	{
 		static const std::vector<uint8_t> emptyBytecode;
+
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return pipeline.vertexShaderBytecode;
-		case ShaderTarget::PixelShader: return pipeline.pixelShaderBytecode;
-		case ShaderTarget::GeometryShader: return pipeline.geometryShaderBytecode;
-		case ShaderTarget::HullShader: return pipeline.hullShaderBytecode;
-		case ShaderTarget::DomainShader: return pipeline.domainShaderBytecode;
-		default: return emptyBytecode;
+			case ShaderTarget::VertexShader:
+				return pipeline.vertexShaderBytecode;
+			case ShaderTarget::PixelShader:
+				return pipeline.pixelShaderBytecode;
+			case ShaderTarget::GeometryShader:
+				return pipeline.geometryShaderBytecode;
+			case ShaderTarget::HullShader:
+				return pipeline.hullShaderBytecode;
+			case ShaderTarget::DomainShader:
+				return pipeline.domainShaderBytecode;
+			default:
+				return emptyBytecode;
 		}
 	}
 
 	const std::vector<uint8_t>& StreamShaderBytecode(const PipelineStateInfo& pipeline, ShaderTarget::ShaderType shaderType)
 	{
 		static const std::vector<uint8_t> emptyBytecode;
+
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader: return pipeline.vertexShaderBytecode;
-		case ShaderTarget::PixelShader: return pipeline.pixelShaderBytecode;
-		case ShaderTarget::ComputeShader: return pipeline.computeShaderBytecode;
-		case ShaderTarget::GeometryShader: return pipeline.geometryShaderBytecode;
-		case ShaderTarget::HullShader: return pipeline.hullShaderBytecode;
-		case ShaderTarget::DomainShader: return pipeline.domainShaderBytecode;
-		default: return emptyBytecode;
+			case ShaderTarget::VertexShader:
+				return pipeline.vertexShaderBytecode;
+			case ShaderTarget::PixelShader:
+				return pipeline.pixelShaderBytecode;
+			case ShaderTarget::ComputeShader:
+				return pipeline.computeShaderBytecode;
+			case ShaderTarget::GeometryShader:
+				return pipeline.geometryShaderBytecode;
+			case ShaderTarget::HullShader:
+				return pipeline.hullShaderBytecode;
+			case ShaderTarget::DomainShader:
+				return pipeline.domainShaderBytecode;
+			default:
+				return emptyBytecode;
 		}
 	}
 
 	void RebuildCapturedShaderLocationIndex()
 	{
 		gCapturedShaderLocations.clear();
+
 		const ShaderTarget::ShaderType graphicsTypes[] =
 		{
 			ShaderTarget::VertexShader,
@@ -198,6 +219,7 @@ namespace HookD3D12
 			ShaderTarget::HullShader,
 			ShaderTarget::DomainShader,
 		};
+
 		const ShaderTarget::ShaderType streamTypes[] =
 		{
 			ShaderTarget::VertexShader,
@@ -213,8 +235,9 @@ namespace HookD3D12
 			for (ShaderTarget::ShaderType shaderType : graphicsTypes)
 			{
 				const uint64_t shaderHash = GraphicsShaderHash(gGraphicsPipelines[pipelineIndex], shaderType);
+
 				if (shaderHash != 0)
-					gCapturedShaderLocations.emplace(CapturedShaderKey{ shaderHash, shaderType }, CapturedShaderLocation{ false, pipelineIndex });
+					gCapturedShaderLocations.emplace(ShaderIdentityKey{shaderHash, shaderType}, CapturedShaderLocation{false, pipelineIndex});
 			}
 		}
 
@@ -223,8 +246,9 @@ namespace HookD3D12
 			for (ShaderTarget::ShaderType shaderType : streamTypes)
 			{
 				const uint64_t shaderHash = StreamShaderHashForType(gPipelineStates[pipelineIndex], shaderType);
+
 				if (shaderHash != 0)
-					gCapturedShaderLocations[CapturedShaderKey{ shaderHash, shaderType }] = CapturedShaderLocation{ true, pipelineIndex };
+					gCapturedShaderLocations[ShaderIdentityKey{shaderHash, shaderType}] = CapturedShaderLocation{true, pipelineIndex};
 			}
 		}
 
@@ -238,36 +262,43 @@ namespace HookD3D12
 		bool& outStreamPipeline)
 	{
 		outStreamPipeline = false;
+
 		if (gIndexedGraphicsPipelineCount != gGraphicsPipelines.size() ||
 			gIndexedStreamPipelineCount != gPipelineStates.size())
 		{
 			RebuildCapturedShaderLocationIndex();
 		}
 
-		const auto location = gCapturedShaderLocations.find(CapturedShaderKey{ shaderHash, shaderType });
+		const auto location = gCapturedShaderLocations.find(ShaderIdentityKey{shaderHash, shaderType});
+
 		if (location == gCapturedShaderLocations.end())
 			return nullptr;
 
 		outStreamPipeline = location->second.isStreamPipeline;
+
 		if (outStreamPipeline)
 		{
 			if (location->second.pipelineIndex >= gPipelineStates.size())
 				return nullptr;
+
 			return &StreamShaderBytecode(gPipelineStates[location->second.pipelineIndex], shaderType);
 		}
 
 		if (location->second.pipelineIndex >= gGraphicsPipelines.size())
 			return nullptr;
+
 		return &GraphicsShaderBytecode(gGraphicsPipelines[location->second.pipelineIndex], shaderType);
 	}
 
 	const std::vector<uint8_t>& LoadCachedBlobSidecar(const std::string& path)
 	{
 		auto existing = gCachedBlobSidecars.find(path);
+
 		if (existing != gCachedBlobSidecars.end())
 			return existing->second;
 
 		std::vector<uint8_t> bytes;
+
 		if (!path.empty())
 			ShaderInjectorIO::LoadDXILBlobFromDisk(path, bytes);
 
@@ -281,6 +312,7 @@ namespace HookD3D12
 		CachedBlobContentMatch match{};
 		const size_t smallerSize = (std::min)(persistedBlob.size(), currentBlob.size());
 		const size_t largerSize = (std::max)(persistedBlob.size(), currentBlob.size());
+
 		if (smallerSize < minimumContentMatchSize || largerSize == 0 ||
 			static_cast<double>(smallerSize) / static_cast<double>(largerSize) < minimumMatchingByteRatio)
 		{
@@ -288,53 +320,56 @@ namespace HookD3D12
 		}
 
 		const auto compareAligned = [&](size_t persistedOffset, size_t currentOffset, size_t byteCount)
+		{
+			CachedBlobContentMatch candidate{};
+			size_t matchingBytes = 0;
+			size_t currentMatchingRun = 0;
+
+			for (size_t byteIndex = 0; byteIndex < byteCount; ++byteIndex)
 			{
-				CachedBlobContentMatch candidate{};
-				size_t matchingBytes = 0;
-				size_t currentMatchingRun = 0;
-				for (size_t byteIndex = 0; byteIndex < byteCount; ++byteIndex)
+				if (persistedBlob[persistedOffset + byteIndex] != currentBlob[currentOffset + byteIndex])
 				{
-					if (persistedBlob[persistedOffset + byteIndex] != currentBlob[currentOffset + byteIndex])
-					{
-						currentMatchingRun = 0;
-						continue;
-					}
-					++matchingBytes;
-					++currentMatchingRun;
-					candidate.longestMatchingRun = (std::max)(candidate.longestMatchingRun, currentMatchingRun);
+					currentMatchingRun = 0;
+					continue;
 				}
-				candidate.matchingRatio = static_cast<double>(matchingBytes) / static_cast<double>(largerSize);
-				return candidate;
-			};
+
+				++matchingBytes;
+				++currentMatchingRun;
+				candidate.longestMatchingRun = (std::max)(candidate.longestMatchingRun, currentMatchingRun);
+			}
+
+			candidate.matchingRatio = static_cast<double>(matchingBytes) / static_cast<double>(largerSize);
+			return candidate;
+		};
 
 		const auto keepBetter = [&](const CachedBlobContentMatch& candidate)
-			{
-				if (candidate.matchingRatio > match.matchingRatio ||
-					(candidate.matchingRatio == match.matchingRatio &&
-						candidate.longestMatchingRun > match.longestMatchingRun))
-					match = candidate;
-			};
+		{
+			if (candidate.matchingRatio > match.matchingRatio ||
+				(candidate.matchingRatio == match.matchingRatio &&
+				 candidate.longestMatchingRun > match.longestMatchingRun))
+				match = candidate;
+		};
 
-		// A warmed driver cache can add or remove a small envelope around otherwise
-		// identical pipeline data. Check front and back alignment, then one changed
-		// middle region. The larger blob remains the denominator, so the normal 98%
-		// threshold strictly bounds how much envelope variance is accepted.
+		//A warmed driver cache can add or remove a small envelope around otherwise
+		//identical pipeline data. Check front and back alignment, then one changed
+		//middle region. The larger blob remains the denominator, so the normal 98%
+		//threshold strictly bounds how much envelope variance is accepted.
 		keepBetter(compareAligned(0, 0, smallerSize));
 		keepBetter(compareAligned(
 			persistedBlob.size() - smallerSize,
 			currentBlob.size() - smallerSize,
 			smallerSize));
 
-		// A driver may wrap the stable payload at both ends, so neither front nor
-		// back alignment necessarily lines up. Locate a few anchors from the saved
-		// payload within the narrow shift permitted by the 98% threshold, then score
-		// the entire resulting overlap. This stays linear over a small search window
-		// instead of performing an unrestricted edit-distance comparison.
+		//A driver may wrap the stable payload at both ends, so neither front nor
+		//back alignment necessarily lines up. Locate a few anchors from the saved
+		//payload within the narrow shift permitted by the 98% threshold, then score
+		//the entire resulting overlap. This stays linear over a small search window
+		//instead of performing an unrestricted edit-distance comparison.
 		constexpr size_t anchorSize = 32;
+
 		if (persistedBlob.size() >= anchorSize && currentBlob.size() >= anchorSize)
 		{
-			const size_t maximumShift =
-				static_cast<size_t>(static_cast<double>(largerSize) * (1.0 - minimumMatchingByteRatio)) + 1;
+			const size_t maximumShift = static_cast<size_t>(static_cast<double>(largerSize) * (1.0 - minimumMatchingByteRatio)) + 1;
 			const size_t anchorOffsets[] =
 			{
 				persistedBlob.size() / 4,
@@ -345,35 +380,36 @@ namespace HookD3D12
 			for (size_t anchorOffset : anchorOffsets)
 			{
 				anchorOffset = (std::min)(anchorOffset, persistedBlob.size() - anchorSize);
-				const size_t searchStart = anchorOffset > maximumShift ? anchorOffset - maximumShift : 0;
-				const size_t searchLastStart = (std::min)(
-					currentBlob.size() - anchorSize,
-					anchorOffset + maximumShift);
+				size_t searchStart = 0;
+
+				if (anchorOffset > maximumShift)
+					searchStart = anchorOffset - maximumShift;
+
+				const size_t searchLastStart = (std::min)(currentBlob.size() - anchorSize, anchorOffset + maximumShift);
+
 				if (searchStart > searchLastStart)
 					continue;
 
 				auto searchPosition = currentBlob.begin() + searchStart;
 				const auto searchEnd = currentBlob.begin() + searchLastStart + anchorSize;
+
 				while (searchPosition < searchEnd)
 				{
-					const auto found = std::search(
-						searchPosition,
-						searchEnd,
-						persistedBlob.begin() + anchorOffset,
-						persistedBlob.begin() + anchorOffset + anchorSize);
+					const auto found = std::search(searchPosition, searchEnd, persistedBlob.begin() + anchorOffset, persistedBlob.begin() + anchorOffset + anchorSize);
+
 					if (found == searchEnd)
 						break;
 
 					const size_t currentAnchorOffset = static_cast<size_t>(found - currentBlob.begin());
-					const size_t persistedOffset = currentAnchorOffset < anchorOffset
-						? anchorOffset - currentAnchorOffset
-						: 0;
-					const size_t currentOffset = currentAnchorOffset > anchorOffset
-						? currentAnchorOffset - anchorOffset
-						: 0;
-					const size_t overlapSize = (std::min)(
-						persistedBlob.size() - persistedOffset,
-						currentBlob.size() - currentOffset);
+					size_t persistedOffset = 0;
+					size_t currentOffset = 0;
+
+					if (currentAnchorOffset < anchorOffset)
+						persistedOffset = anchorOffset - currentAnchorOffset;
+					else if (currentAnchorOffset > anchorOffset)
+						currentOffset = currentAnchorOffset - anchorOffset;
+
+					const size_t overlapSize = (std::min)(persistedBlob.size() - persistedOffset, currentBlob.size() - currentOffset);
 					keepBetter(compareAligned(persistedOffset, currentOffset, overlapSize));
 					searchPosition = found + 1;
 				}
@@ -381,21 +417,22 @@ namespace HookD3D12
 		}
 
 		size_t matchingPrefix = 0;
+
 		while (matchingPrefix < smallerSize &&
-			persistedBlob[matchingPrefix] == currentBlob[matchingPrefix])
+			   persistedBlob[matchingPrefix] == currentBlob[matchingPrefix])
 			++matchingPrefix;
 
 		size_t matchingSuffix = 0;
+
 		while (matchingSuffix < smallerSize - matchingPrefix &&
-			persistedBlob[persistedBlob.size() - 1 - matchingSuffix] ==
-			currentBlob[currentBlob.size() - 1 - matchingSuffix])
+			   persistedBlob[persistedBlob.size() - 1 - matchingSuffix] ==
+				   currentBlob[currentBlob.size() - 1 - matchingSuffix])
 		{
 			++matchingSuffix;
 		}
 
 		CachedBlobContentMatch splitMatch{};
-		splitMatch.matchingRatio = static_cast<double>(matchingPrefix + matchingSuffix) /
-			static_cast<double>(largerSize);
+		splitMatch.matchingRatio = static_cast<double>(matchingPrefix + matchingSuffix) / static_cast<double>(largerSize);
 		splitMatch.longestMatchingRun = (std::max)(matchingPrefix, matchingSuffix);
 		keepBetter(splitMatch);
 		return match;
@@ -406,19 +443,22 @@ namespace HookD3D12
 		const size_t smallerSize = (std::min)(persistedBlobSize, currentBlobSize);
 		const size_t largerSize = (std::max)(persistedBlobSize, currentBlobSize);
 		return smallerSize >= minimumContentMatchSize && largerSize > 0 &&
-			static_cast<double>(smallerSize) / static_cast<double>(largerSize) >= minimumMatchingByteRatio;
+			   static_cast<double>(smallerSize) / static_cast<double>(largerSize) >= minimumMatchingByteRatio;
 	}
 
 	bool TryParseCachedBlobLength(const std::string& serializedLength, size_t& outLength)
 	{
 		outLength = 0;
+
 		if (serializedLength.empty())
 			return false;
 
 		char* parseEnd = nullptr;
 		const unsigned long long parsedLength = _strtoui64(serializedLength.c_str(), &parseEnd, 10);
+
 		if (parseEnd == serializedLength.c_str() || *parseEnd != '\0' || parsedLength > SIZE_MAX)
 			return false;
+
 		outLength = static_cast<size_t>(parsedLength);
 		return true;
 	}
@@ -427,7 +467,7 @@ namespace HookD3D12
 	{
 		size_t persistedBlobSize = 0;
 		return TryParseCachedBlobLength(serializedLength, persistedBlobSize) &&
-			CachedBlobLengthsCanMatch(persistedBlobSize, currentBlobSize);
+			   CachedBlobLengthsCanMatch(persistedBlobSize, currentBlobSize);
 	}
 
 	bool CachedBlobMetadataMatches(
@@ -439,19 +479,21 @@ namespace HookD3D12
 			return false;
 
 		const auto entryMatches = [&](const std::string& length, const std::string& rootHash)
-			{
-				size_t parsedLength = 0;
-				return TryParseCachedBlobLength(length, parsedLength) &&
-					parsedLength == cachedBlobSize &&
-					Hash::ParseHashText(rootHash) == rootSignatureHash;
-			};
+		{
+			size_t parsedLength = 0;
+			return TryParseCachedBlobLength(length, parsedLength) &&
+				   parsedLength == cachedBlobSize &&
+				   Hash::ParseHashText(rootHash) == rootSignatureHash;
+		};
 
 		std::vector<std::string> matchingPipelineStreamPaths;
+
 		if (PersistedPipelineEntryTargetsShader(replacement, replacement) &&
 			entryMatches(replacement.pipelineCachedBlobLength, replacement.rootSignatureHash))
 		{
 			matchingPipelineStreamPaths.push_back(replacement.pipelineStreamBlobPath);
 		}
+
 		for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
 		{
 			if (PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate) &&
@@ -463,24 +505,28 @@ namespace HookD3D12
 
 		if (matchingPipelineStreamPaths.empty())
 			return false;
+
 		if (matchingPipelineStreamPaths.size() == 1)
 			return true;
 
-		// Root signature and cache length can be shared by multiple fixed-function
-		// variants of the same shader. Permit metadata recovery only when all matching
-		// entries serialize the same pipeline stream; otherwise the cache bytes are
-		// required to select the correct raster/depth/blend state.
+		//Root signature and cache length can be shared by multiple fixed-function
+		//variants of the same shader. Permit metadata recovery only when all matching
+		//entries serialize the same pipeline stream; otherwise the cache bytes are
+		//required to select the correct raster/depth/blend state.
 		uint64_t matchingPipelineStreamHash = 0;
 		for (const std::string& pipelineStreamPath : matchingPipelineStreamPaths)
 		{
 			const uint64_t pipelineStreamHash = CanonicalPipelineStreamSidecarHash(pipelineStreamPath);
+
 			if (!pipelineStreamHash)
 				return false;
+
 			if (!matchingPipelineStreamHash)
 				matchingPipelineStreamHash = pipelineStreamHash;
 			else if (matchingPipelineStreamHash != pipelineStreamHash)
 				return false;
 		}
+
 		return true;
 	}
 
@@ -491,34 +537,38 @@ namespace HookD3D12
 		CachedBlobContentMatch bestMatch{};
 
 		auto considerPath = [&](const std::string& path, const std::string& serializedLength)
-			{
-				// Driver cache sidecars can be large and a target may contain many templates.
-				// Length metadata lets us reject almost every candidate without loading it
-				// from disk or comparing it byte-by-byte on the render thread.
-				if (!CachedBlobLengthCanMatch(serializedLength, currentBlob.size()))
-					return;
+		{
+			//Driver cache sidecars can be large and a target may contain many templates.
+			//Length metadata lets us reject almost every candidate without loading it
+			//from disk or comparing it byte-by-byte on the render thread.
+			if (!CachedBlobLengthCanMatch(serializedLength, currentBlob.size()))
+				return;
 
-				double matchingRatio = 0.0;
-				size_t longestMatchingRun = 0;
-				if (!MatchPersistedCachedBlobContent(
+			double matchingRatio = 0.0;
+			size_t longestMatchingRun = 0;
+
+			if (!MatchPersistedCachedBlobContent(
 					path,
 					serializedLength,
 					currentBlob,
 					matchingRatio,
 					longestMatchingRun))
-				{
-					return;
-				}
-				const CachedBlobContentMatch match{ matchingRatio, longestMatchingRun };
-				if (match.matchingRatio > bestMatch.matchingRatio ||
-					(match.matchingRatio == bestMatch.matchingRatio && match.longestMatchingRun > bestMatch.longestMatchingRun))
-				{
-					bestMatch = match;
-				}
-			};
+			{
+				return;
+			}
+
+			const CachedBlobContentMatch match{matchingRatio, longestMatchingRun};
+
+			if (match.matchingRatio > bestMatch.matchingRatio ||
+				(match.matchingRatio == bestMatch.matchingRatio && match.longestMatchingRun > bestMatch.longestMatchingRun))
+			{
+				bestMatch = match;
+			}
+		};
 
 		if (PersistedPipelineEntryTargetsShader(replacement, replacement))
 			considerPath(replacement.pipelineCachedBlobPath, replacement.pipelineCachedBlobLength);
+
 		for (const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate : replacement.pipelineTemplates)
 		{
 			if (PersistedPipelineEntryTargetsShader(replacement, pipelineTemplate))
@@ -541,18 +591,14 @@ namespace HookD3D12
 		const ShaderTarget::ShaderTargetDisk& replacement,
 		const ShaderTarget::ShaderTargetDisk& pipelineEntry)
 	{
-		return TargetContainsSerializedShaderHash(
-			replacement,
-			SerializedShaderHashForType(pipelineEntry, replacement.shaderType));
+		return TargetContainsSerializedShaderHash(replacement, SerializedShaderHashForType(pipelineEntry, replacement.shaderType));
 	}
 
 	bool PersistedPipelineEntryTargetsShader(
 		const ShaderTarget::ShaderTargetDisk& replacement,
 		const ShaderTarget::ShaderPipelineTemplateDisk& pipelineEntry)
 	{
-		return TargetContainsSerializedShaderHash(
-			replacement,
-			SerializedShaderHashForType(pipelineEntry, replacement.shaderType));
+		return TargetContainsSerializedShaderHash(replacement, SerializedShaderHashForType(pipelineEntry, replacement.shaderType));
 	}
 
 	bool PersistedPipelineStreamsAreEquivalent(
@@ -560,6 +606,7 @@ namespace HookD3D12
 		const std::string& secondStreamPath)
 	{
 		const uint64_t firstHash = CanonicalPipelineStreamSidecarHash(firstStreamPath);
+
 		return firstHash != 0 && firstHash == CanonicalPipelineStreamSidecarHash(secondStreamPath);
 	}
 
@@ -572,6 +619,7 @@ namespace HookD3D12
 	{
 		outMatchingRatio = 0.0;
 		outLongestMatchingRun = 0;
+
 		if (persistedBlobPath.empty() ||
 			!CachedBlobLengthCanMatch(persistedBlobLength, currentBlob.size()))
 		{
@@ -582,6 +630,7 @@ namespace HookD3D12
 		const CachedBlobContentMatch match = CompareCachedBlobContent(persistedBlob, currentBlob);
 		const size_t largerSize = (std::max)(persistedBlob.size(), currentBlob.size());
 		const size_t minimumStableRun = static_cast<size_t>(largerSize * minimumStableRunRatio);
+
 		if (match.matchingRatio < minimumMatchingByteRatio ||
 			match.longestMatchingRun < minimumStableRun)
 		{
@@ -634,18 +683,20 @@ namespace HookD3D12
 		if (cachedBlobSize < minimumContentMatchSize)
 			return false;
 
-		// The content matcher permits only the tiny size delta that could still meet
-		// its strict identity threshold. Do this metadata-only check before querying
-		// the driver for another blob or spending a rebuild slot.
+		//The content matcher permits only the tiny size delta that could still meet
+		//its strict identity threshold. Do this metadata-only check before querying
+		//the driver for another blob or spending a rebuild slot.
 		for (const auto& target : gLoadedShaderTargets)
 		{
 			if (!IsShaderTargetEffectivelyEnabled(target))
 				continue;
+
 			if (PersistedPipelineEntryTargetsShader(target, target) &&
 				CachedBlobLengthCanMatch(target.pipelineCachedBlobLength, cachedBlobSize))
 			{
 				return true;
 			}
+
 			for (const auto& pipelineTemplate : target.pipelineTemplates)
 			{
 				if (PersistedPipelineEntryTargetsShader(target, pipelineTemplate) &&
@@ -655,6 +706,7 @@ namespace HookD3D12
 				}
 			}
 		}
+
 		return false;
 	}
 
@@ -669,6 +721,7 @@ namespace HookD3D12
 				continue;
 
 			size_t serializedLength = 0;
+
 			if (PersistedPipelineEntryTargetsShader(target, target) &&
 				TryParseCachedBlobLength(target.pipelineCachedBlobLength, serializedLength) &&
 				serializedLength == cachedBlobSize)
@@ -747,27 +800,33 @@ namespace HookD3D12
 			return -1;
 
 		int matchedReplacementIndex = -1;
+
 		for (int replacementIndex = 0;
-			replacementIndex < static_cast<int>(gLoadedShaderTargets.size());
-			++replacementIndex)
+			 replacementIndex < static_cast<int>(gLoadedShaderTargets.size());
+			 ++replacementIndex)
 		{
 			const ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
+
 			if (!IsShaderTargetEffectivelyEnabled(replacement))
 				continue;
+
 			const bool replacementIsCompute = replacement.shaderType == ShaderTarget::ComputeShader;
+
 			if (replacementIsCompute != computePipeline ||
 				!CachedBlobMetadataMatches(replacement, cachedBlobSize, rootSignatureHash))
 			{
 				continue;
 			}
 
-			// Cache length and root signature are a guarded recovery identity, not a
-			// globally unique key. Refuse an ambiguous pair rather than replacing an
-			// unrelated PSO that happens to share both pieces of metadata.
+			//Cache length and root signature are a guarded recovery identity, not a
+			//globally unique key. Refuse an ambiguous pair rather than replacing an
+			//unrelated PSO that happens to share both pieces of metadata.
 			if (matchedReplacementIndex >= 0)
 				return -1;
+
 			matchedReplacementIndex = replacementIndex;
 		}
+
 		return matchedReplacementIndex;
 	}
 
@@ -788,11 +847,13 @@ namespace HookD3D12
 		for (int replacementIndex = 0; replacementIndex < static_cast<int>(gLoadedShaderTargets.size()); ++replacementIndex)
 		{
 			const ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
+
 			if (!IsShaderTargetEffectivelyEnabled(replacement))
 				continue;
 
 			const CachedBlobContentMatch match = BestCachedBlobContentMatch(replacement, cachedBlob);
 			const size_t minimumStableRun = static_cast<size_t>(cachedBlob.size() * minimumStableRunRatio);
+
 			if (match.matchingRatio < minimumMatchingByteRatio || match.longestMatchingRun < minimumStableRun)
 				continue;
 
@@ -812,8 +873,8 @@ namespace HookD3D12
 		if (bestReplacementIndex < 0)
 			return -1;
 
-		// Two nearly identical enabled replacements targeting the same cached PSO
-		// are ambiguous. Refuse to guess rather than binding the wrong pipeline.
+		//Two nearly identical enabled replacements targeting the same cached PSO
+		//are ambiguous. Refuse to guess rather than binding the wrong pipeline.
 		if (secondBestRatio > 0.0 && outMatchingRatio - secondBestRatio < ambiguityRatioMargin)
 		{
 			outMatchingRatio = 0.0;
@@ -833,33 +894,40 @@ namespace HookD3D12
 	bool GraphicsPipelineMatchesReplacementTemplate(const GraphicsPipelineInfo& pipeline, const ShaderTarget::ShaderTargetDisk& replacement)
 	{
 		return ReplacementHashMatches(pipeline.vertexShaderHash, replacement.vsHash) &&
-			ReplacementHashMatches(pipeline.pixelShaderHash, replacement.psHash) &&
-			ReplacementHashMatches(pipeline.geometryShaderHash, replacement.gsHash) &&
-			ReplacementHashMatches(pipeline.hullShaderHash, replacement.hsHash) &&
-			ReplacementHashMatches(pipeline.domainShaderHash, replacement.dsHash);
+			   ReplacementHashMatches(pipeline.pixelShaderHash, replacement.psHash) &&
+			   ReplacementHashMatches(pipeline.geometryShaderHash, replacement.gsHash) &&
+			   ReplacementHashMatches(pipeline.hullShaderHash, replacement.hsHash) &&
+			   ReplacementHashMatches(pipeline.domainShaderHash, replacement.dsHash);
 	}
 
 	bool StreamPipelineMatchesReplacementTemplate(const PipelineStateInfo& pipeline, const ShaderTarget::ShaderTargetDisk& replacement)
 	{
 		return ReplacementHashMatches(pipeline.vertexShaderHash, replacement.vsHash) &&
-			ReplacementHashMatches(pipeline.pixelShaderHash, replacement.psHash) &&
-			ReplacementHashMatches(pipeline.computeShaderHash, replacement.csHash) &&
-			ReplacementHashMatches(pipeline.geometryShaderHash, replacement.gsHash) &&
-			ReplacementHashMatches(pipeline.hullShaderHash, replacement.hsHash) &&
-			ReplacementHashMatches(pipeline.domainShaderHash, replacement.dsHash);
+			   ReplacementHashMatches(pipeline.pixelShaderHash, replacement.psHash) &&
+			   ReplacementHashMatches(pipeline.computeShaderHash, replacement.csHash) &&
+			   ReplacementHashMatches(pipeline.geometryShaderHash, replacement.gsHash) &&
+			   ReplacementHashMatches(pipeline.hullShaderHash, replacement.hsHash) &&
+			   ReplacementHashMatches(pipeline.domainShaderHash, replacement.dsHash);
 	}
 
 	D3D12_PIPELINE_STATE_SUBOBJECT_TYPE SubobjectTypeForShaderType(ShaderTarget::ShaderType shaderType)
 	{
 		switch (shaderType)
 		{
-		case ShaderTarget::VertexShader:   return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS;
-		case ShaderTarget::PixelShader:    return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS;
-		case ShaderTarget::GeometryShader: return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS;
-		case ShaderTarget::HullShader:     return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS;
-		case ShaderTarget::DomainShader:   return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS;
-		case ShaderTarget::ComputeShader:  return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS;
-		default: return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MAX_VALID;
+			case ShaderTarget::VertexShader:
+				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS;
+			case ShaderTarget::PixelShader:
+				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS;
+			case ShaderTarget::GeometryShader:
+				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS;
+			case ShaderTarget::HullShader:
+				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS;
+			case ShaderTarget::DomainShader:
+				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS;
+			case ShaderTarget::ComputeShader:
+				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS;
+			default:
+				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MAX_VALID;
 		}
 	}
 
@@ -883,9 +951,12 @@ namespace HookD3D12
 				if (Hash::ParseHashText(aliasHash) == shaderHash)
 				{
 					bool streamPipeline = false;
+
 					FindCapturedShaderBytecode(shaderHash, shaderType, streamPipeline);
+
 					if (streamPipeline)
 						PersistStreamPipelineTemplatesForShaderAlias(gLoadedShaderTargets[i], shaderType, shaderHash);
+
 					return i;
 				}
 			}
@@ -893,6 +964,7 @@ namespace HookD3D12
 
 		bool streamPipeline = false;
 		const std::vector<uint8_t>* shaderBytecode = FindCapturedShaderBytecode(shaderHash, shaderType, streamPipeline);
+
 		if (!shaderBytecode || shaderBytecode->empty())
 			return -1;
 
@@ -901,16 +973,20 @@ namespace HookD3D12
 			shaderType,
 			*shaderBytecode,
 			gLoadedShaderTargets);
+
 		if (discoveredReplacementIndex < 0)
 			return -1;
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[discoveredReplacementIndex];
+
 		if (!IsShaderTargetEffectivelyEnabled(replacement))
 			return -1;
 
 		ShaderDiscovery::PersistShaderHashAlias(replacement, shaderHash);
+
 		if (streamPipeline)
 			PersistStreamPipelineTemplatesForShaderAlias(replacement, shaderType, shaderHash);
+
 		return discoveredReplacementIndex;
 	}
 
@@ -925,6 +1001,10 @@ namespace HookD3D12
 			return nullptr;
 
 		const ShaderTarget::ShaderTargetDisk& shaderTarget = gLoadedShaderTargets[replacementIndex];
-		return shaderTarget.name == shaderTargetName ? &shaderTarget : nullptr;
+
+		if (shaderTarget.name == shaderTargetName)
+			return &shaderTarget;
+
+		return nullptr;
 	}
-}
+} //namespace HookD3D12

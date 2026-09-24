@@ -17,7 +17,12 @@ namespace SimilarityScore
 
 	class WeightedAverage
 	{
-	public:
+	  private:
+		double weightedScore = 0.0;
+		double totalWeight = 0.0;
+
+	  public:
+		//ignore missing scores so optional shader data does not skew the average.
 		void Add(double score, double weight = 1.0)
 		{
 			if (weight <= 0.0 || !std::isfinite(score))
@@ -28,28 +33,30 @@ namespace SimilarityScore
 
 		double Result(double emptyResult = 1.0) const
 		{
-			return totalWeight > 0.0 ? Clamp(weightedScore / totalWeight) : emptyResult;
+			if (totalWeight > 0.0)
+				return Clamp(weightedScore / totalWeight);
+			return emptyResult;
 		}
-
-	private:
-		double weightedScore = 0.0;
-		double totalWeight = 0.0;
 	};
 
-	template<typename Value>
+	template <typename Value>
 	double Exact(const Value& left, const Value& right)
 	{
-		return left == right ? 1.0 : 0.0;
+		if (left == right)
+			return 1.0;
+		return 0.0;
 	}
 
 	inline double Exact(const std::string& left, const std::string& right)
 	{
 		if (left.empty() && right.empty())
 			return (std::numeric_limits<double>::quiet_NaN)();
-		return left == right ? 1.0 : 0.0;
+		if (left == right)
+			return 1.0;
+		return 0.0;
 	}
 
-	template<typename Value>
+	template <typename Value>
 	double Numeric(Value left, Value right)
 	{
 		const long double leftValue = static_cast<long double>(left);
@@ -97,7 +104,7 @@ namespace SimilarityScore
 		return static_cast<double>(countBits(shared)) / static_cast<double>(countBits(combined));
 	}
 
-	template<typename Element>
+	template <typename Element>
 	double CalculateCollectionSimilarityScore(const std::vector<Element>& left, const std::vector<Element>& right)
 	{
 		if (left.empty() && right.empty())
@@ -105,8 +112,8 @@ namespace SimilarityScore
 		if (left.empty() || right.empty())
 			return 0.0;
 
-		// Solve a padded maximum-weight bipartite assignment. Each real element can
-		// contribute to at most one match, and unmatched elements contribute zero.
+		//Solve a padded maximum-weight bipartite assignment. Each real element can
+		//contribute to at most one match, and unmatched elements contribute zero.
 		const size_t dimension = (std::max)(left.size(), right.size());
 		std::vector<double> rowPotential(dimension + 1, 0.0);
 		std::vector<double> columnPotential(dimension + 1, 0.0);
@@ -163,16 +170,14 @@ namespace SimilarityScore
 				}
 
 				currentColumn = nextColumn;
-			}
-			while (columnMatch[currentColumn] != 0);
+			} while (columnMatch[currentColumn] != 0);
 
 			do
 			{
 				const size_t nextColumn = previousColumn[currentColumn];
 				columnMatch[currentColumn] = columnMatch[nextColumn];
 				currentColumn = nextColumn;
-			}
-			while (currentColumn != 0);
+			} while (currentColumn != 0);
 		}
 
 		double similarityTotal = 0.0;
@@ -186,7 +191,7 @@ namespace SimilarityScore
 		return Clamp(similarityTotal / static_cast<double>(dimension));
 	}
 
-	template<typename Element>
+	template <typename Element>
 	double CalculateOrderedNumericCollectionSimilarityScore(const std::vector<Element>& left, const std::vector<Element>& right)
 	{
 		if (left.empty() && right.empty())
@@ -197,6 +202,8 @@ namespace SimilarityScore
 		for (size_t index = 0; index < (std::min)(left.size(), right.size()); ++index)
 			score += Numeric(left[index], right[index]);
 
-		return maximumSize > 0 ? Clamp(score / static_cast<double>(maximumSize)) : 1.0;
+		if (maximumSize > 0)
+			return Clamp(score / static_cast<double>(maximumSize));
+		return 1.0;
 	}
-}
+} //namespace SimilarityScore

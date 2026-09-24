@@ -58,4 +58,4 @@ namespace HookD3D12
 			RenderPassRuntime::RecordExecutionBoundary(commandList, true, RenderPassRuntime::ExecutionBoundary::After, "Dispatch", threadGroupCountX, threadGroupCountY, threadGroupCountZ);
 		}
 	}
-}
+} //namespace HookD3D12

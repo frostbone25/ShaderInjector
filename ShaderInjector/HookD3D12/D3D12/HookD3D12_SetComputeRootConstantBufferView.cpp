@@ -20,4 +20,4 @@ namespace HookD3D12
 
 		Original_SetComputeRootConstantBufferView(commandList, rootParameterIndex, address);
 	}
-}
+} //namespace HookD3D12

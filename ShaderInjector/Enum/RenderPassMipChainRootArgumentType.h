@@ -12,4 +12,4 @@ namespace RenderPassMipChain
 		UnorderedAccessView,
 		Constants
 	};
-}
+} //namespace RenderPassMipChain

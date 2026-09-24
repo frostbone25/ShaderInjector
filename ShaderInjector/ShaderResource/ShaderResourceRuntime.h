@@ -35,4 +35,4 @@ namespace ShaderResourceRuntime
 		ID3D12CommandList* const* commandLists);
 	void ReleaseResources();
 	void LogPerformanceStatistics();
-}
+} //namespace ShaderResourceRuntime

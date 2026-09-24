@@ -33,4 +33,4 @@ namespace ShaderTarget
 			viewInstanceViewportArrayIndices,
 			viewInstanceRenderTargetArrayIndices)
 	};
-}
+} //namespace ShaderTarget

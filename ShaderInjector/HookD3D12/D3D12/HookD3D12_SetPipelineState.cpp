@@ -75,4 +75,4 @@ namespace HookD3D12
 		RenderPassRuntime::TrackBoundPipelineState(commandList, boundPipelineState);
 		Original_SetPipelineState(commandList, boundPipelineState);
 	}
-}
+} //namespace HookD3D12

@@ -37,4 +37,4 @@ namespace RenderPassExecutor
 		const RenderPassTexturePool::TextureView& destination,
 		std::string& outError);
 	void ReleaseResources();
-}
+} //namespace RenderPassExecutor

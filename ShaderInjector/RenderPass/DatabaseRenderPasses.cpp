@@ -1,4 +1,5 @@
 #include "DatabaseRenderPasses.h"
+#include "RenderPass/AvailableRenderPassIdentity.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -15,37 +16,28 @@ namespace DatabaseRenderPasses
 	std::vector<RenderPass::RenderPassDisk> gRenderPasses;
 	bool gRenderPassesLoaded = false;
 
-	struct AvailableRenderPassIdentity
-	{
-		std::string id;
-		std::string name;
-	};
-
 	AvailableRenderPassIdentity FindAvailableRenderPassIdentity()
 	{
 		const std::string renderPassDirectory = ShaderInjectorIO::GetRenderPassesDirectory();
 
+		//check both loaded passes and package folders before offering a new identity.
 		for (uint32_t suffix = 1; suffix < UINT32_MAX; ++suffix)
 		{
-			const std::string candidateId = suffix == 1
-				? "RenderPass"
-				: "RenderPass_" + std::to_string(suffix);
+			std::string candidateID = "RenderPass";
+			std::string candidateDisplayName = "New Render Pass";
+			if (suffix > 1)
+			{
+				candidateID += "_" + std::to_string(suffix);
+				candidateDisplayName += " " + std::to_string(suffix);
+			}
 
-			const std::string candidateName = suffix == 1
-				? "New Render Pass"
-				: "New Render Pass " + std::to_string(suffix);
+			const std::string candidateDirectory = ShaderInjectorIO::JoinPath(renderPassDirectory, ShaderInjectorIO::SanitizeFileStem(candidateDisplayName));
 
-			const std::string candidateDirectory = ShaderInjectorIO::JoinPath(
-				renderPassDirectory,
-				ShaderInjectorIO::SanitizeFileStem(candidateName));
+			const bool duplicateID = std::any_of(gRenderPasses.begin(), gRenderPasses.end(), [&](const RenderPass::RenderPassDisk& renderPass)
+												 { return renderPass.id == candidateID; });
 
-			const bool duplicateId = std::any_of(gRenderPasses.begin(), gRenderPasses.end(), [&](const auto& renderPass)
-				{
-					return renderPass.id == candidateId;
-				});
-
-			if (!duplicateId && !ShaderInjectorIO::PathExists(candidateDirectory))
-				return { candidateId, candidateName };
+			if (!duplicateID && !ShaderInjectorIO::PathExists(candidateDirectory))
+				return {candidateID, candidateDisplayName};
 		}
 
 		return {};
@@ -75,9 +67,9 @@ namespace DatabaseRenderPasses
 		const std::string desiredPackageDirectory = ShaderInjectorIO::JoinPath(renderPassesDirectory, fileStem);
 		const std::string desiredJsonPath = ShaderInjectorIO::JoinPath(desiredPackageDirectory, fileStem + ShaderInjectorIO::extensionJSON);
 
-		std::string currentPackageDirectory = renderPass.packageDirectory.empty()
-			? ShaderInjectorIO::DirectoryFromPath(renderPass.jsonPath)
-			: renderPass.packageDirectory;
+		std::string currentPackageDirectory = renderPass.packageDirectory;
+		if (currentPackageDirectory.empty())
+			currentPackageDirectory = ShaderInjectorIO::DirectoryFromPath(renderPass.jsonPath);
 
 		std::string currentJsonPath = renderPass.jsonPath;
 
@@ -159,7 +151,7 @@ namespace DatabaseRenderPasses
 			if (!storedAtRenderPassRoot &&
 				ShaderInjectorIO::FileNameFromPath(jsonPath) != expectedPackageJsonName)
 			{
-				// Other JSON resources may live beside the primary package document.
+				//Other JSON resources may live beside the primary package document.
 				continue;
 			}
 
@@ -172,9 +164,7 @@ namespace DatabaseRenderPasses
 			}
 
 			const bool duplicateId = std::any_of(gRenderPasses.begin(), gRenderPasses.end(), [&](const auto& existing)
-				{
-					return existing.id == renderPass.id;
-				});
+												 { return existing.id == renderPass.id; });
 
 			if (duplicateId)
 			{
@@ -194,9 +184,7 @@ namespace DatabaseRenderPasses
 		}
 
 		std::sort(gRenderPasses.begin(), gRenderPasses.end(), [](const auto& left, const auto& right)
-			{
-				return left.name < right.name;
-			});
+				  { return left.name < right.name; });
 
 		PublishRuntimeConfiguration();
 
@@ -220,11 +208,11 @@ namespace DatabaseRenderPasses
 		EnsureRenderPassesLoaded();
 
 		const auto renderPassIt = std::find_if(gRenderPasses.begin(), gRenderPasses.end(), [&](const auto& renderPass)
-			{
-				return renderPass.id == renderPassId;
-			});
+											   { return renderPass.id == renderPassId; });
 
-		return renderPassIt != gRenderPasses.end() ? &*renderPassIt : nullptr;
+		if (renderPassIt != gRenderPasses.end())
+			return &*renderPassIt;
+		return nullptr;
 	}
 
 	const RenderPass::RenderPassDisk* FindRenderPassByIdReadOnly(const std::string& renderPassId)
@@ -272,10 +260,9 @@ namespace DatabaseRenderPasses
 
 			if (currentRenderPass->event.type == RenderPass::EventType::ModifiedShader)
 			{
-				return currentRenderPass->type == RenderPass::RenderPassType::MipChain &&
-					!RenderPass::FindMipChainRuntimeSource(*currentRenderPass)
-					? RenderPass::timingBefore
-					: currentRenderPass->timing;
+				if (currentRenderPass->type == RenderPass::RenderPassType::MipChain && !RenderPass::FindMipChainRuntimeSource(*currentRenderPass))
+					return RenderPass::timingBefore;
+				return currentRenderPass->timing;
 			}
 
 			if (currentRenderPass->event.id.empty())
@@ -290,9 +277,9 @@ namespace DatabaseRenderPasses
 	const ModifiedShader::ModifiedShaderPackageDisk* ResolveModifiedShader(const RenderPass::RenderPassDisk& renderPass)
 	{
 		const std::string modifiedShaderId = ResolveModifiedShaderId(renderPass);
-		return modifiedShaderId.empty()
-			? nullptr
-			: DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
+		if (modifiedShaderId.empty())
+			return nullptr;
+		return DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
 	}
 
 	bool IsEventChainActive(const RenderPass::RenderPassDisk& renderPass)
@@ -315,11 +302,11 @@ namespace DatabaseRenderPasses
 			if (currentRenderPass->event.type == RenderPass::EventType::ModifiedShader)
 			{
 				const bool rootExecutesAfter = (currentRenderPass->type != RenderPass::RenderPassType::MipChain ||
-					RenderPass::FindMipChainRuntimeSource(*currentRenderPass)) &&
-					currentRenderPass->timing == RenderPass::timingAfter;
+												RenderPass::FindMipChainRuntimeSource(*currentRenderPass)) &&
+											   currentRenderPass->timing == RenderPass::timingAfter;
 
 				return (!mipChainPass || !rootExecutesAfter) &&
-					DatabaseModifiedShaders::FindModifiedShaderById(currentRenderPass->event.id) != nullptr;
+					   DatabaseModifiedShaders::FindModifiedShaderById(currentRenderPass->event.id) != nullptr;
 			}
 			currentRenderPass = FindRenderPassByIdReadOnly(currentRenderPass->event.id);
 		}
@@ -361,14 +348,14 @@ namespace DatabaseRenderPasses
 	{
 		EnsureRenderPassesLoaded();
 		outRenderPassId.clear();
-		const AvailableRenderPassIdentity identity = FindAvailableRenderPassIdentity();
+		const AvailableRenderPassIdentity availableIdentity = FindAvailableRenderPassIdentity();
 
-		if (identity.id.empty() || identity.name.empty())
+		if (availableIdentity.renderPassID.empty() || availableIdentity.displayName.empty())
 			return false;
 
 		RenderPass::RenderPassDisk renderPass{};
-		renderPass.id = identity.id;
-		renderPass.name = identity.name;
+		renderPass.id = availableIdentity.renderPassID;
+		renderPass.name = availableIdentity.displayName;
 		renderPass.vertexShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::VertexShader);
 		renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::PixelShader);
 		const std::string fileStem = ShaderInjectorIO::SanitizeFileStem(renderPass.name);
@@ -386,7 +373,7 @@ namespace DatabaseRenderPasses
 		}
 
 		gRenderPasses.push_back(renderPass);
-		outRenderPassId = identity.id;
+		outRenderPassId = availableIdentity.renderPassID;
 		PublishRuntimeConfiguration();
 		return true;
 	}
@@ -410,8 +397,8 @@ namespace DatabaseRenderPasses
 			return false;
 		}
 
-		// Runtime plans are immutable snapshots. Publish immediately so disabling a
-		// pass takes effect without requiring the separate Save action.
+		//Runtime plans are immutable snapshots. Publish immediately so disabling a
+		//pass takes effect without requiring the separate Save action.
 		PublishRuntimeConfiguration();
 
 		return true;
@@ -480,17 +467,15 @@ namespace DatabaseRenderPasses
 		EnsureRenderPassesLoaded();
 
 		const auto renderPassIt = std::find_if(gRenderPasses.begin(), gRenderPasses.end(), [&](const auto& renderPass)
-			{
-				return renderPass.id == renderPassId;
-			});
+											   { return renderPass.id == renderPassId; });
 
 		if (renderPassIt == gRenderPasses.end())
 			return false;
 
 		const std::string renderPassesDirectory = ShaderInjectorIO::GetRenderPassesDirectory();
-		const std::string packageDirectory = renderPassIt->packageDirectory.empty()
-			? ShaderInjectorIO::DirectoryFromPath(renderPassIt->jsonPath)
-			: renderPassIt->packageDirectory;
+		std::string packageDirectory = renderPassIt->packageDirectory;
+		if (packageDirectory.empty())
+			packageDirectory = ShaderInjectorIO::DirectoryFromPath(renderPassIt->jsonPath);
 
 		if (!ShaderInjectorIO::PathsEqual(packageDirectory, renderPassesDirectory))
 		{
@@ -595,9 +580,9 @@ namespace DatabaseRenderPasses
 			++result.compiledRenderPassCount;
 		}
 
-		// Publish once after the batch so successfully loaded blobs become active
-		// without rebuilding the complete runtime configuration for every pass.
+		//Publish once after the batch so successfully loaded blobs become active
+		//without rebuilding the complete runtime configuration for every pass.
 		PublishRuntimeConfiguration();
 		return result;
 	}
-}
+} //namespace DatabaseRenderPasses

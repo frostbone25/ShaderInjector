@@ -27,4 +27,4 @@ namespace HookD3D12
 
 		UINT commandQueueType = 0;
 	};
-}
+} //namespace HookD3D12

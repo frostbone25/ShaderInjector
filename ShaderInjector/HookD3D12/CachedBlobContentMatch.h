@@ -9,4 +9,4 @@ namespace HookD3D12
 		double matchingRatio = 0.0;
 		size_t longestMatchingRun = 0;
 	};
-}
+} //namespace HookD3D12

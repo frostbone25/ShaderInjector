@@ -11,4 +11,4 @@ namespace HookD3D12
 	{
 		return Original_StorePipeline(library, name, pipelineState);
 	}
-}
+} //namespace HookD3D12

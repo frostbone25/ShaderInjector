@@ -14,4 +14,4 @@ namespace ShaderConfiguration::Internal
 		std::string range;
 		std::vector<std::string> descriptionLines;
 	};
-}
+} //namespace ShaderConfiguration::Internal

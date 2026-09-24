@@ -16,12 +16,12 @@ namespace HookD3D12
 	{
 		const HRESULT result = Original_CreateDescriptorHeap(device, description, interfaceId, descriptorHeapObject);
 
-		if (FAILED(result) || 
-			!device || 
-			!description || 
+		if (FAILED(result) ||
+			!device ||
+			!description ||
 			!descriptorHeapObject ||
 			!*descriptorHeapObject ||
-			IsInsideRenderPassInjection() || 
+			IsInsideRenderPassInjection() ||
 			!RenderPassRuntime::IsDescriptorRegistryTrackingRequired())
 		{
 			return result;
@@ -39,4 +39,4 @@ namespace HookD3D12
 
 		return result;
 	}
-}
+} //namespace HookD3D12

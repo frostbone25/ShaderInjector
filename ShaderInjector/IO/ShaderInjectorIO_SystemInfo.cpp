@@ -193,7 +193,7 @@ namespace ShaderInjectorIO
 		}
 		else
 		{
-			translationList.push_back({ 0x0409, 1200 });
+			translationList.push_back({0x0409, 1200});
 		}
 
 		//try each translation because one executable can store these labels in multiple languages.
@@ -276,6 +276,7 @@ namespace ShaderInjectorIO
 		ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->D3D12Device: AdapterLuid = " + LUIDToString(deviceLUID));
 
 		Microsoft::WRL::ComPtr<IDXGIFactory6> factory;
+
 		if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
 		{
 			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->D3D12Device: CreateDXGIFactory1 failed; adapter details unavailable");
@@ -283,13 +284,16 @@ namespace ShaderInjectorIO
 		}
 
 		Microsoft::WRL::ComPtr<IDXGIAdapter1> matchingDXGIAdapter;
+
 		for (UINT adapterIndex = 0;; ++adapterIndex)
 		{
 			Microsoft::WRL::ComPtr<IDXGIAdapter1> dxgiAdapter;
+
 			if (factory->EnumAdapters1(adapterIndex, &dxgiAdapter) == DXGI_ERROR_NOT_FOUND)
 				break;
 
 			DXGI_ADAPTER_DESC1 adapterDescription{};
+
 			if (FAILED(dxgiAdapter->GetDesc1(&adapterDescription)))
 				continue;
 
@@ -318,9 +322,11 @@ namespace ShaderInjectorIO
 
 		//query the newer adapter interface only when it exposes the per-segment memory budgets.
 		Microsoft::WRL::ComPtr<IDXGIAdapter3> adapterWithMemoryBudget;
+
 		if (SUCCEEDED(matchingDXGIAdapter.As(&adapterWithMemoryBudget)))
 		{
 			DXGI_QUERY_VIDEO_MEMORY_INFO localMemoryInfo{};
+
 			if (SUCCEEDED(adapterWithMemoryBudget->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &localMemoryInfo)))
 			{
 				ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->GPUMemory: LocalBudget = " + StringHelper::FormatBytesAsGiB(localMemoryInfo.Budget));
@@ -330,6 +336,7 @@ namespace ShaderInjectorIO
 			}
 
 			DXGI_QUERY_VIDEO_MEMORY_INFO nonLocalMemoryInfo{};
+
 			if (SUCCEEDED(adapterWithMemoryBudget->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &nonLocalMemoryInfo)))
 			{
 				ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->GPUMemory: NonLocalBudget = " + StringHelper::FormatBytesAsGiB(nonLocalMemoryInfo.Budget));
@@ -344,13 +351,13 @@ namespace ShaderInjectorIO
 	{
 		//ask D3D12 for each feature family separately because older drivers may support only some of them.
 		std::array<D3D_FEATURE_LEVEL, 5> requestedFeatureLevels =
-		{
-			D3D_FEATURE_LEVEL_12_2,
-			D3D_FEATURE_LEVEL_12_1,
-			D3D_FEATURE_LEVEL_12_0,
-			D3D_FEATURE_LEVEL_11_1,
-			D3D_FEATURE_LEVEL_11_0,
-		};
+			{
+				D3D_FEATURE_LEVEL_12_2,
+				D3D_FEATURE_LEVEL_12_1,
+				D3D_FEATURE_LEVEL_12_0,
+				D3D_FEATURE_LEVEL_11_1,
+				D3D_FEATURE_LEVEL_11_0,
+			};
 
 		D3D12_FEATURE_DATA_FEATURE_LEVELS requestedFeatureLevelData{};
 		requestedFeatureLevelData.NumFeatureLevels = static_cast<UINT>(requestedFeatureLevels.size());
@@ -458,12 +465,11 @@ namespace ShaderInjectorIO
 	{
 		//emit this startup summary once even when multiple hooks request the same system details.
 		std::call_once(processAndSystemInfoLogFlag, []()
-		{
+					   {
 			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->ProcessAndSystemInfo: begin");
 			LogExecutableMetadata();
 			LogSystemInfo();
-			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->ProcessAndSystemInfo: end");
-		});
+			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->ProcessAndSystemInfo: end"); });
 	}
 
 	void LogD3D12DeviceInfo(ID3D12Device* d3d12Device)
@@ -473,11 +479,10 @@ namespace ShaderInjectorIO
 
 		//only the first created D3D12 device writes adapter and capability details.
 		std::call_once(d3d12DeviceInfoLogFlag, [d3d12Device]()
-		{
+					   {
 			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->D3D12DeviceInfo: begin");
 			LogAdapterInfo(d3d12Device);
 			LogD3D12FeatureSupport(d3d12Device);
-			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->D3D12DeviceInfo: end");
-		});
+			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->D3D12DeviceInfo: end"); });
 	}
-}
+} //namespace ShaderInjectorIO

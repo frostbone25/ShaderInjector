@@ -14,11 +14,11 @@ namespace HookD3D12
 	{
 		const HRESULT result = Original_CreateCommittedResource(device, heapProperties, heapFlags, description, initialState, clearValue, interfaceId, resource);
 
-		if (Globals::gShaderInjectorEnabled && 
-			!IsInsideRenderPassInjection() && 
+		if (Globals::gShaderInjectorEnabled &&
+			!IsInsideRenderPassInjection() &&
 			RenderPassRuntime::IsResourceTrackingRequired())
 			RegisterCreatedResource(result, resource);
 
 		return result;
 	}
-}
+} //namespace HookD3D12

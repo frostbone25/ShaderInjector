@@ -20,4 +20,4 @@ namespace HookD3D12
 
 		Original_IASetIndexBuffer(commandList, view);
 	}
-}
+} //namespace HookD3D12

@@ -41,4 +41,4 @@ namespace HookD3D12
 
 		Original_SetGraphicsRootSignature(commandList, rootSignature);
 	}
-}
+} //namespace HookD3D12

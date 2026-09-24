@@ -12,4 +12,4 @@ namespace DatabaseShaderConfigurations
 	ShaderConfiguration::DocumentDisk& GetEditableDocument();
 
 	ApplyResult ApplyChanges();
-}
+} //namespace DatabaseShaderConfigurations

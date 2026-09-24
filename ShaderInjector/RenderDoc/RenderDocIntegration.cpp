@@ -17,7 +17,7 @@
 
 namespace RenderDocIntegration
 {
-	//render doc state is shared by the public functions below and guarded by gRenderDocMutex. 
+	//render doc state is shared by the public functions below and guarded by gRenderDocMutex.
 	//keeping it private to this translation unit prevents other modules from accidentally mutating the capture state behind the API.
 	std::mutex gRenderDocMutex;
 	HMODULE gRenderDocModule = nullptr;
@@ -37,14 +37,14 @@ namespace RenderDocIntegration
 
 	//prefer the newest API version, but retain compatibility with older RenderDoc installations that still expose one of these supported interfaces.
 	static const std::array<RENDERDOC_Version, 7> supportedApiVersions =
-	{
-		eRENDERDOC_API_Version_1_7_0,
-		eRENDERDOC_API_Version_1_6_0,
-		eRENDERDOC_API_Version_1_5_0,
-		eRENDERDOC_API_Version_1_4_2,
-		eRENDERDOC_API_Version_1_2_0,
-		eRENDERDOC_API_Version_1_1_2,
-		eRENDERDOC_API_Version_1_0_0,
+		{
+			eRENDERDOC_API_Version_1_7_0,
+			eRENDERDOC_API_Version_1_6_0,
+			eRENDERDOC_API_Version_1_5_0,
+			eRENDERDOC_API_Version_1_4_2,
+			eRENDERDOC_API_Version_1_2_0,
+			eRENDERDOC_API_Version_1_1_2,
+			eRENDERDOC_API_Version_1_0_0,
 	};
 
 	void AddLibraryCandidate(std::vector<std::string>& candidates, std::string candidate)
@@ -58,9 +58,7 @@ namespace RenderDocIntegration
 			candidate = ShaderInjectorIO::JoinPath(candidate, "renderdoc.dll");
 
 		const auto existingCandidate = std::find_if(candidates.begin(), candidates.end(), [&](const std::string& existingPath)
-		{
-			return ShaderInjectorIO::PathsEqual(existingPath, candidate);
-		});
+													{ return ShaderInjectorIO::PathsEqual(existingPath, candidate); });
 
 		if (existingCandidate == candidates.end())
 			candidates.push_back(std::move(candidate));
@@ -105,7 +103,8 @@ namespace RenderDocIntegration
 
 			installationFound = true;
 			const std::wstring wideCandidate = StringHelper::Utf8ToWide(candidate);
-			gRenderDocModule = wideCandidate.empty() ? nullptr : LoadLibraryW(wideCandidate.c_str());
+			if (!wideCandidate.empty())
+				gRenderDocModule = LoadLibraryW(wideCandidate.c_str());
 
 			if (gRenderDocModule)
 			{
@@ -117,7 +116,9 @@ namespace RenderDocIntegration
 			gRenderDocLoadError = GetLastError();
 		}
 
-		gAvailability = installationFound ? RenderDocAvailability::ModuleLoadFailed : RenderDocAvailability::InstallationNotFound;
+		gAvailability = RenderDocAvailability::InstallationNotFound;
+		if (installationFound)
+			gAvailability = RenderDocAvailability::ModuleLoadFailed;
 		return false;
 	}
 
@@ -126,7 +127,7 @@ namespace RenderDocIntegration
 		if (!gRenderDocApi)
 			return false;
 
-		//LaunchReplayUI is idempotent from the injector's perspective. 
+		//LaunchReplayUI is idempotent from the injector's perspective.
 		//reuse an existing target-control connection instead of starting another UI process.
 		if (gRenderDocApi->IsTargetControlConnected() != 0)
 			return true;
@@ -145,7 +146,7 @@ namespace RenderDocIntegration
 
 	bool ResolveRenderDocModuleLocked(bool loadInstalledModule)
 	{
-		//GetModuleHandle detects RenderDoc when it was injected by the launcher, another overlay, or the user. 
+		//GetModuleHandle detects RenderDoc when it was injected by the launcher, another overlay, or the user.
 		//loading from disk is only allowed when the caller explicitly requests attachment.
 		gRenderDocModule = GetModuleHandleW(L"renderdoc.dll");
 
@@ -253,7 +254,7 @@ namespace RenderDocIntegration
 	{
 		std::lock_guard<std::mutex> lock(gRenderDocMutex);
 
-		//refresh is observational. 
+		//refresh is observational.
 		//loading the capture layer is reserved for the explicit attach action so a status check cannot alter the live D3D12 device.
 		DiscoverApiLocked(false);
 
@@ -331,10 +332,10 @@ namespace RenderDocIntegration
 			return;
 
 		gCaptureRequestPending = false;
-		ShaderInjectorIO::WriteToLogFileSuccess(StringHelper::Format(
-			"RenderDocIntegration->PollCaptureStatus: capture completed count=%u passObservedActive=%u",
-			captureCount,
-			gCaptureStartedForPendingRequest ? 1u : 0u));
+		uint32_t passObservedActive = 0;
+		if (gCaptureStartedForPendingRequest)
+			passObservedActive = 1;
+		ShaderInjectorIO::WriteToLogFileSuccess(StringHelper::Format("RenderDocIntegration->PollCaptureStatus: capture completed count=%u passObservedActive=%u", captureCount, passObservedActive));
 	}
 
 	//this monotonically increasing value lets render-pass code detect a new capture request without depending on the timing of RenderDoc's asynchronous callbacks.
@@ -357,10 +358,12 @@ namespace RenderDocIntegration
 		if (gRenderDocApi->IsTargetControlConnected() != 0)
 			return RenderDocReplayUIRequestResult::AlreadyConnected;
 
-		return LaunchReplayUiLocked() ? RenderDocReplayUIRequestResult::Launched : RenderDocReplayUIRequestResult::LaunchFailed;
+		if (LaunchReplayUiLocked())
+			return RenderDocReplayUIRequestResult::Launched;
+		return RenderDocReplayUIRequestResult::LaunchFailed;
 	}
 
-	//status accessors return snapshots while holding the same mutex used by lifecycle and capture operations. 
+	//status accessors return snapshots while holding the same mutex used by lifecycle and capture operations.
 	//this keeps the GUI from observing partially updated state.
 	std::string GetStatusText()
 	{
@@ -387,7 +390,9 @@ namespace RenderDocIntegration
 	uint32_t GetCaptureCount()
 	{
 		std::lock_guard<std::mutex> lock(gRenderDocMutex);
-		return gRenderDocApi ? gRenderDocApi->GetNumCaptures() : 0;
+		if (gRenderDocApi)
+			return gRenderDocApi->GetNumCaptures();
+		return 0;
 	}
 
 	uint32_t GetReplayUiProcessId()
@@ -423,4 +428,4 @@ namespace RenderDocIntegration
 
 		return capturePath.data();
 	}
-}
+} //namespace RenderDocIntegration

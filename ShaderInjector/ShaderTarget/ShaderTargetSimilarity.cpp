@@ -4,10 +4,10 @@
 
 namespace ShaderTarget
 {
-#define DEFINE_COLLECTION_SCORE(Type) \
+#define DEFINE_COLLECTION_SCORE(Type)                                                                    \
 	double Type::CalculateSimilarityScore(const std::vector<Type>& left, const std::vector<Type>& right) \
-	{ \
-		return SimilarityScore::CalculateCollectionSimilarityScore(left, right); \
+	{                                                                                                    \
+		return SimilarityScore::CalculateCollectionSimilarityScore(left, right);                         \
 	}
 
 	void AddStageIdentityScores(
@@ -148,4 +148,4 @@ namespace ShaderTarget
 	DEFINE_COLLECTION_SCORE(ShaderPipelineStreamMetadataDisk)
 
 #undef DEFINE_COLLECTION_SCORE
-}
+} //namespace ShaderTarget

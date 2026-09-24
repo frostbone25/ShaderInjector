@@ -22,11 +22,11 @@ namespace DDS
 		//when using a four - character code, dwFlags must include DDPF_FOURCC.
 		uint32_t fourCC;
 
-		//number of bits in an RGB (possibly including alpha) format. 
+		//number of bits in an RGB (possibly including alpha) format.
 		//valid when dwFlags includes DDPF_RGB, DDPF_LUMINANCE, or DDPF_YUV.
 		uint32_t rgbBitCount;
 
-		//red (or luminance or Y) mask for reading color data. 
+		//red (or luminance or Y) mask for reading color data.
 		//for instance, given the A8R8G8B8 format, the red mask would be 0x00ff0000.
 		uint32_t redMask;
 
@@ -39,11 +39,11 @@ namespace DDS
 		uint32_t blueMask;
 
 		//alpha mask for reading alpha data.
-		//dwFlags must include DDPF_ALPHAPIXELS or DDPF_ALPHA. 
+		//dwFlags must include DDPF_ALPHAPIXELS or DDPF_ALPHA.
 		//for instance, given the A8R8G8B8 format, the alpha mask would be 0xff000000.
 		uint32_t alphaMask;
 	};
 #pragma pack(pop)
 
 	static_assert(sizeof(DDSPixelFormat) == 32, "Unexpected DDS pixel format size.");
-}
+} //namespace DDS

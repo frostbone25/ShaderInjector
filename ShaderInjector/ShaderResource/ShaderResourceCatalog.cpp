@@ -15,7 +15,7 @@ namespace ShaderResourceCatalog
 		{
 			return std::to_string(static_cast<unsigned int>(origin)) + ":" + resourceId;
 		}
-	}
+	} //namespace
 
 	void PublishDiskResources(const std::vector<ShaderResource::TextureDisk>& resources)
 	{
@@ -43,7 +43,9 @@ namespace ShaderResourceCatalog
 			entry.arraySize = resource.arraySize;
 			entry.mipLevels = resource.mipLevels;
 			entry.format = resource.format;
-			entry.status = resource.validationError.empty() ? "Available" : resource.validationError;
+			entry.status = "Available";
+			if (!resource.validationError.empty())
+				entry.status = resource.validationError;
 			gCatalog[CatalogKey(entry.origin, entry.id)] = std::move(entry);
 		}
 	}
@@ -116,16 +118,15 @@ namespace ShaderResourceCatalog
 			snapshot.push_back(resource.second);
 
 		std::sort(snapshot.begin(), snapshot.end(), [](const auto& left, const auto& right)
-		{
+				  {
 			if (left.origin != right.origin)
 				return left.origin < right.origin;
 
 			if (left.name != right.name)
 				return left.name < right.name;
 
-			return left.id < right.id;
-		});
+			return left.id < right.id; });
 
 		return snapshot;
 	}
-}
+} //namespace ShaderResourceCatalog

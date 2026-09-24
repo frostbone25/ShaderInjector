@@ -20,7 +20,7 @@ namespace HookD3D12
 			IsInsideRenderPassInjection() ||
 			!RenderPassRuntime::IsDescriptorRegistryTrackingRequired() ||
 			(heapType != D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV &&
-			!RenderPassRuntime::IsResourceTrackingRequired()))
+			 !RenderPassRuntime::IsResourceTrackingRequired()))
 		{
 			return;
 		}
@@ -37,4 +37,4 @@ namespace HookD3D12
 		if (inspectedRegistry)
 			PerformanceMetrics::Increment(PerformanceMetrics::Counter::DescriptorCopyRegistryHit);
 	}
-}
+} //namespace HookD3D12

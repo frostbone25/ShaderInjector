@@ -17,4 +17,4 @@ namespace HookD3D12
 
 		Original_RSSetViewports(commandList, viewportCount, viewports);
 	}
-}
+} //namespace HookD3D12

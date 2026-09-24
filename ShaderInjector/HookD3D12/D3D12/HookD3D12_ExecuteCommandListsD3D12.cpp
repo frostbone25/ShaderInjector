@@ -19,4 +19,4 @@ namespace HookD3D12
 
 		RememberDirectCommandQueue(commandQueue);
 	}
-}
+} //namespace HookD3D12

@@ -10,4 +10,4 @@ namespace HookD3D12
 		uint64_t rootSignatureHash = 0;
 		std::vector<uint8_t> rootSignatureBlob;
 	};
-}
+} //namespace HookD3D12

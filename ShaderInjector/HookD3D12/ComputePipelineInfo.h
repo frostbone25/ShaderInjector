@@ -18,4 +18,4 @@ namespace HookD3D12
 
 		D3D12_COMPUTE_PIPELINE_STATE_DESC originalDescription = {};
 	};
-}
+} //namespace HookD3D12

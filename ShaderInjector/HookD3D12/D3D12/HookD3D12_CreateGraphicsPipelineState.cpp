@@ -17,13 +17,13 @@ namespace HookD3D12
 		ScopedPipelineActivity pipelineActivity(!gInsideOverlayResourceCreation);
 		HRESULT result = Original_CreateGraphicsPipelineState(device, description, interfaceId, pipelineState);
 
-		if (SUCCEEDED(result) && 
-			!gInsideOverlayResourceCreation && 
-			description && 
-			pipelineState && 
+		if (SUCCEEDED(result) &&
+			!gInsideOverlayResourceCreation &&
+			description &&
+			pipelineState &&
 			*pipelineState)
 			CaptureGraphicsPipelineState(description, static_cast<ID3D12PipelineState*>(*pipelineState));
 
 		return result;
 	}
-}
+} //namespace HookD3D12

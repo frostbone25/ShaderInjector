@@ -75,4 +75,4 @@ namespace ShaderTarget
 				outJsonFiles.push_back(jsonFile);
 		}
 	}
-}
+} //namespace ShaderTarget

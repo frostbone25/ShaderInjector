@@ -135,7 +135,7 @@ namespace HookD3D12
 
 		++gOverlayStartupGate.stableFrameCount;
 		return gOverlayStartupGate.stableFrameCount >= kOverlayStartupStableFrameLimit &&
-			(now - gOverlayStartupGate.firstStableTick) >= kOverlayStartupMinimumStableMs;
+			   (now - gOverlayStartupGate.firstStableTick) >= kOverlayStartupMinimumStableMs;
 	}
 
 	void NotifyOverlayResizeBuffersSucceeded()
@@ -144,4 +144,4 @@ namespace HookD3D12
 		gLoggedResizeCooldown = false;
 		ResetOverlayStartupGate();
 	}
-}
+} //namespace HookD3D12

@@ -1,6 +1,5 @@
 #pragma once
 
-
 namespace RenderPassRuntime
 {
 	enum class ExecutionBoundary
@@ -8,4 +7,4 @@ namespace RenderPassRuntime
 		Before,
 		After,
 	};
-}
+} //namespace RenderPassRuntime

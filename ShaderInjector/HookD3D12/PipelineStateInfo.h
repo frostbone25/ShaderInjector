@@ -75,4 +75,4 @@ namespace HookD3D12
 		std::vector<uint8_t> amplificationShaderBytecode;
 		std::vector<uint8_t> meshShaderBytecode;
 	};
-}
+} //namespace HookD3D12

@@ -12,4 +12,4 @@ namespace HookD3D12
 		ID3D12PipelineState* resolvedPipelineState = nullptr;
 		uint64_t overrideGeneration = 0;
 	};
-}
+} //namespace HookD3D12

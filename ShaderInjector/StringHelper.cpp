@@ -9,13 +9,13 @@
 #include <string>
 
 #if defined(_WIN32)
-	#include <Windows.h>
+#include <Windows.h>
 #else
-	#include <codecvt>
-	#include <locale>
+#include <codecvt>
+#include <locale>
 #endif
 
-//custom 
+//custom
 #include "ShaderTarget/ShaderTarget.h"
 
 namespace StringHelper
@@ -27,7 +27,9 @@ namespace StringHelper
 
 	std::string SafeString(const char* text)
 	{
-		return text ? text : "";
+		if (text)
+			return text;
+		return "";
 	}
 
 	std::string TrimWhitespace(const std::string& text)
@@ -69,9 +71,7 @@ namespace StringHelper
 	std::string LowercaseAscii(std::string text)
 	{
 		std::transform(text.begin(), text.end(), text.begin(), [](unsigned char character)
-		{
-			return static_cast<char>(std::tolower(character));
-		});
+					   { return static_cast<char>(std::tolower(character)); });
 
 		return text;
 	}
@@ -94,36 +94,36 @@ namespace StringHelper
 		if (text.empty())
 			return {};
 
-		#if defined(_WIN32)
-			UINT codePage = CP_UTF8;
-			DWORD conversionFlags = MB_ERR_INVALID_CHARS;
-			int characterCount = MultiByteToWideChar(codePage, conversionFlags, text.c_str(), -1, nullptr, 0);
+#if defined(_WIN32)
+		UINT codePage = CP_UTF8;
+		DWORD conversionFlags = MB_ERR_INVALID_CHARS;
+		int characterCount = MultiByteToWideChar(codePage, conversionFlags, text.c_str(), -1, nullptr, 0);
 
-			if (characterCount == 0 && fallbackToActiveCodePage)
-			{
-				codePage = CP_ACP;
-				conversionFlags = 0;
-				characterCount = MultiByteToWideChar(codePage, conversionFlags, text.c_str(), -1, nullptr, 0);
-			}
+		if (characterCount == 0 && fallbackToActiveCodePage)
+		{
+			codePage = CP_ACP;
+			conversionFlags = 0;
+			characterCount = MultiByteToWideChar(codePage, conversionFlags, text.c_str(), -1, nullptr, 0);
+		}
 
-			if (characterCount == 0)
-				return {};
+		if (characterCount == 0)
+			return {};
 
-			std::wstring wideText(static_cast<size_t>(characterCount), L'\0');
-			MultiByteToWideChar(codePage, conversionFlags, text.c_str(), -1, wideText.data(), characterCount);
-			wideText.pop_back();
-			return wideText;
-		#else
-			try
-			{
-				std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-				return converter.from_bytes(text);
-			}
-			catch (...)
-			{
-				return {};
-			}
-		#endif
+		std::wstring wideText(static_cast<size_t>(characterCount), L'\0');
+		MultiByteToWideChar(codePage, conversionFlags, text.c_str(), -1, wideText.data(), characterCount);
+		wideText.pop_back();
+		return wideText;
+#else
+		try
+		{
+			std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+			return converter.from_bytes(text);
+		}
+		catch (...)
+		{
+			return {};
+		}
+#endif
 	}
 
 	std::string WideToUtf8(const std::wstring& text)
@@ -131,63 +131,65 @@ namespace StringHelper
 		if (text.empty())
 			return {};
 
-		#if defined(_WIN32)
-			const int requiredBytes = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+#if defined(_WIN32)
+		const int requiredBytes = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
 
-			if (requiredBytes <= 0)
-				return {};
+		if (requiredBytes <= 0)
+			return {};
 
-			std::string utf8Text(static_cast<size_t>(requiredBytes), '\0');
+		std::string utf8Text(static_cast<size_t>(requiredBytes), '\0');
 
-			WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), utf8Text.data(), requiredBytes, nullptr, nullptr);
+		WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), utf8Text.data(), requiredBytes, nullptr, nullptr);
 
-			return utf8Text;
-		#else
-			try
-			{
-				std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-				return converter.to_bytes(text);
-			}
-			catch (...)
-			{
-				return {};
-			}
-		#endif
+		return utf8Text;
+#else
+		try
+		{
+			std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+			return converter.to_bytes(text);
+		}
+		catch (...)
+		{
+			return {};
+		}
+#endif
 	}
 
 	std::string WideToUtf8(const wchar_t* text)
 	{
-		return text ? WideToUtf8(std::wstring(text)) : std::string();
+		if (text)
+			return WideToUtf8(std::wstring(text));
+		return std::string();
 	}
 
 	std::string WindowsErrorMessage(unsigned long errorCode)
 	{
-		#if defined(_WIN32)
-			char* messageBuffer = nullptr;
+#if defined(_WIN32)
+		char* messageBuffer = nullptr;
 
-			const DWORD messageLength = FormatMessageA(
-				FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-				nullptr,
-				static_cast<DWORD>(errorCode),
-				MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-				reinterpret_cast<char*>(&messageBuffer),
-				0,
-				nullptr);
+		const DWORD messageLength = FormatMessageA(
+			FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+			nullptr,
+			static_cast<DWORD>(errorCode),
+			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+			reinterpret_cast<char*>(&messageBuffer),
+			0,
+			nullptr);
 
-			std::string message = messageLength && messageBuffer
-				? std::string(messageBuffer, messageLength)
-				: "Windows error " + std::to_string(errorCode);
+		std::string message = "Windows error " + std::to_string(errorCode);
+		if (messageLength && messageBuffer)
+			message = std::string(messageBuffer, messageLength);
 
-			if (messageBuffer)
-				LocalFree(messageBuffer);
+		if (messageBuffer)
+			LocalFree(messageBuffer);
 
-			while (!message.empty() && (message.back() == '\r' || message.back() == '\n'))
-				message.pop_back();
+		while (!message.empty() && (message.back() == '\r' || message.back() == '\n'))
+			message.pop_back();
 
-			return message;
-		#else
-			return std::strerror(static_cast<int>(errorCode));
-		#endif
+		return message;
+#else
+		return std::strerror(static_cast<int>(errorCode));
+#endif
 	}
 
 	std::string FormatHRESULT(long result)
@@ -223,7 +225,9 @@ namespace StringHelper
 
 	std::string BoolText(bool value)
 	{
-		return value ? "true" : "false";
+		if (value)
+			return "true";
+		return "false";
 	}
 
 	std::string ExecutablePathFromCommandLine(const std::string& commandLine)
@@ -246,32 +250,32 @@ namespace StringHelper
 		return commandLine.substr(commandStart, commandEnd - commandStart);
 	}
 
-
 	bool IsValidShaderModel(Globals::ShaderModel shaderModel)
 	{
 		switch (shaderModel)
 		{
-			case Globals::ShaderModel::ShaderModel5_0:
-			case Globals::ShaderModel::ShaderModel5_1:
-			case Globals::ShaderModel::ShaderModel6_0:
-			case Globals::ShaderModel::ShaderModel6_1:
-			case Globals::ShaderModel::ShaderModel6_2:
-			case Globals::ShaderModel::ShaderModel6_3:
-			case Globals::ShaderModel::ShaderModel6_4:
-			case Globals::ShaderModel::ShaderModel6_5:
-			case Globals::ShaderModel::ShaderModel6_6:
-				return true;
-			default:
-				return false;
+		case Globals::ShaderModel::ShaderModel5_0:
+		case Globals::ShaderModel::ShaderModel5_1:
+		case Globals::ShaderModel::ShaderModel6_0:
+		case Globals::ShaderModel::ShaderModel6_1:
+		case Globals::ShaderModel::ShaderModel6_2:
+		case Globals::ShaderModel::ShaderModel6_3:
+		case Globals::ShaderModel::ShaderModel6_4:
+		case Globals::ShaderModel::ShaderModel6_5:
+		case Globals::ShaderModel::ShaderModel6_6:
+			return true;
+		default:
+			return false;
 		}
 	}
 
 	Globals::ShaderModel ShaderModelFromValue(int value, Globals::ShaderModel fallback)
 	{
 		const Globals::ShaderModel shaderModel = static_cast<Globals::ShaderModel>(value);
-		return IsValidShaderModel(shaderModel) ? shaderModel : fallback;
+		if (IsValidShaderModel(shaderModel))
+			return shaderModel;
+		return fallback;
 	}
-
 
 	std::string ShaderProfileForType(ShaderTarget::ShaderType shaderType)
 	{
@@ -280,35 +284,35 @@ namespace StringHelper
 
 		switch (shaderType)
 		{
-			case ShaderTarget::VertexShader:
-				stagePrefix = "vs_";
-				shaderModel = Globals::gVertexShaderModel;
-				break;
-			case ShaderTarget::HullShader:
-				stagePrefix = "hs_";
-				shaderModel = Globals::gHullShaderModel;
-				break;
-			case ShaderTarget::DomainShader:
-				stagePrefix = "ds_";
-				shaderModel = Globals::gDomainShaderModel;
-				break;
-			case ShaderTarget::GeometryShader:
-				stagePrefix = "gs_";
-				shaderModel = Globals::gGeometryShaderModel;
-				break;
-			case ShaderTarget::PixelShader:
-				stagePrefix = "ps_";
-				shaderModel = Globals::gPixelShaderModel;
-				break;
-			case ShaderTarget::ComputeShader:
-				stagePrefix = "cs_";
-				shaderModel = Globals::gComputeShaderModel;
-				break;
-			default:
-				return {};
+		case ShaderTarget::VertexShader:
+			stagePrefix = "vs_";
+			shaderModel = Globals::gVertexShaderModel;
+			break;
+		case ShaderTarget::HullShader:
+			stagePrefix = "hs_";
+			shaderModel = Globals::gHullShaderModel;
+			break;
+		case ShaderTarget::DomainShader:
+			stagePrefix = "ds_";
+			shaderModel = Globals::gDomainShaderModel;
+			break;
+		case ShaderTarget::GeometryShader:
+			stagePrefix = "gs_";
+			shaderModel = Globals::gGeometryShaderModel;
+			break;
+		case ShaderTarget::PixelShader:
+			stagePrefix = "ps_";
+			shaderModel = Globals::gPixelShaderModel;
+			break;
+		case ShaderTarget::ComputeShader:
+			stagePrefix = "cs_";
+			shaderModel = Globals::gComputeShaderModel;
+			break;
+		default:
+			return {};
 		}
 
 		shaderModel = ShaderModelDetector::GetEffectiveShaderModel(shaderType, shaderModel);
 		return std::string(stagePrefix) + ShaderModelToString(shaderModel);
 	}
-}
+} //namespace StringHelper

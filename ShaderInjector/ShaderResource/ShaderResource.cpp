@@ -2,13 +2,16 @@
 
 namespace ShaderResource
 {
-	#define SHADER_INJECTOR_DXGI_FORMAT(name, value) \
-		TextureFormatOption{ value, #name, #name " (" #value ")" }
+#define SHADER_INJECTOR_DXGI_FORMAT(name, value) \
+	TextureFormatOption                          \
+	{                                            \
+		value, #name, #name " (" #value ")"      \
+	}
 
 	const std::vector<TextureFormatOption>& TextureFormatOptions()
 	{
-		// Keep numeric values here rather than depending on a particular Windows SDK
-		// version so configurations containing newer DXGI formats remain portable.
+		//Keep numeric values here rather than depending on a particular Windows SDK
+		//version so configurations containing newer DXGI formats remain portable.
 		static const std::vector<TextureFormatOption> formatOptions = {
 			SHADER_INJECTOR_DXGI_FORMAT(DXGI_FORMAT_UNKNOWN, 0),
 			SHADER_INJECTOR_DXGI_FORMAT(DXGI_FORMAT_R32G32B32A32_TYPELESS, 1),
@@ -147,13 +150,11 @@ namespace ShaderResource
 		return "Unknown DXGI format (" + std::to_string(format) + ")";
 	}
 
-
-
 	bool IsValidDownscaleFactor(uint32_t downscaleFactor)
 	{
 		return downscaleFactor >= 1 && downscaleFactor <= 16 &&
-			(downscaleFactor & (downscaleFactor - 1)) == 0;
+			   (downscaleFactor & (downscaleFactor - 1)) == 0;
 	}
 
-	#undef SHADER_INJECTOR_DXGI_FORMAT
-}
+#undef SHADER_INJECTOR_DXGI_FORMAT
+} //namespace ShaderResource

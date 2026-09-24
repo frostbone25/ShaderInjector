@@ -61,4 +61,4 @@ namespace ShaderInjectorIO
 	{
 		return WriteInternalShaderSourceCodeToDisk(GetInternalMarkerComputeShaderSourceCodeFilePath(), ShaderTemplates::internalMarkerComputeShaderSourceCode);
 	}
-}
+} //namespace ShaderInjectorIO

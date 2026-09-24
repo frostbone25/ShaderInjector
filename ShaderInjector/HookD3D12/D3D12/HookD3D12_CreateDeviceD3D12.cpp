@@ -34,4 +34,4 @@ namespace HookD3D12
 
 		return createDeviceResult;
 	}
-}
+} //namespace HookD3D12

@@ -17,4 +17,4 @@ namespace DatabaseModifiedShaders::Detail
 		const ShaderAnalysis::ShaderAnalysisDisk& candidateAnalysis);
 
 	bool CompileModifiedShaderPackage(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader);
-}
+} //namespace DatabaseModifiedShaders::Detail

@@ -8,42 +8,12 @@
 #include <d3d12.h>
 
 #include "RenderPass.h"
+#include "RenderPass/Registry/RegistryStatistics.h"
+#include "RenderPass/Registry/DescriptorTableLayout.h"
+#include "RenderPass/Registry/DescriptorBindingLocation.h"
 
 namespace RenderPassResourceRegistry
 {
-	struct RegistryStatistics
-	{
-		size_t descriptorCount = 0;
-		size_t descriptorHeapCount = 0;
-		size_t retiredDescriptorHeapCount = 0;
-		size_t heapDescriptorCount = 0;
-		size_t fallbackDescriptorCount = 0;
-		size_t descriptorMetadataCount = 0;
-		size_t bufferResourceCount = 0;
-		size_t rootSignatureCount = 0;
-	};
-
-	struct DescriptorTableLayout
-	{
-		UINT rootParameterIndex = UINT32_MAX;
-		D3D12_DESCRIPTOR_HEAP_TYPE heapType = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
-		D3D12_SHADER_VISIBILITY shaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-		UINT descriptorCount = 0;
-		bool containsUnboundedRange = false;
-	};
-
-	struct DescriptorBindingLocation
-	{
-		UINT rootParameterIndex = UINT32_MAX;
-		UINT tableOffset = UINT32_MAX;
-		UINT shaderRegister = UINT32_MAX;
-		UINT registerSpace = UINT32_MAX;
-		D3D12_DESCRIPTOR_HEAP_TYPE heapType = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
-		D3D12_SHADER_VISIBILITY shaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-		UINT descriptorCount = 0;
-		bool tableContainsUnboundedRange = false;
-	};
-
 	void RegisterRootSignature(
 		ID3D12RootSignature* rootSignature,
 		const void* serializedRootSignature,
@@ -142,4 +112,4 @@ namespace RenderPassResourceRegistry
 		D3D12_SHADER_VISIBILITY shaderVisibility,
 		DescriptorBindingLocation& outLocation);
 	RegistryStatistics GetStatistics();
-}
+} //namespace RenderPassResourceRegistry

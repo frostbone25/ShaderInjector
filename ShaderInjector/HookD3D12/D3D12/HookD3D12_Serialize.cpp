@@ -11,4 +11,4 @@ namespace HookD3D12
 	{
 		return Original_Serialize(library, data, dataSize);
 	}
-}
+} //namespace HookD3D12

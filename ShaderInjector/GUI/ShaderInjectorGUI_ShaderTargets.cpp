@@ -1,5 +1,6 @@
 //ShaderInjectorGUI.cpp
 #include "ShaderInjectorGUI.h"
+#include "GUI/ShaderTargetReloadResult.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -31,13 +32,6 @@
 
 namespace ShaderInjectorGUI
 {
-	struct ShaderTargetReloadResult
-	{
-		int activeShaderTargetCount = 0;
-		int reloadedShaderTargetCount = 0;
-		int skippedInactiveShaderTargetCount = 0;
-	};
-
 	ShaderTargetReloadResult ReloadAllActiveShaderTargets()
 	{
 		ShaderTargetReloadResult result{};
@@ -145,12 +139,12 @@ namespace ShaderInjectorGUI
 		return reloaded;
 	}
 
-	void UI_ShaderTargets()
+	void DrawShaderTargets()
 	{
 		if (!HookD3D12::gLoadedShaderTargetsOnce)
 			HookD3D12::RefreshLoadedShaderTargets();
-		const std::string shaderTargetsHeader =
-			"Shader Targets: " + std::to_string(HookD3D12::gLoadedShaderTargets.size()) + "###ShaderTargets";
+
+		const std::string shaderTargetsHeader = "Shader Targets: " + std::to_string(HookD3D12::gLoadedShaderTargets.size()) + "###ShaderTargets";
 
 		if (ImGui::CollapsingHeader(shaderTargetsHeader.c_str()))
 		{
@@ -158,11 +152,10 @@ namespace ShaderInjectorGUI
 			ImGui::Spacing();
 
 			ImGui::InputTextMultiline("##ShaderTargetsNote",
-				const_cast<char*>(noteShaderTargetsText),
-				strlen(noteShaderTargetsText) + 1,
-				ImVec2(-FLT_MIN, 0), // -FLT_MIN width = stretch to window edge, 0 height = auto
-				ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap
-			);
+									  const_cast<char*>(noteShaderTargetsText),
+									  strlen(noteShaderTargetsText) + 1,
+									  ImVec2(-FLT_MIN, 0), //-FLT_MIN width = stretch to window edge, 0 height = auto
+									  ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
 
 			if (ImGui::Button("Refresh##ShaderTargets"))
 				HookD3D12::RefreshLoadedShaderTargets();
@@ -174,6 +167,7 @@ namespace ShaderInjectorGUI
 
 			ImGui::SameLine();
 			ImGui::BeginDisabled(HookD3D12::gLoadedShaderTargets.empty());
+
 			if (ImGui::Button("Reload All##ShaderTargets"))
 			{
 				const ShaderTargetReloadResult result = ReloadAllActiveShaderTargets();
@@ -187,6 +181,7 @@ namespace ShaderInjectorGUI
 				else
 					WriteToRuntimeLogError(summary);
 			}
+
 			ImGui::EndDisabled();
 
 			if (HookD3D12::gLoadedShaderTargets.empty())
@@ -205,7 +200,10 @@ namespace ShaderInjectorGUI
 				for (int i = 0; i < (int)HookD3D12::gLoadedShaderTargets.size(); i++)
 				{
 					const ShaderTarget::ShaderTargetDisk& replacement = HookD3D12::gLoadedShaderTargets[i];
-					std::string label = replacement.name.empty() ? replacement.jsonPath : replacement.name;
+					std::string label = replacement.jsonPath;
+
+					if (!replacement.name.empty())
+						label = replacement.name;
 
 					if (!replacement.originalShaderBytecodeHash.empty())
 						label += " [" + replacement.originalShaderBytecodeHash + "]";
@@ -246,9 +244,10 @@ namespace ShaderInjectorGUI
 			HookD3D12::SyncShaderTargetNameBuffer();
 
 			ShaderTarget::ShaderTargetDisk& replacement = HookD3D12::gLoadedShaderTargets[HookD3D12::gSelectedShaderTargetIndex];
-			const size_t loadedBlobSize = HookD3D12::gSelectedShaderTargetIndex < (int)HookD3D12::gLoadedShaderTargetBlobs.size()
-				? HookD3D12::gLoadedShaderTargetBlobs[HookD3D12::gSelectedShaderTargetIndex].size()
-				: 0;
+			size_t loadedBlobSize = 0;
+
+			if (HookD3D12::gSelectedShaderTargetIndex < (int)HookD3D12::gLoadedShaderTargetBlobs.size())
+				loadedBlobSize = HookD3D12::gLoadedShaderTargetBlobs[HookD3D12::gSelectedShaderTargetIndex].size();
 
 			//========================== SELECTED ===========================
 			ImGui::SeparatorText(HookD3D12::gShaderTargetNameBuffer);
@@ -256,8 +255,10 @@ namespace ShaderInjectorGUI
 
 			ImGui::Text("Enabled");
 			ImGui::SameLine();
+
 			if (ImGui::Checkbox("##ShaderTargetEnable", &replacement.enabled))
 				HookD3D12::MarkShaderTargetApplyDirty();
+
 			ImGui::SameLine();
 
 			if (ImGui::Button("Delete##ShaderTarget"))
@@ -273,7 +274,7 @@ namespace ShaderInjectorGUI
 			ImGui::Spacing();
 			ImGui::Unindent(indentSpace);
 
-			UI_ShaderTargetSourceSection(replacement, HookD3D12::gSelectedShaderTargetIndex);
+			DrawShaderTargetSourceSection(replacement, HookD3D12::gSelectedShaderTargetIndex);
 
 			ImGui::Spacing();
 
@@ -295,7 +296,7 @@ namespace ShaderInjectorGUI
 
 			ImGui::Spacing();
 
-			UI_ShaderTargetPSOList(replacement);
+			DrawShaderTargetPSOList(replacement);
 
 			ImGui::Spacing();
 
@@ -303,7 +304,7 @@ namespace ShaderInjectorGUI
 		}
 	}
 
-	void UI_ShaderTargetSourceSection(ShaderTarget::ShaderTargetDisk& replacement, int replacementIndex)
+	void DrawShaderTargetSourceSection(ShaderTarget::ShaderTargetDisk& replacement, int replacementIndex)
 	{
 		DatabaseModifiedShaders::EnsureModifiedShadersLoaded();
 
@@ -322,9 +323,10 @@ namespace ShaderInjectorGUI
 		ImGui::SetNextItemWidth(comboWidth);
 
 		const ModifiedShader::ModifiedShaderPackageDisk* selectedPackage = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
-		const std::string currentPackageName = selectedPackage
-			? DatabaseModifiedShaders::DisplayName(*selectedPackage)
-			: "(none)";
+		std::string currentPackageName = "(none)";
+
+		if (selectedPackage)
+			currentPackageName = DatabaseModifiedShaders::DisplayName(*selectedPackage);
 
 		if (ImGui::BeginCombo("##ShaderTargetModifiedShader", currentPackageName.c_str()))
 		{
@@ -357,6 +359,7 @@ namespace ShaderInjectorGUI
 		}
 
 		ImGui::SameLine();
+
 		if (ImGui::Button(btnLabel))
 			DatabaseModifiedShaders::RefreshModifiedShaders();
 
@@ -366,7 +369,7 @@ namespace ShaderInjectorGUI
 		ImGui::Unindent(indentSpace);
 	}
 
-	void UI_ShaderTargetPSOList(const ShaderTarget::ShaderTargetDisk& replacement)
+	void DrawShaderTargetPSOList(const ShaderTarget::ShaderTargetDisk& replacement)
 	{
 		const int replacementCount = CountReplacementPSOs(replacement);
 		std::string title = "Replacing Active PSOs: " + std::to_string(replacementCount);
@@ -386,7 +389,7 @@ namespace ShaderInjectorGUI
 					const auto& pipeline = HookD3D12::gGraphicsPipelines[i];
 
 					if (PipelineUsesReplacement(pipeline, replacement))
-						UI_DrawReplacementPSORow("Graphics", i, pipeline);
+						DrawReplacementPSORow("Graphics", i, pipeline);
 				}
 
 				for (int i = 0; i < (int)HookD3D12::gPipelineStates.size(); i++)
@@ -394,7 +397,7 @@ namespace ShaderInjectorGUI
 					const auto& pipeline = HookD3D12::gPipelineStates[i];
 
 					if (PipelineUsesReplacement(pipeline, replacement))
-						UI_DrawReplacementPSORow("Stream", i, pipeline);
+						DrawReplacementPSORow("Stream", i, pipeline);
 				}
 			}
 
@@ -403,8 +406,8 @@ namespace ShaderInjectorGUI
 		}
 	}
 
-	template<typename PipelineT>
-	void UI_DrawReplacementPSORow(const char* sourceList, int index, const PipelineT& pipeline)
+	template <typename PipelineT>
+	void DrawReplacementPSORow(const char* sourceList, int index, const PipelineT& pipeline)
 	{
 		ImGui::Text("%s #%d", sourceList, index);
 		ImGui::SameLine();
@@ -442,13 +445,12 @@ namespace ShaderInjectorGUI
 		return count;
 	}
 
-	template<typename PipelineT>
+	template <typename PipelineT>
 	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderTarget::ShaderTargetDisk& replacement)
 	{
 		if (!HookD3D12::IsShaderTargetEffectivelyEnabled(replacement) || !pipeline.pipelineStateWithReplacement)
 			return false;
 
-		return pipeline.activeShaderTargetType == replacement.shaderType
-			&& pipeline.activeShaderTargetHash == Hash::ParseHashText(replacement.originalShaderBytecodeHash);
+		return pipeline.activeShaderTargetType == replacement.shaderType && pipeline.activeShaderTargetHash == Hash::ParseHashText(replacement.originalShaderBytecodeHash);
 	}
-}
+} //namespace ShaderInjectorGUI

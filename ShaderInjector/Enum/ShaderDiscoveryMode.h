@@ -1,6 +1,5 @@
 #pragma once
 
-
 namespace Globals
 {
 	enum class ShaderDiscoveryMode
@@ -8,4 +7,4 @@ namespace Globals
 		HashLookup = 0,
 		ShaderAnalysis = 1,
 	};
-}
+} //namespace Globals

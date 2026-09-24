@@ -1,4 +1,4 @@
-// ShaderInjectorVersion.h
+//ShaderInjectorVersion.h
 #pragma once
 
 #define SHADER_INJECTOR_VERSION_MAJOR 3

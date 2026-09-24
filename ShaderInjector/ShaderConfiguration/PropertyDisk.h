@@ -36,4 +36,4 @@ namespace ShaderConfiguration
 			definitionIndex,
 			sourceOrder)
 	};
-}
+} //namespace ShaderConfiguration

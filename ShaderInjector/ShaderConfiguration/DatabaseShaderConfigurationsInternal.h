@@ -8,4 +8,4 @@ namespace DatabaseShaderConfigurations
 {
 	extern ShaderConfiguration::DocumentDisk gDocument;
 	bool IsSafeRelativeSourcePath(const std::string& sourcePath);
-}
+} //namespace DatabaseShaderConfigurations

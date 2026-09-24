@@ -1,9 +1,12 @@
 #include "RenderPass/RenderPassReplacement.h"
+#include "RenderPass/PipelineFailure.h"
+#include "RenderPass/ReplacementThreadPipelineLookup.h"
 
 #include <array>
 #include <atomic>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
 #include "Hash/Hash.h"
 #include "HookD3D12/HookD3D12.h"
@@ -15,27 +18,29 @@ namespace RenderPassReplacement
 	{
 		std::mutex gCacheMutex;
 		std::unordered_map<std::string, ID3D12PipelineState*> gPipelineCache;
-		std::atomic<uint64_t> gPipelineAvailabilityGeneration{ 1 };
-
-		struct PipelineFailure
-		{
-			uint64_t generation = 0;
-			std::string error;
-		};
+		std::atomic<uint64_t> gPipelineAvailabilityGeneration{1};
 
 		std::unordered_map<std::string, PipelineFailure> gPipelineFailures;
 
-		struct ThreadPipelineLookup
-		{
-			const RenderPass::RenderPassDisk* renderPass = nullptr;
-			ID3D12PipelineState* originalPipelineState = nullptr;
-			uint64_t shaderBlobHash = 0;
-			ID3D12PipelineState* replacementPipelineState = nullptr;
-			std::string error;
-		};
-
 		thread_local std::unordered_map<const RenderPass::RenderPassDisk*, ThreadPipelineLookup> gThreadPipelineLookups;
 		thread_local uint64_t gThreadPipelineGeneration = 0;
+
+		//D3D12 expects null pointers for absent stream data even when vector::data is available.
+		template <typename Value>
+		Value* DataOrNull(std::vector<Value>& values)
+		{
+			if (values.empty())
+				return nullptr;
+			return values.data();
+		}
+
+		template <typename Value>
+		const Value* DataOrNull(const std::vector<Value>& values)
+		{
+			if (values.empty())
+				return nullptr;
+			return values.data();
+		}
 
 		const ThreadPipelineLookup* FindThreadPipeline(
 			const RenderPass::RenderPassDisk& renderPass,
@@ -77,13 +82,13 @@ namespace RenderPassReplacement
 				originalPipelineState,
 				renderPass.fragmentShaderBlobHash,
 				replacementPipelineState,
-				error };
+				error};
 		}
 
 		std::string CacheKey(const RenderPass::RenderPassDisk& renderPass, ID3D12PipelineState* original)
 		{
 			return StringHelper::PointerToString(original) + ':' + std::to_string(static_cast<int>(renderPass.type)) +
-				':' + std::to_string(renderPass.fragmentShaderBlobHash);
+				   ':' + std::to_string(renderPass.fragmentShaderBlobHash);
 		}
 
 		ID3D12PipelineState* BuildGraphicsPipeline(
@@ -97,22 +102,22 @@ namespace RenderPassReplacement
 					continue;
 
 				D3D12_GRAPHICS_PIPELINE_STATE_DESC description = pipeline.originalDescription;
-				description.VS = { pipeline.vertexShaderBytecode.empty() ? nullptr : pipeline.vertexShaderBytecode.data(), pipeline.vertexShaderBytecode.size() };
-				description.PS = { renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size() };
-				description.GS = { pipeline.geometryShaderBytecode.empty() ? nullptr : pipeline.geometryShaderBytecode.data(), pipeline.geometryShaderBytecode.size() };
-				description.HS = { pipeline.hullShaderBytecode.empty() ? nullptr : pipeline.hullShaderBytecode.data(), pipeline.hullShaderBytecode.size() };
-				description.DS = { pipeline.domainShaderBytecode.empty() ? nullptr : pipeline.domainShaderBytecode.data(), pipeline.domainShaderBytecode.size() };
-				description.InputLayout = { pipeline.inputElements.empty() ? nullptr : pipeline.inputElements.data(), static_cast<UINT>(pipeline.inputElements.size()) };
-				description.StreamOutput.pSODeclaration = pipeline.streamOutputDeclarations.empty() ? nullptr : pipeline.streamOutputDeclarations.data();
+				description.VS = {DataOrNull(pipeline.vertexShaderBytecode), pipeline.vertexShaderBytecode.size()};
+				description.PS = {renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size()};
+				description.GS = {DataOrNull(pipeline.geometryShaderBytecode), pipeline.geometryShaderBytecode.size()};
+				description.HS = {DataOrNull(pipeline.hullShaderBytecode), pipeline.hullShaderBytecode.size()};
+				description.DS = {DataOrNull(pipeline.domainShaderBytecode), pipeline.domainShaderBytecode.size()};
+				description.InputLayout = {DataOrNull(pipeline.inputElements), static_cast<UINT>(pipeline.inputElements.size())};
+				description.StreamOutput.pSODeclaration = DataOrNull(pipeline.streamOutputDeclarations);
 				description.StreamOutput.NumEntries = static_cast<UINT>(pipeline.streamOutputDeclarations.size());
-				description.StreamOutput.pBufferStrides = pipeline.streamOutputStrides.empty() ? nullptr : pipeline.streamOutputStrides.data();
+				description.StreamOutput.pBufferStrides = DataOrNull(pipeline.streamOutputStrides);
 				description.StreamOutput.NumStrides = static_cast<UINT>(pipeline.streamOutputStrides.size());
 				description.CachedPSO = {};
 				ID3D12PipelineState* replacement = nullptr;
 				HookD3D12::ScopedRenderPassInjection injectionScope;
-				const HRESULT result = HookD3D12::Original_CreateGraphicsPipelineState
-					? HookD3D12::Original_CreateGraphicsPipelineState(HookD3D12::GetCapturedDevice(), &description, IID_PPV_ARGS(&replacement))
-					: E_NOINTERFACE;
+				HRESULT result = E_NOINTERFACE;
+				if (HookD3D12::Original_CreateGraphicsPipelineState)
+					result = HookD3D12::Original_CreateGraphicsPipelineState(HookD3D12::GetCapturedDevice(), &description, IID_PPV_ARGS(&replacement));
 
 				if (FAILED(result) || !replacement)
 					outError = "Replacement pixel PSO creation failed with " + StringHelper::FormatHRESULT(result);
@@ -145,10 +150,9 @@ namespace RenderPassReplacement
 			if (rebuildTemplate && !rebuildTemplate->streamBlob.empty())
 			{
 				const auto& pipeline = *rebuildTemplate;
-				const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetType =
-					RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute
-					? D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS
-					: D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS;
+				D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetType = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS;
+				if (RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute)
+					targetType = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS;
 				std::vector<uint8_t> stream = pipeline.streamBlob;
 				uint8_t* cursor = stream.data();
 				uint8_t* end = cursor + stream.size();
@@ -159,15 +163,24 @@ namespace RenderPassReplacement
 				{
 					switch (type)
 					{
-						case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS: return &pipeline.vertexShaderBytecode;
-						case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS: return &pipeline.pixelShaderBytecode;
-						case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS: return &pipeline.computeShaderBytecode;
-						case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS: return &pipeline.geometryShaderBytecode;
-						case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS: return &pipeline.hullShaderBytecode;
-						case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS: return &pipeline.domainShaderBytecode;
-						case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS: return &pipeline.amplificationShaderBytecode;
-						case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS: return &pipeline.meshShaderBytecode;
-						default: return nullptr;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS:
+						return &pipeline.vertexShaderBytecode;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS:
+						return &pipeline.pixelShaderBytecode;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS:
+						return &pipeline.computeShaderBytecode;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS:
+						return &pipeline.geometryShaderBytecode;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS:
+						return &pipeline.hullShaderBytecode;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS:
+						return &pipeline.domainShaderBytecode;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS:
+						return &pipeline.amplificationShaderBytecode;
+					case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS:
+						return &pipeline.meshShaderBytecode;
+					default:
+						return nullptr;
 					}
 				};
 
@@ -179,10 +192,10 @@ namespace RenderPassReplacement
 					const auto type = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(cursor);
 					const UINT typeIndex = static_cast<UINT>(type);
 
-					if (typeIndex >= ARRAYSIZE(HookD3D12::kSubobjectSizes) || !HookD3D12::kSubobjectSizes[typeIndex])
+					if (typeIndex >= ARRAYSIZE(HookD3D12::subobjectSizes) || !HookD3D12::subobjectSizes[typeIndex])
 						break;
 
-					const size_t subobjectSize = HookD3D12::kSubobjectSizes[typeIndex];
+					const size_t subobjectSize = HookD3D12::subobjectSizes[typeIndex];
 
 					if (cursor + subobjectSize > end)
 						break;
@@ -195,11 +208,11 @@ namespace RenderPassReplacement
 
 						if (type == targetType)
 						{
-							*bytecode = { renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size() };
+							*bytecode = {renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size()};
 							targetPatched = true;
 						}
 						else
-							*bytecode = { originalBytecode->empty() ? nullptr : originalBytecode->data(), originalBytecode->size() };
+							*bytecode = {DataOrNull(*originalBytecode), originalBytecode->size()};
 					}
 					else if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE)
 					{
@@ -209,13 +222,13 @@ namespace RenderPassReplacement
 					else if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CACHED_PSO)
 						*static_cast<D3D12_CACHED_PIPELINE_STATE*>(payload) = {};
 					else if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT)
-						*static_cast<D3D12_INPUT_LAYOUT_DESC*>(payload) = { pipeline.inputElements.empty() ? nullptr : pipeline.inputElements.data(), static_cast<UINT>(pipeline.inputElements.size()) };
+						*static_cast<D3D12_INPUT_LAYOUT_DESC*>(payload) = {DataOrNull(pipeline.inputElements), static_cast<UINT>(pipeline.inputElements.size())};
 					else if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_STREAM_OUTPUT)
 					{
 						auto* output = static_cast<D3D12_STREAM_OUTPUT_DESC*>(payload);
-						output->pSODeclaration = pipeline.streamOutputDeclarations.empty() ? nullptr : pipeline.streamOutputDeclarations.data();
+						output->pSODeclaration = DataOrNull(pipeline.streamOutputDeclarations);
 						output->NumEntries = static_cast<UINT>(pipeline.streamOutputDeclarations.size());
-						output->pBufferStrides = pipeline.streamOutputStrides.empty() ? nullptr : pipeline.streamOutputStrides.data();
+						output->pBufferStrides = DataOrNull(pipeline.streamOutputStrides);
 						output->NumStrides = static_cast<UINT>(pipeline.streamOutputStrides.size());
 					}
 					else if (type == D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING)
@@ -227,7 +240,7 @@ namespace RenderPassReplacement
 						else if (pipeline.hasViewInstancing)
 						{
 							viewInstancing->ViewInstanceCount = static_cast<UINT>(pipeline.viewInstanceLocations.size());
-							viewInstancing->pViewInstanceLocations = pipeline.viewInstanceLocations.empty() ? nullptr : pipeline.viewInstanceLocations.data();
+							viewInstancing->pViewInstanceLocations = DataOrNull(pipeline.viewInstanceLocations);
 							viewInstancing->Flags = pipeline.viewInstancingFlags;
 						}
 					}
@@ -248,7 +261,7 @@ namespace RenderPassReplacement
 				if (FAILED(HookD3D12::GetCapturedDevice()->QueryInterface(IID_PPV_ARGS(&device))) || !device)
 					return nullptr;
 
-				D3D12_PIPELINE_STATE_STREAM_DESC description{ stream.size(), stream.data() };
+				D3D12_PIPELINE_STATE_STREAM_DESC description{stream.size(), stream.data()};
 				ID3D12PipelineState* replacement = nullptr;
 				HookD3D12::ScopedRenderPassInjection injectionScope;
 				const HRESULT result = HookD3D12::CreatePipelineStateInternal(device, &description, IID_PPV_ARGS(&replacement));
@@ -274,13 +287,13 @@ namespace RenderPassReplacement
 					continue;
 
 				D3D12_COMPUTE_PIPELINE_STATE_DESC description = pipeline.originalDescription;
-				description.CS = { renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size() };
+				description.CS = {renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size()};
 				description.CachedPSO = {};
 				ID3D12PipelineState* replacement = nullptr;
 				HookD3D12::ScopedRenderPassInjection injectionScope;
-				const HRESULT result = HookD3D12::Original_CreateComputePipelineState
-					? HookD3D12::Original_CreateComputePipelineState(HookD3D12::GetCapturedDevice(), &description, IID_PPV_ARGS(&replacement))
-					: E_NOINTERFACE;
+				HRESULT result = E_NOINTERFACE;
+				if (HookD3D12::Original_CreateComputePipelineState)
+					result = HookD3D12::Original_CreateComputePipelineState(HookD3D12::GetCapturedDevice(), &description, IID_PPV_ARGS(&replacement));
 
 				if (FAILED(result) || !replacement)
 					outError = "Replacement compute PSO creation failed with " + StringHelper::FormatHRESULT(result);
@@ -290,7 +303,7 @@ namespace RenderPassReplacement
 
 			return nullptr;
 		}
-	}
+	} //namespace
 
 	ID3D12PipelineState* GetOrCreatePipeline(
 		const RenderPass::RenderPassDisk& renderPass,
@@ -332,10 +345,11 @@ namespace RenderPassReplacement
 		}
 
 		std::lock_guard<std::mutex> pipelineLock(HookD3D12::gPipelineMutex);
-		ID3D12PipelineState* pipeline =
-			RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute
-				? BuildComputePipeline(renderPass, originalPipelineState, outError)
-				: BuildGraphicsPipeline(renderPass, originalPipelineState, outError);
+		ID3D12PipelineState* pipeline = nullptr;
+		if (RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute)
+			pipeline = BuildComputePipeline(renderPass, originalPipelineState, outError);
+		else
+			pipeline = BuildGraphicsPipeline(renderPass, originalPipelineState, outError);
 
 		if (!pipeline)
 			pipeline = BuildStreamPipeline(renderPass, originalPipelineState, outError);
@@ -352,7 +366,7 @@ namespace RenderPassReplacement
 		{
 			//repeated invalid-argument or missing-template failures are not new work.
 			//a package edit or newly published target invalidates this negative cache.
-			gPipelineFailures[key] = { generation, outError };
+			gPipelineFailures[key] = {generation, outError};
 			CacheThreadPipeline(renderPass, originalPipelineState, nullptr, outError);
 		}
 
@@ -376,4 +390,4 @@ namespace RenderPassReplacement
 		InvalidateFailedPipelines();
 		gThreadPipelineLookups.clear();
 	}
-}
+} //namespace RenderPassReplacement

@@ -46,7 +46,9 @@ namespace ShaderAnalyzer
 			for (size_t index = 0; index < text.size(); ++index)
 			{
 				const char character = static_cast<char>((kind >> (index * 8)) & 0xff);
-				text[index] = character >= 32 && character <= 126 ? character : '?';
+				text[index] = '?';
+				if (character >= 32 && character <= 126)
+					text[index] = character;
 			}
 
 			return text;
@@ -56,14 +58,22 @@ namespace ShaderAnalyzer
 		{
 			switch (shaderStage)
 			{
-				case D3D12_SHVER_PIXEL_SHADER: return { "PixelShader", "ps" };
-				case D3D12_SHVER_VERTEX_SHADER: return { "VertexShader", "vs" };
-				case D3D12_SHVER_GEOMETRY_SHADER: return { "GeometryShader", "gs" };
-				case D3D12_SHVER_HULL_SHADER: return { "HullShader", "hs" };
-				case D3D12_SHVER_DOMAIN_SHADER: return { "DomainShader", "ds" };
-				case D3D12_SHVER_COMPUTE_SHADER: return { "ComputeShader", "cs" };
-				case D3D12_SHVER_LIBRARY: return { "Library", "lib" };
-				default: return { "Unknown", "unknown" };
+			case D3D12_SHVER_PIXEL_SHADER:
+				return {"PixelShader", "ps"};
+			case D3D12_SHVER_VERTEX_SHADER:
+				return {"VertexShader", "vs"};
+			case D3D12_SHVER_GEOMETRY_SHADER:
+				return {"GeometryShader", "gs"};
+			case D3D12_SHVER_HULL_SHADER:
+				return {"HullShader", "hs"};
+			case D3D12_SHVER_DOMAIN_SHADER:
+				return {"DomainShader", "ds"};
+			case D3D12_SHVER_COMPUTE_SHADER:
+				return {"ComputeShader", "cs"};
+			case D3D12_SHVER_LIBRARY:
+				return {"Library", "lib"};
+			default:
+				return {"Unknown", "unknown"};
 			}
 		}
 
@@ -74,12 +84,12 @@ namespace ShaderAnalyzer
 			if (gDXCompilerModule)
 				return gDXCompilerModule;
 
-			// Pin a copy already loaded by the game so another component cannot unload it
-			// while the background analyzer is using DXC interfaces from that module.
+			//Pin a copy already loaded by the game so another component cannot unload it
+			//while the background analyzer is using DXC interfaces from that module.
 			if (GetModuleHandleExW(
-				GET_MODULE_HANDLE_EX_FLAG_PIN,
-				L"dxcompiler.dll",
-				&gDXCompilerModule))
+					GET_MODULE_HANDLE_EX_FLAG_PIN,
+					L"dxcompiler.dll",
+					&gDXCompilerModule))
 			{
 				return gDXCompilerModule;
 			}
@@ -97,7 +107,7 @@ namespace ShaderAnalyzer
 			if (!gDXCompilerModule)
 				gDXCompilerModule = LoadLibraryW(L"dxcompiler.dll");
 
-			// Intentionally retain this module reference for the injector's lifetime.
+			//Intentionally retain this module reference for the injector's lifetime.
 			return gDXCompilerModule;
 		}
 
@@ -170,17 +180,15 @@ namespace ShaderAnalyzer
 			auto appendParameters = [](std::ostringstream& signature, char category, std::vector<ShaderAnalysis::SignatureParameterDisk> parameters)
 			{
 				std::sort(parameters.begin(), parameters.end(), [](const auto& left, const auto& right)
-				{
-					return std::tie(left.stream, left.registerIndex, left.semanticName, left.semanticIndex) <
-						std::tie(right.stream, right.registerIndex, right.semanticName, right.semanticIndex);
-				});
+						  { return std::tie(left.stream, left.registerIndex, left.semanticName, left.semanticIndex) <
+								   std::tie(right.stream, right.registerIndex, right.semanticName, right.semanticIndex); });
 
 				for (const auto& parameter : parameters)
 				{
 					signature << category << ':' << parameter.semanticName << ':' << parameter.semanticIndex << ':'
-						<< parameter.registerIndex << ':' << parameter.systemValueType << ':' << parameter.componentType << ':'
-						<< parameter.mask << ':' << parameter.readWriteMask << ':' << parameter.stream << ':'
-						<< parameter.minimumPrecision << ';';
+							  << parameter.registerIndex << ':' << parameter.systemValueType << ':' << parameter.componentType << ':'
+							  << parameter.mask << ':' << parameter.readWriteMask << ':' << parameter.stream << ':'
+							  << parameter.minimumPrecision << ';';
 				}
 			};
 
@@ -194,18 +202,16 @@ namespace ShaderAnalyzer
 		std::string BuildResourceFingerprint(std::vector<ShaderAnalysis::ResourceBindingDisk> resources)
 		{
 			std::sort(resources.begin(), resources.end(), [](const auto& left, const auto& right)
-			{
-				return std::tie(left.registerSpace, left.bindPoint, left.type, left.bindCount) < std::tie(right.registerSpace, right.bindPoint, right.type, right.bindCount);
-			});
+					  { return std::tie(left.registerSpace, left.bindPoint, left.type, left.bindCount) < std::tie(right.registerSpace, right.bindPoint, right.type, right.bindCount); });
 
 			std::ostringstream signature;
 
 			for (const auto& resource : resources)
 			{
-				// Names and range IDs are intentionally excluded because compilers may rewrite them.
+				//Names and range IDs are intentionally excluded because compilers may rewrite them.
 				signature << resource.type << ':' << resource.bindPoint << ':' << resource.bindCount << ':'
-					<< resource.flags << ':' << resource.returnType << ':' << resource.dimension << ':'
-					<< resource.sampleCountOrStride << ':' << resource.registerSpace << ';';
+						  << resource.flags << ':' << resource.returnType << ':' << resource.dimension << ':'
+						  << resource.sampleCountOrStride << ':' << resource.registerSpace << ';';
 			}
 
 			return Fingerprint(signature.str());
@@ -214,27 +220,23 @@ namespace ShaderAnalyzer
 		std::string BuildConstantBufferFingerprint(std::vector<ShaderAnalysis::ConstantBufferDisk> buffers)
 		{
 			std::sort(buffers.begin(), buffers.end(), [](const auto& left, const auto& right)
-			{
-				return std::make_tuple(left.type, left.size, left.variables.size()) <
-					std::make_tuple(right.type, right.size, right.variables.size());
-			});
+					  { return std::make_tuple(left.type, left.size, left.variables.size()) <
+							   std::make_tuple(right.type, right.size, right.variables.size()); });
 
 			std::ostringstream signature;
 
 			for (auto& buffer : buffers)
 			{
 				std::sort(buffer.variables.begin(), buffer.variables.end(), [](const auto& left, const auto& right)
-				{
-					return left.startOffset < right.startOffset;
-				});
+						  { return left.startOffset < right.startOffset; });
 
 				signature << buffer.type << ':' << buffer.size << ':' << buffer.flags << '{';
 
 				for (const auto& variable : buffer.variables)
 				{
 					signature << variable.startOffset << ':' << variable.size << ':' << variable.flags << ':'
-						<< variable.startTexture << ':' << variable.textureCount << ':'
-						<< variable.startSampler << ':' << variable.samplerCount << ':';
+							  << variable.startTexture << ':' << variable.textureCount << ':'
+							  << variable.startSampler << ':' << variable.samplerCount << ':';
 					AppendTypeLayoutSignature(signature, variable.typeLayout);
 					signature << ';';
 				}
@@ -304,7 +306,9 @@ namespace ShaderAnalyzer
 					if (analysis.entryFunctionName.empty())
 					{
 						const size_t nameStart = trimmedLine.find('@');
-						const size_t nameEnd = nameStart == std::string::npos ? std::string::npos : trimmedLine.find('(', nameStart + 1);
+						size_t nameEnd = std::string::npos;
+						if (nameStart != std::string::npos)
+							nameEnd = trimmedLine.find('(', nameStart + 1);
 
 						if (nameStart != std::string::npos && nameEnd != std::string::npos)
 							analysis.entryFunctionName = trimmedLine.substr(nameStart + 1, nameEnd - nameStart - 1);
@@ -353,7 +357,7 @@ namespace ShaderAnalyzer
 			if (!normalizedInstructions.empty())
 				analysis.semanticInstructionSetHash = Fingerprint(canonicalInstructions.str());
 		}
-	}
+	} //namespace
 
 	bool Analyze(
 		const void* bytecode,
@@ -361,8 +365,8 @@ namespace ShaderAnalyzer
 		ShaderAnalysis::ShaderAnalysisDisk& outAnalysis,
 		const std::unordered_set<std::string>* acceptablePortableReflectionHashes)
 	{
-		// DXC may also be used by template creation and cached-PSO discovery on game
-		// threads. Keep all reflection/disassembly work single-file across the process.
+		//DXC may also be used by template creation and cached-PSO discovery on game
+		//threads. Keep all reflection/disassembly work single-file across the process.
 		std::lock_guard<std::mutex> analyzerLock(gAnalyzerMutex);
 
 		outAnalysis = {};
@@ -603,19 +607,19 @@ namespace ShaderAnalyzer
 		outAnalysis.instructionStatisticsHash = BuildInstructionFingerprint(outAnalysis.instructionStatistics);
 		outAnalysis.executionSignatureHash = BuildExecutionFingerprint(outAnalysis.executionProperties);
 
-		// portableReflectionIdentityHash only needs the structured reflection data gathered
-		// above - no disassembly required - so it's available here as a cheap pre-filter before
-		// the expensive full-disassembly step below.
+		//portableReflectionIdentityHash only needs the structured reflection data gathered
+		//above - no disassembly required - so it's available here as a cheap pre-filter before
+		//the expensive full-disassembly step below.
 		std::ostringstream portableReflectionIdentity;
 		portableReflectionIdentity << outAnalysis.shaderStage << ':' << outAnalysis.shaderModelMajor << ':' << outAnalysis.shaderModelMinor << ':'
-			<< outAnalysis.interfaceSignatureHash << ':' << outAnalysis.resourceSignatureHash << ':'
-			<< outAnalysis.constantBufferSignatureHash << ':' << outAnalysis.executionSignatureHash;
+								   << outAnalysis.interfaceSignatureHash << ':' << outAnalysis.resourceSignatureHash << ':'
+								   << outAnalysis.constantBufferSignatureHash << ':' << outAnalysis.executionSignatureHash;
 		outAnalysis.portableReflectionIdentityHash = Fingerprint(portableReflectionIdentity.str());
 
-		// Cross-version matches always share an exact portableReflectionIdentityHash (this is
-		// already how the fuzzy replacement fallback gates its candidates). If nothing in the
-		// caller's candidate set shares this shader's reflection identity, it can never match, so
-		// skip the expensive disassembly and semantic hashing below entirely.
+		//Cross-version matches always share an exact portableReflectionIdentityHash (this is
+		//already how the fuzzy replacement fallback gates its candidates). If nothing in the
+		//caller's candidate set shares this shader's reflection identity, it can never match, so
+		//skip the expensive disassembly and semantic hashing below entirely.
 		const bool skipDisassembly = acceptablePortableReflectionHashes && acceptablePortableReflectionHashes->find(outAnalysis.portableReflectionIdentityHash) == acceptablePortableReflectionHashes->end();
 
 		if (!skipDisassembly)
@@ -630,14 +634,14 @@ namespace ShaderAnalyzer
 
 		std::ostringstream reflectionSignature;
 		reflectionSignature << outAnalysis.shaderStage << ':' << outAnalysis.shaderModelMajor << ':' << outAnalysis.shaderModelMinor << ':'
-			<< outAnalysis.interfaceSignatureHash << ':' << outAnalysis.resourceSignatureHash << ':'
-			<< outAnalysis.constantBufferSignatureHash << ':' << outAnalysis.instructionStatisticsHash << ':'
-			<< execution.requiresFlags << ':' << execution.threadGroupSizeX << ':' << execution.threadGroupSizeY << ':'
-			<< execution.threadGroupSizeZ << ':' << execution.sampleFrequencyShader;
+							<< outAnalysis.interfaceSignatureHash << ':' << outAnalysis.resourceSignatureHash << ':'
+							<< outAnalysis.constantBufferSignatureHash << ':' << outAnalysis.instructionStatisticsHash << ':'
+							<< execution.requiresFlags << ':' << execution.threadGroupSizeX << ':' << execution.threadGroupSizeY << ':'
+							<< execution.threadGroupSizeZ << ':' << execution.sampleFrequencyShader;
 		outAnalysis.reflectionSignatureHash = Fingerprint(reflectionSignature.str());
 
 		outAnalysis.succeeded = true;
 		outAnalysis.error.clear();
 		return true;
 	}
-}
+} //namespace ShaderAnalyzer

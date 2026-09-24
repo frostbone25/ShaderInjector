@@ -1,5 +1,6 @@
 //ShaderInjectorGUI.cpp
 #include "ShaderInjectorGUI.h"
+#include "GUI/ShaderModelOption.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -35,33 +36,30 @@
 
 namespace
 {
-	struct ShaderModelOption
-	{
-		Globals::ShaderModel value;
-		const char* label;
-	};
+	using ShaderInjectorGUI::ShaderModelOption;
 
 	constexpr ShaderModelOption shaderModelOptions[] =
 	{
-		{ Globals::ShaderModel::ShaderModel5_0, "Shader Model 5.0 (DXBC)" },
-		{ Globals::ShaderModel::ShaderModel5_1, "Shader Model 5.1 (DXBC)" },
-		{ Globals::ShaderModel::ShaderModel6_0, "Shader Model 6.0 (DXIL)" },
-		{ Globals::ShaderModel::ShaderModel6_1, "Shader Model 6.1 (DXIL)" },
-		{ Globals::ShaderModel::ShaderModel6_2, "Shader Model 6.2 (DXIL)" },
-		{ Globals::ShaderModel::ShaderModel6_3, "Shader Model 6.3 (DXIL)" },
-		{ Globals::ShaderModel::ShaderModel6_4, "Shader Model 6.4 (DXIL)" },
-		{ Globals::ShaderModel::ShaderModel6_5, "Shader Model 6.5 (DXIL)" },
-		{ Globals::ShaderModel::ShaderModel6_6, "Shader Model 6.6 (DXIL)" },
+		{Globals::ShaderModel::ShaderModel5_0, "Shader Model 5.0 (DXBC)"},
+		{Globals::ShaderModel::ShaderModel5_1, "Shader Model 5.1 (DXBC)"},
+		{Globals::ShaderModel::ShaderModel6_0, "Shader Model 6.0 (DXIL)"},
+		{Globals::ShaderModel::ShaderModel6_1, "Shader Model 6.1 (DXIL)"},
+		{Globals::ShaderModel::ShaderModel6_2, "Shader Model 6.2 (DXIL)"},
+		{Globals::ShaderModel::ShaderModel6_3, "Shader Model 6.3 (DXIL)"},
+		{Globals::ShaderModel::ShaderModel6_4, "Shader Model 6.4 (DXIL)"},
+		{Globals::ShaderModel::ShaderModel6_5, "Shader Model 6.5 (DXIL)"},
+		{Globals::ShaderModel::ShaderModel6_6, "Shader Model 6.6 (DXIL)"},
 	};
 
 	bool DrawShaderModelCombo(const char* label, Globals::ShaderModel& shaderModel)
 	{
-		const char* preview = shaderModelOptions[8].label;
+		const char* previewLabel = shaderModelOptions[8].displayLabel;
+
 		for (const ShaderModelOption& option : shaderModelOptions)
 		{
-			if (option.value == shaderModel)
+			if (option.shaderModel == shaderModel)
 			{
-				preview = option.label;
+				previewLabel = option.displayLabel;
 				break;
 			}
 		}
@@ -70,15 +68,15 @@ namespace
 
 		ImGui::SetNextItemWidth(220.0f * Globals::gShaderInjectorGUIScale);
 
-		if (ImGui::BeginCombo(label, preview))
+		if (ImGui::BeginCombo(label, previewLabel))
 		{
 			for (const ShaderModelOption& option : shaderModelOptions)
 			{
-				const bool selected = shaderModel == option.value;
+				const bool selected = shaderModel == option.shaderModel;
 
-				if (ImGui::Selectable(option.label, selected))
+				if (ImGui::Selectable(option.displayLabel, selected))
 				{
-					shaderModel = option.value;
+					shaderModel = option.shaderModel;
 					changed = true;
 				}
 
@@ -111,20 +109,19 @@ namespace
 		if (Globals::gAutoDetectShaderModels)
 		{
 			ImGui::SameLine();
-			ImGui::TextDisabled("(%s)", modelDetected ? "detected" : "fallback");
+			const char* detectionStatus = "fallback";
+			if (modelDetected)
+				detectionStatus = "detected";
+			ImGui::TextDisabled("(%s)", detectionStatus);
 		}
 	}
-}
+} //namespace
 
 namespace ShaderInjectorGUI
 {
 	static int gSelectionStyleIndex = (int)HookD3D12::PixelShaderSelectionStyle::BluePixelShader;
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| DEVELOPER SETTINGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| DEVELOPER SETTINGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| DEVELOPER SETTINGS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
-	void UI_RenderDoc()
+	void DrawRenderDoc()
 	{
 		const bool renderDocAvailable = RenderDocIntegration::IsAvailable();
 		const bool frameCaptureActive = RenderDocIntegration::IsFrameCapturing();
@@ -135,10 +132,26 @@ namespace ShaderInjectorGUI
 		ImGui::Text("API Version: %s", RenderDocIntegration::GetApiVersionText().c_str());
 
 		if (renderDocAvailable)
-			ImGui::Text("Library Load: %s", RenderDocIntegration::WasLoadedByInjector() ? "Shader Injector" : "External");
+		{
+			const char* librarySource = "External";
 
-		ImGui::Text("Target Control: %s", targetControlConnected ? "Connected" : "Disconnected");
-		ImGui::Text("Frame Capture: %s", frameCaptureActive ? "Active" : "Idle");
+			if (RenderDocIntegration::WasLoadedByInjector())
+				librarySource = "Shader Injector";
+
+			ImGui::Text("Library Load: %s", librarySource);
+		}
+
+		const char* targetControlStatus = "Disconnected";
+		const char* frameCaptureStatus = "Idle";
+
+		if (targetControlConnected)
+			targetControlStatus = "Connected";
+
+		if (frameCaptureActive)
+			frameCaptureStatus = "Active";
+
+		ImGui::Text("Target Control: %s", targetControlStatus);
+		ImGui::Text("Frame Capture: %s", frameCaptureStatus);
 		ImGui::Text("Captures: %u", RenderDocIntegration::GetCaptureCount());
 
 		const std::string renderDocLibraryPath = RenderDocIntegration::GetLibraryPath();
@@ -160,7 +173,12 @@ namespace ShaderInjectorGUI
 
 		if (!targetControlConnected)
 		{
-			if (ImGui::Button(renderDocAvailable ? "Connect RenderDoc UI" : "Attach RenderDoc"))
+			const char* connectButtonLabel = "Attach RenderDoc";
+
+			if (renderDocAvailable)
+				connectButtonLabel = "Connect RenderDoc UI";
+
+			if (ImGui::Button(connectButtonLabel))
 			{
 				const RenderDocReplayUIRequestResult result = RenderDocIntegration::ConnectReplayUI();
 
@@ -226,7 +244,7 @@ namespace ShaderInjectorGUI
 		}
 	}
 
-	void UI_ShaderCompilerSettings()
+	void DrawShaderCompilerSettings()
 	{
 		ImGui::Checkbox("Automatically Detect Shader Models", &Globals::gAutoDetectShaderModels);
 		DrawShaderModelSetting("Vertex Shader", ShaderTarget::VertexShader, Globals::gVertexShaderModel);
@@ -250,7 +268,7 @@ namespace ShaderInjectorGUI
 		}
 	}
 
-	void UI_DeveloperSettings()
+	void DrawDeveloperSettings()
 	{
 		if (ImGui::CollapsingHeader("Developer Settings"))
 		{
@@ -262,22 +280,21 @@ namespace ShaderInjectorGUI
 				if (ImGui::BeginTabItem("Shader Compiler"))
 				{
 					HookD3D12::ClearShaderMarkers();
-					UI_ShaderCompilerSettings();
+					DrawShaderCompilerSettings();
 					ImGui::EndTabItem();
 				}
 
 				if (ImGui::BeginTabItem("Shader Inspector"))
 				{
 					ImGui::InputTextMultiline("##DeveloperSettingsNote",
-						const_cast<char*>(noteDeveloperSettingsText),
-						strlen(noteDeveloperSettingsText) + 1,
-						ImVec2(-FLT_MIN, 0), // -FLT_MIN width = stretch to window edge, 0 height = auto
-						ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap
-					);
+											  const_cast<char*>(noteDeveloperSettingsText),
+											  strlen(noteDeveloperSettingsText) + 1,
+											  ImVec2(-FLT_MIN, 0), //-FLT_MIN width = stretch to window edge, 0 height = auto
+											  ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
 
 					ImGui::Spacing();
-					UI_AdapterInfo();
-					UI_D3D12PipelineInfo();
+					DrawAdapterInfo();
+					DrawD3D12PipelineInfo();
 					ImGui::Spacing();
 
 					ImGui::Text("Selection Style: ");
@@ -310,19 +327,16 @@ namespace ShaderInjectorGUI
 
 					ImGui::Spacing();
 
-					UI_StreamPipelines();
+					DrawStreamPipelines();
 
-					//NOTE: hidden from GUI for now, even though the app can largly support operations
-					//with the graphics pipeline, for the most part with the game, FF7 rebirth we are primarily
-					//going to be messing with the stream pipeline, and this also will help avoid confusion for users
-					//UI_GraphicsPipelines();
+					//show stream pipelines here because they contain the shader stages users edit in this game.
 					ImGui::EndTabItem();
 				}
 
 				if (Globals::gRenderDocIntegrationEnabled && ImGui::BeginTabItem("RenderDoc"))
 				{
 					HookD3D12::ClearShaderMarkers();
-					UI_RenderDoc();
+					DrawRenderDoc();
 					ImGui::EndTabItem();
 				}
 
@@ -338,11 +352,7 @@ namespace ShaderInjectorGUI
 		}
 	}
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| ADAPTER INFO |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| ADAPTER INFO |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| ADAPTER INFO |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
-	void UI_AdapterInfo()
+	void DrawAdapterInfo()
 	{
 		if (ImGui::TreeNodeEx("Adapter Info"))
 		{
@@ -359,11 +369,7 @@ namespace ShaderInjectorGUI
 		}
 	}
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| D3D12 PIPELINE INFO |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| D3D12 PIPELINE INFO |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| D3D12 PIPELINE INFO |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
-	void UI_D3D12PipelineInfo()
+	void DrawD3D12PipelineInfo()
 	{
 		if (ImGui::TreeNodeEx("D3D12 Pipeline Info"))
 		{
@@ -383,64 +389,28 @@ namespace ShaderInjectorGUI
 		}
 	}
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| GRAPHICS PIPELINES |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| GRAPHICS PIPELINES |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| GRAPHICS PIPELINES |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
-	/*
-	//NOTE: disabled/hidden from the user for now to avoid confusion during setup
-	//and also most of the games shader resources/pso goes through the stream pipeline
-	//KEEP IT AROUND, DON'T REMOVE AS IT WILL STILL BE USEFUL IN THE FUTURE
-	void UI_GraphicsPipelines()
-	{
-		std::string headerText = "Graphics Pipelines: " + std::to_string(HookD3D12::gGraphicsPipelines.size()) + " PSOs";
-
-		if (ImGui::CollapsingHeader(headerText.c_str()))
-		{
-			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::pixelShaderHash, &HookD3D12::GraphicsPipelineInfo::pixelShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::pixelShaderBytecode>(
-				"Pixel Shaders", "GraphicsPS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PipelineSourceList::Graphics, true, true, &HookD3D12::GraphicsPipelineInfo::pixelShaderDisabled, &HookD3D12::GraphicsPipelineInfo::pipelineStateWithoutPixelShader);
-
-			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::vertexShaderHash, &HookD3D12::GraphicsPipelineInfo::vertexShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::vertexShaderBytecode>(
-				"Vertex Shaders", "GraphicsVS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::VertexShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
-
-			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::geometryShaderHash, &HookD3D12::GraphicsPipelineInfo::geometryShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::geometryShaderBytecode>(
-				"Geometry Shaders", "GraphicsGS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::GeometryShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
-
-			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::hullShaderHash, &HookD3D12::GraphicsPipelineInfo::hullShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::hullShaderBytecode>(
-				"Hull Shaders", "GraphicsHS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::HullShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
-
-			UI_ShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::domainShaderHash, &HookD3D12::GraphicsPipelineInfo::domainShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::domainShaderBytecode>(
-				"Domain Shaders", "GraphicsDS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::DomainShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, HookD3D12::PipelineSourceList::Graphics, false, true, nullptr, nullptr);
-		}
-	}
-	*/
-
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| STREAM PIPELINES |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| STREAM PIPELINES |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| STREAM PIPELINES |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
-	void UI_StreamPipelines()
+	void DrawStreamPipelines()
 	{
 		std::string headerText = "Stream Pipelines: " + std::to_string(HookD3D12::gPipelineStates.size()) + " PSOs";
 
 		if (ImGui::CollapsingHeader(headerText.c_str()))
 		{
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::pixelShaderHash, &HookD3D12::PipelineStateInfo::pixelShaderBytecodeSize, &HookD3D12::PipelineStateInfo::pixelShaderBytecode>(
+			DrawShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::pixelShaderHash, &HookD3D12::PipelineStateInfo::pixelShaderBytecodeSize, &HookD3D12::PipelineStateInfo::pixelShaderBytecode>(
 				"Pixel Shaders", "StreamPS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PipelineSourceList::Stream, true, false, &HookD3D12::PipelineStateInfo::pixelShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutPixelShader);
 
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::computeShaderHash, &HookD3D12::PipelineStateInfo::computeShaderBytecodeSize, &HookD3D12::PipelineStateInfo::computeShaderBytecode>(
+			DrawShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::computeShaderHash, &HookD3D12::PipelineStateInfo::computeShaderBytecodeSize, &HookD3D12::PipelineStateInfo::computeShaderBytecode>(
 				"Compute Shaders", "StreamCS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::ComputeShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS, HookD3D12::PipelineSourceList::Stream, true, false, &HookD3D12::PipelineStateInfo::computeShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutComputeShader);
 
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::vertexShaderHash, &HookD3D12::PipelineStateInfo::vertexShaderBytecodeSize, &HookD3D12::PipelineStateInfo::vertexShaderBytecode>(
+			DrawShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::vertexShaderHash, &HookD3D12::PipelineStateInfo::vertexShaderBytecodeSize, &HookD3D12::PipelineStateInfo::vertexShaderBytecode>(
 				"Vertex Shaders", "StreamVS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::VertexShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::vertexShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutVertexShader);
 
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::geometryShaderHash, &HookD3D12::PipelineStateInfo::geometryShaderBytecodeSize, &HookD3D12::PipelineStateInfo::geometryShaderBytecode>(
+			DrawShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::geometryShaderHash, &HookD3D12::PipelineStateInfo::geometryShaderBytecodeSize, &HookD3D12::PipelineStateInfo::geometryShaderBytecode>(
 				"Geometry Shaders", "StreamGS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::GeometryShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::geometryShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutGeometryShader);
 
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::hullShaderHash, &HookD3D12::PipelineStateInfo::hullShaderBytecodeSize, &HookD3D12::PipelineStateInfo::hullShaderBytecode>(
+			DrawShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::hullShaderHash, &HookD3D12::PipelineStateInfo::hullShaderBytecodeSize, &HookD3D12::PipelineStateInfo::hullShaderBytecode>(
 				"Hull Shaders", "StreamHS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::HullShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::hullShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutHullShader);
 
-			UI_ShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::domainShaderHash, &HookD3D12::PipelineStateInfo::domainShaderBytecodeSize, &HookD3D12::PipelineStateInfo::domainShaderBytecode>(
+			DrawShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::domainShaderHash, &HookD3D12::PipelineStateInfo::domainShaderBytecodeSize, &HookD3D12::PipelineStateInfo::domainShaderBytecode>(
 				"Domain Shaders", "StreamDS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::DomainShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::domainShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutDomainShader);
 		}
 		else
@@ -450,8 +420,8 @@ namespace ShaderInjectorGUI
 	}
 
 	//UI "Template" for each of the shader stages
-	template<typename PipelineT, uint64_t PipelineT::* HashMember, SIZE_T PipelineT::* SizeMember, std::vector<uint8_t> PipelineT::* BytecodeMember>
-	void UI_ShaderStageList(
+	template <typename PipelineT, uint64_t PipelineT::*HashMember, SIZE_T PipelineT::*SizeMember, std::vector<uint8_t> PipelineT::*BytecodeMember>
+	void DrawShaderStageList(
 		const char* stageLabel,
 		const char* idPrefix,
 		const char* sourceList,
@@ -461,8 +431,8 @@ namespace ShaderInjectorGUI
 		HookD3D12::PipelineSourceList pendingSource,
 		bool allowMarkerToggle,
 		bool disableActions,
-		bool PipelineT::* disabledMember,
-		ID3D12PipelineState* PipelineT::* rebuiltPSOMember)
+		bool PipelineT::*disabledMember,
+		ID3D12PipelineState* PipelineT::*rebuiltPSOMember)
 	{
 		static int selectedIndex = -1;
 		static int sortMode = 0;
@@ -494,36 +464,36 @@ namespace ShaderInjectorGUI
 		}
 
 		std::sort(sortedIndices.begin(), sortedIndices.end(), [&](int a, int b)
+		{
+			const PipelineT& left = pipelines[a];
+			const PipelineT& right = pipelines[b];
+
+			if (sortMode == 1)
 			{
-				const PipelineT& left = pipelines[a];
-				const PipelineT& right = pipelines[b];
+				const SIZE_T leftSize = left.*SizeMember;
+				const SIZE_T rightSize = right.*SizeMember;
 
-				if (sortMode == 1)
-				{
-					const SIZE_T leftSize = left.*SizeMember;
-					const SIZE_T rightSize = right.*SizeMember;
+				if (leftSize != rightSize)
+					return leftSize > rightSize;
+			}
+			else if (sortMode == 2)
+			{
+				// The vector position is the pipeline index used by the capture and
+				// rebuild systems, so preserve its natural ascending order here.
+				if (a != b)
+					return a < b;
+			}
+			else
+			{
+				const uint64_t leftHash = left.*HashMember;
+				const uint64_t rightHash = right.*HashMember;
 
-					if (leftSize != rightSize)
-						return leftSize > rightSize;
-				}
-				else if (sortMode == 2)
-				{
-					// The vector position is the pipeline index used by the capture and
-					// rebuild systems, so preserve its natural ascending order here.
-					if (a != b)
-						return a < b;
-				}
-				else
-				{
-					const uint64_t leftHash = left.*HashMember;
-					const uint64_t rightHash = right.*HashMember;
+				if (leftHash != rightHash)
+					return leftHash < rightHash;
+			}
 
-					if (leftHash != rightHash)
-						return leftHash < rightHash;
-				}
-
-				return a < b;
-			});
+			return a < b; 
+		});
 
 		ImGui::Text("Sort By:");
 
@@ -542,7 +512,7 @@ namespace ShaderInjectorGUI
 		std::string pipelineIndexSortLabel = std::string("Pipeline Index##") + idPrefix;
 		ImGui::RadioButton(pipelineIndexSortLabel.c_str(), &sortMode, 2);
 
-			std::string childLabel = std::string("ShaderList##") + idPrefix;
+		std::string childLabel = std::string("ShaderList##") + idPrefix;
 
 		if (ImGui::BeginChild(childLabel.c_str(), ImVec2(0, 180), ImGuiChildFlags_Borders))
 		{
@@ -609,7 +579,10 @@ namespace ShaderInjectorGUI
 		std::vector<uint8_t>& bytecode = pipeline.*BytecodeMember;
 
 		const int selectedReplacementIndex = HookD3D12::FindEnabledShaderTarget(hash, shaderType);
-		const char* selectedReplacementName = selectedReplacementIndex >= 0 ? HookD3D12::gLoadedShaderTargets[selectedReplacementIndex].name.c_str() : "(none)";
+		const char* selectedReplacementName = "(none)";
+
+		if (selectedReplacementIndex >= 0)
+			selectedReplacementName = HookD3D12::gLoadedShaderTargets[selectedReplacementIndex].name.c_str();
 
 		ImGui::SeparatorText("Selected Shader");
 		ImGui::Text("Pipeline Index: %d", selectedIndex);
@@ -620,7 +593,12 @@ namespace ShaderInjectorGUI
 
 		if (allowMarkerToggle && disabledMember && rebuiltPSOMember)
 		{
-			ImGui::Text("Marker: %s", pipeline.*disabledMember ? "active" : "inactive");
+			const char* markerStatus = "inactive";
+
+			if (pipeline.*disabledMember)
+				markerStatus = "active";
+
+			ImGui::Text("Marker: %s", markerStatus);
 
 			if ((HookD3D12::PixelShaderSelectionStyle)gSelectionStyleIndex == HookD3D12::PixelShaderSelectionStyle::None)
 				ImGui::Text("Selection Style is None.");
@@ -677,7 +655,7 @@ namespace ShaderInjectorGUI
 		ImGui::Separator();
 	}
 
-	template<typename PipelineT, uint64_t PipelineT::* HashMember>
+	template <typename PipelineT, uint64_t PipelineT::*HashMember>
 	int CountShaderStage(const std::vector<PipelineT>& pipelines)
 	{
 		int count = 0;
@@ -691,7 +669,7 @@ namespace ShaderInjectorGUI
 		return count;
 	}
 
-	template<typename PipelineT, uint64_t PipelineT::* HashMember>
+	template <typename PipelineT, uint64_t PipelineT::*HashMember>
 	int FindFirstShaderStageIndex(const std::vector<PipelineT>& pipelines)
 	{
 		for (int i = 0; i < (int)pipelines.size(); i++)
@@ -702,4 +680,4 @@ namespace ShaderInjectorGUI
 
 		return -1;
 	}
-}
+} //namespace ShaderInjectorGUI

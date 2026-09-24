@@ -1,9 +1,8 @@
 #pragma once
 
-
 namespace Globals
 {
-	// Profiles are configured per stage; values keep the serialized INI readable.
+	//Profiles are configured per stage; values keep the serialized INI readable.
 	enum class ShaderModel
 	{
 		ShaderModel5_0 = 50,
@@ -16,4 +15,4 @@ namespace Globals
 		ShaderModel6_5 = 65,
 		ShaderModel6_6 = 66,
 	};
-}
+} //namespace Globals

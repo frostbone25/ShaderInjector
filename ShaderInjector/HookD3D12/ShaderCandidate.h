@@ -11,4 +11,4 @@ namespace HookD3D12
 		uint64_t shaderHash = 0;
 		ShaderTarget::ShaderType shaderType = ShaderTarget::Unknown;
 	};
-}
+} //namespace HookD3D12

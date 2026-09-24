@@ -34,8 +34,8 @@ namespace HookD3D12
 		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
 
 		return modifiedShader && modifiedShader->enabled &&
-			modifiedShader->shaderType == replacement.shaderType &&
-			DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(*modifiedShader, replacement.originalShaderAnalysis);
+			   modifiedShader->shaderType == replacement.shaderType &&
+			   DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(*modifiedShader, replacement.originalShaderAnalysis);
 	}
 
 	void RefreshShaderTargetsForModifiedShaderStateChange()
@@ -49,10 +49,6 @@ namespace HookD3D12
 
 		RefreshLoadedShaderTargets();
 	}
-
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| REFRESH SHADER TARGETS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| REFRESH SHADER TARGETS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| REFRESH SHADER TARGETS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
 	//recollect shader targets from the shader replacement folder, and load them into memory
 	void RefreshLoadedShaderTargets()
@@ -90,12 +86,14 @@ namespace HookD3D12
 				std::vector<uint8_t> compiledReplacementBlob;
 
 				const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
-				replacement.modifiedShaderBlobPath = modifiedShader ? modifiedShader->compiledBlobPath : "";
+				replacement.modifiedShaderBlobPath.clear();
+				if (modifiedShader)
+					replacement.modifiedShaderBlobPath = modifiedShader->compiledBlobPath;
 
 				if (modifiedShader && IsShaderTargetEffectivelyEnabled(replacement))
 					compiledReplacementBlob = modifiedShader->compiledBlob;
 				else if (modifiedShader && modifiedShader->enabled && !modifiedShader->compiledBlob.empty() &&
-					!DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(*modifiedShader, replacement.originalShaderAnalysis))
+						 !DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(*modifiedShader, replacement.originalShaderAnalysis))
 				{
 					ShaderInjectorIO::WriteToLogFileError("DatabaseShaderTargets->RefreshLoadedShaderTargets: refusing incompatible compiled shader interface for " + replacement.name + " from " + modifiedShader->id);
 				}
@@ -118,9 +116,12 @@ namespace HookD3D12
 
 		for (const auto& replacement : gLoadedShaderTargets)
 		{
+			int enabledFlag = 0;
+			if (replacement.enabled)
+				enabledFlag = 1;
 			ShaderInjectorGUI::WriteToRuntimeLog(
 				"DatabaseShaderTargets->RefreshLoadedShaderTargets: Replacement loaded: " + replacement.name +
-				" enabled=" + std::to_string(replacement.enabled ? 1 : 0) +
+				" enabled=" + std::to_string(enabledFlag) +
 				" shaderHash=" + replacement.originalShaderBytecodeHash +
 				" cacheHash=" + replacement.pipelineCachedBlobHash +
 				" cacheBytes=" + replacement.pipelineCachedBlobLength +
@@ -146,4 +147,4 @@ namespace HookD3D12
 		strncpy_s(gShaderTargetNameBuffer, name.c_str(), _TRUNCATE);
 		gShaderTargetNameBufferIndex = gSelectedShaderTargetIndex;
 	}
-}
+} //namespace HookD3D12

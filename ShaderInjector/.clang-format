@@ -1,0 +1,14 @@
+BasedOnStyle: Microsoft
+BreakBeforeBraces: Allman
+NamespaceIndentation: All
+IndentWidth: 4
+TabWidth: 4
+UseTab: Always
+PointerAlignment: Left
+ColumnLimit: 0
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortBlocksOnASingleLine: Never
+SortIncludes: Never
+SpacesInLineCommentPrefix:
+  Minimum: 0
+  Maximum: 0

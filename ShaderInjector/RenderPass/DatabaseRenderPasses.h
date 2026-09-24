@@ -33,4 +33,4 @@ namespace DatabaseRenderPasses
 	bool CreateShaderTemplate(const std::string& renderPassId, std::string& outError);
 	bool CompileRenderPassShaders(const std::string& renderPassId, std::string& outError);
 	RenderPassShaderBatchCompileResult CompileAllRenderPassShaders();
-}
+} //namespace DatabaseRenderPasses

@@ -19,4 +19,4 @@ namespace HookD3D12
 	{
 		return gRenderPassInjectionDepth != 0;
 	}
-}
+} //namespace HookD3D12

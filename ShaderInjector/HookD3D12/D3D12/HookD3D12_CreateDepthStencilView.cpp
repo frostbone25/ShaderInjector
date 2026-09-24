@@ -15,9 +15,9 @@ namespace HookD3D12
 	{
 		Original_CreateDepthStencilView(device, resource, description, destination);
 
-		if (Globals::gShaderInjectorEnabled && 
-			!IsInsideRenderPassInjection() && 
+		if (Globals::gShaderInjectorEnabled &&
+			!IsInsideRenderPassInjection() &&
 			RenderPassRuntime::IsResourceTrackingRequired())
 			RenderPassResourceRegistry::RegisterDepthStencilView(resource, description, destination);
 	}
-}
+} //namespace HookD3D12

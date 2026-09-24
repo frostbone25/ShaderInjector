@@ -31,7 +31,7 @@
 
 namespace ShaderInjectorGUI
 {
-	void UI_ApplyStyle()
+	void ApplyGUIStyle()
 	{
 		ImGuiStyle& imguiStyle = ImGui::GetStyle();
 		imguiStyle = ImGuiStyle();
@@ -127,4 +127,4 @@ namespace ShaderInjectorGUI
 		imguiStyle.ScaleAllSizes(menuScale);
 		imguiStyle.FontScaleMain = menuScale;
 	}
-}
+} //namespace ShaderInjectorGUI

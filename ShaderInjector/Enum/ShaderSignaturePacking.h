@@ -1,6 +1,5 @@
 #pragma once
 
-
 namespace ShaderInjectorIO
 {
 	enum class ShaderSignaturePacking
@@ -8,4 +7,4 @@ namespace ShaderInjectorIO
 		PrefixStable,
 		Optimized,
 	};
-}
+} //namespace ShaderInjectorIO

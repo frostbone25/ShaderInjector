@@ -13,4 +13,4 @@ namespace DatabaseShaderResources
 	const std::vector<ShaderResource::TextureDisk>& GetShaderResources();
 
 	const ShaderResource::TextureDisk* FindShaderResourceById(const std::string& resourceId);
-}
+} //namespace DatabaseShaderResources

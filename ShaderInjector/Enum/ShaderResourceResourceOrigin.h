@@ -13,9 +13,9 @@ namespace ShaderResource
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(ResourceOrigin,
-	{
-		{ ResourceOrigin::Disk, "Disk" },
-		{ ResourceOrigin::Game, "Game" },
-		{ ResourceOrigin::Runtime, "Runtime" },
-	})
-}
+								 {
+									 {ResourceOrigin::Disk, "Disk"},
+									 {ResourceOrigin::Game, "Game"},
+									 {ResourceOrigin::Runtime, "Runtime"},
+								 })
+} //namespace ShaderResource

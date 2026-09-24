@@ -41,4 +41,4 @@ namespace HookD3D12
 
 		Original_SetComputeRootSignature(commandList, rootSignature);
 	}
-}
+} //namespace HookD3D12

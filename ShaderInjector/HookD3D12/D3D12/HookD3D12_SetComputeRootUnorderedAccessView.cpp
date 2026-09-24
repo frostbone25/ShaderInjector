@@ -20,4 +20,4 @@ namespace HookD3D12
 
 		Original_SetComputeRootUnorderedAccessView(commandList, rootParameterIndex, address);
 	}
-}
+} //namespace HookD3D12

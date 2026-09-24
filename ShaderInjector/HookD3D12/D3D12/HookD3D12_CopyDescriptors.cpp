@@ -16,11 +16,11 @@ namespace HookD3D12
 	{
 		Original_CopyDescriptors(device, destinationRangeCount, destinationRangeStarts, destinationRangeSizes, sourceRangeCount, sourceRangeStarts, sourceRangeSizes, heapType);
 
-		if (!Globals::gShaderInjectorEnabled || 
+		if (!Globals::gShaderInjectorEnabled ||
 			IsInsideRenderPassInjection() ||
 			!RenderPassRuntime::IsDescriptorRegistryTrackingRequired() ||
-			(heapType != D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV && 
-			!RenderPassRuntime::IsResourceTrackingRequired()))
+			(heapType != D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV &&
+			 !RenderPassRuntime::IsResourceTrackingRequired()))
 		{
 			return;
 		}
@@ -40,4 +40,4 @@ namespace HookD3D12
 		if (inspectedRegistry)
 			PerformanceMetrics::Increment(PerformanceMetrics::Counter::DescriptorCopyRegistryHit);
 	}
-}
+} //namespace HookD3D12

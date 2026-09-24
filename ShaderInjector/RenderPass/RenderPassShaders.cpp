@@ -140,7 +140,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			for (char character : value)
 			{
 				const unsigned char unsignedCharacter = static_cast<unsigned char>(character);
-				identifier.push_back(std::isalnum(unsignedCharacter) || character == '_' ? character : '_');
+				char identifierCharacter = '_';
+				if (std::isalnum(unsignedCharacter) || character == '_')
+					identifierCharacter = character;
+				identifier.push_back(identifierCharacter);
 			}
 
 			if (identifier == "SI_")
@@ -153,7 +156,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			std::unordered_set<std::string>& usedIdentifiers)
 		{
 			const std::string fallback = "Resource_" + std::to_string(resource.type) + "_" +
-				std::to_string(resource.bindPoint) + "_" + std::to_string(resource.registerSpace);
+										 std::to_string(resource.bindPoint) + "_" + std::to_string(resource.registerSpace);
 			const std::string baseIdentifier = SanitizeIdentifier(resource.name, fallback);
 			std::string identifier = baseIdentifier;
 			for (uint32_t suffix = 2; !usedIdentifiers.insert(identifier).second; ++suffix)
@@ -198,10 +201,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			switch (static_cast<D3D_RESOURCE_RETURN_TYPE>(returnType))
 			{
-				case D3D_RETURN_TYPE_SINT: return "int4";
-				case D3D_RETURN_TYPE_UINT: return "uint4";
-				case D3D_RETURN_TYPE_DOUBLE: return "double4";
-				default: return "float4";
+			case D3D_RETURN_TYPE_SINT:
+				return "int4";
+			case D3D_RETURN_TYPE_UINT:
+				return "uint4";
+			case D3D_RETURN_TYPE_DOUBLE:
+				return "double4";
+			default:
+				return "float4";
 			}
 		}
 
@@ -211,21 +218,37 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			bool writable,
 			uint32_t sampleCount)
 		{
-			const char* prefix = writable ? "RWTexture" : "Texture";
+			const char* prefix = "Texture";
+			if (writable)
+				prefix = "RWTexture";
 			switch (static_cast<D3D_SRV_DIMENSION>(dimension))
 			{
-				case D3D_SRV_DIMENSION_TEXTURE1D: return std::string(prefix) + "1D<" + elementType + ">";
-				case D3D_SRV_DIMENSION_TEXTURE1DARRAY: return std::string(prefix) + "1DArray<" + elementType + ">";
-				case D3D_SRV_DIMENSION_TEXTURE2D: return std::string(prefix) + "2D<" + elementType + ">";
-				case D3D_SRV_DIMENSION_TEXTURE2DARRAY: return std::string(prefix) + "2DArray<" + elementType + ">";
-				case D3D_SRV_DIMENSION_TEXTURE3D: return std::string(prefix) + "3D<" + elementType + ">";
-				case D3D_SRV_DIMENSION_TEXTURECUBE: return writable ? "RWTexture2D<float4>" : std::string("TextureCube<") + elementType + ">";
-				case D3D_SRV_DIMENSION_TEXTURECUBEARRAY: return writable ? "RWTexture2DArray<float4>" : std::string("TextureCubeArray<") + elementType + ">";
-				case D3D_SRV_DIMENSION_TEXTURE2DMS:
-					return std::string("Texture2DMS<") + elementType + ", " + std::to_string((std::max)(1u, sampleCount)) + ">";
-				case D3D_SRV_DIMENSION_TEXTURE2DMSARRAY:
-					return std::string("Texture2DMSArray<") + elementType + ", " + std::to_string((std::max)(1u, sampleCount)) + ">";
-				default: return writable ? std::string("RWBuffer<") + elementType + ">" : std::string("Buffer<") + elementType + ">";
+			case D3D_SRV_DIMENSION_TEXTURE1D:
+				return std::string(prefix) + "1D<" + elementType + ">";
+			case D3D_SRV_DIMENSION_TEXTURE1DARRAY:
+				return std::string(prefix) + "1DArray<" + elementType + ">";
+			case D3D_SRV_DIMENSION_TEXTURE2D:
+				return std::string(prefix) + "2D<" + elementType + ">";
+			case D3D_SRV_DIMENSION_TEXTURE2DARRAY:
+				return std::string(prefix) + "2DArray<" + elementType + ">";
+			case D3D_SRV_DIMENSION_TEXTURE3D:
+				return std::string(prefix) + "3D<" + elementType + ">";
+			case D3D_SRV_DIMENSION_TEXTURECUBE:
+				if (writable)
+					return "RWTexture2D<float4>";
+				return std::string("TextureCube<") + elementType + ">";
+			case D3D_SRV_DIMENSION_TEXTURECUBEARRAY:
+				if (writable)
+					return "RWTexture2DArray<float4>";
+				return std::string("TextureCubeArray<") + elementType + ">";
+			case D3D_SRV_DIMENSION_TEXTURE2DMS:
+				return std::string("Texture2DMS<") + elementType + ", " + std::to_string((std::max)(1u, sampleCount)) + ">";
+			case D3D_SRV_DIMENSION_TEXTURE2DMSARRAY:
+				return std::string("Texture2DMSArray<") + elementType + ", " + std::to_string((std::max)(1u, sampleCount)) + ">";
+			default:
+				if (writable)
+					return std::string("RWBuffer<") + elementType + ">";
+				return std::string("Buffer<") + elementType + ">";
 			}
 		}
 
@@ -241,7 +264,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		std::string RegisterText(char registerType, const ShaderAnalysis::ResourceBindingDisk& resource)
 		{
 			return "register(" + std::string(1, registerType) + std::to_string(resource.bindPoint) +
-				", space" + std::to_string(resource.registerSpace) + ")";
+				   ", space" + std::to_string(resource.registerSpace) + ")";
 		}
 
 		void AppendResourceDeclaration(
@@ -252,16 +275,21 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			const std::string identifier = UniqueIdentifier(resource, usedIdentifiers);
 			const D3D_SHADER_INPUT_TYPE inputType = static_cast<D3D_SHADER_INPUT_TYPE>(resource.type);
-			source << "// Reflected resource: " << (resource.name.empty() ? "(unnamed)" : resource.name)
-				<< ", bind count " << resource.bindCount << "\n";
+			std::string resourceName = resource.name;
+			if (resourceName.empty())
+				resourceName = "(unnamed)";
+			source << "// Reflected resource: " << resourceName
+				   << ", bind count " << resource.bindCount << "\n";
 
 			if (inputType == D3D_SIT_CBUFFER)
 			{
 				const ShaderAnalysis::ConstantBufferDisk* constantBuffer = FindConstantBuffer(analysis, resource.name);
-				const uint32_t byteSize = constantBuffer ? constantBuffer->size : 16;
+				uint32_t byteSize = 16;
+				if (constantBuffer)
+					byteSize = constantBuffer->size;
 				const uint32_t vectorCount = (std::max)(1u, (byteSize + 15u) / 16u);
 				source << "cbuffer " << identifier << " : " << RegisterText('b', resource) << "\n{\n"
-					<< "\tuint4 " << identifier << "_RawData[" << vectorCount << "];\n};\n\n";
+					   << "\tuint4 " << identifier << "_RawData[" << vectorCount << "];\n};\n\n";
 				return;
 			}
 
@@ -270,33 +298,56 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const char* elementType = TypedResourceElementType(resource.returnType);
 			switch (inputType)
 			{
-				case D3D_SIT_TBUFFER:
-				case D3D_SIT_TEXTURE:
-					declarationType = TextureType(resource.dimension, elementType, false, resource.sampleCountOrStride);
-					break;
-				case D3D_SIT_SAMPLER:
-					declarationType = (resource.flags & D3D_SIF_COMPARISON_SAMPLER) != 0 ? "SamplerComparisonState" : "SamplerState";
-					registerType = 's';
-					break;
-				case D3D_SIT_UAV_RWTYPED:
-					declarationType = TextureType(resource.dimension, elementType, true, resource.sampleCountOrStride);
-					registerType = 'u';
-					break;
-				case D3D_SIT_STRUCTURED: declarationType = "StructuredBuffer<uint>"; break;
-				case D3D_SIT_UAV_RWSTRUCTURED: declarationType = "RWStructuredBuffer<uint>"; registerType = 'u'; break;
-				case D3D_SIT_BYTEADDRESS: declarationType = "ByteAddressBuffer"; break;
-				case D3D_SIT_UAV_RWBYTEADDRESS: declarationType = "RWByteAddressBuffer"; registerType = 'u'; break;
-				case D3D_SIT_UAV_APPEND_STRUCTURED: declarationType = "AppendStructuredBuffer<uint>"; registerType = 'u'; break;
-				case D3D_SIT_UAV_CONSUME_STRUCTURED: declarationType = "ConsumeStructuredBuffer<uint>"; registerType = 'u'; break;
-				case D3D_SIT_UAV_RWSTRUCTURED_WITH_COUNTER: declarationType = "RWStructuredBuffer<uint>"; registerType = 'u'; break;
-				case D3D_SIT_RTACCELERATIONSTRUCTURE: declarationType = "RaytracingAccelerationStructure"; break;
-				default:
-					source << "// Unsupported reflected resource type " << resource.type << "; declare it manually if needed.\n\n";
-					return;
+			case D3D_SIT_TBUFFER:
+			case D3D_SIT_TEXTURE:
+				declarationType = TextureType(resource.dimension, elementType, false, resource.sampleCountOrStride);
+				break;
+			case D3D_SIT_SAMPLER:
+				declarationType = "SamplerState";
+				if ((resource.flags & D3D_SIF_COMPARISON_SAMPLER) != 0)
+					declarationType = "SamplerComparisonState";
+				registerType = 's';
+				break;
+			case D3D_SIT_UAV_RWTYPED:
+				declarationType = TextureType(resource.dimension, elementType, true, resource.sampleCountOrStride);
+				registerType = 'u';
+				break;
+			case D3D_SIT_STRUCTURED:
+				declarationType = "StructuredBuffer<uint>";
+				break;
+			case D3D_SIT_UAV_RWSTRUCTURED:
+				declarationType = "RWStructuredBuffer<uint>";
+				registerType = 'u';
+				break;
+			case D3D_SIT_BYTEADDRESS:
+				declarationType = "ByteAddressBuffer";
+				break;
+			case D3D_SIT_UAV_RWBYTEADDRESS:
+				declarationType = "RWByteAddressBuffer";
+				registerType = 'u';
+				break;
+			case D3D_SIT_UAV_APPEND_STRUCTURED:
+				declarationType = "AppendStructuredBuffer<uint>";
+				registerType = 'u';
+				break;
+			case D3D_SIT_UAV_CONSUME_STRUCTURED:
+				declarationType = "ConsumeStructuredBuffer<uint>";
+				registerType = 'u';
+				break;
+			case D3D_SIT_UAV_RWSTRUCTURED_WITH_COUNTER:
+				declarationType = "RWStructuredBuffer<uint>";
+				registerType = 'u';
+				break;
+			case D3D_SIT_RTACCELERATIONSTRUCTURE:
+				declarationType = "RaytracingAccelerationStructure";
+				break;
+			default:
+				source << "// Unsupported reflected resource type " << resource.type << "; declare it manually if needed.\n\n";
+				return;
 			}
 
 			source << declarationType << ' ' << identifier << ArraySuffix(resource.bindCount)
-				<< " : " << RegisterText(registerType, resource) << ";\n\n";
+				   << " : " << RegisterText(registerType, resource) << ";\n\n";
 		}
 
 		void AppendInjectedResourceDeclarations(
@@ -310,7 +361,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				[](const RenderPass::LogicalResourceBindingDisk& input)
 				{
 					return input.origin == ShaderResource::ResourceOrigin::Runtime &&
-						input.access == RenderPass::ResourceAccess::ShaderResource;
+						   input.access == RenderPass::ResourceAccess::ShaderResource;
 				});
 			const bool hasRuntimeOutputs = std::any_of(
 				renderPass.outputs.begin(),
@@ -318,7 +369,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				[](const RenderPass::LogicalResourceBindingDisk& output)
 				{
 					return output.origin == ShaderResource::ResourceOrigin::Runtime &&
-						output.access == RenderPass::ResourceAccess::UnorderedAccess;
+						   output.access == RenderPass::ResourceAccess::UnorderedAccess;
 				});
 			if (renderPass.shaderResources.empty() && renderPass.samplers.empty() &&
 				!hasRuntimeInputs && !hasRuntimeOutputs)
@@ -333,9 +384,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const std::string baseIdentifier = identifier;
 				for (uint32_t suffix = 2; !usedIdentifiers.insert(identifier).second; ++suffix)
 					identifier = baseIdentifier + "_" + std::to_string(suffix);
-				source << (sampler.comparisonSampler ? "SamplerComparisonState " : "SamplerState ")
-					<< identifier << " : register(s" << sampler.shaderRegister
-					<< ", space" << sampler.registerSpace << ");\n";
+				const char* samplerType = "SamplerState ";
+				if (sampler.comparisonSampler)
+					samplerType = "SamplerComparisonState ";
+				source << samplerType
+					   << identifier << " : register(s" << sampler.shaderRegister
+					   << ", space" << sampler.registerSpace << ");\n";
 			}
 			if (!renderPass.shaderResources.empty())
 				source << "// Injector-owned DDS textures configured on this Render Pass.\n";
@@ -348,11 +402,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					identifier = baseIdentifier + "_" + std::to_string(suffix);
 				const ShaderResource::TextureDisk* texture =
 					DatabaseShaderResources::FindShaderResourceById(resource.resourceId);
-				const ShaderResource::TextureDimension dimension = texture
-					? texture->dimension
-					: ShaderResource::TextureDimension::Unknown;
+				ShaderResource::TextureDimension dimension = ShaderResource::TextureDimension::Unknown;
+				if (texture)
+					dimension = texture->dimension;
 				source << ShaderResource::TextureHlslTypeName(dimension) << ' ' << identifier << " : register(t"
-					<< resource.shaderRegister << ", space" << resource.registerSpace << ");\n";
+					   << resource.shaderRegister << ", space" << resource.registerSpace << ");\n";
 			}
 
 			if (hasRuntimeInputs)
@@ -373,13 +427,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					identifier = baseIdentifier + "_" + std::to_string(suffix);
 				ShaderResource::TextureDimension dimension = ShaderResource::TextureDimension::Texture2D;
 				const auto catalogIt = std::find_if(catalog.begin(), catalog.end(), [&](const auto& entry)
-				{
-					return entry.origin == ShaderResource::ResourceOrigin::Runtime && entry.id == input.resourceId;
-				});
+													{ return entry.origin == ShaderResource::ResourceOrigin::Runtime && entry.id == input.resourceId; });
 				if (catalogIt != catalog.end() && catalogIt->dimension != ShaderResource::TextureDimension::Unknown)
 					dimension = catalogIt->dimension;
 				source << ShaderResource::TextureHlslTypeName(dimension) << ' ' << identifier << " : register(t"
-					<< input.shaderRegister << ", space" << input.registerSpace << ");\n";
+					   << input.shaderRegister << ", space" << input.registerSpace << ");\n";
 			}
 
 			if (hasRuntimeOutputs)
@@ -403,15 +455,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const auto configuredTexture = std::find_if(
 					renderPass.runtimeResources.begin(),
 					renderPass.runtimeResources.end(),
-					[&](const auto& resource) { return resource.id == output.resourceId; });
+					[&](const auto& resource)
+					{ return resource.id == output.resourceId; });
 				if (configuredTexture != renderPass.runtimeResources.end())
 					dimension = configuredTexture->texture.dimension;
 				else
 				{
 					const auto catalogIt = std::find_if(catalog.begin(), catalog.end(), [&](const auto& entry)
-					{
-						return entry.origin == ShaderResource::ResourceOrigin::Runtime && entry.id == output.resourceId;
-					});
+														{ return entry.origin == ShaderResource::ResourceOrigin::Runtime && entry.id == output.resourceId; });
 					if (catalogIt != catalog.end() && catalogIt->dimension != ShaderResource::TextureDimension::Unknown)
 						dimension = catalogIt->dimension;
 				}
@@ -427,7 +478,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					textureType = "RWTexture3D<float4>";
 
 				source << textureType << ' ' << identifier << " : register(u"
-					<< output.shaderRegister << ", space" << output.registerSpace << ");\n";
+					   << output.shaderRegister << ", space" << output.registerSpace << ");\n";
 			}
 			source << '\n';
 		}
@@ -440,24 +491,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			if (inputType == D3D_SIT_SAMPLER)
 			{
 				return std::any_of(renderPass.samplers.begin(), renderPass.samplers.end(), [&](const auto& sampler)
-				{
-					return sampler.shaderRegister == resource.bindPoint &&
-						sampler.registerSpace == resource.registerSpace;
-				});
+								   { return sampler.shaderRegister == resource.bindPoint &&
+											sampler.registerSpace == resource.registerSpace; });
 			}
 			if (inputType == D3D_SIT_TEXTURE)
 			{
 				return std::any_of(renderPass.shaderResources.begin(), renderPass.shaderResources.end(), [&](const auto& injected)
-				{
-					return injected.shaderRegister == resource.bindPoint &&
-						injected.registerSpace == resource.registerSpace;
-				}) || std::any_of(renderPass.inputs.begin(), renderPass.inputs.end(), [&](const auto& input)
-				{
-					return input.origin == ShaderResource::ResourceOrigin::Runtime &&
-						input.access == RenderPass::ResourceAccess::ShaderResource &&
-						input.shaderRegister == resource.bindPoint &&
-						input.registerSpace == resource.registerSpace;
-				});
+								   { return injected.shaderRegister == resource.bindPoint &&
+											injected.registerSpace == resource.registerSpace; }) ||
+					   std::any_of(renderPass.inputs.begin(), renderPass.inputs.end(), [&](const auto& input)
+								   { return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+											input.access == RenderPass::ResourceAccess::ShaderResource &&
+											input.shaderRegister == resource.bindPoint &&
+											input.registerSpace == resource.registerSpace; });
 			}
 			const bool unorderedAccessResource =
 				inputType == D3D_SIT_UAV_RWTYPED ||
@@ -469,21 +515,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			if (!unorderedAccessResource)
 				return false;
 			return std::any_of(renderPass.outputs.begin(), renderPass.outputs.end(), [&](const auto& output)
-			{
-				return output.origin == ShaderResource::ResourceOrigin::Runtime &&
-					output.access == RenderPass::ResourceAccess::UnorderedAccess &&
-					output.shaderRegister == resource.bindPoint &&
-					output.registerSpace == resource.registerSpace;
-			});
+							   { return output.origin == ShaderResource::ResourceOrigin::Runtime &&
+										output.access == RenderPass::ResourceAccess::UnorderedAccess &&
+										output.shaderRegister == resource.bindPoint &&
+										output.registerSpace == resource.registerSpace; });
 		}
 
 		bool ShouldDeclareInheritedResource(
 			const RenderPass::RenderPassDisk& renderPass,
 			const ShaderAnalysis::ResourceBindingDisk& resource)
 		{
-			return static_cast<D3D_SHADER_INPUT_TYPE>(resource.type) == D3D_SIT_CBUFFER
-				? renderPass.inheritedGameBindings.constantBuffers
-				: renderPass.inheritedGameBindings.shaderResources;
+			if (static_cast<D3D_SHADER_INPUT_TYPE>(resource.type) == D3D_SIT_CBUFFER)
+				return renderPass.inheritedGameBindings.constantBuffers;
+			return renderPass.inheritedGameBindings.shaderResources;
 		}
 
 		std::string SignatureValueType(const ShaderAnalysis::SignatureParameterDisk& parameter)
@@ -496,7 +540,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			uint32_t componentCount = 0;
 			for (uint32_t mask = parameter.mask & 0xfu; mask; mask >>= 1)
 				componentCount += mask & 1u;
-			return componentCount > 1 ? std::string(scalarType) + std::to_string(componentCount) : scalarType;
+			if (componentCount > 1)
+				return std::string(scalarType) + std::to_string(componentCount);
+			return scalarType;
 		}
 
 		void AppendSignatureStruct(
@@ -508,9 +554,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			for (size_t index = 0; index < parameters.size(); ++index)
 			{
 				const auto& parameter = parameters[index];
-				const std::string semantic = parameter.semanticName.empty() ? "TEXCOORD" : parameter.semanticName;
+				std::string semantic = parameter.semanticName;
+				if (semantic.empty())
+					semantic = "TEXCOORD";
 				source << "\t" << SignatureValueType(parameter) << " value" << index << " : "
-					<< semantic;
+					   << semantic;
 				if (parameter.semanticIndex)
 					source << parameter.semanticIndex;
 				source << ";\n";
@@ -556,10 +604,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			bool replacementPixelShader)
 		{
 			std::ostringstream source;
+			std::string modifiedShaderName = modifiedShader.name;
+			if (modifiedShaderName.empty())
+				modifiedShaderName = modifiedShader.id;
 			source << "// Fullscreen fragment shader for Modified Shader: "
-				<< (modifiedShader.name.empty() ? modifiedShader.id : modifiedShader.name) << "\n"
-				<< "// Enabled inherited bindings use the values from the linked game draw.\n"
-				<< "// Reflected declarations use raw cbuffer storage where original HLSL types are unavailable.\n\n";
+				   << modifiedShaderName << "\n"
+				   << "// Enabled inherited bindings use the values from the linked game draw.\n"
+				   << "// Reflected declarations use raw cbuffer storage where original HLSL types are unavailable.\n\n";
 
 			const ShaderAnalysis::ShaderAnalysisDisk* analysis = SelectReflectionAnalysis(modifiedShader);
 			std::unordered_set<std::string> usedIdentifiers;
@@ -578,15 +629,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					AppendSignatureStruct(source, "ReplacementPixelInput", analysis->inputParameters);
 					AppendSignatureStruct(source, "ReplacementPixelOutput", analysis->outputParameters);
 					source << "ReplacementPixelOutput main(ReplacementPixelInput input)\n{\n"
-						<< "\tReplacementPixelOutput output = (ReplacementPixelOutput)0;\n"
-						<< "\t// Implement the replacement pixel shader while retaining this reflected signature.\n"
-						<< "\treturn output;\n}\n";
+						   << "\tReplacementPixelOutput output = (ReplacementPixelOutput)0;\n"
+						   << "\t// Implement the replacement pixel shader while retaining this reflected signature.\n"
+						   << "\treturn output;\n}\n";
 				}
 				else
 				{
 					source << "// Reflection was unavailable. Update this signature to match the original pixel shader.\n"
-						<< "float4 main(float4 position : SV_Position) : SV_Target0\n{\n"
-						<< "\treturn float4(1.0, 0.0, 1.0, 1.0);\n}\n";
+						   << "float4 main(float4 position : SV_Position) : SV_Target0\n{\n"
+						   << "\treturn float4(1.0, 0.0, 1.0, 1.0);\n}\n";
 				}
 				return source.str();
 			}
@@ -604,23 +655,24 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const RenderPass::PassOperation operation = RenderPass::ResolvePassOperation(renderPass);
 			const std::string runtimeInput = FirstRuntimeInputIdentifier(renderPass);
 			if ((operation == RenderPass::PassOperation::Downsample ||
-				operation == RenderPass::PassOperation::UpsampleChain) && !runtimeInput.empty())
+				 operation == RenderPass::PassOperation::UpsampleChain) &&
+				!runtimeInput.empty())
 			{
 				source << "\nfloat4 main(FullscreenVertexOutput input) : SV_Target0\n{\n"
-					<< "\tuint sourceWidth, sourceHeight;\n"
-					<< "\t" << runtimeInput << ".GetDimensions(sourceWidth, sourceHeight);\n"
-					<< "\tfloat2 sourcePosition = input.uv * float2(sourceWidth, sourceHeight) - 0.5;\n"
-					<< "\tint2 sourceBase = int2(floor(sourcePosition));\n"
-					<< "\tfloat2 sourceFraction = frac(sourcePosition);\n"
-					<< "\tint2 maximumPixel = int2(max(sourceWidth, 1u) - 1u, max(sourceHeight, 1u) - 1u);\n"
-					<< "\tint2 p00 = clamp(sourceBase, int2(0, 0), maximumPixel);\n"
-					<< "\tint2 p10 = clamp(sourceBase + int2(1, 0), int2(0, 0), maximumPixel);\n"
-					<< "\tint2 p01 = clamp(sourceBase + int2(0, 1), int2(0, 0), maximumPixel);\n"
-					<< "\tint2 p11 = clamp(sourceBase + int2(1, 1), int2(0, 0), maximumPixel);\n"
-					<< "\tfloat4 c00 = " << runtimeInput << ".Load(int3(p00, 0));\n"
-					<< "\tfloat4 c10 = " << runtimeInput << ".Load(int3(p10, 0));\n"
-					<< "\tfloat4 c01 = " << runtimeInput << ".Load(int3(p01, 0));\n"
-					<< "\tfloat4 c11 = " << runtimeInput << ".Load(int3(p11, 0));\n";
+					   << "\tuint sourceWidth, sourceHeight;\n"
+					   << "\t" << runtimeInput << ".GetDimensions(sourceWidth, sourceHeight);\n"
+					   << "\tfloat2 sourcePosition = input.uv * float2(sourceWidth, sourceHeight) - 0.5;\n"
+					   << "\tint2 sourceBase = int2(floor(sourcePosition));\n"
+					   << "\tfloat2 sourceFraction = frac(sourcePosition);\n"
+					   << "\tint2 maximumPixel = int2(max(sourceWidth, 1u) - 1u, max(sourceHeight, 1u) - 1u);\n"
+					   << "\tint2 p00 = clamp(sourceBase, int2(0, 0), maximumPixel);\n"
+					   << "\tint2 p10 = clamp(sourceBase + int2(1, 0), int2(0, 0), maximumPixel);\n"
+					   << "\tint2 p01 = clamp(sourceBase + int2(0, 1), int2(0, 0), maximumPixel);\n"
+					   << "\tint2 p11 = clamp(sourceBase + int2(1, 1), int2(0, 0), maximumPixel);\n"
+					   << "\tfloat4 c00 = " << runtimeInput << ".Load(int3(p00, 0));\n"
+					   << "\tfloat4 c10 = " << runtimeInput << ".Load(int3(p10, 0));\n"
+					   << "\tfloat4 c01 = " << runtimeInput << ".Load(int3(p01, 0));\n"
+					   << "\tfloat4 c11 = " << runtimeInput << ".Load(int3(p11, 0));\n";
 				if (operation == RenderPass::PassOperation::Downsample)
 					source << "\treturn (c00 + c10 + c01 + c11) * 0.25;\n";
 				else
@@ -648,10 +700,16 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		{
 			std::ostringstream source;
 			const bool replacement = renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader;
-			source << (replacement ? "// Replacement" : "// Custom Render Pass")
-				<< " compute shader for Modified Shader: "
-				<< (modifiedShader.name.empty() ? modifiedShader.id : modifiedShader.name) << "\n"
-				<< "// Enabled inherited bindings use the values from the linked game dispatch.\n\n";
+			const char* shaderDescription = "// Custom Render Pass";
+			if (replacement)
+				shaderDescription = "// Replacement";
+			std::string modifiedShaderName = modifiedShader.name;
+			if (modifiedShaderName.empty())
+				modifiedShaderName = modifiedShader.id;
+			source << shaderDescription
+				   << " compute shader for Modified Shader: "
+				   << modifiedShaderName << "\n"
+				   << "// Enabled inherited bindings use the values from the linked game dispatch.\n\n";
 			std::unordered_set<std::string> usedIdentifiers;
 			const ShaderAnalysis::ShaderAnalysisDisk* analysis = SelectReflectionAnalysis(modifiedShader);
 			if (analysis)
@@ -669,47 +727,48 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			const std::string runtimeInput = FirstRuntimeInputIdentifier(renderPass);
 			const std::string runtimeOutput = FirstRuntimeOutputIdentifier(renderPass);
 			source << "[numthreads(" << threadCountX << ", " << threadCountY << ", " << threadCountZ
-				<< ")]\nvoid main(uint3 dispatchThreadId : SV_DispatchThreadID)\n{\n";
+				   << ")]\nvoid main(uint3 dispatchThreadId : SV_DispatchThreadID)\n{\n";
 			if ((operation == RenderPass::PassOperation::Downsample ||
-				operation == RenderPass::PassOperation::UpsampleChain) &&
+				 operation == RenderPass::PassOperation::UpsampleChain) &&
 				!runtimeInput.empty() && !runtimeOutput.empty())
 			{
 				source << "\tuint destinationWidth, destinationHeight;\n"
-					<< "\t" << runtimeOutput << ".GetDimensions(destinationWidth, destinationHeight);\n"
-					<< "\tif (dispatchThreadId.x >= destinationWidth || dispatchThreadId.y >= destinationHeight)\n"
-					<< "\t\treturn;\n"
-					<< "\tuint sourceWidth, sourceHeight;\n"
-					<< "\t" << runtimeInput << ".GetDimensions(sourceWidth, sourceHeight);\n"
-					<< "\tfloat2 sourcePosition = ((float2(dispatchThreadId.xy) + 0.5) / "
-						"float2(destinationWidth, destinationHeight)) * float2(sourceWidth, sourceHeight) - 0.5;\n"
-					<< "\tint2 sourceBase = int2(floor(sourcePosition));\n"
-					<< "\tfloat2 sourceFraction = frac(sourcePosition);\n"
-					<< "\tint2 maximumPixel = int2(max(sourceWidth, 1u) - 1u, max(sourceHeight, 1u) - 1u);\n"
-					<< "\tint2 p00 = clamp(sourceBase, int2(0, 0), maximumPixel);\n"
-					<< "\tint2 p10 = clamp(sourceBase + int2(1, 0), int2(0, 0), maximumPixel);\n"
-					<< "\tint2 p01 = clamp(sourceBase + int2(0, 1), int2(0, 0), maximumPixel);\n"
-					<< "\tint2 p11 = clamp(sourceBase + int2(1, 1), int2(0, 0), maximumPixel);\n"
-					<< "\tfloat4 c00 = " << runtimeInput << ".Load(int3(p00, 0));\n"
-					<< "\tfloat4 c10 = " << runtimeInput << ".Load(int3(p10, 0));\n"
-					<< "\tfloat4 c01 = " << runtimeInput << ".Load(int3(p01, 0));\n"
-					<< "\tfloat4 c11 = " << runtimeInput << ".Load(int3(p11, 0));\n";
+					   << "\t" << runtimeOutput << ".GetDimensions(destinationWidth, destinationHeight);\n"
+					   << "\tif (dispatchThreadId.x >= destinationWidth || dispatchThreadId.y >= destinationHeight)\n"
+					   << "\t\treturn;\n"
+					   << "\tuint sourceWidth, sourceHeight;\n"
+					   << "\t" << runtimeInput << ".GetDimensions(sourceWidth, sourceHeight);\n"
+					   << "\tfloat2 sourcePosition = ((float2(dispatchThreadId.xy) + 0.5) / "
+						  "float2(destinationWidth, destinationHeight)) * float2(sourceWidth, sourceHeight) - 0.5;\n"
+					   << "\tint2 sourceBase = int2(floor(sourcePosition));\n"
+					   << "\tfloat2 sourceFraction = frac(sourcePosition);\n"
+					   << "\tint2 maximumPixel = int2(max(sourceWidth, 1u) - 1u, max(sourceHeight, 1u) - 1u);\n"
+					   << "\tint2 p00 = clamp(sourceBase, int2(0, 0), maximumPixel);\n"
+					   << "\tint2 p10 = clamp(sourceBase + int2(1, 0), int2(0, 0), maximumPixel);\n"
+					   << "\tint2 p01 = clamp(sourceBase + int2(0, 1), int2(0, 0), maximumPixel);\n"
+					   << "\tint2 p11 = clamp(sourceBase + int2(1, 1), int2(0, 0), maximumPixel);\n"
+					   << "\tfloat4 c00 = " << runtimeInput << ".Load(int3(p00, 0));\n"
+					   << "\tfloat4 c10 = " << runtimeInput << ".Load(int3(p10, 0));\n"
+					   << "\tfloat4 c01 = " << runtimeInput << ".Load(int3(p01, 0));\n"
+					   << "\tfloat4 c11 = " << runtimeInput << ".Load(int3(p11, 0));\n";
 				if (operation == RenderPass::PassOperation::Downsample)
 					source << "\t" << runtimeOutput << "[dispatchThreadId.xy] = (c00 + c10 + c01 + c11) * 0.25;\n";
 				else
 					source << "\t" << runtimeOutput << "[dispatchThreadId.xy] = "
-						"lerp(lerp(c00, c10, sourceFraction.x), lerp(c01, c11, sourceFraction.x), sourceFraction.y);\n";
+													   "lerp(lerp(c00, c10, sourceFraction.x), lerp(c01, c11, sourceFraction.x), sourceFraction.y);\n";
 			}
 			else
 			{
-				source << (replacement
-					? "\t// Implement the replacement compute workload here.\n"
-					: "\t// Implement the injected compute workload here. Runtime UAV outputs are declared above.\n");
+				if (replacement)
+					source << "\t// Implement the replacement compute workload here.\n";
+				else
+					source << "\t// Implement the injected compute workload here. Runtime UAV outputs are declared above.\n";
 			}
 			source << "}\n";
 			return source.str();
 		}
 
-	}
+	} //namespace
 
 	bool CreateShaderTemplate(
 		RenderPass::RenderPassDisk& renderPass,
@@ -755,42 +814,98 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 				renderPass.dispatch.threadGroupSizeZ = (std::max)(1u, analysis->executionProperties.threadGroupSizeZ);
 			}
 		}
-		renderPass.vertexShaderSourceFile = computePass || pixelReplacement ? std::string() :
-			(mipChain ? mipChainVertexSourceFile : vertexSourceFile);
-		renderPass.fragmentShaderSourceFile = computeReplacement ? replacementComputeSourceFile :
-			(computePass ? (mipChain ? mipChainComputeSourceFile :
-			(downsample ? downsampleComputeSourceFile :
-			(upsampleChain ? upsampleComputeSourceFile : computeSourceFile))) :
-			(pixelReplacement ? replacementPixelSourceFile : (mipChain ? mipChainFragmentSourceFile :
-			(downsample ? downsampleFragmentSourceFile :
-			(upsampleChain ? upsampleFragmentSourceFile : fragmentSourceFile)))));
-		renderPass.vertexShaderCompiledBlobFile = computePass || pixelReplacement ? std::string() :
-			(mipChain ? mipChainVertexBlobFile : vertexBlobFile);
-		renderPass.fragmentShaderCompiledBlobFile = computeReplacement ? replacementComputeBlobFile :
-			(computePass ? (mipChain ? mipChainComputeBlobFile :
-			(downsample ? downsampleComputeBlobFile :
-			(upsampleChain ? upsampleComputeBlobFile : computeBlobFile))) :
-			(pixelReplacement ? replacementPixelBlobFile : (mipChain ? mipChainFragmentBlobFile :
-			(downsample ? downsampleFragmentBlobFile :
-			(upsampleChain ? upsampleFragmentBlobFile : fragmentBlobFile)))));
-		renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(
-			computePass ? ShaderTarget::ComputeShader : ShaderTarget::PixelShader);
+		//start with the ordinary fullscreen files, then select the template for this pass kind.
+		renderPass.vertexShaderSourceFile = vertexSourceFile;
+		renderPass.vertexShaderCompiledBlobFile = vertexBlobFile;
+		if (mipChain)
+		{
+			renderPass.vertexShaderSourceFile = mipChainVertexSourceFile;
+			renderPass.vertexShaderCompiledBlobFile = mipChainVertexBlobFile;
+		}
+		if (computePass || pixelReplacement)
+		{
+			renderPass.vertexShaderSourceFile.clear();
+			renderPass.vertexShaderCompiledBlobFile.clear();
+		}
+
+		renderPass.fragmentShaderSourceFile = fragmentSourceFile;
+		renderPass.fragmentShaderCompiledBlobFile = fragmentBlobFile;
+		if (upsampleChain)
+		{
+			renderPass.fragmentShaderSourceFile = upsampleFragmentSourceFile;
+			renderPass.fragmentShaderCompiledBlobFile = upsampleFragmentBlobFile;
+		}
+		if (downsample)
+		{
+			renderPass.fragmentShaderSourceFile = downsampleFragmentSourceFile;
+			renderPass.fragmentShaderCompiledBlobFile = downsampleFragmentBlobFile;
+		}
+		if (mipChain)
+		{
+			renderPass.fragmentShaderSourceFile = mipChainFragmentSourceFile;
+			renderPass.fragmentShaderCompiledBlobFile = mipChainFragmentBlobFile;
+		}
+		if (pixelReplacement)
+		{
+			renderPass.fragmentShaderSourceFile = replacementPixelSourceFile;
+			renderPass.fragmentShaderCompiledBlobFile = replacementPixelBlobFile;
+		}
+		if (computePass)
+		{
+			renderPass.fragmentShaderSourceFile = computeSourceFile;
+			renderPass.fragmentShaderCompiledBlobFile = computeBlobFile;
+			if (upsampleChain)
+			{
+				renderPass.fragmentShaderSourceFile = upsampleComputeSourceFile;
+				renderPass.fragmentShaderCompiledBlobFile = upsampleComputeBlobFile;
+			}
+			if (downsample)
+			{
+				renderPass.fragmentShaderSourceFile = downsampleComputeSourceFile;
+				renderPass.fragmentShaderCompiledBlobFile = downsampleComputeBlobFile;
+			}
+			if (mipChain)
+			{
+				renderPass.fragmentShaderSourceFile = mipChainComputeSourceFile;
+				renderPass.fragmentShaderCompiledBlobFile = mipChainComputeBlobFile;
+			}
+		}
+		if (computeReplacement)
+		{
+			renderPass.fragmentShaderSourceFile = replacementComputeSourceFile;
+			renderPass.fragmentShaderCompiledBlobFile = replacementComputeBlobFile;
+		}
+		renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::PixelShader);
+		if (computePass)
+			renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::ComputeShader);
 		renderPass.vertexShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::VertexShader);
 		renderPass.vertexShaderEntryPoint = "main";
 		renderPass.fragmentShaderEntryPoint = "main";
 		RenderPass::ResolveShaderPaths(renderPass);
 
 		if (!renderPass.vertexShaderSourcePath.empty() && !ShaderInjectorIO::WriteTextFileIfMissing(
-			renderPass.vertexShaderSourcePath,
-			fullscreenTriangleVertexShader))
+															  renderPass.vertexShaderSourcePath,
+															  fullscreenTriangleVertexShader))
 		{
 			outError = "Could not create the fullscreen vertex shader source.";
 			return false;
 		}
-		if (!ShaderInjectorIO::WriteTextFileIfMissing(
-			renderPass.fragmentShaderSourcePath,
-			computePass ? (mipChain ? mipChainComputeShader : BuildComputeShaderSource(renderPass, modifiedShader)) :
-			(mipChain ? mipChainFragmentShader : BuildFragmentShaderSource(renderPass, modifiedShader, pixelReplacement))))
+		std::string fragmentShaderSource;
+		if (computePass)
+		{
+			if (mipChain)
+				fragmentShaderSource = mipChainComputeShader;
+			else
+				fragmentShaderSource = BuildComputeShaderSource(renderPass, modifiedShader);
+		}
+		else
+		{
+			if (mipChain)
+				fragmentShaderSource = mipChainFragmentShader;
+			else
+				fragmentShaderSource = BuildFragmentShaderSource(renderPass, modifiedShader, pixelReplacement);
+		}
+		if (!ShaderInjectorIO::WriteTextFileIfMissing(renderPass.fragmentShaderSourcePath, fragmentShaderSource))
 		{
 			outError = "Could not create the Render Pass shader source.";
 			return false;
@@ -810,16 +925,17 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		}
 
 		const bool computePass = RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute;
-		renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(
-			computePass ? ShaderTarget::ComputeShader : ShaderTarget::PixelShader);
+		renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::PixelShader);
+		if (computePass)
+			renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::ComputeShader);
 		renderPass.vertexShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::VertexShader);
 
 		std::string vertexBlobPath = renderPass.vertexShaderCompiledBlobPath;
 		if (!vertexBlobPath.empty() && !ShaderInjectorIO::CompileSourceToDXILBlob(
-			renderPass.vertexShaderSourcePath,
-			renderPass.vertexShaderProfile,
-			renderPass.vertexShaderEntryPoint,
-			vertexBlobPath))
+										   renderPass.vertexShaderSourcePath,
+										   renderPass.vertexShaderProfile,
+										   renderPass.vertexShaderEntryPoint,
+										   vertexBlobPath))
 		{
 			outError = "Fullscreen vertex shader compilation failed.";
 			return false;
@@ -827,10 +943,10 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 
 		std::string fragmentBlobPath = renderPass.fragmentShaderCompiledBlobPath;
 		if (!ShaderInjectorIO::CompileSourceToDXILBlob(
-			renderPass.fragmentShaderSourcePath,
-			renderPass.fragmentShaderProfile,
-			renderPass.fragmentShaderEntryPoint,
-			fragmentBlobPath))
+				renderPass.fragmentShaderSourcePath,
+				renderPass.fragmentShaderProfile,
+				renderPass.fragmentShaderEntryPoint,
+				fragmentBlobPath))
 		{
 			outError = "Render Pass shader compilation failed.";
 			return false;
@@ -843,4 +959,4 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		}
 		return true;
 	}
-}
+} //namespace RenderPassShaders

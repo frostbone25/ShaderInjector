@@ -12,4 +12,4 @@ namespace DatabaseShaderConfigurations
 		size_t sourceFileCount = 0;
 		std::string errorMessage;
 	};
-}
+} //namespace DatabaseShaderConfigurations

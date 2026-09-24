@@ -37,7 +37,7 @@ namespace ShaderTarget
 		std::string replacementDirectory;
 		std::string jsonPath;
 
-		//runtime-only cache resolved from modifiedShaderId. 
+		//runtime-only cache resolved from modifiedShaderId.
 		//this path is never serialized and always points into the ModifiedShader package directory.
 		std::string modifiedShaderBlobPath;
 
@@ -107,4 +107,4 @@ namespace ShaderTarget
 
 	void to_json(nlohmann::ordered_json& json, const ShaderTargetDisk& shaderTarget);
 	void from_json(const nlohmann::ordered_json& json, ShaderTargetDisk& shaderTarget);
-}
+} //namespace ShaderTarget

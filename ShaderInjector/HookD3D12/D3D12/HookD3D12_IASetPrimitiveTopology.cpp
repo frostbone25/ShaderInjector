@@ -19,4 +19,4 @@ namespace HookD3D12
 
 		Original_IASetPrimitiveTopology(commandList, topology);
 	}
-}
+} //namespace HookD3D12

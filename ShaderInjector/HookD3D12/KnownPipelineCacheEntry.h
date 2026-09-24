@@ -12,4 +12,4 @@ namespace HookD3D12
 		uint64_t overrideGeneration = 0;
 		bool isKnown = false;
 	};
-}
+} //namespace HookD3D12

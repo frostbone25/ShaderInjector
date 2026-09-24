@@ -34,4 +34,4 @@ namespace Hash
 		char* parseEnd = nullptr;
 		return strtoull(hashText.c_str(), &parseEnd, 16);
 	}
-}
+} //namespace Hash

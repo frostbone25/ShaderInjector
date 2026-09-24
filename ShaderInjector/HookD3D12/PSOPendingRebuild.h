@@ -12,4 +12,4 @@ namespace HookD3D12
 		int pipelineIndex;
 		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE targetSubobjectType;
 	};
-}
+} //namespace HookD3D12

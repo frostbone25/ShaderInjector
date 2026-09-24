@@ -15,6 +15,17 @@
 #include "HookD3D12.h"
 #include "Performance/PerformanceMetrics.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
+#include "RecordedTextureState.h"
+#include "RenderPass/MipChain/ActiveDescriptorTable.h"
+#include "RenderPass/MipChain/CommandListPool.h"
+#include "RenderPass/MipChain/DeviceResources.h"
+#include "RenderPass/MipChain/ExecutionSlot.h"
+#include "RenderPass/MipChain/MipTextureResources.h"
+#include "RenderPass/MipChain/QueueFence.h"
+#include "RenderPass/MipChain/ResolvedMipPass.h"
+#include "RenderPass/MipChain/ThreadDeviceResourcesLookup.h"
+#include "RenderPass/MipChain/ThreadGeneratorPipelineLookup.h"
+#include "RenderPass/MipChain/ThreadMipBindingLookup.h"
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderResource/ShaderResourceCatalog.h"
 #include "StringHelper.h"
@@ -22,104 +33,6 @@
 namespace RenderPassMipChain
 {
 	using Microsoft::WRL::ComPtr;
-
-	struct DeviceResources
-	{
-		DeviceResources()
-		{
-			for (std::atomic<int8_t>& support : graphicsMipGeneratorFormatSupport)
-				support.store(-1, std::memory_order_relaxed);
-
-			for (std::atomic<int8_t>& support : computeMipGeneratorFormatSupport)
-				support.store(-1, std::memory_order_relaxed);
-		}
-
-		ComPtr<ID3D12Device> device;
-		ComPtr<ID3D12RootSignature> rootSignature;
-		std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> pipelines;
-		std::unordered_map<std::string, std::string> pipelineErrors;
-		std::array<std::atomic<int8_t>, 256> graphicsMipGeneratorFormatSupport;
-		std::array<std::atomic<int8_t>, 256> computeMipGeneratorFormatSupport;
-		UINT shaderResourceDescriptorIncrement = 0;
-		UINT renderTargetDescriptorIncrement = 0;
-	};
-
-	struct MipTextureResources
-	{
-		ComPtr<ID3D12Resource> texture;
-		ComPtr<ID3D12DescriptorHeap> sourceHeap;
-		ComPtr<ID3D12DescriptorHeap> renderTargetHeap;
-		ComPtr<ID3D12DescriptorHeap> fullMipChainHeap;
-		UINT width = 0;
-		UINT height = 0;
-		UINT mipLevelCount = 0;
-		DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
-		UINT shader4ComponentMapping = 0;
-		D3D12_CPU_DESCRIPTOR_HANDLE fullMipChainDescriptor{};
-		bool fullMipChainDescriptorInitialized = false;
-		bool allSubresourcesShaderReadable = false;
-		bool computePipeline = false;
-		std::wstring eventName;
-	};
-
-	struct ExecutionSlot
-	{
-		struct RecordedTextureState
-		{
-			MipTextureResources* resources = nullptr;
-			bool allSubresourcesShaderReadable = false;
-		};
-
-		// A slot can execute different pass groups over its lifetime. Keep each
-		// pass's resources under a stable identity so changing execution order
-		// never turns into texture and descriptor-heap recreation.
-		std::unordered_map<std::string, MipTextureResources> mipTexturesByRenderPassId;
-		std::vector<RecordedTextureState> recordedTextureStates;
-		ComPtr<ID3D12DescriptorHeap> nativeDescriptorHeap;
-		UINT nativeDescriptorCapacity = 0;
-		ID3D12RootSignature* cachedLayoutRootSignature = nullptr;
-		UINT cachedLayoutMaximumDescriptors = 0;
-		std::vector<RenderPassResourceRegistry::DescriptorTableLayout> cachedDescriptorTableLayouts;
-		ComPtr<ID3D12Fence> retirementFence;
-		UINT64 retirementFenceValue = 0;
-		bool recorded = false;
-		bool submitted = false;
-		bool retirementBlocked = false;
-	};
-
-	struct CommandListPool
-	{
-		ComPtr<ID3D12Device> device;
-		std::vector<std::unique_ptr<ExecutionSlot>> slots;
-		std::vector<ExecutionSlot*> recordedSlots;
-	};
-
-	struct QueueFence
-	{
-		ComPtr<ID3D12Fence> fence;
-		UINT64 nextValue = 0;
-	};
-
-	struct ResolvedMipPass
-	{
-		const RenderPass::RenderPassDisk* renderPass = nullptr;
-		size_t resultIndex = 0;
-		RenderPassResourceRegistry::DescriptorBindingLocation bindingLocation;
-		D3D12_CPU_DESCRIPTOR_HANDLE sourceDescriptor{};
-		RenderPass::ResourceBindingDiagnostic sourceMetadata;
-		ComPtr<ID3D12Resource> sourceResource;
-		MipTextureResources* resources = nullptr;
-	};
-
-	struct ActiveDescriptorTable
-	{
-		UINT rootParameterIndex = UINT32_MAX;
-		D3D12_DESCRIPTOR_HEAP_TYPE heapType = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
-		UINT descriptorCount = 0;
-		D3D12_GPU_DESCRIPTOR_HANDLE originalGpuHandle{};
-		D3D12_CPU_DESCRIPTOR_HANDLE originalCpuHandle{};
-		UINT customHeapOffset = 0;
-	};
 
 	std::mutex gDeviceResourcesMutex;
 	std::unordered_map<ID3D12Device*, std::unique_ptr<DeviceResources>> gDeviceResources;
@@ -129,35 +42,18 @@ namespace RenderPassMipChain
 	std::unordered_map<ID3D12CommandQueue*, QueueFence> gQueueFences;
 	std::atomic<uint32_t> gRecordedCommandListCount = 0;
 
-	struct ThreadDeviceResourcesLookup
-	{
-		ID3D12Device* device = nullptr;
-		DeviceResources* resources = nullptr;
-	};
-
-	struct ThreadGeneratorPipelineLookup
-	{
-		DeviceResources* deviceResources = nullptr;
-		const RenderPass::RenderPassDisk* renderPass = nullptr;
-		DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
-		bool computePipeline = false;
-		ID3D12PipelineState* pipelineState = nullptr;
-	};
-
-	struct ThreadMipBindingLookup
-	{
-		const RenderPass::RenderPassDisk* renderPass = nullptr;
-		ID3D12RootSignature* rootSignature = nullptr;
-		bool computePipeline = false;
-		RenderPassResourceRegistry::DescriptorBindingLocation location;
-		bool found = false;
-	};
-
 	thread_local ThreadDeviceResourcesLookup gThreadDeviceResourcesLookup;
 	thread_local std::array<ThreadGeneratorPipelineLookup, 16> gThreadGeneratorPipelineLookups;
 	thread_local size_t gNextThreadGeneratorPipelineLookup = 0;
 	thread_local std::array<ThreadMipBindingLookup, 16> gThreadMipBindingLookups;
 	thread_local size_t gNextThreadMipBindingLookup = 0;
+
+	const char* PipelineKindName(bool computePipeline)
+	{
+		if (computePipeline)
+			return "compute";
+		return "graphics";
+	}
 
 	UINT CalculateMipLevelCount(UINT width, UINT height)
 	{
@@ -220,24 +116,24 @@ namespace RenderPassMipChain
 		lookup.renderPass = &renderPass;
 		lookup.rootSignature = rootSignature;
 		lookup.computePipeline = computePipeline;
-		const D3D12_SHADER_VISIBILITY shaderVisibility = computePipeline
-			? D3D12_SHADER_VISIBILITY_ALL
-			: D3D12_SHADER_VISIBILITY_PIXEL;
+		D3D12_SHADER_VISIBILITY shaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		if (computePipeline)
+			shaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 		lookup.found = RenderPassResourceRegistry::FindDescriptorBinding(
-			rootSignature,
-			D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-			renderPass.sourceTextureShaderRegister,
-			renderPass.sourceTextureRegisterSpace,
-			renderPass.maximumTrackedDescriptors,
-			shaderVisibility,
-			lookup.location) ||
-			RenderPassResourceRegistry::FindUniqueDescriptorBindingByShaderRegister(
-				rootSignature,
-				D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-				renderPass.sourceTextureShaderRegister,
-				renderPass.maximumTrackedDescriptors,
-				shaderVisibility,
-				lookup.location);
+						   rootSignature,
+						   D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+						   renderPass.sourceTextureShaderRegister,
+						   renderPass.sourceTextureRegisterSpace,
+						   renderPass.maximumTrackedDescriptors,
+						   shaderVisibility,
+						   lookup.location) ||
+					   RenderPassResourceRegistry::FindUniqueDescriptorBindingByShaderRegister(
+						   rootSignature,
+						   D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+						   renderPass.sourceTextureShaderRegister,
+						   renderPass.maximumTrackedDescriptors,
+						   shaderVisibility,
+						   lookup.location);
 		outLocation = lookup.location;
 		gThreadMipBindingLookups[gNextThreadMipBindingLookup] = lookup;
 		gNextThreadMipBindingLookup =
@@ -280,14 +176,13 @@ namespace RenderPassMipChain
 			RootArgumentType::DescriptorTable);
 		if (!tableBinding || !tableBinding->value)
 		{
-			outError = std::string("The source texture's ") +
-				(computePipeline ? "compute" : "graphics") + " descriptor table is not currently bound.";
+			outError = std::string("The source texture's ") + PipelineKindName(computePipeline) + " descriptor table is not currently bound.";
 			return false;
 		}
 
 		const DescriptorHeapBinding* heap = FindHeapForGpuHandle(
 			gameState,
-			{ tableBinding->value },
+			{tableBinding->value},
 			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 		if (!heap)
 		{
@@ -297,7 +192,7 @@ namespace RenderPassMipChain
 
 		const UINT64 tableByteOffset = tableBinding->value - heap->gpuStart.ptr;
 		const UINT64 sourceByteOffset = tableByteOffset +
-			static_cast<UINT64>(outPass.bindingLocation.tableOffset) * heap->descriptorIncrementSize;
+										static_cast<UINT64>(outPass.bindingLocation.tableOffset) * heap->descriptorIncrementSize;
 		const UINT64 heapByteSize = static_cast<UINT64>(heap->descriptorCount) * heap->descriptorIncrementSize;
 		if (sourceByteOffset >= heapByteSize)
 		{
@@ -318,7 +213,7 @@ namespace RenderPassMipChain
 		outPass.sourceResource = reinterpret_cast<ID3D12Resource*>(outPass.sourceMetadata.resourcePointer);
 		if (outPass.sourceMetadata.resourceDimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
 			(outPass.sourceMetadata.descriptorViewDimension != UINT32_MAX &&
-				outPass.sourceMetadata.descriptorViewDimension != D3D12_SRV_DIMENSION_TEXTURE2D) ||
+			 outPass.sourceMetadata.descriptorViewDimension != D3D12_SRV_DIMENSION_TEXTURE2D) ||
 			outPass.sourceMetadata.resourceDepthOrArraySize != 1 ||
 			outPass.sourceMetadata.resourceSampleCount != 1)
 		{
@@ -438,7 +333,7 @@ namespace RenderPassMipChain
 		}
 		if (!CreateGeneratorRootSignature(*resources, outError))
 			return nullptr;
-		gThreadDeviceResourcesLookup = { device, resources.get() };
+		gThreadDeviceResourcesLookup = {device, resources.get()};
 		return resources.get();
 	}
 
@@ -461,18 +356,17 @@ namespace RenderPassMipChain
 			}
 		}
 
-		const std::string cacheKey = renderPass.id + ':' +
-			(computePipeline ? "compute:" : "graphics:") +
-			std::to_string(renderPass.vertexShaderBlobHash) + ':' +
-			std::to_string(renderPass.fragmentShaderBlobHash) + ':' +
-			std::to_string(static_cast<UINT>(format));
+		const std::string cacheKey = renderPass.id + ':' + PipelineKindName(computePipeline) + ':' +
+									 std::to_string(renderPass.vertexShaderBlobHash) + ':' +
+									 std::to_string(renderPass.fragmentShaderBlobHash) + ':' +
+									 std::to_string(static_cast<UINT>(format));
 		{
 			std::lock_guard<std::mutex> lock(gDeviceResourcesMutex);
 			const auto pipelineIt = deviceResources.pipelines.find(cacheKey);
 			if (pipelineIt != deviceResources.pipelines.end())
 			{
 				gThreadGeneratorPipelineLookups[gNextThreadGeneratorPipelineLookup] = {
-					&deviceResources, &renderPass, format, computePipeline, pipelineIt->second.Get() };
+					&deviceResources, &renderPass, format, computePipeline, pipelineIt->second.Get()};
 				gNextThreadGeneratorPipelineLookup =
 					(gNextThreadGeneratorPipelineLookup + 1) % gThreadGeneratorPipelineLookups.size();
 				return pipelineIt->second.Get();
@@ -491,7 +385,7 @@ namespace RenderPassMipChain
 		{
 			D3D12_COMPUTE_PIPELINE_STATE_DESC description{};
 			description.pRootSignature = deviceResources.rootSignature.Get();
-			description.CS = { renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size() };
+			description.CS = {renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size()};
 			result = deviceResources.device->CreateComputePipelineState(
 				&description,
 				IID_PPV_ARGS(&pipeline));
@@ -500,8 +394,8 @@ namespace RenderPassMipChain
 		{
 			D3D12_GRAPHICS_PIPELINE_STATE_DESC description{};
 			description.pRootSignature = deviceResources.rootSignature.Get();
-			description.VS = { renderPass.vertexShaderBlob.data(), renderPass.vertexShaderBlob.size() };
-			description.PS = { renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size() };
+			description.VS = {renderPass.vertexShaderBlob.data(), renderPass.vertexShaderBlob.size()};
+			description.PS = {renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size()};
 			description.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
 			description.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_ZERO;
 			description.BlendState.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
@@ -516,11 +410,11 @@ namespace RenderPassMipChain
 			description.DepthStencilState.DepthEnable = FALSE;
 			description.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
 			description.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-			description.InputLayout = { nullptr, 0 };
+			description.InputLayout = {nullptr, 0};
 			description.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 			description.NumRenderTargets = 1;
 			description.RTVFormats[0] = format;
-			description.SampleDesc = { 1, 0 };
+			description.SampleDesc = {1, 0};
 			result = deviceResources.device->CreateGraphicsPipelineState(
 				&description,
 				IID_PPV_ARGS(&pipeline));
@@ -532,14 +426,15 @@ namespace RenderPassMipChain
 			deviceResources.pipelineErrors[cacheKey] = outError;
 			return nullptr;
 		}
-		pipeline->SetName(computePipeline
-			? L"Shader Injector Compute Mip Chain Pipeline"
-			: L"Shader Injector Graphics Mip Chain Pipeline");
+		const wchar_t* pipelineName = L"Shader Injector Graphics Mip Chain Pipeline";
+		if (computePipeline)
+			pipelineName = L"Shader Injector Compute Mip Chain Pipeline";
+		pipeline->SetName(pipelineName);
 
 		std::lock_guard<std::mutex> lock(gDeviceResourcesMutex);
 		auto [pipelineIt, inserted] = deviceResources.pipelines.emplace(cacheKey, pipeline);
 		gThreadGeneratorPipelineLookups[gNextThreadGeneratorPipelineLookup] = {
-			&deviceResources, &renderPass, format, computePipeline, pipelineIt->second.Get() };
+			&deviceResources, &renderPass, format, computePipeline, pipelineIt->second.Get()};
 		gNextThreadGeneratorPipelineLookup =
 			(gNextThreadGeneratorPipelineLookup + 1) % gThreadGeneratorPipelineLookups.size();
 		return pipelineIt->second.Get();
@@ -550,7 +445,7 @@ namespace RenderPassMipChain
 		if (slot.recorded || slot.retirementBlocked)
 			return false;
 		return !slot.retirementFence ||
-			slot.retirementFence->GetCompletedValue() >= slot.retirementFenceValue;
+			   slot.retirementFence->GetCompletedValue() >= slot.retirementFenceValue;
 	}
 
 	ExecutionSlot* AcquireExecutionSlot(
@@ -651,52 +546,44 @@ namespace RenderPassMipChain
 
 		bool formatSupported = false;
 		const UINT formatIndex = static_cast<UINT>(format);
-		auto& formatSupportCache = computePipeline
-			? deviceResources.computeMipGeneratorFormatSupport
-			: deviceResources.graphicsMipGeneratorFormatSupport;
-		int8_t cachedFormatSupport = formatIndex < formatSupportCache.size()
-			? formatSupportCache[formatIndex].load(std::memory_order_acquire)
-			: -1;
+		auto* formatSupportCache = &deviceResources.graphicsMipGeneratorFormatSupport;
+		if (computePipeline)
+			formatSupportCache = &deviceResources.computeMipGeneratorFormatSupport;
+		int8_t cachedFormatSupport = -1;
+		if (formatIndex < formatSupportCache->size())
+			cachedFormatSupport = (*formatSupportCache)[formatIndex].load(std::memory_order_acquire);
 		if (cachedFormatSupport >= 0)
 		{
 			formatSupported = cachedFormatSupport != 0;
 		}
 		else
 		{
-			D3D12_FEATURE_DATA_FORMAT_SUPPORT formatSupport{ format };
-			formatSupported =
-				SUCCEEDED(device->CheckFeatureSupport(
-					D3D12_FEATURE_FORMAT_SUPPORT,
-					&formatSupport,
-					sizeof(formatSupport))) &&
-				(formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_TEXTURE2D) != 0 &&
-				(computePipeline
-					? (formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_SHADER_LOAD) != 0 &&
-					(formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) != 0 &&
-					(formatSupport.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE) != 0
-					: (formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE) != 0 &&
-					(formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_RENDER_TARGET) != 0);
-			if (formatIndex < formatSupportCache.size())
+			D3D12_FEATURE_DATA_FORMAT_SUPPORT formatSupport{format};
+			const bool formatQueried = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &formatSupport, sizeof(formatSupport)));
+			const bool texture2DSupported = (formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_TEXTURE2D) != 0;
+			bool pipelineFormatSupported = (formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE) != 0 && (formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_RENDER_TARGET) != 0;
+			if (computePipeline)
+				pipelineFormatSupported = (formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_SHADER_LOAD) != 0 && (formatSupport.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) != 0 && (formatSupport.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE) != 0;
+			formatSupported = formatQueried && texture2DSupported && pipelineFormatSupported;
+			if (formatIndex < formatSupportCache->size())
 			{
-				formatSupportCache[formatIndex].store(
-					formatSupported ? 1 : 0,
-					std::memory_order_release);
+				(*formatSupportCache)[formatIndex].store(static_cast<int8_t>(formatSupported), std::memory_order_release);
 			}
 		}
 		if (!formatSupported)
 		{
-			outError = computePipeline
-				? "The selected source SRV format cannot be loaded and written as a typed UAV on this device."
-				: "The selected source SRV format cannot be sampled and rendered on this device.";
+			outError = "The selected source SRV format cannot be sampled and rendered on this device.";
+			if (computePipeline)
+				outError = "The selected source SRV format cannot be loaded and written as a typed UAV on this device.";
 			return false;
 		}
 
 		const bool configurationMatches = resources.texture && resources.sourceHeap &&
-			resources.fullMipChainHeap &&
-			(computePipeline || resources.renderTargetHeap) &&
-			resources.width == width && resources.height == height &&
-			resources.mipLevelCount == mipLevelCount && resources.format == format &&
-			resources.computePipeline == computePipeline;
+										  resources.fullMipChainHeap &&
+										  (computePipeline || resources.renderTargetHeap) &&
+										  resources.width == width && resources.height == height &&
+										  resources.mipLevelCount == mipLevelCount && resources.format == format &&
+										  resources.computePipeline == computePipeline;
 		if (!configurationMatches)
 		{
 			resources = {};
@@ -706,7 +593,7 @@ namespace RenderPassMipChain
 			resources.format = format;
 			resources.computePipeline = computePipeline;
 			resources.eventName = L"Shader Injector Mip Chain: " +
-				StringHelper::Utf8ToWide(mipPass.renderPass->name);
+								  StringHelper::Utf8ToWide(mipPass.renderPass->name);
 
 			D3D12_RESOURCE_DESC textureDescription{};
 			textureDescription.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -715,11 +602,15 @@ namespace RenderPassMipChain
 			textureDescription.DepthOrArraySize = 1;
 			textureDescription.MipLevels = static_cast<UINT16>(mipLevelCount);
 			textureDescription.Format = format;
-			textureDescription.SampleDesc = { 1, 0 };
+			textureDescription.SampleDesc = {1, 0};
 			textureDescription.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-			textureDescription.Flags = computePipeline
-				? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
-				: D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+			textureDescription.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+			D3D12_RESOURCE_STATES initialTextureState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			if (computePipeline)
+			{
+				textureDescription.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+				initialTextureState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+			}
 
 			D3D12_HEAP_PROPERTIES heapProperties{};
 			heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -732,7 +623,7 @@ namespace RenderPassMipChain
 				&heapProperties,
 				D3D12_HEAP_FLAG_NONE,
 				&textureDescription,
-				computePipeline ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATE_RENDER_TARGET,
+				initialTextureState,
 				nullptr,
 				IID_PPV_ARGS(&resources.texture));
 			if (FAILED(result) || !resources.texture)
@@ -743,9 +634,9 @@ namespace RenderPassMipChain
 
 			D3D12_DESCRIPTOR_HEAP_DESC sourceHeapDescription{};
 			sourceHeapDescription.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-			sourceHeapDescription.NumDescriptors = computePipeline
-				? mipLevelCount * 2
-				: mipLevelCount;
+			sourceHeapDescription.NumDescriptors = mipLevelCount;
+			if (computePipeline)
+				sourceHeapDescription.NumDescriptors *= 2;
 			sourceHeapDescription.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 			result = device->CreateDescriptorHeap(&sourceHeapDescription, IID_PPV_ARGS(&resources.sourceHeap));
 			if (FAILED(result) || !resources.sourceHeap)
@@ -754,8 +645,8 @@ namespace RenderPassMipChain
 				return false;
 			}
 
-			// CopyDescriptors sources must reside in a non-shader-visible heap.
-			// Keep this reusable full-chain SRV separate from the generator's GPU tables.
+			//CopyDescriptors sources must reside in a non-shader-visible heap.
+			//Keep this reusable full-chain SRV separate from the generator's GPU tables.
 			D3D12_DESCRIPTOR_HEAP_DESC fullChainHeapDescription{};
 			fullChainHeapDescription.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 			fullChainHeapDescription.NumDescriptors = 1;
@@ -891,9 +782,9 @@ namespace RenderPassMipChain
 				if (includeDescriptorTables)
 				{
 					if (computePipeline)
-						commandList->SetComputeRootDescriptorTable(binding.rootParameterIndex, { binding.value });
+						commandList->SetComputeRootDescriptorTable(binding.rootParameterIndex, {binding.value});
 					else
-						commandList->SetGraphicsRootDescriptorTable(binding.rootParameterIndex, { binding.value });
+						commandList->SetGraphicsRootDescriptorTable(binding.rootParameterIndex, {binding.value});
 				}
 			}
 			else if (binding.type == RootArgumentType::Constants)
@@ -957,11 +848,13 @@ namespace RenderPassMipChain
 				commandList->RSSetScissorRects(
 					static_cast<UINT>(gameState.scissorRectangles.size()),
 					gameState.scissorRectangles.data());
-			commandList->OMSetRenderTargets(
-				static_cast<UINT>(gameState.renderTargets.size()),
-				gameState.renderTargets.empty() ? nullptr : gameState.renderTargets.data(),
-				FALSE,
-				gameState.depthStencil.ptr ? &gameState.depthStencil : nullptr);
+			const D3D12_CPU_DESCRIPTOR_HANDLE* renderTargetData = nullptr;
+			if (!gameState.renderTargets.empty())
+				renderTargetData = gameState.renderTargets.data();
+			const D3D12_CPU_DESCRIPTOR_HANDLE* depthStencilData = nullptr;
+			if (gameState.depthStencil.ptr)
+				depthStencilData = &gameState.depthStencil;
+			commandList->OMSetRenderTargets(static_cast<UINT>(gameState.renderTargets.size()), renderTargetData, FALSE, depthStencilData);
 		}
 
 		std::array<ID3D12DescriptorHeap*, D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES> descriptorHeaps{};
@@ -971,9 +864,10 @@ namespace RenderPassMipChain
 			if (heap.heap && descriptorHeapCount < descriptorHeaps.size())
 				descriptorHeaps[descriptorHeapCount++] = heap.heap;
 		}
-		commandList->SetDescriptorHeaps(
-			descriptorHeapCount,
-			descriptorHeapCount ? descriptorHeaps.data() : nullptr);
+		ID3D12DescriptorHeap* const* descriptorHeapData = nullptr;
+		if (descriptorHeapCount)
+			descriptorHeapData = descriptorHeaps.data();
+		commandList->SetDescriptorHeaps(descriptorHeapCount, descriptorHeapData);
 		RestoreRootArguments(commandList, gameState, computePipeline, true);
 	}
 
@@ -996,12 +890,13 @@ namespace RenderPassMipChain
 				barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 				barrier.Transition.pResource = resources.texture.Get();
 				barrier.Transition.Subresource = mipLevel;
-				barrier.Transition.StateBefore = computePipeline
-					? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-					: D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-				barrier.Transition.StateAfter = computePipeline
-					? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-					: D3D12_RESOURCE_STATE_RENDER_TARGET;
+				barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+				barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+				if (computePipeline)
+				{
+					barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+					barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+				}
 			}
 			commandList->ResourceBarrier(resources.mipLevelCount, barriers.data());
 		}
@@ -1030,13 +925,16 @@ namespace RenderPassMipChain
 			const UINT destinationWidth = (std::max)(1u, resources.width >> destinationMip);
 			const UINT destinationHeight = (std::max)(1u, resources.height >> destinationMip);
 			generatedTexels += static_cast<uint64_t>(destinationWidth) * destinationHeight;
-			const UINT sourceWidth = destinationMip == 0
-				? resources.width
-				: (std::max)(1u, resources.width >> (destinationMip - 1));
-			const UINT sourceHeight = destinationMip == 0
-				? resources.height
-				: (std::max)(1u, resources.height >> (destinationMip - 1));
-			const UINT constants[4] = { destinationMip == 0 ? 1u : 0u, sourceWidth, sourceHeight, 0u };
+			UINT sourceWidth = resources.width;
+			UINT sourceHeight = resources.height;
+			UINT sourceIsOriginalTexture = 1;
+			if (destinationMip > 0)
+			{
+				sourceWidth = (std::max)(1u, resources.width >> (destinationMip - 1));
+				sourceHeight = (std::max)(1u, resources.height >> (destinationMip - 1));
+				sourceIsOriginalTexture = 0;
+			}
+			const UINT constants[4] = {sourceIsOriginalTexture, sourceWidth, sourceHeight, 0u};
 			if (computePipeline)
 			{
 				commandList->SetComputeRootDescriptorTable(0, source);
@@ -1053,7 +951,7 @@ namespace RenderPassMipChain
 				viewport.Width = static_cast<float>(destinationWidth);
 				viewport.Height = static_cast<float>(destinationHeight);
 				viewport.MaxDepth = 1.0f;
-				const D3D12_RECT scissor{ 0, 0, static_cast<LONG>(destinationWidth), static_cast<LONG>(destinationHeight) };
+				const D3D12_RECT scissor{0, 0, static_cast<LONG>(destinationWidth), static_cast<LONG>(destinationHeight)};
 
 				commandList->SetGraphicsRootDescriptorTable(0, source);
 				commandList->SetGraphicsRoot32BitConstants(1, 4, constants, 0);
@@ -1141,9 +1039,7 @@ namespace RenderPassMipChain
 				continue;
 
 			const auto layoutIt = std::find_if(layouts.begin(), layouts.end(), [&](const auto& layout)
-				{
-					return layout.rootParameterIndex == binding.rootParameterIndex;
-				});
+											   { return layout.rootParameterIndex == binding.rootParameterIndex; });
 			if (layoutIt == layouts.end())
 			{
 				outError = "An active target descriptor table could not be described safely.";
@@ -1152,12 +1048,12 @@ namespace RenderPassMipChain
 
 			const DescriptorHeapBinding* sourceHeap = FindHeapForGpuHandle(
 				gameState,
-				{ binding.value },
+				{binding.value},
 				layoutIt->heapType);
 			if (!sourceHeap)
 			{
-				outError = std::string("An active ") + (computePipeline ? "compute" : "graphics") +
-					" descriptor table is outside the currently bound heaps.";
+				outError = std::string("An active ") + PipelineKindName(computePipeline) +
+						   " descriptor table is outside the currently bound heaps.";
 				return false;
 			}
 
@@ -1172,14 +1068,14 @@ namespace RenderPassMipChain
 			ActiveDescriptorTable table{};
 			table.rootParameterIndex = binding.rootParameterIndex;
 			table.heapType = layoutIt->heapType;
-			// Unbounded tables are represented by maximumTrackedDescriptors in the
-			// root-signature layout. The live heap can legitimately contain fewer
-			// descriptors after this table's base. Clone only that valid intersection;
-			// reserving the synthetic maximum would leave stale descriptors in the
-			// reusable heap and can make later draws sample unrelated resources.
+			//Unbounded tables are represented by maximumTrackedDescriptors in the
+			//root-signature layout. The live heap can legitimately contain fewer
+			//descriptors after this table's base. Clone only that valid intersection;
+			//reserving the synthetic maximum would leave stale descriptors in the
+			//reusable heap and can make later draws sample unrelated resources.
 			table.descriptorCount = (std::min)(layoutIt->descriptorCount, availableDescriptorCount);
-			table.originalGpuHandle = { binding.value };
-			table.originalCpuHandle = { sourceHeap->cpuStart.ptr + tableByteOffset };
+			table.originalGpuHandle = {binding.value};
+			table.originalCpuHandle = {sourceHeap->cpuStart.ptr + tableByteOffset};
 			if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
 			{
 				table.customHeapOffset = nativeDescriptorCount;
@@ -1223,7 +1119,7 @@ namespace RenderPassMipChain
 			{
 				device->CopyDescriptorsSimple(
 					table.descriptorCount,
-					{ customCpuStart.ptr + static_cast<SIZE_T>(table.customHeapOffset) * increment },
+					{customCpuStart.ptr + static_cast<SIZE_T>(table.customHeapOffset) * increment},
 					table.originalCpuHandle,
 					D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 			}
@@ -1232,9 +1128,7 @@ namespace RenderPassMipChain
 		for (const ResolvedMipPass* mipPass : successfulPasses)
 		{
 			const auto tableIt = std::find_if(activeTables.begin(), activeTables.end(), [&](const auto& table)
-				{
-					return table.rootParameterIndex == mipPass->bindingLocation.rootParameterIndex;
-				});
+											  { return table.rootParameterIndex == mipPass->bindingLocation.rootParameterIndex; });
 			if (tableIt == activeTables.end() || tableIt->heapType != D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV ||
 				mipPass->bindingLocation.tableOffset >= tableIt->descriptorCount)
 			{
@@ -1245,7 +1139,7 @@ namespace RenderPassMipChain
 			const UINT descriptorOffset = tableIt->customHeapOffset + mipPass->bindingLocation.tableOffset;
 			device->CopyDescriptorsSimple(
 				1,
-				{ customCpuStart.ptr + static_cast<SIZE_T>(descriptorOffset) * increment },
+				{customCpuStart.ptr + static_cast<SIZE_T>(descriptorOffset) * increment},
 				mipPass->resources->fullMipChainDescriptor,
 				D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 		}
@@ -1259,14 +1153,16 @@ namespace RenderPassMipChain
 				break;
 			}
 		}
-		ID3D12DescriptorHeap* heaps[2] = { slot.nativeDescriptorHeap.Get(), samplerHeap };
-		commandList->SetDescriptorHeaps(samplerHeap ? 2u : 1u, heaps);
+		ID3D12DescriptorHeap* heaps[2] = {slot.nativeDescriptorHeap.Get(), samplerHeap};
+		UINT descriptorHeapCount = 1;
+		if (samplerHeap)
+			++descriptorHeapCount;
+		commandList->SetDescriptorHeaps(descriptorHeapCount, heaps);
 		for (const ActiveDescriptorTable& table : activeTables)
 		{
-			const D3D12_GPU_DESCRIPTOR_HANDLE handle = table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
-				? D3D12_GPU_DESCRIPTOR_HANDLE{
-					customGpuStart.ptr + static_cast<UINT64>(table.customHeapOffset) * increment }
-			: table.originalGpuHandle;
+			D3D12_GPU_DESCRIPTOR_HANDLE handle = table.originalGpuHandle;
+			if (table.heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+				handle = {customGpuStart.ptr + static_cast<UINT64>(table.customHeapOffset) * increment};
 			if (computePipeline)
 				commandList->SetComputeRootDescriptorTable(table.rootParameterIndex, handle);
 			else
@@ -1289,7 +1185,7 @@ namespace RenderPassMipChain
 		outError.clear();
 		if (!commandList || !gameState.rootSignature || !gameState.pipelineState ||
 			(!computePipeline && (gameState.primitiveTopology == D3D_PRIMITIVE_TOPOLOGY_UNDEFINED ||
-				gameState.viewports.empty() || gameState.scissorRectangles.empty())))
+								  gameState.viewports.empty() || gameState.scissorRectangles.empty())))
 		{
 			outError = "Runtime mip generation requires complete restorable target state.";
 			return false;
@@ -1330,7 +1226,7 @@ namespace RenderPassMipChain
 		DeviceResources* deviceResources = GetDeviceResources(device, outError);
 		mipPass.resources = &slot->mipTexturesByRenderPassId[renderPass.id];
 		if (!deviceResources || !EnsureMipTextureResources(
-			*deviceResources, mipPass, *mipPass.resources, computePipeline, outError))
+									*deviceResources, mipPass, *mipPass.resources, computePipeline, outError))
 		{
 			DiscardUnusedExecutionSlot(commandList, slot);
 			return false;
@@ -1344,9 +1240,9 @@ namespace RenderPassMipChain
 		}
 
 		MipTextureResources& resources = *mipPass.resources;
-		slot->recordedTextureStates.push_back({ &resources, resources.allSubresourcesShaderReadable });
+		slot->recordedTextureStates.push_back({&resources, resources.allSubresourcesShaderReadable});
 		commandList->BeginEvent(0, resources.eventName.c_str(),
-			static_cast<UINT>((resources.eventName.size() + 1) * sizeof(wchar_t)));
+								static_cast<UINT>((resources.eventName.size() + 1) * sizeof(wchar_t)));
 		const bool succeeded = RecordMipGeneration(
 			mipPass, commandList, *deviceResources, pipeline, computePipeline, outError);
 		RestoreGameState(commandList, gameState, computePipeline);
@@ -1355,8 +1251,8 @@ namespace RenderPassMipChain
 		if (!succeeded)
 			return false;
 
-		// The fenced execution slot owns the allocation until all recorded GPU uses
-		// finish. Consumers only borrow its read-only view for this graph execution.
+		//The fenced execution slot owns the allocation until all recorded GPU uses
+		//finish. Consumers only borrow its read-only view for this graph execution.
 		outTexture.resource = resources.texture;
 		outTexture.shaderViewHeap = resources.fullMipChainHeap;
 		outTexture.shaderResourceView = resources.fullMipChainDescriptor;
@@ -1364,10 +1260,13 @@ namespace RenderPassMipChain
 		outTexture.description.width = resources.width;
 		outTexture.description.height = resources.height;
 		outTexture.description.mipLevels = resources.mipLevelCount;
-		outTexture.description.flags = computePipeline
-			? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-		outTexture.initialState = computePipeline
-			? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		outTexture.description.flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+		outTexture.initialState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		if (computePipeline)
+		{
+			outTexture.description.flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+			outTexture.initialState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+		}
 		return true;
 	}
 
@@ -1381,23 +1280,27 @@ namespace RenderPassMipChain
 		outResults.clear();
 		outResults.reserve(renderPasses.size());
 		for (const RenderPass::RenderPassDisk* renderPass : renderPasses)
-			outResults.push_back({ renderPass, true, false, {} });
+			outResults.push_back({renderPass, true, false, {}});
 
 		if (!commandList || !gameState.rootSignature || !gameState.pipelineState ||
 			(!computePipeline &&
-				(gameState.primitiveTopology == D3D_PRIMITIVE_TOPOLOGY_UNDEFINED ||
-					gameState.viewports.empty() || gameState.scissorRectangles.empty())))
+			 (gameState.primitiveTopology == D3D_PRIMITIVE_TOPOLOGY_UNDEFINED ||
+			  gameState.viewports.empty() || gameState.scissorRectangles.empty())))
 		{
+			const char* missingStateError = "The target draw does not have complete restorable graphics state.";
+			if (computePipeline)
+				missingStateError = "The target dispatch does not have complete restorable compute state.";
 			for (ExecutionResult& result : outResults)
-				result.error = computePipeline
-				? "The target dispatch does not have complete restorable compute state."
-				: "The target draw does not have complete restorable graphics state.";
+				result.error = missingStateError;
 			return;
 		}
 
 		thread_local std::vector<ResolvedMipPass> resolvedPasses;
 		resolvedPasses.clear();
 		resolvedPasses.reserve(renderPasses.size());
+		RenderPass::ExecutionMode expectedExecutionMode = RenderPass::ExecutionMode::FullscreenPixel;
+		if (computePipeline)
+			expectedExecutionMode = RenderPass::ExecutionMode::Compute;
 		for (size_t passIndex = 0; passIndex < renderPasses.size(); ++passIndex)
 		{
 			if (!renderPasses[passIndex])
@@ -1405,8 +1308,7 @@ namespace RenderPassMipChain
 				outResults[passIndex].error = "Render Pass configuration is unavailable.";
 				continue;
 			}
-			if (RenderPass::ResolveExecutionMode(*renderPasses[passIndex]) !=
-				(computePipeline ? RenderPass::ExecutionMode::Compute : RenderPass::ExecutionMode::FullscreenPixel))
+			if (RenderPass::ResolveExecutionMode(*renderPasses[passIndex]) != expectedExecutionMode)
 			{
 				outResults[passIndex].attempted = false;
 				continue;
@@ -1416,11 +1318,11 @@ namespace RenderPassMipChain
 			resolved.renderPass = renderPasses[passIndex];
 			resolved.resultIndex = passIndex;
 			if (!ResolveMipPass(
-				*renderPasses[passIndex],
-				gameState,
-				computePipeline,
-				resolved,
-				outResults[passIndex].error))
+					*renderPasses[passIndex],
+					gameState,
+					computePipeline,
+					resolved,
+					outResults[passIndex].error))
 				continue;
 			resolvedPasses.push_back(std::move(resolved));
 		}
@@ -1433,7 +1335,7 @@ namespace RenderPassMipChain
 		{
 			for (ResolvedMipPass& mipPass : resolvedPasses)
 				outResults[mipPass.resultIndex].error =
-				"Could not query the D3D12 device from the target command list.";
+					"Could not query the D3D12 device from the target command list.";
 			return;
 		}
 		std::string deviceError;
@@ -1458,11 +1360,11 @@ namespace RenderPassMipChain
 				ExecutionResult& result = outResults[mipPass.resultIndex];
 				mipPass.resources = &slot->mipTexturesByRenderPassId[mipPass.renderPass->id];
 				if (!EnsureMipTextureResources(
-					*deviceResources,
-					mipPass,
-					*mipPass.resources,
-					computePipeline,
-					result.error))
+						*deviceResources,
+						mipPass,
+						*mipPass.resources,
+						computePipeline,
+						result.error))
 					continue;
 
 				ID3D12PipelineState* pipeline = GetGeneratorPipeline(
@@ -1473,16 +1375,15 @@ namespace RenderPassMipChain
 					result.error);
 				if (!pipeline)
 					continue;
-				slot->recordedTextureStates.push_back({
-					mipPass.resources,
-					mipPass.resources->allSubresourcesShaderReadable });
+				slot->recordedTextureStates.push_back({mipPass.resources,
+													   mipPass.resources->allSubresourcesShaderReadable});
 				if (!RecordMipGeneration(
-					mipPass,
-					commandList,
-					*deviceResources,
-					pipeline,
-					computePipeline,
-					result.error))
+						mipPass,
+						commandList,
+						*deviceResources,
+						pipeline,
+						computePipeline,
+						result.error))
 				{
 					continue;
 				}
@@ -1495,13 +1396,13 @@ namespace RenderPassMipChain
 				RestoreGameState(commandList, gameState, computePipeline);
 				std::string bindingError;
 				if (!BuildAndBindNativeDescriptorHeap(
-					device,
-					commandList,
-					*slot,
-					gameState,
-					successfulPasses,
-					computePipeline,
-					bindingError))
+						device,
+						commandList,
+						*slot,
+						gameState,
+						successfulPasses,
+						computePipeline,
+						bindingError))
 				{
 					for (ResolvedMipPass* mipPass : successfulPasses)
 					{
@@ -1532,9 +1433,10 @@ namespace RenderPassMipChain
 			if (heap.heap && descriptorHeapCount < descriptorHeaps.size())
 				descriptorHeaps[descriptorHeapCount++] = heap.heap;
 		}
-		commandList->SetDescriptorHeaps(
-			descriptorHeapCount,
-			descriptorHeapCount ? descriptorHeaps.data() : nullptr);
+		ID3D12DescriptorHeap* const* descriptorHeapData = nullptr;
+		if (descriptorHeapCount)
+			descriptorHeapData = descriptorHeaps.data();
+		commandList->SetDescriptorHeaps(descriptorHeapCount, descriptorHeapData);
 		RestoreRootArguments(commandList, gameState, computePipeline, true);
 	}
 
@@ -1545,9 +1447,9 @@ namespace RenderPassMipChain
 
 	void ResetCommandListRecording(ID3D12GraphicsCommandList* commandList)
 	{
-		// Reset is one of the game's hottest command-list paths during a fresh
-		// shader-cache build. Do not touch the mip pool mutex until a mip pass has
-		// actually recorded work on at least one command list.
+		//Reset is one of the game's hottest command-list paths during a fresh
+		//shader-cache build. Do not touch the mip pool mutex until a mip pass has
+		//actually recorded work on at least one command list.
 		if (!commandList || !HasRecordedCommandListWork())
 			return;
 		std::lock_guard<std::mutex> lock(gExecutionPoolMutex);
@@ -1560,7 +1462,7 @@ namespace RenderPassMipChain
 				continue;
 			if (!slot->submitted)
 			{
-				for (const ExecutionSlot::RecordedTextureState& recordedState : slot->recordedTextureStates)
+				for (const RecordedTextureState& recordedState : slot->recordedTextureStates)
 				{
 					if (recordedState.resources)
 					{
@@ -1569,8 +1471,8 @@ namespace RenderPassMipChain
 					}
 				}
 			}
-			// A discarded recording never reached the GPU, so its slot is already
-			// safe to reuse. Keep its allocations warm for the next recording.
+			//A discarded recording never reached the GPU, so its slot is already
+			//safe to reuse. Keep its allocations warm for the next recording.
 			slot->recordedTextureStates.clear();
 			slot->recorded = false;
 		}
@@ -1673,4 +1575,4 @@ namespace RenderPassMipChain
 		gThreadMipBindingLookups = {};
 		gNextThreadMipBindingLookup = 0;
 	}
-}
+} //namespace RenderPassMipChain

@@ -20,9 +20,9 @@ namespace ShaderConfiguration::Internal
 
 		const size_t colonPosition = comment.find(':', tagPosition + tag.size());
 
-		return colonPosition == std::string::npos
-			? std::string()
-			: StringHelper::TrimWhitespace(comment.substr(colonPosition + 1));
+		if (colonPosition == std::string::npos)
+			return std::string();
+		return StringHelper::TrimWhitespace(comment.substr(colonPosition + 1));
 	}
 
 	ConfigurationMetadata ParseMetadata(const std::vector<std::string>& comments)
@@ -80,21 +80,21 @@ namespace ShaderConfiguration::Internal
 
 		return StringHelper::TrimWhitespace(description);
 	}
-}
+} //namespace ShaderConfiguration::Internal
 
 namespace ShaderConfiguration
 {
 	using Internal::ConfigurationMetadata;
 	using Internal::JoinDescription;
 	using Internal::NormalizeType;
+	using Internal::NormalizeValue;
 	using Internal::ParseBooleanText;
-	using Internal::ParseMetadata;
 	using Internal::ParsedDefine;
+	using Internal::ParseMetadata;
 	using Internal::SourceLine;
 	using Internal::SplitSourceLines;
 	using Internal::TryParseComment;
 	using Internal::TryParseDefine;
-	using Internal::NormalizeValue;
 
 	bool ParseShaderSource(
 		const std::string& relativeSourcePath,
@@ -125,12 +125,16 @@ namespace ShaderConfiguration
 					continue;
 
 				const bool usesDefinitionPresence = type == "bool" && define.value.empty();
-				const bool currentBoolean = usesDefinitionPresence
-					? !define.commentedOut
-					: ParseBooleanText(define.value, !define.commentedOut);
-				const std::string sourceFallback = usesDefinitionPresence
-					? (currentBoolean ? "true" : "false")
-					: define.value;
+				bool currentBoolean = ParseBooleanText(define.value, !define.commentedOut);
+				if (usesDefinitionPresence)
+					currentBoolean = !define.commentedOut;
+				std::string sourceFallback = define.value;
+				if (usesDefinitionPresence)
+				{
+					sourceFallback = "false";
+					if (currentBoolean)
+						sourceFallback = "true";
+				}
 				const std::string normalizedDefault = NormalizeValue(
 					type,
 					metadata.defaultValue,
@@ -172,4 +176,4 @@ namespace ShaderConfiguration
 
 		return true;
 	}
-}
+} //namespace ShaderConfiguration

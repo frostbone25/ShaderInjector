@@ -26,4 +26,4 @@ namespace ShaderConfiguration::Internal
 	size_t ComponentCountForType(const std::string& type);
 	std::string FormatFloat(float value);
 	std::string FormatFloatComponents(const float* values, size_t componentCount);
-}
+} //namespace ShaderConfiguration::Internal

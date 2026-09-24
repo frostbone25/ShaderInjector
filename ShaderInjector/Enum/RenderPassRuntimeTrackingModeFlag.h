@@ -13,4 +13,4 @@ namespace RenderPassRuntime
 		DescriptorTableTrackingEnabled = 1u << 4,
 		RootBindingTrackingEnabled = 1u << 5
 	};
-}
+} //namespace RenderPassRuntime

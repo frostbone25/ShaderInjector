@@ -62,9 +62,7 @@ namespace DatabaseShaderResources
 		}
 
 		std::sort(gShaderResources.begin(), gShaderResources.end(), [](const auto& left, const auto& right)
-		{
-			return left.id < right.id;
-		});
+				  { return left.id < right.id; });
 
 		gShaderResourceIndices.reserve(gShaderResources.size());
 
@@ -91,8 +89,8 @@ namespace DatabaseShaderResources
 	{
 		EnsureShaderResourcesLoaded();
 		const auto resourceIt = gShaderResourceIndices.find(resourceId);
-		return resourceIt != gShaderResourceIndices.end()
-			? &gShaderResources[resourceIt->second]
-			: nullptr;
+		if (resourceIt != gShaderResourceIndices.end())
+			return &gShaderResources[resourceIt->second];
+		return nullptr;
 	}
-}
+} //namespace DatabaseShaderResources

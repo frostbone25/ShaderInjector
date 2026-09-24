@@ -10,6 +10,7 @@
 
 //custom
 #include "Hooks.h"
+#include "HooksDummyObjectCleanupGuard.h"
 #include "dsound_proxy.h"
 #include "Globals.h"
 #include "HookD3D12.h"
@@ -21,10 +22,10 @@
 namespace Hooks
 {
 	//dummy objects are created only to discover D3D12/DXGI vtable addresses for MinHook.
-	static Microsoft::WRL::ComPtr<IDXGISwapChain3>           gDummySwapChain = nullptr;
-	static Microsoft::WRL::ComPtr<ID3D12Device>              gDummyDevice = nullptr;
-	static Microsoft::WRL::ComPtr<ID3D12CommandQueue>        gDummyCommandQueue = nullptr;
-	static Microsoft::WRL::ComPtr<ID3D12CommandAllocator>    gDummyCommandAllocator = nullptr;
+	static Microsoft::WRL::ComPtr<IDXGISwapChain3> gDummySwapChain = nullptr;
+	static Microsoft::WRL::ComPtr<ID3D12Device> gDummyDevice = nullptr;
+	static Microsoft::WRL::ComPtr<ID3D12CommandQueue> gDummyCommandQueue = nullptr;
+	static Microsoft::WRL::ComPtr<ID3D12CommandAllocator> gDummyCommandAllocator = nullptr;
 	static Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> gDummyCommandList = nullptr;
 	static HWND gDummyWindow = nullptr;
 	static const wchar_t* gDummyWindowClassName = L"DummyWndClass";
@@ -36,7 +37,7 @@ namespace Hooks
 	static bool gOptiScalerCompatibilityEnabled = false;
 	static bool gObjectLocalSwapChainHooksEnabled = false;
 
-}
+} //namespace Hooks
 
 namespace HookD3D12
 {
@@ -53,14 +54,17 @@ namespace HookD3D12
 		if (FAILED(swapChain->QueryInterface(IID_PPV_ARGS(&swapChain3))))
 			return;
 
-		// D3D12 passes the presenting direct command queue as the factory's
-		// device argument. Preserve that exact association for overlay work.
+		//D3D12 passes the presenting direct command queue as the factory's
+		//device argument. Preserve that exact association for overlay work.
 		RegisterSwapChainCommandQueue(swapChain3.Get(), creationDevice);
 
 		if (!Hooks::gObjectLocalSwapChainHooksEnabled)
 			return;
 
-		const char* compatibilitySource = Hooks::gOptiScalerCompatibilityEnabled ? "OptiScaler" : "RenderDoc";
+		//use the active capture layer's name when recording where this swap chain came from.
+		const char* compatibilitySource = "RenderDoc";
+		if (Hooks::gOptiScalerCompatibilityEnabled)
+			compatibilitySource = "OptiScaler";
 
 		if (InstallSwapChainCompatibility(swapChain3.Get(), compatibilitySource))
 		{
@@ -68,7 +72,7 @@ namespace HookD3D12
 		}
 	}
 
-}
+} //namespace HookD3D12
 
 namespace Hooks
 {
@@ -93,7 +97,9 @@ namespace Hooks
 		void* createSwapChainForHwndTarget = factoryVTable[VTableIndex::indexCreateSwapChainForHwnd];
 
 		MH_STATUS createHwndStatus = MH_CreateHook(createSwapChainForHwndTarget, reinterpret_cast<void*>(&HookD3D12::Hook_CreateSwapChainForHwnd), reinterpret_cast<void**>(&HookD3D12::gOriginalCreateSwapChainForHwnd));
-		MH_STATUS enableHwndStatus = createHwndStatus == MH_OK ? MH_EnableHook(createSwapChainForHwndTarget) : createHwndStatus;
+		MH_STATUS enableHwndStatus = createHwndStatus;
+		if (createHwndStatus == MH_OK)
+			enableHwndStatus = MH_EnableHook(createSwapChainForHwndTarget);
 
 		if (createHwndStatus != MH_OK || (enableHwndStatus != MH_OK && enableHwndStatus != MH_ERROR_ENABLED))
 		{
@@ -102,12 +108,14 @@ namespace Hooks
 		}
 
 		MH_STATUS createLegacyStatus = MH_CreateHook(createSwapChainTarget, reinterpret_cast<void*>(&HookD3D12::Hook_CreateSwapChain), reinterpret_cast<void**>(&HookD3D12::gOriginalCreateSwapChain));
-		MH_STATUS enableLegacyStatus = createLegacyStatus == MH_OK ? MH_EnableHook(createSwapChainTarget) : createLegacyStatus;
+		MH_STATUS enableLegacyStatus = createLegacyStatus;
+		if (createLegacyStatus == MH_OK)
+			enableLegacyStatus = MH_EnableHook(createSwapChainTarget);
 
 		if (createLegacyStatus != MH_OK || (enableLegacyStatus != MH_OK && enableLegacyStatus != MH_ERROR_ENABLED))
 		{
-			// Rebirth uses CreateSwapChainForHwnd. Keep the capture path active
-			// when only the legacy fallback could not be installed.
+			//Rebirth uses CreateSwapChainForHwnd. Keep the capture path active
+			//when only the legacy fallback could not be installed.
 			ShaderInjectorIO::WriteToLogFileWarning(StringHelper::Format("Hooks->PrepareSwapChainCapture: legacy CreateSwapChain hook unavailable create=%s enable=%s", MH_StatusToString(createLegacyStatus), MH_StatusToString(enableLegacyStatus)));
 		}
 
@@ -131,52 +139,49 @@ namespace Hooks
 		return gOptiScalerCompatibilityEnabled;
 	}
 
-	//create a hidden window, device, command queue, command list, and swap chain so we can read correct vtables on the machine (the game never sees these objects)
+	//temporary D3D12 objects expose the vtables used by this machine without touching game objects.
 	static HRESULT CreateDeviceAndSwapChain()
 	{
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: creating device and swap chain...");
 
-		//============================== 1) Register dummy window ==============================
+		//the temporary swap chain needs a window, even though the game never sees it.
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: registering dummy window...");
 
-		WNDCLASSEXW windowClass = 
-		{
-			sizeof(WNDCLASSEXW),
-			CS_CLASSDC,
-			DefWindowProcW,
-			0, 0,
-			GetModuleHandleW(nullptr),
-			nullptr, nullptr, nullptr, nullptr,
-			gDummyWindowClassName,
-			nullptr
-		};
+		WNDCLASSEXW windowClass =
+			{
+				sizeof(WNDCLASSEXW),
+				CS_CLASSDC,
+				DefWindowProcW,
+				0, 0,
+				GetModuleHandleW(nullptr),
+				nullptr, nullptr, nullptr, nullptr,
+				gDummyWindowClassName,
+				nullptr};
 
 		if (!RegisterClassExW(&windowClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
 		{
-			//NOTE: keep this comment around for sanity check please!
 			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->CreateDeviceAndSwapChain: RegisterClassExW failed: %lu", static_cast<unsigned long>(GetLastError())));
 			return E_FAIL;
 		}
 
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: registered dummy window!");
-		//============================== 2) Create hidden window ==============================
+		//keep the discovery window small and hidden while collecting swap-chain methods.
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: creating hidden window...");
 
 		gDummyWindow = CreateWindowExW(
 			0, gDummyWindowClassName, L"Dummy",
 			WS_OVERLAPPEDWINDOW,
 			0, 0, 1, 1,
-			nullptr, nullptr, windowClass.hInstance, nullptr
-		);
+			nullptr, nullptr, windowClass.hInstance, nullptr);
 
-		if (!gDummyWindow) 
+		if (!gDummyWindow)
 		{
 			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->CreateDeviceAndSwapChain: CreateWindowExW failed: %lu", static_cast<unsigned long>(GetLastError())));
 			return E_FAIL;
 		}
 
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: created hidden window!");
-		//============================== 3) Factory DXGI ==============================
+		//create a local DXGI factory so its swap chain has the same interface shape as the game's.
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateDXGIFactory1...");
 
 		Microsoft::WRL::ComPtr<IDXGIFactory4> dxgiFactory4;
@@ -189,7 +194,7 @@ namespace Hooks
 		}
 
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateDXGIFactory1 Success!");
-		//============================== 4) Device D3D12 ==============================
+		//the device provides the queue and command list needed to locate their methods.
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: D3D12CreateDevice...");
 
 		HRESULT createdD3D12DeviceResult = D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&gDummyDevice));
@@ -201,7 +206,6 @@ namespace Hooks
 		}
 
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: D3D12CreateDevice Success!");
-		//============================== 5) Command Queue ==============================
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateCommandQueue...");
 
 		D3D12_COMMAND_QUEUE_DESC commandQueueDescription = {};
@@ -216,7 +220,6 @@ namespace Hooks
 		}
 
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateCommandQueue Success!");
-		//============================== 6) Command List ==============================
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateCommandAllocator...");
 
 		HRESULT createCommandAllocatorResult = gDummyDevice->CreateCommandAllocator(
@@ -230,7 +233,6 @@ namespace Hooks
 		}
 
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateCommandAllocator Success!");
-		//============================== 7) Command List ==============================
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateCommandList...");
 
 		HRESULT createCommandListResult = gDummyDevice->CreateCommandList(
@@ -251,14 +253,12 @@ namespace Hooks
 
 		if (gObjectLocalSwapChainHooksEnabled)
 		{
-			// Wrapper layers own the live swap chain and may expose a different
-			// Present/ResizeBuffers chain than a temporary discovery object. The real
-			// object is captured by the factory hook and receives a private vtable.
+			//wrapper layers can expose different Present and ResizeBuffers methods on the live swap chain.
+			//the factory hook captures that object and installs its private vtable hooks instead.
 			ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: object-local swap-chain hooks active; skipping dummy swap chain");
 			return S_OK;
 		}
 
-		//============================== 8) SwapChainDesc1 ==============================
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateSwapChainForHwnd...");
 
 		DXGI_SWAP_CHAIN_DESC1 swapChainDescription = {};
@@ -276,8 +276,7 @@ namespace Hooks
 			gDummyWindow,
 			&swapChainDescription,
 			nullptr, nullptr,
-			&swapChain1
-		);
+			&swapChain1);
 
 		if (FAILED(createSwapChain1Result))
 		{
@@ -286,7 +285,7 @@ namespace Hooks
 		}
 
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: CreateSwapChainForHwnd Success!");
-		//============================== 9) Query IDXGISwapChain3 ==============================
+		//the overlay needs the IDXGISwapChain3 interface used by the live rendering path.
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CreateDeviceAndSwapChain: querying IDXGISwapChain3...");
 
 		HRESULT swapChainQueryResult = swapChain1.As(&gDummySwapChain);
@@ -303,17 +302,9 @@ namespace Hooks
 
 	void Initialize()
 	{
-		//IMPORTANT NOTE 1: We are able to get to this point and call this function
-		//NOTE: keep this comment around for sanity check please!
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->Initialize: initalizing hooks...");
 
-		struct CleanupGuard 
-		{
-			~CleanupGuard() 
-			{ 
-				CleanupDummyObjects(); 
-			}
-		} cleanup;
+		DummyObjectCleanupGuard dummyObjectCleanupGuard;
 
 		HRESULT createDeviceAndSwapChainResult = CreateDeviceAndSwapChain();
 
@@ -323,25 +314,12 @@ namespace Hooks
 			return;
 		}
 
-		//IMPORTANT NOTE 2: We are able to get to this point this means that we were able to...
-		// - register a dummy window
-		// - create a hidden window
-		// - factory dxgi
-		// - d3d12 device
-		// - command queue
-		// - swapchaindesec1
-		// - query idxgiswapchain3
-		//NOTE: keep this comment around for sanity check please!
-		//MessageBoxA(nullptr, "Create device and swap chain passed!", "Shader Injector", MB_OK);
-
-		//======================================== Collect V-Tables ========================================
+		//read the queue vtable while its temporary COM object is still alive.
 
 		auto commandQueueVTable = *reinterpret_cast<void***>(gDummyCommandQueue.Get());
 
 		HookD3D12::InstallPipelineHooksForDevice(gDummyDevice.Get());
 		HookD3D12::InstallCommandListHooksForCommandList(gDummyCommandList.Get());
-
-		//======================================== Hook Start ========================================
 
 		MH_STATUS minHookStatus;
 
@@ -349,21 +327,19 @@ namespace Hooks
 		{
 			auto swapChainVTable = *reinterpret_cast<void***>(gDummySwapChain.Get());
 
-			//======================================== Hook_PresentD3D12 ========================================
+			//process-wide swap-chain hooks are used when private object hooks are unavailable.
 			gPresentTarget = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexPresent]);
 			minHookStatus = MH_CreateHook(gPresentTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_PresentD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_PresentD3D12));
 
 			if (minHookStatus != MH_OK)
 				ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook Present failed: %s", MH_StatusToString(minHookStatus)));
 
-			//======================================== Hook_Present1D3D12 ========================================
 			gPresent1Target = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexPresent1]);
 			minHookStatus = MH_CreateHook(gPresent1Target, reinterpret_cast<LPVOID>(HookD3D12::Hook_Present1D3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_Present1D3D12));
 
 			if (minHookStatus != MH_OK)
 				ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook Present1 failed: %s", MH_StatusToString(minHookStatus)));
 
-			//======================================== Hook_ResizeBuffersD3D12 ========================================
 			gResizeBuffersTarget = reinterpret_cast<LPVOID>(swapChainVTable[VTableIndex::indexResizeBuffers]);
 			minHookStatus = MH_CreateHook(gResizeBuffersTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_ResizeBuffersD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_ResizeBuffersD3D12));
 
@@ -371,15 +347,14 @@ namespace Hooks
 				ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook ResizeBuffers failed: %s", MH_StatusToString(minHookStatus)));
 		}
 
-		//======================================== Hook_ExecuteCommandListsD3D12 ========================================
+		//queue submission tells the render-pass runtime when recorded work reaches the GPU.
 		gExecuteCommandListsTarget = reinterpret_cast<LPVOID>(commandQueueVTable[VTableIndex::indexExecuteCommandLists]);
 		minHookStatus = MH_CreateHook(gExecuteCommandListsTarget, reinterpret_cast<LPVOID>(HookD3D12::Hook_ExecuteCommandListsD3D12), reinterpret_cast<LPVOID*>(&HookD3D12::Original_ExecuteCommandListsD3D12));
 
 		if (minHookStatus != MH_OK)
 			ShaderInjectorGUI::WriteToRuntimeLogError(StringHelper::Format("Hooks->Initialize: MH_CreateHook ExecuteCommandLists failed: %s", MH_StatusToString(minHookStatus)));
 
-		//======================================== Enable Hooks ========================================
-		//enable all hooks
+		//publish the prepared hooks together after every trampoline has been configured.
 		minHookStatus = MH_EnableHook(MH_ALL_HOOKS);
 
 		if (minHookStatus != MH_OK)
@@ -390,9 +365,8 @@ namespace Hooks
 
 	void CleanupDummyObjects()
 	{
-		// DXGI swap chains retain presentation state associated with their HWND.
-		// Release every dependent COM object before destroying that window. Native
-		// Windows drivers often tolerate the inverse order, but Wine/VKD3D may not.
+		//DXGI swap chains retain presentation state associated with their window.
+		//release the COM objects before destroying that window for Wine and VKD3D compatibility.
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CleanupDummyObjects: releasing command list...");
 		gDummyCommandList.Reset();
 
@@ -418,4 +392,4 @@ namespace Hooks
 		UnregisterClassW(gDummyWindowClassName, GetModuleHandleW(nullptr));
 		ShaderInjectorGUI::WriteToRuntimeLog("Hooks->CleanupDummyObjects: complete.");
 	}
-}
+} //namespace Hooks

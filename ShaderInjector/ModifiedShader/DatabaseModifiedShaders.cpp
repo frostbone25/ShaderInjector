@@ -47,11 +47,11 @@ namespace DatabaseModifiedShaders
 			//override package metadata in memory so existing packages follow the selected profile on recompile.
 			package.shaderProfile = StringHelper::ShaderProfileForType(package.shaderType);
 
-			if (package.id.empty() || 
+			if (package.id.empty() ||
 				package.shaderType == ShaderTarget::Unknown ||
-				package.shaderProfile.empty() || 
+				package.shaderProfile.empty() ||
 				package.shaderEntryPoint.empty() ||
-				package.sourcePath.empty() || 
+				package.sourcePath.empty() ||
 				!ShaderInjectorIO::FileExists(package.sourcePath) ||
 				package.compiledBlobPath.empty())
 			{
@@ -84,11 +84,14 @@ namespace DatabaseModifiedShaders
 		}
 
 		std::sort(gModifiedShaders.begin(), gModifiedShaders.end(), [](const auto& left, const auto& right)
-		{
-			const std::string leftName = left.name.empty() ? left.id : left.name;
-			const std::string rightName = right.name.empty() ? right.id : right.name;
-			return leftName < rightName;
-		});
+				  {
+			std::string leftName = left.id;
+			std::string rightName = right.id;
+			if (!left.name.empty())
+				leftName = left.name;
+			if (!right.name.empty())
+				rightName = right.name;
+			return leftName < rightName; });
 
 		ShaderAutomaticDiscovery::RefreshModifiedShaderIndex(gModifiedShaders);
 
@@ -103,7 +106,10 @@ namespace DatabaseModifiedShaders
 		{
 			for (const ModifiedShader::ModifiedShaderPackageDisk& package : gModifiedShaders)
 			{
-				ShaderInjectorIO::WriteToLogFileStatus("DatabaseModifiedShaders->RefreshModifiedShaders: loaded name=\"" + (package.name.empty() ? package.id : package.name) + "\" id=" + package.id);
+				std::string displayName = package.id;
+				if (!package.name.empty())
+					displayName = package.name;
+				ShaderInjectorIO::WriteToLogFileStatus("DatabaseModifiedShaders->RefreshModifiedShaders: loaded name=\"" + displayName + "\" id=" + package.id);
 			}
 		}
 	}
@@ -148,4 +154,4 @@ namespace DatabaseModifiedShaders
 
 		return modifiedShader.name + " (" + modifiedShader.id + ")";
 	}
-}
+} //namespace DatabaseModifiedShaders

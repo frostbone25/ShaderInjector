@@ -60,17 +60,13 @@ namespace
 
 		return changed;
 	}
-}
+} //namespace
 
 namespace ShaderInjectorGUI
 {
 	std::string runtimeLogText;
 
 	static bool injectorDeveloperSettings = false;
-
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| MAIN |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
 	void DrawMainWindow(const MainWindowContext& context)
 	{
@@ -90,11 +86,16 @@ namespace ShaderInjectorGUI
 			//injector enable checkbox
 			ImGui::Checkbox("##InjectorEnabled", &Globals::gShaderInjectorEnabled);
 			ImGui::SameLine();
-			ImGui::Text("Injector %s", context.injectorEnabled ? "Enabled!" : "Disabled!");
+			const char* injectorStatus = "Disabled!";
+
+			if (context.injectorEnabled)
+				injectorStatus = "Enabled!";
+
+			ImGui::Text("Injector %s", injectorStatus);
 
 			//fps counter
-			if (context.fpsCounterActive)
-				ImGui::Text("FPS: %.1f (%.4fms)", context.fps, context.frameTimeMs);
+			if (context.framesPerSecondCounterActive)
+				ImGui::Text("FPS: %.1f (%.4fms)", context.framesPerSecond, context.frameTimeMilliseconds);
 
 			DrawKeycodeCombo("Toggle Injector", Globals::keyToggleShaderInjector);
 			DrawKeycodeCombo("Toggle Menu", Globals::keyOpenShaderInjectorGUI);
@@ -113,6 +114,7 @@ namespace ShaderInjectorGUI
 				WriteToRuntimeLogError("Could not open ShaderInjector.ini.");
 
 			ImGui::SameLine();
+
 			if (ImGui::Button("Save Injector Settings", ImVec2(settingsButtonWidth, 0)))
 			{
 				if (ShaderInjectorIO::WriteInjectorSettings())
@@ -123,7 +125,7 @@ namespace ShaderInjectorGUI
 
 			ImGui::Spacing();
 
-			//set in HookD3D12, wires up an event that calls UI_ShaderInjectorMenu()
+			//set in HookD3D12, wires up an event that calls DrawShaderInjectorMenu()
 			if (context.drawMenu)
 				context.drawMenu();
 
@@ -147,19 +149,19 @@ namespace ShaderInjectorGUI
 			}
 
 			ImGui::EndGroup();
-		} 
+		}
 		//window end
 
 		ImGui::End();
 	}
 
-	void UI_ShaderInjectorMenu()
+	void DrawShaderInjectorMenu()
 	{
-		UI_ModifiedShaders();
-		UI_ShaderConfiguration();
-		UI_ShaderTargets();
-		UI_ShaderResources();
-		UI_RenderPasses();
-		UI_DeveloperSettings();
+		DrawModifiedShaders();
+		DrawShaderConfiguration();
+		DrawShaderTargets();
+		DrawShaderResources();
+		DrawRenderPasses();
+		DrawDeveloperSettings();
 	}
-}
+} //namespace ShaderInjectorGUI

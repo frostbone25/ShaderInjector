@@ -9,7 +9,7 @@ namespace ShaderConfiguration::Internal
 	bool StartsWith(const std::string& text, const std::string& prefix)
 	{
 		return text.size() >= prefix.size() &&
-			text.compare(0, prefix.size(), prefix) == 0;
+			   text.compare(0, prefix.size(), prefix) == 0;
 	}
 
 	std::vector<SourceLine> SplitSourceLines(const std::string& sourceText)
@@ -23,7 +23,7 @@ namespace ShaderConfiguration::Internal
 
 			if (newline == std::string::npos)
 			{
-				lines.push_back({ sourceText.substr(lineStart), {} });
+				lines.push_back({sourceText.substr(lineStart), {}});
 				break;
 			}
 
@@ -36,7 +36,7 @@ namespace ShaderConfiguration::Internal
 				ending = "\r\n";
 			}
 
-			lines.push_back({sourceText.substr(lineStart, contentEnd - lineStart), ending });
+			lines.push_back({sourceText.substr(lineStart, contentEnd - lineStart), ending});
 			lineStart = newline + 1;
 		}
 
@@ -132,4 +132,4 @@ namespace ShaderConfiguration::Internal
 		outComment = line;
 		return true;
 	}
-}
+} //namespace ShaderConfiguration::Internal

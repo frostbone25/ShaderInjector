@@ -9,4 +9,4 @@ namespace RenderPassGraph
 		Before,
 		After,
 	};
-}
+} //namespace RenderPassGraph

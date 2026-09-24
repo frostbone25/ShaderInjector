@@ -14,4 +14,4 @@ namespace ModifiedShader
 		const ShaderTarget::ShaderTargetDisk& shaderTarget,
 		const std::string& targetApplication = "",
 		const std::string& gameVersion = "");
-}
+} //namespace ModifiedShader

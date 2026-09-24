@@ -6,11 +6,11 @@ namespace HookD3D12
 	{
 		bool shouldTrackActivity = false;
 
-	public:
+	  public:
 		explicit ScopedPipelineActivity(bool trackActivity = true);
 		~ScopedPipelineActivity();
 
 		ScopedPipelineActivity(const ScopedPipelineActivity&) = delete;
 		ScopedPipelineActivity& operator=(const ScopedPipelineActivity&) = delete;
 	};
-}
+} //namespace HookD3D12

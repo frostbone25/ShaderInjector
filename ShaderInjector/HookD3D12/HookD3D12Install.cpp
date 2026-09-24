@@ -31,10 +31,6 @@ namespace HookD3D12
 	static std::atomic<void*> fastDeferredDeviceVTable = nullptr;
 	static std::atomic<void*> fastDeferredCommandListVTable = nullptr;
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL D3D12 CREATE DEVICE HOOK |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL D3D12 CREATE DEVICE HOOK |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL D3D12 CREATE DEVICE HOOK |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
 	bool InstallD3D12CreateDeviceHook(HMODULE d3d12Module)
 	{
 		if (checkD3D12CreateDeviceHookInstalled)
@@ -71,10 +67,6 @@ namespace HookD3D12
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12Install->InstallD3D12CreateDeviceHook: D3D12CreateDevice hook installed");
 		return true;
 	}
-
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL PIPELINE HOOKS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL PIPELINE HOOKS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL PIPELINE HOOKS |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
 	void InstallPipelineHooksForDevice(ID3D12Device* device)
 	{
@@ -148,10 +140,6 @@ namespace HookD3D12
 			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12Install->InstallPipelineHooksForDevice: CreateRootSignature hook failed");
 	}
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL COMMAND LIST HOOKS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL COMMAND LIST HOOKS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| INSTALL COMMAND LIST HOOKS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
 	void InstallCommandListHooksForCommandList(ID3D12GraphicsCommandList* commandList)
 	{
 		if (!commandList)
@@ -223,28 +211,25 @@ namespace HookD3D12
 
 		const HookDefinition resourceHooks[] =
 		{
-			{ VTableIndex::indexCreateDescriptorHeap, reinterpret_cast<void*>(&Hook_CreateDescriptorHeap), reinterpret_cast<void**>(&Original_CreateDescriptorHeap) },
-			{ VTableIndex::indexCreateConstantBufferView, reinterpret_cast<void*>(&Hook_CreateConstantBufferView), reinterpret_cast<void**>(&Original_CreateConstantBufferView) },
-			{ VTableIndex::indexCreateShaderResourceView, reinterpret_cast<void*>(&Hook_CreateShaderResourceView), reinterpret_cast<void**>(&Original_CreateShaderResourceView) },
-			{ VTableIndex::indexCreateUnorderedAccessView, reinterpret_cast<void*>(&Hook_CreateUnorderedAccessView), reinterpret_cast<void**>(&Original_CreateUnorderedAccessView) },
-			{ VTableIndex::indexCreateRenderTargetView, reinterpret_cast<void*>(&Hook_CreateRenderTargetView), reinterpret_cast<void**>(&Original_CreateRenderTargetView) },
-			{ VTableIndex::indexCreateDepthStencilView, reinterpret_cast<void*>(&Hook_CreateDepthStencilView), reinterpret_cast<void**>(&Original_CreateDepthStencilView) },
-			{ VTableIndex::indexCreateSampler, reinterpret_cast<void*>(&Hook_CreateSampler), reinterpret_cast<void**>(&Original_CreateSampler) },
-			{ VTableIndex::indexCopyDescriptors, reinterpret_cast<void*>(&Hook_CopyDescriptors), reinterpret_cast<void**>(&Original_CopyDescriptors) },
-			{ VTableIndex::indexCopyDescriptorsSimple, reinterpret_cast<void*>(&Hook_CopyDescriptorsSimple), reinterpret_cast<void**>(&Original_CopyDescriptorsSimple) },
-			{ VTableIndex::indexCreateCommittedResource, reinterpret_cast<void*>(&Hook_CreateCommittedResource), reinterpret_cast<void**>(&Original_CreateCommittedResource) },
-			{ VTableIndex::indexCreatePlacedResource, reinterpret_cast<void*>(&Hook_CreatePlacedResource), reinterpret_cast<void**>(&Original_CreatePlacedResource) },
-			{ VTableIndex::indexCreateReservedResource, reinterpret_cast<void*>(&Hook_CreateReservedResource), reinterpret_cast<void**>(&Original_CreateReservedResource) },
+			{VTableIndex::indexCreateDescriptorHeap, reinterpret_cast<void*>(&Hook_CreateDescriptorHeap), reinterpret_cast<void**>(&Original_CreateDescriptorHeap)},
+			{VTableIndex::indexCreateConstantBufferView, reinterpret_cast<void*>(&Hook_CreateConstantBufferView), reinterpret_cast<void**>(&Original_CreateConstantBufferView)},
+			{VTableIndex::indexCreateShaderResourceView, reinterpret_cast<void*>(&Hook_CreateShaderResourceView), reinterpret_cast<void**>(&Original_CreateShaderResourceView)},
+			{VTableIndex::indexCreateUnorderedAccessView, reinterpret_cast<void*>(&Hook_CreateUnorderedAccessView), reinterpret_cast<void**>(&Original_CreateUnorderedAccessView)},
+			{VTableIndex::indexCreateRenderTargetView, reinterpret_cast<void*>(&Hook_CreateRenderTargetView), reinterpret_cast<void**>(&Original_CreateRenderTargetView)},
+			{VTableIndex::indexCreateDepthStencilView, reinterpret_cast<void*>(&Hook_CreateDepthStencilView), reinterpret_cast<void**>(&Original_CreateDepthStencilView)},
+			{VTableIndex::indexCreateSampler, reinterpret_cast<void*>(&Hook_CreateSampler), reinterpret_cast<void**>(&Original_CreateSampler)},
+			{VTableIndex::indexCopyDescriptors, reinterpret_cast<void*>(&Hook_CopyDescriptors), reinterpret_cast<void**>(&Original_CopyDescriptors)},
+			{VTableIndex::indexCopyDescriptorsSimple, reinterpret_cast<void*>(&Hook_CopyDescriptorsSimple), reinterpret_cast<void**>(&Original_CopyDescriptorsSimple)},
+			{VTableIndex::indexCreateCommittedResource, reinterpret_cast<void*>(&Hook_CreateCommittedResource), reinterpret_cast<void**>(&Original_CreateCommittedResource)},
+			{VTableIndex::indexCreatePlacedResource, reinterpret_cast<void*>(&Hook_CreatePlacedResource), reinterpret_cast<void**>(&Original_CreatePlacedResource)},
+			{VTableIndex::indexCreateReservedResource, reinterpret_cast<void*>(&Hook_CreateReservedResource), reinterpret_cast<void**>(&Original_CreateReservedResource)},
 		};
 
 		bool resourceHooksInstalled = true;
 
 		for (const HookDefinition& hook : resourceHooks)
 		{
-			const MH_STATUS createStatus = MH_CreateHook(
-				deviceVTable[hook.vTableIndex],
-				hook.hookFunction,
-				hook.originalFunction);
+			const MH_STATUS createStatus = MH_CreateHook(deviceVTable[hook.vTableIndex], hook.hookFunction, hook.originalFunction);
 			const MH_STATUS enableStatus = MH_EnableHook(deviceVTable[hook.vTableIndex]);
 			const bool createSucceeded = createStatus == MH_OK || createStatus == MH_ERROR_ALREADY_CREATED;
 			const bool enableSucceeded = enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED;
@@ -277,9 +262,9 @@ namespace HookD3D12
 
 		InstallRenderPassResourceHooksForDevice(device);
 
-		// The game performs its most intensive pipeline/query work before the overlay is
-		// ready. Render-pass observation is unnecessary during that phase, especially on
-		// a fresh shader-cache run where no shader target can be resolved yet.
+		//The game performs its most intensive pipeline/query work before the overlay is
+		//ready. Render-pass observation is unnecessary during that phase, especially on
+		//a fresh shader-cache run where no shader target can be resolved yet.
 		std::lock_guard<std::mutex> installationLock(hookInstallationMutex);
 
 		void** deviceVTable = *reinterpret_cast<void***>(device);
@@ -289,28 +274,25 @@ namespace HookD3D12
 		{
 			const HookDefinition resourceHooks[] =
 			{
-				{ VTableIndex::indexCreateDescriptorHeap, reinterpret_cast<void*>(&Hook_CreateDescriptorHeap), reinterpret_cast<void**>(&Original_CreateDescriptorHeap) },
-				{ VTableIndex::indexCreateConstantBufferView, reinterpret_cast<void*>(&Hook_CreateConstantBufferView), reinterpret_cast<void**>(&Original_CreateConstantBufferView) },
-				{ VTableIndex::indexCreateShaderResourceView, reinterpret_cast<void*>(&Hook_CreateShaderResourceView), reinterpret_cast<void**>(&Original_CreateShaderResourceView) },
-				{ VTableIndex::indexCreateUnorderedAccessView, reinterpret_cast<void*>(&Hook_CreateUnorderedAccessView), reinterpret_cast<void**>(&Original_CreateUnorderedAccessView) },
-				{ VTableIndex::indexCreateRenderTargetView, reinterpret_cast<void*>(&Hook_CreateRenderTargetView), reinterpret_cast<void**>(&Original_CreateRenderTargetView) },
-				{ VTableIndex::indexCreateDepthStencilView, reinterpret_cast<void*>(&Hook_CreateDepthStencilView), reinterpret_cast<void**>(&Original_CreateDepthStencilView) },
-				{ VTableIndex::indexCreateSampler, reinterpret_cast<void*>(&Hook_CreateSampler), reinterpret_cast<void**>(&Original_CreateSampler) },
-				{ VTableIndex::indexCopyDescriptors, reinterpret_cast<void*>(&Hook_CopyDescriptors), reinterpret_cast<void**>(&Original_CopyDescriptors) },
-				{ VTableIndex::indexCopyDescriptorsSimple, reinterpret_cast<void*>(&Hook_CopyDescriptorsSimple), reinterpret_cast<void**>(&Original_CopyDescriptorsSimple) },
-				{ VTableIndex::indexCreateCommittedResource, reinterpret_cast<void*>(&Hook_CreateCommittedResource), reinterpret_cast<void**>(&Original_CreateCommittedResource) },
-				{ VTableIndex::indexCreatePlacedResource, reinterpret_cast<void*>(&Hook_CreatePlacedResource), reinterpret_cast<void**>(&Original_CreatePlacedResource) },
-				{ VTableIndex::indexCreateReservedResource, reinterpret_cast<void*>(&Hook_CreateReservedResource), reinterpret_cast<void**>(&Original_CreateReservedResource) },
+				{VTableIndex::indexCreateDescriptorHeap, reinterpret_cast<void*>(&Hook_CreateDescriptorHeap), reinterpret_cast<void**>(&Original_CreateDescriptorHeap)},
+				{VTableIndex::indexCreateConstantBufferView, reinterpret_cast<void*>(&Hook_CreateConstantBufferView), reinterpret_cast<void**>(&Original_CreateConstantBufferView)},
+				{VTableIndex::indexCreateShaderResourceView, reinterpret_cast<void*>(&Hook_CreateShaderResourceView), reinterpret_cast<void**>(&Original_CreateShaderResourceView)},
+				{VTableIndex::indexCreateUnorderedAccessView, reinterpret_cast<void*>(&Hook_CreateUnorderedAccessView), reinterpret_cast<void**>(&Original_CreateUnorderedAccessView)},
+				{VTableIndex::indexCreateRenderTargetView, reinterpret_cast<void*>(&Hook_CreateRenderTargetView), reinterpret_cast<void**>(&Original_CreateRenderTargetView)},
+				{VTableIndex::indexCreateDepthStencilView, reinterpret_cast<void*>(&Hook_CreateDepthStencilView), reinterpret_cast<void**>(&Original_CreateDepthStencilView)},
+				{VTableIndex::indexCreateSampler, reinterpret_cast<void*>(&Hook_CreateSampler), reinterpret_cast<void**>(&Original_CreateSampler)},
+				{VTableIndex::indexCopyDescriptors, reinterpret_cast<void*>(&Hook_CopyDescriptors), reinterpret_cast<void**>(&Original_CopyDescriptors)},
+				{VTableIndex::indexCopyDescriptorsSimple, reinterpret_cast<void*>(&Hook_CopyDescriptorsSimple), reinterpret_cast<void**>(&Original_CopyDescriptorsSimple)},
+				{VTableIndex::indexCreateCommittedResource, reinterpret_cast<void*>(&Hook_CreateCommittedResource), reinterpret_cast<void**>(&Original_CreateCommittedResource)},
+				{VTableIndex::indexCreatePlacedResource, reinterpret_cast<void*>(&Hook_CreatePlacedResource), reinterpret_cast<void**>(&Original_CreatePlacedResource)},
+				{VTableIndex::indexCreateReservedResource, reinterpret_cast<void*>(&Hook_CreateReservedResource), reinterpret_cast<void**>(&Original_CreateReservedResource)},
 			};
 
 			bool resourceHooksInstalled = true;
 
 			for (const HookDefinition& hook : resourceHooks)
 			{
-				const MH_STATUS createStatus = MH_CreateHook(
-					deviceVTable[hook.vTableIndex],
-					hook.hookFunction,
-					hook.originalFunction);
+				const MH_STATUS createStatus = MH_CreateHook(deviceVTable[hook.vTableIndex], hook.hookFunction, hook.originalFunction);
 				const MH_STATUS enableStatus = MH_EnableHook(deviceVTable[hook.vTableIndex]);
 				const bool createSucceeded = createStatus == MH_OK || createStatus == MH_ERROR_ALREADY_CREATED;
 				const bool enableSucceeded = enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED;
@@ -335,39 +317,36 @@ namespace HookD3D12
 		{
 			const HookDefinition commandListHooks[] =
 			{
-				{ VTableIndex::indexDrawInstanced, reinterpret_cast<void*>(&Hook_DrawInstanced), reinterpret_cast<void**>(&Original_DrawInstanced) },
-				{ VTableIndex::indexDrawIndexedInstanced, reinterpret_cast<void*>(&Hook_DrawIndexedInstanced), reinterpret_cast<void**>(&Original_DrawIndexedInstanced) },
-				{ VTableIndex::indexDispatch, reinterpret_cast<void*>(&Hook_Dispatch), reinterpret_cast<void**>(&Original_Dispatch) },
-				{ VTableIndex::indexIASetPrimitiveTopology, reinterpret_cast<void*>(&Hook_IASetPrimitiveTopology), reinterpret_cast<void**>(&Original_IASetPrimitiveTopology) },
-				{ VTableIndex::indexRSSetViewports, reinterpret_cast<void*>(&Hook_RSSetViewports), reinterpret_cast<void**>(&Original_RSSetViewports) },
-				{ VTableIndex::indexRSSetScissorRects, reinterpret_cast<void*>(&Hook_RSSetScissorRects), reinterpret_cast<void**>(&Original_RSSetScissorRects) },
-				{ VTableIndex::indexSetDescriptorHeaps, reinterpret_cast<void*>(&Hook_SetDescriptorHeaps), reinterpret_cast<void**>(&Original_SetDescriptorHeaps) },
-				{ VTableIndex::indexSetComputeRootDescriptorTable, reinterpret_cast<void*>(&Hook_SetComputeRootDescriptorTable), reinterpret_cast<void**>(&Original_SetComputeRootDescriptorTable) },
-				{ VTableIndex::indexSetGraphicsRootDescriptorTable, reinterpret_cast<void*>(&Hook_SetGraphicsRootDescriptorTable), reinterpret_cast<void**>(&Original_SetGraphicsRootDescriptorTable) },
-				{ VTableIndex::indexSetComputeRoot32BitConstant, reinterpret_cast<void*>(&Hook_SetComputeRoot32BitConstant), reinterpret_cast<void**>(&Original_SetComputeRoot32BitConstant) },
-				{ VTableIndex::indexSetGraphicsRoot32BitConstant, reinterpret_cast<void*>(&Hook_SetGraphicsRoot32BitConstant), reinterpret_cast<void**>(&Original_SetGraphicsRoot32BitConstant) },
-				{ VTableIndex::indexSetComputeRoot32BitConstants, reinterpret_cast<void*>(&Hook_SetComputeRoot32BitConstants), reinterpret_cast<void**>(&Original_SetComputeRoot32BitConstants) },
-				{ VTableIndex::indexSetGraphicsRoot32BitConstants, reinterpret_cast<void*>(&Hook_SetGraphicsRoot32BitConstants), reinterpret_cast<void**>(&Original_SetGraphicsRoot32BitConstants) },
-				{ VTableIndex::indexSetComputeRootConstantBufferView, reinterpret_cast<void*>(&Hook_SetComputeRootConstantBufferView), reinterpret_cast<void**>(&Original_SetComputeRootConstantBufferView) },
-				{ VTableIndex::indexSetGraphicsRootConstantBufferView, reinterpret_cast<void*>(&Hook_SetGraphicsRootConstantBufferView), reinterpret_cast<void**>(&Original_SetGraphicsRootConstantBufferView) },
-				{ VTableIndex::indexSetComputeRootShaderResourceView, reinterpret_cast<void*>(&Hook_SetComputeRootShaderResourceView), reinterpret_cast<void**>(&Original_SetComputeRootShaderResourceView) },
-				{ VTableIndex::indexSetGraphicsRootShaderResourceView, reinterpret_cast<void*>(&Hook_SetGraphicsRootShaderResourceView), reinterpret_cast<void**>(&Original_SetGraphicsRootShaderResourceView) },
-				{ VTableIndex::indexSetComputeRootUnorderedAccessView, reinterpret_cast<void*>(&Hook_SetComputeRootUnorderedAccessView), reinterpret_cast<void**>(&Original_SetComputeRootUnorderedAccessView) },
-				{ VTableIndex::indexSetGraphicsRootUnorderedAccessView, reinterpret_cast<void*>(&Hook_SetGraphicsRootUnorderedAccessView), reinterpret_cast<void**>(&Original_SetGraphicsRootUnorderedAccessView) },
-				{ VTableIndex::indexIASetIndexBuffer, reinterpret_cast<void*>(&Hook_IASetIndexBuffer), reinterpret_cast<void**>(&Original_IASetIndexBuffer) },
-				{ VTableIndex::indexIASetVertexBuffers, reinterpret_cast<void*>(&Hook_IASetVertexBuffers), reinterpret_cast<void**>(&Original_IASetVertexBuffers) },
-				{ VTableIndex::indexOMSetRenderTargets, reinterpret_cast<void*>(&Hook_OMSetRenderTargets), reinterpret_cast<void**>(&Original_OMSetRenderTargets) },
-				{ VTableIndex::indexExecuteIndirect, reinterpret_cast<void*>(&Hook_ExecuteIndirect), reinterpret_cast<void**>(&Original_ExecuteIndirect) },
-			};
+				{VTableIndex::indexDrawInstanced, reinterpret_cast<void*>(&Hook_DrawInstanced), reinterpret_cast<void**>(&Original_DrawInstanced)},
+				{VTableIndex::indexDrawIndexedInstanced, reinterpret_cast<void*>(&Hook_DrawIndexedInstanced), reinterpret_cast<void**>(&Original_DrawIndexedInstanced)},
+				{VTableIndex::indexDispatch, reinterpret_cast<void*>(&Hook_Dispatch), reinterpret_cast<void**>(&Original_Dispatch)},
+				{VTableIndex::indexIASetPrimitiveTopology, reinterpret_cast<void*>(&Hook_IASetPrimitiveTopology), reinterpret_cast<void**>(&Original_IASetPrimitiveTopology)},
+				{VTableIndex::indexRSSetViewports, reinterpret_cast<void*>(&Hook_RSSetViewports), reinterpret_cast<void**>(&Original_RSSetViewports)},
+				{VTableIndex::indexRSSetScissorRects, reinterpret_cast<void*>(&Hook_RSSetScissorRects), reinterpret_cast<void**>(&Original_RSSetScissorRects)},
+				{VTableIndex::indexSetDescriptorHeaps, reinterpret_cast<void*>(&Hook_SetDescriptorHeaps), reinterpret_cast<void**>(&Original_SetDescriptorHeaps)},
+				{VTableIndex::indexSetComputeRootDescriptorTable, reinterpret_cast<void*>(&Hook_SetComputeRootDescriptorTable), reinterpret_cast<void**>(&Original_SetComputeRootDescriptorTable)},
+				{VTableIndex::indexSetGraphicsRootDescriptorTable, reinterpret_cast<void*>(&Hook_SetGraphicsRootDescriptorTable), reinterpret_cast<void**>(&Original_SetGraphicsRootDescriptorTable)},
+				{VTableIndex::indexSetComputeRoot32BitConstant, reinterpret_cast<void*>(&Hook_SetComputeRoot32BitConstant), reinterpret_cast<void**>(&Original_SetComputeRoot32BitConstant)},
+				{VTableIndex::indexSetGraphicsRoot32BitConstant, reinterpret_cast<void*>(&Hook_SetGraphicsRoot32BitConstant), reinterpret_cast<void**>(&Original_SetGraphicsRoot32BitConstant)},
+				{VTableIndex::indexSetComputeRoot32BitConstants, reinterpret_cast<void*>(&Hook_SetComputeRoot32BitConstants), reinterpret_cast<void**>(&Original_SetComputeRoot32BitConstants)},
+				{VTableIndex::indexSetGraphicsRoot32BitConstants, reinterpret_cast<void*>(&Hook_SetGraphicsRoot32BitConstants), reinterpret_cast<void**>(&Original_SetGraphicsRoot32BitConstants)},
+				{VTableIndex::indexSetComputeRootConstantBufferView, reinterpret_cast<void*>(&Hook_SetComputeRootConstantBufferView), reinterpret_cast<void**>(&Original_SetComputeRootConstantBufferView)},
+				{VTableIndex::indexSetGraphicsRootConstantBufferView, reinterpret_cast<void*>(&Hook_SetGraphicsRootConstantBufferView), reinterpret_cast<void**>(&Original_SetGraphicsRootConstantBufferView)},
+				{VTableIndex::indexSetComputeRootShaderResourceView, reinterpret_cast<void*>(&Hook_SetComputeRootShaderResourceView), reinterpret_cast<void**>(&Original_SetComputeRootShaderResourceView)},
+				{VTableIndex::indexSetGraphicsRootShaderResourceView, reinterpret_cast<void*>(&Hook_SetGraphicsRootShaderResourceView), reinterpret_cast<void**>(&Original_SetGraphicsRootShaderResourceView)},
+				{VTableIndex::indexSetComputeRootUnorderedAccessView, reinterpret_cast<void*>(&Hook_SetComputeRootUnorderedAccessView), reinterpret_cast<void**>(&Original_SetComputeRootUnorderedAccessView)},
+				{VTableIndex::indexSetGraphicsRootUnorderedAccessView, reinterpret_cast<void*>(&Hook_SetGraphicsRootUnorderedAccessView), reinterpret_cast<void**>(&Original_SetGraphicsRootUnorderedAccessView)},
+				{VTableIndex::indexIASetIndexBuffer, reinterpret_cast<void*>(&Hook_IASetIndexBuffer), reinterpret_cast<void**>(&Original_IASetIndexBuffer)},
+				{VTableIndex::indexIASetVertexBuffers, reinterpret_cast<void*>(&Hook_IASetVertexBuffers), reinterpret_cast<void**>(&Original_IASetVertexBuffers)},
+				{VTableIndex::indexOMSetRenderTargets, reinterpret_cast<void*>(&Hook_OMSetRenderTargets), reinterpret_cast<void**>(&Original_OMSetRenderTargets)},
+				{VTableIndex::indexExecuteIndirect, reinterpret_cast<void*>(&Hook_ExecuteIndirect), reinterpret_cast<void**>(&Original_ExecuteIndirect)},
+				};
 
 			bool commandListHooksInstalled = true;
 
 			for (const HookDefinition& hook : commandListHooks)
 			{
-				const MH_STATUS createStatus = MH_CreateHook(
-					commandListVTable[hook.vTableIndex],
-					hook.hookFunction,
-					hook.originalFunction);
+				const MH_STATUS createStatus = MH_CreateHook(commandListVTable[hook.vTableIndex], hook.hookFunction, hook.originalFunction);
 				const MH_STATUS enableStatus = MH_EnableHook(commandListVTable[hook.vTableIndex]);
 				const bool createSucceeded = createStatus == MH_OK || createStatus == MH_ERROR_ALREADY_CREATED;
 				const bool enableSucceeded = enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED;
@@ -392,4 +371,4 @@ namespace HookD3D12
 			fastDeferredCommandListVTable.store(commandListVTableKey, std::memory_order_release);
 		}
 	}
-}
+} //namespace HookD3D12

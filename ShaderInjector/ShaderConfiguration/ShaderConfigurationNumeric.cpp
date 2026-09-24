@@ -21,7 +21,7 @@ namespace ShaderConfiguration::Internal
 			trimmed = StringHelper::TrimWhitespace(trimmed.substr(1, trimmed.size() - 2));
 
 		while (!trimmed.empty() &&
-			(trimmed.back() == 'u' || trimmed.back() == 'U' ||
+			   (trimmed.back() == 'u' || trimmed.back() == 'U' ||
 				trimmed.back() == 'l' || trimmed.back() == 'L'))
 		{
 			trimmed.pop_back();
@@ -55,7 +55,7 @@ namespace ShaderConfiguration::Internal
 
 		if (!trimmed.empty() &&
 			(trimmed.back() == 'f' || trimmed.back() == 'F' ||
-				trimmed.back() == 'h' || trimmed.back() == 'H'))
+			 trimmed.back() == 'h' || trimmed.back() == 'H'))
 		{
 			trimmed.pop_back();
 		}
@@ -134,4 +134,4 @@ namespace ShaderConfiguration::Internal
 
 		return text;
 	}
-}
+} //namespace ShaderConfiguration::Internal

@@ -9,7 +9,11 @@ namespace HookD3D12
 
 	HRESULT STDMETHODCALLTYPE Handle_CreateSwapChain(IDXGIFactory* factory, IUnknown* device, DXGI_SWAP_CHAIN_DESC* description, IDXGISwapChain** swapChain)
 	{
-		HRESULT result = gOriginalCreateSwapChain ? gOriginalCreateSwapChain(factory, device, description, swapChain) : E_POINTER;
+		HRESULT result = E_POINTER;
+
+		if (gOriginalCreateSwapChain)
+			result = gOriginalCreateSwapChain(factory, device, description, swapChain);
+
 		const bool hasExplicitSize = description && description->BufferDesc.Width != 0 && description->BufferDesc.Height != 0;
 		const bool isOverlaySizedSwapChain = hasExplicitSize && (description->BufferDesc.Width < 100 || description->BufferDesc.Height < 100);
 
@@ -19,4 +23,4 @@ namespace HookD3D12
 		return result;
 	}
 
-}
+} //namespace HookD3D12

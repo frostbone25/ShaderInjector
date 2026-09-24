@@ -15,84 +15,60 @@
 #include "Hash/Hash.h"
 #include "Globals.h"
 #include "ShaderTarget/ShaderTarget.h"
+#include "GUI/MainWindowContext.h"
+#include "GUI/ModifiedShaderBatchRecompileResult.h"
 
 namespace ShaderInjectorGUI
 {
 	const float indentSpace = 16.0f;
 
-	using DrawMenuFn = void(*)();
-
-	struct MainWindowContext
-	{
-		bool* showWindow = nullptr;
-		bool injectorEnabled = false;
-		bool injectorDeveloperSettings = false;
-		bool* fpsCounterActive = nullptr;
-		double fps = 0.0;
-		double frameTimeMs = 0.0;
-		const std::string* runtimeLogText = nullptr;
-		DrawMenuFn drawMenu = nullptr;
-	};
-
 	void DrawMainWindow(const MainWindowContext& context);
-	void UI_ShaderInjectorMenu();
+	void DrawShaderInjectorMenu();
 
 	//===================== modified shaders =====================
-	struct ModifiedShaderBatchRecompileResult
-	{
-		int selectedPackageCount = 0;
-		int skippedInactivePackageCount = 0;
-		int compiledPackageCount = 0;
-		int failedPackageCount = 0;
-		int linkedShaderTargetCount = 0;
-		int reloadedShaderTargetCount = 0;
-		int skippedInactiveShaderTargetCount = 0;
-	};
-
 	ModifiedShaderBatchRecompileResult RecompileModifiedShaders(bool includeInactivePackages);
 
-	void UI_ModifiedShaders();
+	void DrawModifiedShaders();
 
 	//===================== shader configuration =====================
-	void UI_ShaderConfiguration();
+	void DrawShaderConfiguration();
 
 	//===================== shader targets =====================
-	void UI_ShaderTargets();
+	void DrawShaderTargets();
 
-	template<typename PipelineT>
+	template <typename PipelineT>
 	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderTarget::ShaderTargetDisk& replacement);
 
-	void UI_ShaderTargetSourceSection(ShaderTarget::ShaderTargetDisk& replacement, int replacementIndex);
+	void DrawShaderTargetSourceSection(ShaderTarget::ShaderTargetDisk& replacement, int replacementIndex);
 
-	template<typename PipelineT>
-	void UI_DrawReplacementPSORow(const char* sourceList, int index, const PipelineT& pipeline);
-	void UI_ShaderTargetPSOList(const ShaderTarget::ShaderTargetDisk& replacement);
+	template <typename PipelineT>
+	void DrawReplacementPSORow(const char* sourceList, int index, const PipelineT& pipeline);
+	void DrawShaderTargetPSOList(const ShaderTarget::ShaderTargetDisk& replacement);
 	int CountReplacementPSOs(const ShaderTarget::ShaderTargetDisk& replacement);
 
 	//===================== render passes =====================
-	void UI_RenderPasses();
-	void UI_ShaderResources();
+	void DrawRenderPasses();
+	void DrawShaderResources();
 
-	template<typename PipelineT>
+	template <typename PipelineT>
 	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderTarget::ShaderTargetDisk& replacement);
 
 	//===================== developer settings =====================
-	void UI_DeveloperSettings();
-	void UI_ShaderCompilerSettings();
-	void UI_RenderDoc();
-	void UI_AdapterInfo();
-	void UI_D3D12PipelineInfo();
+	void DrawDeveloperSettings();
+	void DrawShaderCompilerSettings();
+	void DrawRenderDoc();
+	void DrawAdapterInfo();
+	void DrawD3D12PipelineInfo();
 
 	//===================== pipelines =====================
-	void UI_StreamPipelines();
-	//void UI_GraphicsPipelines(); //<--- hidden from GUI for now
+	void DrawStreamPipelines();
 
-	template<
+	template <
 		typename PipelineT,
-		uint64_t PipelineT::* HashMember,
-		SIZE_T PipelineT::* SizeMember,
-		std::vector<uint8_t> PipelineT::* BytecodeMember>
-	void UI_ShaderStageList(
+		uint64_t PipelineT::*HashMember,
+		SIZE_T PipelineT::*SizeMember,
+		std::vector<uint8_t> PipelineT::*BytecodeMember>
+	void DrawShaderStageList(
 		const char* stageLabel,
 		const char* idPrefix,
 		const char* sourceList,
@@ -102,13 +78,13 @@ namespace ShaderInjectorGUI
 		HookD3D12::PipelineSourceList pendingSource,
 		bool allowMarkerToggle,
 		bool disableActions,
-		bool PipelineT::* disabledMember,
-		ID3D12PipelineState* PipelineT::* rebuiltPSOMember);
+		bool PipelineT::*disabledMember,
+		ID3D12PipelineState* PipelineT::*rebuiltPSOMember);
 
-	template<typename PipelineT, uint64_t PipelineT::* HashMember>
+	template <typename PipelineT, uint64_t PipelineT::*HashMember>
 	int CountShaderStage(const std::vector<PipelineT>& pipelines);
 
-	template<typename PipelineT, uint64_t PipelineT::* HashMember>
+	template <typename PipelineT, uint64_t PipelineT::*HashMember>
 	int FindFirstShaderStageIndex(const std::vector<PipelineT>& pipelines);
 
 	//===================== runtime logs =====================
@@ -122,5 +98,5 @@ namespace ShaderInjectorGUI
 	std::string GetRuntimeLogSnapshot();
 
 	//===================== style =====================
-	void UI_ApplyStyle();
-}
+	void ApplyGUIStyle();
+} //namespace ShaderInjectorGUI

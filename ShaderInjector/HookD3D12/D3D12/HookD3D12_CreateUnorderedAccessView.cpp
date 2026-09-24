@@ -18,4 +18,4 @@ namespace HookD3D12
 		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() && RenderPassRuntime::IsDescriptorRegistryTrackingRequired())
 			RenderPassResourceRegistry::RegisterUnorderedAccessView(resource, counterResource, description, destination);
 	}
-}
+} //namespace HookD3D12

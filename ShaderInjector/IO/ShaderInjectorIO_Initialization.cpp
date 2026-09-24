@@ -95,4 +95,4 @@ namespace ShaderInjectorIO
 
 		return true;
 	}
-}
+} //namespace ShaderInjectorIO

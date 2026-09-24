@@ -14,109 +14,41 @@
 #include <utility>
 
 #include "Performance/PerformanceMetrics.h"
+#include "RenderPass/Registry/DescriptorCopySegment.h"
+#include "RenderPass/Registry/DescriptorHeapLookupCache.h"
+#include "RenderPass/Registry/DescriptorHeapRecord.h"
+#include "RenderPass/Registry/DescriptorPage.h"
+#include "RenderPass/Registry/DescriptorRangeLayout.h"
+#include "RenderPass/Registry/RootParameterLayout.h"
+#include "RenderPass/Registry/RootSignatureLayout.h"
 
 namespace RenderPassResourceRegistry
 {
-	struct DescriptorRangeLayout
-	{
-		D3D12_DESCRIPTOR_RANGE_TYPE type = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-		UINT descriptorCount = 0;
-		UINT baseShaderRegister = 0;
-		UINT registerSpace = 0;
-		UINT tableOffset = 0;
-	};
-
-	struct RootParameterLayout
-	{
-		D3D12_ROOT_PARAMETER_TYPE type = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-		D3D12_SHADER_VISIBILITY shaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-		UINT shaderRegister = UINT32_MAX;
-		UINT registerSpace = UINT32_MAX;
-		std::vector<DescriptorRangeLayout> ranges;
-	};
-
-	struct RootSignatureLayout
-	{
-		std::vector<RootParameterLayout> parameters;
-	};
-
 	std::shared_mutex gDescriptorMutex;
 	std::shared_mutex gDescriptorHeapMutex;
 	std::shared_mutex gResourceMutex;
 	std::shared_mutex gRootSignatureMutex;
-	using DescriptorRecord = std::shared_ptr<const RenderPass::ResourceBindingDiagnostic>;
-
-	// Fixed metadata pages keep unrelated command-recording threads from
-	// contending while retaining cache-friendly linear descriptor copies.
-	constexpr size_t DescriptorPageSize = 512;
-	constexpr UINT MaximumExactDescriptorRangeScan = 16;
-
-	struct DescriptorPage
-	{
-		std::array<DescriptorRecord, DescriptorPageSize> descriptors;
-		std::array<std::atomic<const RenderPass::ResourceBindingDiagnostic*>, DescriptorPageSize> descriptorIdentities{};
-		std::atomic<uint32_t> trackedDescriptorCount{ 0 };
-	};
-
-	struct DescriptorHeapRecord
-	{
-		ID3D12DescriptorHeap* identity = nullptr;
-		SIZE_T start = 0;
-		SIZE_T end = 0;
-		UINT descriptorCount = 0;
-		UINT descriptorIncrementSize = 0;
-		D3D12_DESCRIPTOR_HEAP_TYPE type = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
-		std::unique_ptr<std::atomic<DescriptorPage*>[]> pages;
-		size_t pageCount = 0;
-		std::atomic<size_t> trackedDescriptorCount{ 0 };
-		std::atomic<bool> active{ true };
-
-		~DescriptorHeapRecord()
-		{
-			if (!pages)
-				return;
-			for (size_t pageIndex = 0; pageIndex < pageCount; ++pageIndex)
-				delete pages[pageIndex].load(std::memory_order_relaxed);
-		}
-	};
-
-	struct DescriptorHeapLookupCache
-	{
-		uint64_t generation = 0;
-		size_t nextEntry = 0;
-		std::array<std::shared_ptr<DescriptorHeapRecord>, 4> entries{};
-	};
-
-	// Declared before every shared owner so the counter remains alive while
-	// descriptor records are released during DLL shutdown.
-	std::atomic<size_t> gLiveDescriptorMetadataCount{ 0 };
+	//fixed metadata pages let recording threads copy descriptors without sharing one large array.
+	constexpr UINT maximumExactDescriptorRangeScan = 16;
+	//Declared before every shared owner so the counter remains alive while
+	//descriptor records are released during DLL shutdown.
+	std::atomic<size_t> gLiveDescriptorMetadataCount{0};
 	std::map<SIZE_T, std::shared_ptr<DescriptorHeapRecord>> gDescriptorHeaps;
-	std::atomic<uint64_t> gDescriptorHeapGeneration{ 1 };
-	std::atomic<size_t> gFallbackTrackedDescriptorCount{ 0 };
-	// Descriptors created before the heap hook was installed remain supported here.
-	// Once heaps are registered, normal gameplay traffic uses the indexed pages above.
+	std::atomic<uint64_t> gDescriptorHeapGeneration{1};
+	std::atomic<size_t> gFallbackTrackedDescriptorCount{0};
+	//Descriptors created before the heap hook was installed remain supported here.
+	//Once heaps are registered, normal gameplay traffic uses the indexed pages above.
 	std::map<SIZE_T, DescriptorRecord> gDescriptors;
 	std::map<uint64_t, RenderPass::ResourceBindingDiagnostic> gResourcesByGpuAddress;
 	std::unordered_map<ID3D12RootSignature*, RootSignatureLayout> gRootSignatures;
-	constexpr size_t DescriptorBloomWordCount = 1u << 14;
-	constexpr UINT MaximumBloomRangeScan = 64;
-	std::array<std::atomic<uint64_t>, DescriptorBloomWordCount> gDescriptorBloom{};
-	struct DescriptorCopySegment
-	{
-		SIZE_T destinationStart = 0;
-		SIZE_T sourceStart = 0;
-		UINT descriptorCount = 0;
-		std::shared_ptr<DescriptorHeapRecord> destinationHeap;
-		std::shared_ptr<DescriptorHeapRecord> sourceHeap;
-		SIZE_T destinationFirstDescriptor = 0;
-		SIZE_T sourceFirstDescriptor = 0;
-	};
-
+	constexpr size_t descriptorBloomWordCount = 1u << 14;
+	constexpr UINT maximumBloomRangeScan = 64;
+	std::array<std::atomic<uint64_t>, descriptorBloomWordCount> gDescriptorBloom{};
 	void NormalizeDescriptorMetadata(RenderPass::ResourceBindingDiagnostic& binding)
 	{
-		// Handles and table locations belong to the descriptor slot, not the
-		// immutable view metadata. Excluding them allows identical views copied to
-		// millions of slots to share one stable record.
+		//Handles and table locations belong to the descriptor slot, not the
+		//immutable view metadata. Excluding them allows identical views copied to
+		//millions of slots to share one stable record.
 		binding.cpuDescriptorHandle = 0;
 		binding.gpuDescriptorHandle = 0;
 		binding.descriptorIndex = UINT32_MAX;
@@ -127,69 +59,69 @@ namespace RenderPassResourceRegistry
 		const RenderPass::ResourceBindingDiagnostic& right)
 	{
 		return std::tie(
-			left.pipeline,
-			left.bindingType,
-			left.rootParameterIndex,
-			left.gpuAddress,
-			left.descriptorHeapType,
-			left.descriptorCount,
-			left.descriptorViewDimension,
-			left.descriptorMostDetailedMip,
-			left.descriptorMipLevels,
-			left.descriptorShader4ComponentMapping,
-			left.descriptorPlaneSlice,
-			left.descriptorResourceMinLodClamp,
-			left.shaderRegister,
-			left.registerSpace,
-			left.destinationOffset,
-			left.resourcePointer,
-			left.resourceName,
-			left.resourceDimension,
-			left.resourceWidth,
-			left.resourceHeight,
-			left.resourceDepthOrArraySize,
-			left.resourceMipLevels,
-			left.resourceFormat,
-			left.resourceSampleCount,
-			left.resourceSampleQuality,
-			left.bufferOffset,
-			left.bufferSize,
-			left.firstElement,
-			left.elementCount,
-			left.structureByteStride,
-			left.rootConstants) ==
-			std::tie(
-				right.pipeline,
-				right.bindingType,
-				right.rootParameterIndex,
-				right.gpuAddress,
-				right.descriptorHeapType,
-				right.descriptorCount,
-				right.descriptorViewDimension,
-				right.descriptorMostDetailedMip,
-				right.descriptorMipLevels,
-				right.descriptorShader4ComponentMapping,
-				right.descriptorPlaneSlice,
-				right.descriptorResourceMinLodClamp,
-				right.shaderRegister,
-				right.registerSpace,
-				right.destinationOffset,
-				right.resourcePointer,
-				right.resourceName,
-				right.resourceDimension,
-				right.resourceWidth,
-				right.resourceHeight,
-				right.resourceDepthOrArraySize,
-				right.resourceMipLevels,
-				right.resourceFormat,
-				right.resourceSampleCount,
-				right.resourceSampleQuality,
-				right.bufferOffset,
-				right.bufferSize,
-				right.firstElement,
-				right.elementCount,
-				right.structureByteStride,
-				right.rootConstants);
+				   left.pipeline,
+				   left.bindingType,
+				   left.rootParameterIndex,
+				   left.gpuAddress,
+				   left.descriptorHeapType,
+				   left.descriptorCount,
+				   left.descriptorViewDimension,
+				   left.descriptorMostDetailedMip,
+				   left.descriptorMipLevels,
+				   left.descriptorShader4ComponentMapping,
+				   left.descriptorPlaneSlice,
+				   left.descriptorResourceMinLodClamp,
+				   left.shaderRegister,
+				   left.registerSpace,
+				   left.destinationOffset,
+				   left.resourcePointer,
+				   left.resourceName,
+				   left.resourceDimension,
+				   left.resourceWidth,
+				   left.resourceHeight,
+				   left.resourceDepthOrArraySize,
+				   left.resourceMipLevels,
+				   left.resourceFormat,
+				   left.resourceSampleCount,
+				   left.resourceSampleQuality,
+				   left.bufferOffset,
+				   left.bufferSize,
+				   left.firstElement,
+				   left.elementCount,
+				   left.structureByteStride,
+				   left.rootConstants) ==
+			   std::tie(
+				   right.pipeline,
+				   right.bindingType,
+				   right.rootParameterIndex,
+				   right.gpuAddress,
+				   right.descriptorHeapType,
+				   right.descriptorCount,
+				   right.descriptorViewDimension,
+				   right.descriptorMostDetailedMip,
+				   right.descriptorMipLevels,
+				   right.descriptorShader4ComponentMapping,
+				   right.descriptorPlaneSlice,
+				   right.descriptorResourceMinLodClamp,
+				   right.shaderRegister,
+				   right.registerSpace,
+				   right.destinationOffset,
+				   right.resourcePointer,
+				   right.resourceName,
+				   right.resourceDimension,
+				   right.resourceWidth,
+				   right.resourceHeight,
+				   right.resourceDepthOrArraySize,
+				   right.resourceMipLevels,
+				   right.resourceFormat,
+				   right.resourceSampleCount,
+				   right.resourceSampleQuality,
+				   right.bufferOffset,
+				   right.bufferSize,
+				   right.firstElement,
+				   right.elementCount,
+				   right.structureByteStride,
+				   right.rootConstants);
 	}
 
 	DescriptorRecord CreateDescriptorMetadata(RenderPass::ResourceBindingDiagnostic binding)
@@ -220,8 +152,8 @@ namespace RenderPassResourceRegistry
 	void MarkDescriptorPossiblyTracked(SIZE_T descriptor)
 	{
 		const uint64_t hash = MixDescriptorHandle(static_cast<uint64_t>(descriptor) >> 4);
-		const size_t firstWord = static_cast<size_t>(hash) & (DescriptorBloomWordCount - 1);
-		const size_t secondWord = static_cast<size_t>(hash >> 32) & (DescriptorBloomWordCount - 1);
+		const size_t firstWord = static_cast<size_t>(hash) & (descriptorBloomWordCount - 1);
+		const size_t secondWord = static_cast<size_t>(hash >> 32) & (descriptorBloomWordCount - 1);
 		const uint64_t firstBit = 1ULL << ((hash >> 18) & 63);
 		const uint64_t secondBit = 1ULL << ((hash >> 50) & 63);
 		gDescriptorBloom[firstWord].fetch_or(firstBit, std::memory_order_release);
@@ -231,12 +163,12 @@ namespace RenderPassResourceRegistry
 	bool DescriptorPossiblyTracked(SIZE_T descriptor)
 	{
 		const uint64_t hash = MixDescriptorHandle(static_cast<uint64_t>(descriptor) >> 4);
-		const size_t firstWord = static_cast<size_t>(hash) & (DescriptorBloomWordCount - 1);
-		const size_t secondWord = static_cast<size_t>(hash >> 32) & (DescriptorBloomWordCount - 1);
+		const size_t firstWord = static_cast<size_t>(hash) & (descriptorBloomWordCount - 1);
+		const size_t secondWord = static_cast<size_t>(hash >> 32) & (descriptorBloomWordCount - 1);
 		const uint64_t firstBit = 1ULL << ((hash >> 18) & 63);
 		const uint64_t secondBit = 1ULL << ((hash >> 50) & 63);
 		return (gDescriptorBloom[firstWord].load(std::memory_order_acquire) & firstBit) != 0 &&
-			(gDescriptorBloom[secondWord].load(std::memory_order_acquire) & secondBit) != 0;
+			   (gDescriptorBloom[secondWord].load(std::memory_order_acquire) & secondBit) != 0;
 	}
 
 	bool DescriptorRangePossiblyTracked(
@@ -246,14 +178,14 @@ namespace RenderPassResourceRegistry
 	{
 		if (!descriptorCount)
 			return false;
-		// Large copies are uncommon and cheap to inspect with the ordered map. Avoid
-		// turning a conservative prefilter into a long linear scan.
-		if (descriptorCount > MaximumBloomRangeScan)
+		//Large copies are uncommon and cheap to inspect with the ordered map. Avoid
+		//turning a conservative prefilter into a long linear scan.
+		if (descriptorCount > maximumBloomRangeScan)
 			return true;
 		for (UINT descriptorIndex = 0; descriptorIndex < descriptorCount; ++descriptorIndex)
 		{
 			if (DescriptorPossiblyTracked(
-				start + static_cast<SIZE_T>(descriptorIndex) * descriptorIncrementSize))
+					start + static_cast<SIZE_T>(descriptorIndex) * descriptorIncrementSize))
 			{
 				return true;
 			}
@@ -282,7 +214,7 @@ namespace RenderPassResourceRegistry
 
 		const SIZE_T firstDescriptor = byteOffset / heap.descriptorIncrementSize;
 		return firstDescriptor < heap.descriptorCount &&
-			descriptorCount <= heap.descriptorCount - firstDescriptor;
+			   descriptorCount <= heap.descriptorCount - firstDescriptor;
 	}
 
 	std::shared_ptr<DescriptorHeapRecord> FindDescriptorHeap(
@@ -302,10 +234,10 @@ namespace RenderPassResourceRegistry
 		for (const std::shared_ptr<DescriptorHeapRecord>& cachedHeap : cache.entries)
 		{
 			if (cachedHeap && DescriptorHeapRangeFits(
-				*cachedHeap,
-				start,
-				descriptorCount,
-				descriptorIncrementSize))
+								  *cachedHeap,
+								  start,
+								  descriptorCount,
+								  descriptorIncrementSize))
 			{
 				return cachedHeap;
 			}
@@ -319,10 +251,10 @@ namespace RenderPassResourceRegistry
 			{
 				--heapIt;
 				if (heapIt->second && DescriptorHeapRangeFits(
-					*heapIt->second,
-					start,
-					descriptorCount,
-					descriptorIncrementSize))
+										  *heapIt->second,
+										  start,
+										  descriptorCount,
+										  descriptorIncrementSize))
 				{
 					cache.entries[cache.nextEntry] = heapIt->second;
 					heap = heapIt->second;
@@ -347,10 +279,10 @@ namespace RenderPassResourceRegistry
 		std::unique_ptr<DescriptorPage> newPage = std::make_unique<DescriptorPage>();
 		DescriptorPage* expected = nullptr;
 		if (heap.pages[pageIndex].compare_exchange_strong(
-			expected,
-			newPage.get(),
-			std::memory_order_release,
-			std::memory_order_acquire))
+				expected,
+				newPage.get(),
+				std::memory_order_release,
+				std::memory_order_acquire))
 		{
 			return newPage.release();
 		}
@@ -379,9 +311,9 @@ namespace RenderPassResourceRegistry
 		size_t pageOffset,
 		DescriptorRecord record)
 	{
-		// Games commonly replay the same descriptor copies every frame. Avoid the
-		// substantially more expensive atomic shared-owner exchange when this slot
-		// already contains the requested immutable metadata record.
+		//Games commonly replay the same descriptor copies every frame. Avoid the
+		//substantially more expensive atomic shared-owner exchange when this slot
+		//already contains the requested immutable metadata record.
 		const RenderPass::ResourceBindingDiagnostic* newIdentity = record.get();
 		if (ReadPageDescriptorIdentity(page, pageOffset) == newIdentity)
 		{
@@ -419,8 +351,8 @@ namespace RenderPassResourceRegistry
 		if (!heap)
 			return;
 		const SIZE_T descriptorIndex = (descriptor - heap->start) / heap->descriptorIncrementSize;
-		const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
-		const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
+		const size_t pageIndex = static_cast<size_t>(descriptorIndex / descriptorPageSize);
+		const size_t pageOffset = static_cast<size_t>(descriptorIndex % descriptorPageSize);
 		DescriptorPage* page = GetDescriptorPage(*heap, pageIndex, static_cast<bool>(record));
 		if (!page)
 			return;
@@ -442,8 +374,8 @@ namespace RenderPassResourceRegistry
 		if (heap)
 		{
 			const SIZE_T descriptorIndex = (descriptor - heap->start) / heap->descriptorIncrementSize;
-			const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
-			const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
+			const size_t pageIndex = static_cast<size_t>(descriptorIndex / descriptorPageSize);
+			const size_t pageOffset = static_cast<size_t>(descriptorIndex % descriptorPageSize);
 			DescriptorPage* page = GetDescriptorPage(*heap, pageIndex, false);
 			if (!page)
 				return {};
@@ -454,18 +386,25 @@ namespace RenderPassResourceRegistry
 
 		std::shared_lock<std::shared_mutex> lock(gDescriptorMutex);
 		const auto descriptorIt = gDescriptors.find(descriptor);
-		return descriptorIt == gDescriptors.end() ? DescriptorRecord{} : descriptorIt->second;
+		if (descriptorIt != gDescriptors.end())
+			return descriptorIt->second;
+		return DescriptorRecord{};
 	}
 
 	const char* DescriptorRangeTypeName(D3D12_DESCRIPTOR_RANGE_TYPE type)
 	{
 		switch (type)
 		{
-		case D3D12_DESCRIPTOR_RANGE_TYPE_SRV: return "SRV";
-		case D3D12_DESCRIPTOR_RANGE_TYPE_UAV: return "UAV";
-		case D3D12_DESCRIPTOR_RANGE_TYPE_CBV: return "CBV";
-		case D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER: return "Sampler";
-		default: return "Descriptor";
+		case D3D12_DESCRIPTOR_RANGE_TYPE_SRV:
+			return "SRV";
+		case D3D12_DESCRIPTOR_RANGE_TYPE_UAV:
+			return "UAV";
+		case D3D12_DESCRIPTOR_RANGE_TYPE_CBV:
+			return "CBV";
+		case D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER:
+			return "Sampler";
+		default:
+			return "Descriptor";
 		}
 	}
 
@@ -537,8 +476,9 @@ namespace RenderPassResourceRegistry
 		MarkDescriptorPossiblyTracked(destination.ptr);
 		std::unique_lock<std::shared_mutex> lock(gDescriptorMutex);
 		const bool inserted = gDescriptors.insert_or_assign(
-			destination.ptr,
-			record).second;
+											  destination.ptr,
+											  record)
+								  .second;
 		if (inserted)
 			gFallbackTrackedDescriptorCount.fetch_add(1, std::memory_order_relaxed);
 	}
@@ -683,18 +623,18 @@ namespace RenderPassResourceRegistry
 				!heap->trackedDescriptorCount.load(std::memory_order_relaxed))
 				return false;
 
-			// Most D3D12 descriptor traffic consists of one-slot copies. A page-level
-			// test produces a false positive for every other slot on a populated page,
-			// forcing shared_ptr exchanges hundreds of thousands of times per frame.
-			// Small ranges are cheap enough to test exactly and can bypass propagation
-			// unless the source or destination slot genuinely carries metadata.
-			if (descriptorCount <= MaximumExactDescriptorRangeScan)
+			//Most D3D12 descriptor traffic consists of one-slot copies. A page-level
+			//test produces a false positive for every other slot on a populated page,
+			//forcing shared_ptr exchanges hundreds of thousands of times per frame.
+			//Small ranges are cheap enough to test exactly and can bypass propagation
+			//unless the source or destination slot genuinely carries metadata.
+			if (descriptorCount <= maximumExactDescriptorRangeScan)
 			{
 				for (UINT descriptorOffset = 0; descriptorOffset < descriptorCount; ++descriptorOffset)
 				{
 					const SIZE_T descriptorIndex = firstDescriptor + descriptorOffset;
-					const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
-					const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
+					const size_t pageIndex = static_cast<size_t>(descriptorIndex / descriptorPageSize);
+					const size_t pageOffset = static_cast<size_t>(descriptorIndex % descriptorPageSize);
 					DescriptorPage* page = GetDescriptorPage(*heap, pageIndex, false);
 					if (page && ReadPageDescriptorIdentity(*page, pageOffset))
 						return true;
@@ -703,8 +643,8 @@ namespace RenderPassResourceRegistry
 			}
 
 			const SIZE_T lastDescriptor = firstDescriptor + descriptorCount - 1;
-			const size_t firstPage = static_cast<size_t>(firstDescriptor / DescriptorPageSize);
-			const size_t lastPage = static_cast<size_t>(lastDescriptor / DescriptorPageSize);
+			const size_t firstPage = static_cast<size_t>(firstDescriptor / descriptorPageSize);
+			const size_t lastPage = static_cast<size_t>(lastDescriptor / descriptorPageSize);
 			for (size_t pageIndex = firstPage; pageIndex <= lastPage; ++pageIndex)
 			{
 				DescriptorPage* page = GetDescriptorPage(*heap, pageIndex, false);
@@ -737,19 +677,19 @@ namespace RenderPassResourceRegistry
 			while (copiedDescriptorCount < descriptorCount)
 			{
 				const SIZE_T descriptorIndex = firstDescriptor + copiedDescriptorCount;
-				const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
-				const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
+				const size_t pageIndex = static_cast<size_t>(descriptorIndex / descriptorPageSize);
+				const size_t pageOffset = static_cast<size_t>(descriptorIndex % descriptorPageSize);
 				const UINT descriptorsOnPage = (std::min)(
 					descriptorCount - copiedDescriptorCount,
-					static_cast<UINT>(DescriptorPageSize - pageOffset));
+					static_cast<UINT>(descriptorPageSize - pageOffset));
 				DescriptorPage* page = GetDescriptorPage(*heap, pageIndex, false);
 				if (page && page->trackedDescriptorCount.load(std::memory_order_relaxed))
 				{
 					if (!heap->active.load(std::memory_order_relaxed))
 						return;
 					for (UINT pageDescriptorIndex = 0;
-						pageDescriptorIndex < descriptorsOnPage;
-						++pageDescriptorIndex)
+						 pageDescriptorIndex < descriptorsOnPage;
+						 ++pageDescriptorIndex)
 					{
 						records[outputOffset + copiedDescriptorCount + pageDescriptorIndex] =
 							ReadPageDescriptor(*page, pageOffset + pageDescriptorIndex);
@@ -763,8 +703,8 @@ namespace RenderPassResourceRegistry
 		const SIZE_T rangeEnd = DescriptorRangeEnd(start, descriptorCount, descriptorIncrementSize);
 		std::shared_lock<std::shared_mutex> lock(gDescriptorMutex);
 		for (auto descriptorIt = gDescriptors.lower_bound(start);
-			descriptorIt != gDescriptors.end() && descriptorIt->first < rangeEnd;
-			++descriptorIt)
+			 descriptorIt != gDescriptors.end() && descriptorIt->first < rangeEnd;
+			 ++descriptorIt)
 		{
 			const SIZE_T byteOffset = descriptorIt->first - start;
 			if (byteOffset % descriptorIncrementSize != 0)
@@ -792,15 +732,15 @@ namespace RenderPassResourceRegistry
 			while (writtenDescriptorCount < descriptorCount)
 			{
 				const SIZE_T descriptorIndex = firstDescriptor + writtenDescriptorCount;
-				const size_t pageIndex = static_cast<size_t>(descriptorIndex / DescriptorPageSize);
-				const size_t pageOffset = static_cast<size_t>(descriptorIndex % DescriptorPageSize);
+				const size_t pageIndex = static_cast<size_t>(descriptorIndex / descriptorPageSize);
+				const size_t pageOffset = static_cast<size_t>(descriptorIndex % descriptorPageSize);
 				const UINT descriptorsOnPage = (std::min)(
 					descriptorCount - writtenDescriptorCount,
-					static_cast<UINT>(DescriptorPageSize - pageOffset));
+					static_cast<UINT>(descriptorPageSize - pageOffset));
 				bool pageNeedsCreation = false;
 				for (UINT pageDescriptorIndex = 0;
-					pageDescriptorIndex < descriptorsOnPage && !pageNeedsCreation;
-					++pageDescriptorIndex)
+					 pageDescriptorIndex < descriptorsOnPage && !pageNeedsCreation;
+					 ++pageDescriptorIndex)
 				{
 					pageNeedsCreation = static_cast<bool>(
 						records[inputOffset + writtenDescriptorCount + pageDescriptorIndex]);
@@ -812,8 +752,8 @@ namespace RenderPassResourceRegistry
 					if (!heap->active.load(std::memory_order_relaxed))
 						return;
 					for (UINT pageDescriptorIndex = 0;
-						pageDescriptorIndex < descriptorsOnPage;
-						++pageDescriptorIndex)
+						 pageDescriptorIndex < descriptorsOnPage;
+						 ++pageDescriptorIndex)
 					{
 						SetPageDescriptor(
 							*heap,
@@ -845,7 +785,7 @@ namespace RenderPassResourceRegistry
 			if (!record)
 				continue;
 			const SIZE_T destination = start +
-				static_cast<SIZE_T>(descriptorIndex) * descriptorIncrementSize;
+									   static_cast<SIZE_T>(descriptorIndex) * descriptorIncrementSize;
 			MarkDescriptorPossiblyTracked(destination);
 			gDescriptors[destination] = record;
 			++insertedDescriptorCount;
@@ -872,24 +812,23 @@ namespace RenderPassResourceRegistry
 			const SIZE_T destinationDescriptorIndex =
 				segment.destinationFirstDescriptor + copiedDescriptorCount;
 			const size_t sourcePageIndex =
-				static_cast<size_t>(sourceDescriptorIndex / DescriptorPageSize);
+				static_cast<size_t>(sourceDescriptorIndex / descriptorPageSize);
 			const size_t destinationPageIndex =
-				static_cast<size_t>(destinationDescriptorIndex / DescriptorPageSize);
+				static_cast<size_t>(destinationDescriptorIndex / descriptorPageSize);
 			const size_t sourcePageOffset =
-				static_cast<size_t>(sourceDescriptorIndex % DescriptorPageSize);
+				static_cast<size_t>(sourceDescriptorIndex % descriptorPageSize);
 			const size_t destinationPageOffset =
-				static_cast<size_t>(destinationDescriptorIndex % DescriptorPageSize);
-			const UINT descriptorsOnPages = (std::min)({
-				segment.descriptorCount - copiedDescriptorCount,
-				static_cast<UINT>(DescriptorPageSize - sourcePageOffset),
-				static_cast<UINT>(DescriptorPageSize - destinationPageOffset) });
+				static_cast<size_t>(destinationDescriptorIndex % descriptorPageSize);
+			const UINT descriptorsOnPages = (std::min)({segment.descriptorCount - copiedDescriptorCount,
+														static_cast<UINT>(descriptorPageSize - sourcePageOffset),
+														static_cast<UINT>(descriptorPageSize - destinationPageOffset)});
 
 			DescriptorPage* sourcePage = GetDescriptorPage(
 				*segment.sourceHeap,
 				sourcePageIndex,
 				false);
 			const bool sourcePageHasDescriptors = sourcePage &&
-				sourcePage->trackedDescriptorCount.load(std::memory_order_relaxed) != 0;
+												  sourcePage->trackedDescriptorCount.load(std::memory_order_relaxed) != 0;
 			DescriptorPage* destinationPage = GetDescriptorPage(
 				*segment.destinationHeap,
 				destinationPageIndex,
@@ -907,12 +846,12 @@ namespace RenderPassResourceRegistry
 			}
 
 			const bool rangesOverlap = sourcePage == destinationPage &&
-				sourcePageOffset < destinationPageOffset + descriptorsOnPages &&
-				destinationPageOffset < sourcePageOffset + descriptorsOnPages;
+									   sourcePageOffset < destinationPageOffset + descriptorsOnPages &&
+									   destinationPageOffset < sourcePageOffset + descriptorsOnPages;
 			if (rangesOverlap)
 			{
-				// D3D12 forbids overlapping source and destination ranges. Preserve
-				// predictable metadata even for an invalid call that aliases a page.
+				//D3D12 forbids overlapping source and destination ranges. Preserve
+				//predictable metadata even for an invalid call that aliases a page.
 				thread_local std::vector<DescriptorRecord> samePageDescriptors;
 				samePageDescriptors.clear();
 				samePageDescriptors.reserve(descriptorsOnPages);
@@ -934,18 +873,18 @@ namespace RenderPassResourceRegistry
 			{
 				for (UINT descriptorIndex = 0; descriptorIndex < descriptorsOnPages; ++descriptorIndex)
 				{
-					const RenderPass::ResourceBindingDiagnostic* sourceIdentity = sourcePageHasDescriptors
-						? ReadPageDescriptorIdentity(*sourcePage, sourcePageOffset + descriptorIndex)
-						: nullptr;
+					const RenderPass::ResourceBindingDiagnostic* sourceIdentity = nullptr;
+					if (sourcePageHasDescriptors)
+						sourceIdentity = ReadPageDescriptorIdentity(*sourcePage, sourcePageOffset + descriptorIndex);
 					if (ReadPageDescriptorIdentity(
-						*destinationPage,
-						destinationPageOffset + descriptorIndex) == sourceIdentity)
+							*destinationPage,
+							destinationPageOffset + descriptorIndex) == sourceIdentity)
 					{
 						continue;
 					}
-					const DescriptorRecord sourceRecord = sourcePageHasDescriptors
-						? ReadPageDescriptor(*sourcePage, sourcePageOffset + descriptorIndex)
-						: nullptr;
+					DescriptorRecord sourceRecord = nullptr;
+					if (sourcePageHasDescriptors)
+						sourceRecord = ReadPageDescriptor(*sourcePage, sourcePageOffset + descriptorIndex);
 					SetPageDescriptor(
 						*segment.destinationHeap,
 						*destinationPage,
@@ -1011,8 +950,8 @@ namespace RenderPassResourceRegistry
 		heap->descriptorIncrementSize = descriptorIncrementSize;
 		heap->type = description.Type;
 		heap->pageCount =
-			(static_cast<size_t>(description.NumDescriptors) + DescriptorPageSize - 1) /
-			DescriptorPageSize;
+			(static_cast<size_t>(description.NumDescriptors) + descriptorPageSize - 1) /
+			descriptorPageSize;
 		heap->pages = std::make_unique<std::atomic<DescriptorPage*>[]>(heap->pageCount);
 		for (size_t pageIndex = 0; pageIndex < heap->pageCount; ++pageIndex)
 			heap->pages[pageIndex].store(nullptr, std::memory_order_relaxed);
@@ -1035,7 +974,7 @@ namespace RenderPassResourceRegistry
 				firstOverlappingIt = previousIt;
 		}
 		while (firstOverlappingIt != gDescriptorHeaps.end() &&
-			firstOverlappingIt->first < end)
+			   firstOverlappingIt->first < end)
 		{
 			if (firstOverlappingIt->second && firstOverlappingIt->second->end > start)
 			{
@@ -1048,10 +987,10 @@ namespace RenderPassResourceRegistry
 			}
 		}
 
-		// A heap first observed through SetDescriptorHeaps may predate the heap hook.
-		// Move any metadata captured through the compatibility map into its indexed
-		// slots. A genuinely new heap instead discards metadata from a recycled handle
-		// range so an old resource can never bleed into the new heap.
+		//A heap first observed through SetDescriptorHeaps may predate the heap hook.
+		//Move any metadata captured through the compatibility map into its indexed
+		//slots. A genuinely new heap instead discards metadata from a recycled handle
+		//range so an old resource can never bleed into the new heap.
 		{
 			std::unique_lock<std::shared_mutex> fallbackLock(gDescriptorMutex);
 			auto descriptorIt = gDescriptors.lower_bound(start);
@@ -1102,9 +1041,10 @@ namespace RenderPassResourceRegistry
 
 		ID3D12VersionedRootSignatureDeserializer* deserializer = nullptr;
 		if (FAILED(D3D12CreateVersionedRootSignatureDeserializer(
-			serializedRootSignature,
-			serializedRootSignatureSize,
-			IID_PPV_ARGS(&deserializer))) || !deserializer)
+				serializedRootSignature,
+				serializedRootSignatureSize,
+				IID_PPV_ARGS(&deserializer))) ||
+			!deserializer)
 		{
 			return;
 		}
@@ -1114,9 +1054,9 @@ namespace RenderPassResourceRegistry
 		RootSignatureLayout layout{};
 		if (description)
 		{
-			const UINT parameterCount = description->Version == D3D_ROOT_SIGNATURE_VERSION_1_0
-				? description->Desc_1_0.NumParameters
-				: description->Desc_1_1.NumParameters;
+			UINT parameterCount = description->Desc_1_1.NumParameters;
+			if (description->Version == D3D_ROOT_SIGNATURE_VERSION_1_0)
+				parameterCount = description->Desc_1_0.NumParameters;
 			layout.parameters.resize(parameterCount);
 
 			for (UINT parameterIndex = 0; parameterIndex < parameterCount; ++parameterIndex)
@@ -1133,10 +1073,10 @@ namespace RenderPassResourceRegistry
 						for (UINT rangeIndex = 0; rangeIndex < parameter.DescriptorTable.NumDescriptorRanges; ++rangeIndex)
 						{
 							const D3D12_DESCRIPTOR_RANGE& range = parameter.DescriptorTable.pDescriptorRanges[rangeIndex];
-							const UINT tableOffset = range.OffsetInDescriptorsFromTableStart == D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND
-								? appendedOffset
-								: range.OffsetInDescriptorsFromTableStart;
-							parameterLayout.ranges.push_back({ range.RangeType, range.NumDescriptors, range.BaseShaderRegister, range.RegisterSpace, tableOffset });
+							UINT tableOffset = range.OffsetInDescriptorsFromTableStart;
+							if (tableOffset == D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND)
+								tableOffset = appendedOffset;
+							parameterLayout.ranges.push_back({range.RangeType, range.NumDescriptors, range.BaseShaderRegister, range.RegisterSpace, tableOffset});
 							if (range.NumDescriptors != UINT_MAX)
 								appendedOffset = tableOffset + range.NumDescriptors;
 						}
@@ -1158,10 +1098,10 @@ namespace RenderPassResourceRegistry
 						for (UINT rangeIndex = 0; rangeIndex < parameter.DescriptorTable.NumDescriptorRanges; ++rangeIndex)
 						{
 							const D3D12_DESCRIPTOR_RANGE1& range = parameter.DescriptorTable.pDescriptorRanges[rangeIndex];
-							const UINT tableOffset = range.OffsetInDescriptorsFromTableStart == D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND
-								? appendedOffset
-								: range.OffsetInDescriptorsFromTableStart;
-							parameterLayout.ranges.push_back({ range.RangeType, range.NumDescriptors, range.BaseShaderRegister, range.RegisterSpace, tableOffset });
+							UINT tableOffset = range.OffsetInDescriptorsFromTableStart;
+							if (tableOffset == D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND)
+								tableOffset = appendedOffset;
+							parameterLayout.ranges.push_back({range.RangeType, range.NumDescriptors, range.BaseShaderRegister, range.RegisterSpace, tableOffset});
 							if (range.NumDescriptors != UINT_MAX)
 								appendedOffset = tableOffset + range.NumDescriptors;
 						}
@@ -1192,10 +1132,9 @@ namespace RenderPassResourceRegistry
 
 		std::unique_lock<std::shared_mutex> lock(gResourceMutex);
 		const uint64_t resourceStart = resourceMetadata.gpuAddress;
-		const uint64_t resourceEnd = resourceMetadata.bufferSize >
-			(std::numeric_limits<uint64_t>::max)() - resourceStart
-			? (std::numeric_limits<uint64_t>::max)()
-			: resourceStart + resourceMetadata.bufferSize;
+		uint64_t resourceEnd = resourceStart + resourceMetadata.bufferSize;
+		if (resourceMetadata.bufferSize > (std::numeric_limits<uint64_t>::max)() - resourceStart)
+			resourceEnd = (std::numeric_limits<uint64_t>::max)();
 
 		auto resourceIt = gResourcesByGpuAddress.lower_bound(resourceStart);
 		if (resourceIt != gResourcesByGpuAddress.begin())
@@ -1253,8 +1192,8 @@ namespace RenderPassResourceRegistry
 				binding.resourceDepthOrArraySize == 1 &&
 				binding.resourceSampleCount == 1;
 			const bool supportedView = !description ||
-				(description->ViewDimension == D3D12_SRV_DIMENSION_TEXTURE2D &&
-					description->Texture2D.PlaneSlice == 0);
+									   (description->ViewDimension == D3D12_SRV_DIMENSION_TEXTURE2D &&
+										description->Texture2D.PlaneSlice == 0);
 			if (!supportedTexture || !supportedView)
 			{
 				EraseDescriptorIfTracked(destination);
@@ -1333,52 +1272,52 @@ namespace RenderPassResourceRegistry
 		thread_local std::vector<DescriptorRecord> fallbackDescriptors;
 		DescriptorCopySegment pendingSegment{};
 		const auto propagatePendingSegment = [&]()
-			{
-				if (!pendingSegment.descriptorCount)
-					return;
+		{
+			if (!pendingSegment.descriptorCount)
+				return;
 
-				ResolveDescriptorCopySegment(pendingSegment, descriptorIncrementSize);
-				const bool segmentMayContainTracked = DescriptorRangeMayContainTracked(
-					pendingSegment.sourceStart,
-					pendingSegment.descriptorCount,
-					descriptorIncrementSize,
-					pendingSegment.sourceHeap,
-					pendingSegment.sourceFirstDescriptor) ||
-					DescriptorRangeMayContainTracked(
+			ResolveDescriptorCopySegment(pendingSegment, descriptorIncrementSize);
+			const bool segmentMayContainTracked = DescriptorRangeMayContainTracked(
+													  pendingSegment.sourceStart,
+													  pendingSegment.descriptorCount,
+													  descriptorIncrementSize,
+													  pendingSegment.sourceHeap,
+													  pendingSegment.sourceFirstDescriptor) ||
+												  DescriptorRangeMayContainTracked(
+													  pendingSegment.destinationStart,
+													  pendingSegment.descriptorCount,
+													  descriptorIncrementSize,
+													  pendingSegment.destinationHeap,
+													  pendingSegment.destinationFirstDescriptor);
+			if (segmentMayContainTracked)
+			{
+				inspectedTrackedDescriptors = true;
+				if (pendingSegment.sourceHeap && pendingSegment.destinationHeap)
+				{
+					CopyHeapDescriptorRange(pendingSegment);
+				}
+				else
+				{
+					fallbackDescriptors.clear();
+					AppendDescriptorRange(
+						pendingSegment.sourceStart,
+						pendingSegment.descriptorCount,
+						descriptorIncrementSize,
+						pendingSegment.sourceHeap,
+						pendingSegment.sourceFirstDescriptor,
+						fallbackDescriptors);
+					WriteDescriptorRange(
 						pendingSegment.destinationStart,
 						pendingSegment.descriptorCount,
 						descriptorIncrementSize,
 						pendingSegment.destinationHeap,
-						pendingSegment.destinationFirstDescriptor);
-				if (segmentMayContainTracked)
-				{
-					inspectedTrackedDescriptors = true;
-					if (pendingSegment.sourceHeap && pendingSegment.destinationHeap)
-					{
-						CopyHeapDescriptorRange(pendingSegment);
-					}
-					else
-					{
-						fallbackDescriptors.clear();
-						AppendDescriptorRange(
-							pendingSegment.sourceStart,
-							pendingSegment.descriptorCount,
-							descriptorIncrementSize,
-							pendingSegment.sourceHeap,
-							pendingSegment.sourceFirstDescriptor,
-							fallbackDescriptors);
-						WriteDescriptorRange(
-							pendingSegment.destinationStart,
-							pendingSegment.descriptorCount,
-							descriptorIncrementSize,
-							pendingSegment.destinationHeap,
-							pendingSegment.destinationFirstDescriptor,
-							fallbackDescriptors,
-							0);
-					}
+						pendingSegment.destinationFirstDescriptor,
+						fallbackDescriptors,
+						0);
 				}
-				pendingSegment = {};
-			};
+			}
+			pendingSegment = {};
+		};
 
 		UINT destinationRangeIndex = 0;
 		UINT sourceRangeIndex = 0;
@@ -1386,8 +1325,12 @@ namespace RenderPassResourceRegistry
 		UINT sourceOffset = 0;
 		while (destinationRangeIndex < destinationRangeCount && sourceRangeIndex < sourceRangeCount)
 		{
-			const UINT destinationRangeSize = destinationRangeSizes ? destinationRangeSizes[destinationRangeIndex] : 1;
-			const UINT sourceRangeSize = sourceRangeSizes ? sourceRangeSizes[sourceRangeIndex] : 1;
+			UINT destinationRangeSize = 1;
+			UINT sourceRangeSize = 1;
+			if (destinationRangeSizes)
+				destinationRangeSize = destinationRangeSizes[destinationRangeIndex];
+			if (sourceRangeSizes)
+				sourceRangeSize = sourceRangeSizes[sourceRangeIndex];
 			const UINT copyCount = (std::min)(
 				destinationRangeSize - destinationOffset,
 				sourceRangeSize - sourceOffset);
@@ -1400,19 +1343,19 @@ namespace RenderPassResourceRegistry
 					sourceRangeStarts[sourceRangeIndex].ptr +
 					static_cast<SIZE_T>(sourceOffset) * descriptorIncrementSize;
 				const bool continuesPendingSegment = pendingSegment.descriptorCount &&
-					pendingSegment.descriptorCount <= UINT_MAX - copyCount &&
-					pendingSegment.destinationStart +
-					static_cast<SIZE_T>(pendingSegment.descriptorCount) * descriptorIncrementSize ==
-					destinationStart &&
-					pendingSegment.sourceStart +
-					static_cast<SIZE_T>(pendingSegment.descriptorCount) * descriptorIncrementSize ==
-					sourceStart;
+													 pendingSegment.descriptorCount <= UINT_MAX - copyCount &&
+													 pendingSegment.destinationStart +
+															 static_cast<SIZE_T>(pendingSegment.descriptorCount) * descriptorIncrementSize ==
+														 destinationStart &&
+													 pendingSegment.sourceStart +
+															 static_cast<SIZE_T>(pendingSegment.descriptorCount) * descriptorIncrementSize ==
+														 sourceStart;
 				if (continuesPendingSegment)
 					pendingSegment.descriptorCount += copyCount;
 				else
 				{
 					propagatePendingSegment();
-					pendingSegment = { destinationStart, sourceStart, copyCount };
+					pendingSegment = {destinationStart, sourceStart, copyCount};
 				}
 			}
 
@@ -1445,14 +1388,14 @@ namespace RenderPassResourceRegistry
 		DescriptorCopySegment segment{
 			destinationStart.ptr,
 			sourceStart.ptr,
-			descriptorCount };
+			descriptorCount};
 		ResolveDescriptorCopySegment(segment, descriptorIncrementSize);
 		if (!DescriptorRangeMayContainTracked(
-			segment.sourceStart,
-			segment.descriptorCount,
-			descriptorIncrementSize,
-			segment.sourceHeap,
-			segment.sourceFirstDescriptor) &&
+				segment.sourceStart,
+				segment.descriptorCount,
+				descriptorIncrementSize,
+				segment.sourceHeap,
+				segment.sourceFirstDescriptor) &&
 			!DescriptorRangeMayContainTracked(
 				segment.destinationStart,
 				segment.descriptorCount,
@@ -1514,7 +1457,7 @@ namespace RenderPassResourceRegistry
 		for (; descriptorCount < maximumDescriptors; ++descriptorCount)
 		{
 			const SIZE_T descriptor = firstDescriptor.ptr +
-				static_cast<SIZE_T>(descriptorCount) * descriptorIncrementSize;
+									  static_cast<SIZE_T>(descriptorCount) * descriptorIncrementSize;
 			if (!ReadDescriptorRecord(descriptor))
 				break;
 		}
@@ -1612,17 +1555,16 @@ namespace RenderPassResourceRegistry
 		uint32_t inspectedDescriptorCount = 0;
 		for (const DescriptorRangeLayout& range : parameter.ranges)
 		{
-			const uint64_t availableDescriptorCount = range.descriptorCount == UINT_MAX
-				? maximumDescriptors - inspectedDescriptorCount
-				: range.descriptorCount;
-			const uint32_t descriptorsToInspect = static_cast<uint32_t>((std::min<uint64_t>)(
-				availableDescriptorCount,
-				maximumDescriptors - inspectedDescriptorCount));
+			uint64_t availableDescriptorCount = range.descriptorCount;
+			if (range.descriptorCount == UINT_MAX)
+				availableDescriptorCount = maximumDescriptors - inspectedDescriptorCount;
+			const uint32_t descriptorsToInspect = static_cast<uint32_t>((std::min<uint64_t>)(availableDescriptorCount,
+																							 maximumDescriptors - inspectedDescriptorCount));
 			for (uint32_t rangeDescriptorIndex = 0; rangeDescriptorIndex < descriptorsToInspect; ++rangeDescriptorIndex)
 			{
 				const uint32_t tableDescriptorIndex = range.tableOffset + rangeDescriptorIndex;
 				const SIZE_T cpuHandle = tableStart.ptr +
-					static_cast<SIZE_T>(tableDescriptorIndex) * descriptorIncrementSize;
+										 static_cast<SIZE_T>(tableDescriptorIndex) * descriptorIncrementSize;
 				const DescriptorRecord descriptor = ReadDescriptorRecord(cpuHandle);
 				if (descriptor)
 				{
@@ -1660,8 +1602,8 @@ namespace RenderPassResourceRegistry
 			return false;
 
 		for (UINT parameterIndex = 0;
-			parameterIndex < rootSignatureIt->second.parameters.size();
-			++parameterIndex)
+			 parameterIndex < rootSignatureIt->second.parameters.size();
+			 ++parameterIndex)
 		{
 			const RootParameterLayout& parameter = rootSignatureIt->second.parameters[parameterIndex];
 			if (parameter.type != D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE || parameter.ranges.empty())
@@ -1670,14 +1612,14 @@ namespace RenderPassResourceRegistry
 			DescriptorTableLayout table{};
 			table.rootParameterIndex = parameterIndex;
 			table.shaderVisibility = parameter.shaderVisibility;
-			table.heapType = parameter.ranges.front().type == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER
-				? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER
-				: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+			table.heapType = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+			if (parameter.ranges.front().type == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER)
+				table.heapType = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
 			for (const DescriptorRangeLayout& range : parameter.ranges)
 			{
-				const UINT rangeCount = range.descriptorCount == UINT_MAX
-					? maximumUnboundedDescriptors
-					: range.descriptorCount;
+				UINT rangeCount = range.descriptorCount;
+				if (range.descriptorCount == UINT_MAX)
+					rangeCount = maximumUnboundedDescriptors;
 				table.containsUnboundedRange = table.containsUnboundedRange || range.descriptorCount == UINT_MAX;
 				if (range.tableOffset <= UINT_MAX - rangeCount)
 					table.descriptorCount = (std::max)(table.descriptorCount, range.tableOffset + rangeCount);
@@ -1700,13 +1642,13 @@ namespace RenderPassResourceRegistry
 		outLocation = {};
 		std::vector<DescriptorBindingLocation> locations;
 		if (!GetDescriptorBindingCandidates(
-			rootSignature,
-			rangeType,
-			shaderRegister,
-			registerSpace,
-			maximumUnboundedDescriptors,
-			shaderVisibility,
-			locations))
+				rootSignature,
+				rangeType,
+				shaderRegister,
+				registerSpace,
+				maximumUnboundedDescriptors,
+				shaderVisibility,
+				locations))
 		{
 			return false;
 		}
@@ -1733,8 +1675,8 @@ namespace RenderPassResourceRegistry
 			return false;
 
 		for (UINT parameterIndex = 0;
-			parameterIndex < rootSignatureIt->second.parameters.size();
-			++parameterIndex)
+			 parameterIndex < rootSignatureIt->second.parameters.size();
+			 ++parameterIndex)
 		{
 			const RootParameterLayout& parameter = rootSignatureIt->second.parameters[parameterIndex];
 			const bool exactVisibility = parameter.shaderVisibility == shaderVisibility;
@@ -1747,9 +1689,9 @@ namespace RenderPassResourceRegistry
 			bool tableContainsUnboundedRange = false;
 			for (const DescriptorRangeLayout& range : parameter.ranges)
 			{
-				const UINT rangeCount = range.descriptorCount == UINT_MAX
-					? maximumUnboundedDescriptors
-					: range.descriptorCount;
+				UINT rangeCount = range.descriptorCount;
+				if (range.descriptorCount == UINT_MAX)
+					rangeCount = maximumUnboundedDescriptors;
 				tableContainsUnboundedRange = tableContainsUnboundedRange || range.descriptorCount == UINT_MAX;
 				if (range.tableOffset <= UINT_MAX - rangeCount)
 					tableDescriptorCount = (std::max)(tableDescriptorCount, range.tableOffset + rangeCount);
@@ -1764,9 +1706,9 @@ namespace RenderPassResourceRegistry
 				}
 
 				const UINT registerOffset = shaderRegister - range.baseShaderRegister;
-				const UINT availableCount = range.descriptorCount == UINT_MAX
-					? maximumUnboundedDescriptors
-					: range.descriptorCount;
+				UINT availableCount = range.descriptorCount;
+				if (range.descriptorCount == UINT_MAX)
+					availableCount = maximumUnboundedDescriptors;
 				if (registerOffset >= availableCount)
 					continue;
 
@@ -1778,9 +1720,9 @@ namespace RenderPassResourceRegistry
 				location.tableOffset = range.tableOffset + registerOffset;
 				location.shaderRegister = shaderRegister;
 				location.registerSpace = registerSpace;
-				location.heapType = rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER
-					? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER
-					: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+				location.heapType = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+				if (rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER)
+					location.heapType = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
 				location.shaderVisibility = parameter.shaderVisibility;
 				location.descriptorCount = tableDescriptorCount;
 				location.tableContainsUnboundedRange = tableContainsUnboundedRange;
@@ -1788,20 +1730,17 @@ namespace RenderPassResourceRegistry
 			}
 		}
 
-		// Prefer stage-specific tables, but retain ALL-visible alternatives. Different
-		// PSO variants can legally activate a different compatible root parameter.
+		//Prefer stage-specific tables, but retain ALL-visible alternatives. Different
+		//PSO variants can legally activate a different compatible root parameter.
 		std::stable_sort(outLocations.begin(), outLocations.end(), [&](const auto& left, const auto& right)
-			{
+						 {
 				const bool leftExact = left.shaderVisibility == shaderVisibility;
 				const bool rightExact = right.shaderVisibility == shaderVisibility;
-				return leftExact && !rightExact;
-			});
+				return leftExact && !rightExact; });
 		outLocations.erase(
 			std::unique(outLocations.begin(), outLocations.end(), [](const auto& left, const auto& right)
-				{
-					return left.rootParameterIndex == right.rootParameterIndex &&
-						left.tableOffset == right.tableOffset;
-				}),
+						{ return left.rootParameterIndex == right.rootParameterIndex &&
+								 left.tableOffset == right.tableOffset; }),
 			outLocations.end());
 		return !outLocations.empty();
 	}
@@ -1827,8 +1766,8 @@ namespace RenderPassResourceRegistry
 		bool ambiguousMatch = false;
 		int bestVisibilityRank = -1;
 		for (UINT parameterIndex = 0;
-			parameterIndex < rootSignatureIt->second.parameters.size();
-			++parameterIndex)
+			 parameterIndex < rootSignatureIt->second.parameters.size();
+			 ++parameterIndex)
 		{
 			const RootParameterLayout& parameter = rootSignatureIt->second.parameters[parameterIndex];
 			const bool exactVisibility = parameter.shaderVisibility == shaderVisibility;
@@ -1836,7 +1775,9 @@ namespace RenderPassResourceRegistry
 			if (parameter.type != D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE ||
 				(!exactVisibility && !allStagesVisibility))
 				continue;
-			const int visibilityRank = exactVisibility ? 2 : 1;
+			int visibilityRank = 1;
+			if (exactVisibility)
+				visibilityRank = 2;
 			if (visibilityRank < bestVisibilityRank)
 				continue;
 
@@ -1844,9 +1785,9 @@ namespace RenderPassResourceRegistry
 			bool tableContainsUnboundedRange = false;
 			for (const DescriptorRangeLayout& range : parameter.ranges)
 			{
-				const UINT rangeCount = range.descriptorCount == UINT_MAX
-					? maximumUnboundedDescriptors
-					: range.descriptorCount;
+				UINT rangeCount = range.descriptorCount;
+				if (range.descriptorCount == UINT_MAX)
+					rangeCount = maximumUnboundedDescriptors;
 				tableContainsUnboundedRange = tableContainsUnboundedRange || range.descriptorCount == UINT_MAX;
 				if (range.tableOffset <= UINT_MAX - rangeCount)
 					tableDescriptorCount = (std::max)(tableDescriptorCount, range.tableOffset + rangeCount);
@@ -1858,14 +1799,14 @@ namespace RenderPassResourceRegistry
 					continue;
 
 				const UINT registerOffset = shaderRegister - range.baseShaderRegister;
-				const UINT availableCount = range.descriptorCount == UINT_MAX
-					? maximumUnboundedDescriptors
-					: range.descriptorCount;
+				UINT availableCount = range.descriptorCount;
+				if (range.descriptorCount == UINT_MAX)
+					availableCount = maximumUnboundedDescriptors;
 				if (registerOffset >= availableCount)
 					continue;
 
-				// A register repeated in multiple spaces is ambiguous. The caller must
-				// require an explicit space instead of risking the wrong game resource.
+				//A register repeated in multiple spaces is ambiguous. The caller must
+				//require an explicit space instead of risking the wrong game resource.
 				if (visibilityRank > bestVisibilityRank)
 				{
 					foundMatch = false;
@@ -1885,9 +1826,9 @@ namespace RenderPassResourceRegistry
 				outLocation.tableOffset = range.tableOffset + registerOffset;
 				outLocation.shaderRegister = shaderRegister;
 				outLocation.registerSpace = range.registerSpace;
-				outLocation.heapType = rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER
-					? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER
-					: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+				outLocation.heapType = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+				if (rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER)
+					outLocation.heapType = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
 				outLocation.shaderVisibility = parameter.shaderVisibility;
 				outLocation.descriptorCount = tableDescriptorCount;
 				outLocation.tableContainsUnboundedRange = tableContainsUnboundedRange;
@@ -1896,4 +1837,4 @@ namespace RenderPassResourceRegistry
 
 		return foundMatch && !ambiguousMatch;
 	}
-}
+} //namespace RenderPassResourceRegistry

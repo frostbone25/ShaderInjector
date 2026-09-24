@@ -20,4 +20,4 @@ namespace HookD3D12
 
 		Original_SetComputeRoot32BitConstants(commandList, rootParameterIndex, valueCount, values, destinationOffset);
 	}
-}
+} //namespace HookD3D12

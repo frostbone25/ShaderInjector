@@ -39,7 +39,7 @@ namespace FPSCounter
 		gFramesSinceLastSample++;
 		const double elapsedSeconds = (double)(now.QuadPart - gLastPerformanceCounterSample.QuadPart) / (double)gPerformanceCounterFrequency.QuadPart;
 
-		// Sample over a short window instead of every frame so the displayed value stays readable.
+		//Sample over a short window instead of every frame so the displayed value stays readable.
 		if (elapsedSeconds >= 0.5)
 		{
 			gCurrentFramesPerSecond = (double)gFramesSinceLastSample / elapsedSeconds;
@@ -48,4 +48,4 @@ namespace FPSCounter
 			gLastPerformanceCounterSample = now;
 		}
 	}
-}
+} //namespace FPSCounter

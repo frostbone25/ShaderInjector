@@ -16,8 +16,8 @@ namespace HookD3D12
 	{
 		Original_CreateShaderResourceView(device, resource, description, destination);
 
-		if (Globals::gShaderInjectorEnabled && 
-			!IsInsideRenderPassInjection() && 
+		if (Globals::gShaderInjectorEnabled &&
+			!IsInsideRenderPassInjection() &&
 			RenderPassRuntime::IsDescriptorRegistryTrackingRequired())
 		{
 			PerformanceMetrics::ScopedTimer registrationTimer(PerformanceMetrics::Timing::RegisterShaderResourceView, 64);
@@ -29,4 +29,4 @@ namespace HookD3D12
 				RenderPassRuntime::IsResourceTrackingRequired() || RenderPassRuntime::IsGameTextureDescriptorTrackingRequired());
 		}
 	}
-}
+} //namespace HookD3D12

@@ -55,7 +55,7 @@ namespace DatabaseShaderConfigurations
 				return result;
 			}
 
-			pendingWrites.push_back({sourcePath, sourcePath + ".shaderconfig.tmp", std::move(rewrittenSource) });
+			pendingWrites.push_back({sourcePath, sourcePath + ".shaderconfig.tmp", std::move(rewrittenSource)});
 		}
 
 		for (const PendingWrite& pendingWrite : pendingWrites)
@@ -95,4 +95,4 @@ namespace DatabaseShaderConfigurations
 		ShaderInjectorIO::WriteToLogFileSuccess("DatabaseShaderConfigurations->ApplyChanges: properties = " + std::to_string(result.propertyCount) + " sources = " + std::to_string(result.sourceFileCount));
 		return result;
 	}
-}
+} //namespace DatabaseShaderConfigurations

@@ -1,4 +1,4 @@
-// Shader target actions that change package blobs or persisted targets.
+//Shader target actions that change package blobs or persisted targets.
 #include <mutex>
 #include <string>
 #include <vector>
@@ -13,9 +13,6 @@
 
 namespace HookD3D12
 {
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| COMPILE SHADER REPLACEMENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| COMPILE SHADER REPLACEMENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| COMPILE SHADER REPLACEMENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
 
 	//using the selected index of currently selected shader replacement...
 	//find the source HLSL shader file it is pointing to and compile it into a ready to use shader bytecode blob
@@ -26,7 +23,9 @@ namespace HookD3D12
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
 		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
-		replacement.modifiedShaderBlobPath = modifiedShader ? modifiedShader->compiledBlobPath : "";
+		replacement.modifiedShaderBlobPath.clear();
+		if (modifiedShader)
+			replacement.modifiedShaderBlobPath = modifiedShader->compiledBlobPath;
 
 		if (!modifiedShader)
 		{
@@ -57,10 +56,6 @@ namespace HookD3D12
 		return true;
 	}
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| RELOAD SHADER TARGETS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| RELOAD SHADER TARGETS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| RELOAD SHADER TARGETS |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
 	//using the selected index of currently selected shader replacement...
 	//"reload" the shader replacement by loading compiled shader blobs from disk
 	bool ReloadShaderTarget(int replacementIndex)
@@ -70,7 +65,9 @@ namespace HookD3D12
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
 		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
-		replacement.modifiedShaderBlobPath = modifiedShader ? modifiedShader->compiledBlobPath : "";
+		replacement.modifiedShaderBlobPath.clear();
+		if (modifiedShader)
+			replacement.modifiedShaderBlobPath = modifiedShader->compiledBlobPath;
 
 		if (replacementIndex >= (int)gLoadedShaderTargetBlobs.size())
 			gLoadedShaderTargetBlobs.resize(gLoadedShaderTargets.size());
@@ -104,10 +101,6 @@ namespace HookD3D12
 		return !gLoadedShaderTargetBlobs[replacementIndex].empty();
 	}
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SAVE SHADER REPLACEMENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SAVE SHADER REPLACEMENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| SAVE SHADER REPLACEMENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
 	//using the selected index of currently selected shader replacement...
 	//save any changes made to the shader replacement to the disk
 	bool SaveShaderTarget(int replacementIndex)
@@ -132,10 +125,6 @@ namespace HookD3D12
 		return true;
 	}
 
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| DELETE SHADER REPLACEMENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| DELETE SHADER REPLACEMENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
-	//||||||||||||||||||||||||||||||||||||||||||||||||||||| DELETE SHADER REPLACEMENT |||||||||||||||||||||||||||||||||||||||||||||||||||||
-
 	//using the selected index of currently selected shader replacement...
 	//delete a shader replacement from the disk (and memory)!
 	bool DeleteShaderTarget(int replacementIndex)
@@ -158,14 +147,14 @@ namespace HookD3D12
 		}
 
 		ShaderInjectorGUI::WriteToRuntimeLog("DatabaseShaderTargets->DeleteShaderTarget: Deleted shader replacement: " + replacement.name);
-		
+
 		//we need to refresh the list so we are up to date with the shader targets that exist in the folder
 		RefreshLoadedShaderTargets();
-		
+
 		//IMPORTANT: let the rest of the injector know that our shader replacement is dirty (needs to be updated)
 		MarkShaderTargetApplyDirty();
 
 		return true;
 	}
 
-}
+} //namespace HookD3D12

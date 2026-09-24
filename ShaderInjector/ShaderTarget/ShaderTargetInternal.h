@@ -8,4 +8,4 @@ namespace ShaderTarget::Internal
 {
 	void MakeReplacementPortableForDisk(ShaderTargetDisk& replacement);
 	void ResolveReplacementPathsFromJsonLocation(ShaderTargetDisk& replacement, const std::string& jsonPath);
-}
+} //namespace ShaderTarget::Internal

@@ -50,7 +50,9 @@ namespace ShaderInjectorInternalResources
 
 			if (!markerPixelCompiled || !nullPixelCompiled || !markerComputeCompiled)
 			{
-				ShaderInjectorIO::WriteToLogFileError("ShaderInjectorInternalResources->RecompileAndReload: compilation failed" " pixelProfile=" + pixelShaderProfile + " computeProfile=" + computeShaderProfile);
+				ShaderInjectorIO::WriteToLogFileError("ShaderInjectorInternalResources->RecompileAndReload: compilation failed"
+													  " pixelProfile=" +
+													  pixelShaderProfile + " computeProfile=" + computeShaderProfile);
 				return false;
 			}
 
@@ -69,15 +71,17 @@ namespace ShaderInjectorInternalResources
 				return false;
 			}
 
-		// Replace the live blobs only after every compile and load succeeds. This
-		// prevents a partial shader-model change from leaving the hooks out of sync.
+			//Replace the live blobs only after every compile and load succeeds. This
+			//prevents a partial shader-model change from leaving the hooks out of sync.
 			Globals::markerPixelShaderBlob.swap(markerPixelShaderBlob);
 			Globals::nullPixelShaderBlob.swap(nullPixelShaderBlob);
 			Globals::markerComputeShaderBlob.swap(markerComputeShaderBlob);
-			ShaderInjectorIO::WriteToLogFileSuccess("ShaderInjectorInternalResources->RecompileAndReload: applied internal shaders" " pixelProfile=" + pixelShaderProfile + " computeProfile=" + computeShaderProfile);
+			ShaderInjectorIO::WriteToLogFileSuccess("ShaderInjectorInternalResources->RecompileAndReload: applied internal shaders"
+													" pixelProfile=" +
+													pixelShaderProfile + " computeProfile=" + computeShaderProfile);
 			return true;
 		}
-	}
+	} //namespace
 
 	bool Initialize()
 	{
@@ -89,4 +93,4 @@ namespace ShaderInjectorInternalResources
 	{
 		return CompileAndLoadInternalShaders();
 	}
-}
+} //namespace ShaderInjectorInternalResources

@@ -12,10 +12,10 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_SetDescriptorHeaps(ID3D12GraphicsCommandList* commandList, UINT descriptorHeapCount, ID3D12DescriptorHeap* const* descriptorHeaps)
 	{
-		if (Globals::gShaderInjectorEnabled && 
+		if (Globals::gShaderInjectorEnabled &&
 			RenderPassRuntime::IsDescriptorTableTrackingRequired() &&
-			(RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) || 
-			RenderPassRuntime::IsPipelineExecutionTrackingRequired(true)) &&
+			(RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) ||
+			 RenderPassRuntime::IsPipelineExecutionTrackingRequired(true)) &&
 			!IsInsideRenderPassInjection())
 		{
 			RenderPassRuntime::TrackDescriptorHeaps(commandList, descriptorHeapCount, descriptorHeaps);
@@ -23,4 +23,4 @@ namespace HookD3D12
 
 		Original_SetDescriptorHeaps(commandList, descriptorHeapCount, descriptorHeaps);
 	}
-}
+} //namespace HookD3D12

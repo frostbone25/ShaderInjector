@@ -10,4 +10,4 @@ namespace RenderPassGraph
 		Visiting,
 		Complete,
 	};
-}
+} //namespace RenderPassGraph

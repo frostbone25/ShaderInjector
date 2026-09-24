@@ -11,8 +11,8 @@ namespace RenderPass
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(GameResourceViewType,
-	{
-		{ GameResourceViewType::ShaderResource, "ShaderResource" },
-		{ GameResourceViewType::UnorderedAccess, "UnorderedAccess" },
-	})
-}
+								 {
+									 {GameResourceViewType::ShaderResource, "ShaderResource"},
+									 {GameResourceViewType::UnorderedAccess, "UnorderedAccess"},
+								 })
+} //namespace RenderPass

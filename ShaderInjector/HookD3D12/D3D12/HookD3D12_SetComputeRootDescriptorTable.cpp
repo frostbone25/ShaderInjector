@@ -20,4 +20,4 @@ namespace HookD3D12
 
 		Original_SetComputeRootDescriptorTable(commandList, rootParameterIndex, descriptorHandle);
 	}
-}
+} //namespace HookD3D12

@@ -123,4 +123,4 @@ namespace ShaderInjectorIO
 
 	//prepare the directories and settings the rest of the injector relies on.
 	bool Initialize();
-}
+} //namespace ShaderInjectorIO

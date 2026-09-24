@@ -1,5 +1,6 @@
 //ShaderInjectorGUI.cpp
 #include "ShaderInjectorGUI.h"
+#include "GUI/ModifiedShaderRecompileResult.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -51,14 +52,6 @@ namespace ShaderInjectorGUI
 
 		return false;
 	}
-
-	struct ModifiedShaderRecompileResult
-	{
-		bool compiled = false;
-		int linkedShaderTargetCount = 0;
-		int reloadedShaderTargetCount = 0;
-		int skippedInactiveShaderTargetCount = 0;
-	};
 
 	ModifiedShaderRecompileResult RecompileModifiedShaderAndReloadLinkedTargets(const std::string& modifiedShaderId)
 	{
@@ -137,9 +130,10 @@ namespace ShaderInjectorGUI
 			batchResult.skippedInactiveShaderTargetCount += result.skippedInactiveShaderTargetCount;
 		}
 
-		const std::string actionName = includeInactivePackages
-			? "Force Recompile All Modified Shaders"
-			: "Recompile All Active Modified Shaders";
+		std::string actionName = "Recompile All Active Modified Shaders";
+
+		if (includeInactivePackages)
+			actionName = "Force Recompile All Modified Shaders";
 
 		const std::string summary =
 			actionName +
@@ -155,9 +149,7 @@ namespace ShaderInjectorGUI
 			std::to_string(batchResult.skippedInactiveShaderTargetCount);
 
 		if (batchResult.failedPackageCount == 0 &&
-			batchResult.reloadedShaderTargetCount +
-			batchResult.skippedInactiveShaderTargetCount ==
-			batchResult.linkedShaderTargetCount)
+			batchResult.reloadedShaderTargetCount + batchResult.skippedInactiveShaderTargetCount == batchResult.linkedShaderTargetCount)
 		{
 			WriteToRuntimeLogSuccess(summary);
 		}
@@ -169,13 +161,11 @@ namespace ShaderInjectorGUI
 		return batchResult;
 	}
 
-
-	void UI_ModifiedShaders()
+	void DrawModifiedShaders()
 	{
 		DatabaseModifiedShaders::EnsureModifiedShadersLoaded();
 		const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
-		const std::string modifiedShadersHeader =
-			"Modified Shaders: " + std::to_string(modifiedShaders.size()) + "###ModifiedShaders";
+		const std::string modifiedShadersHeader = "Modified Shaders: " + std::to_string(modifiedShaders.size()) + "###ModifiedShaders";
 
 		if (ImGui::CollapsingHeader(modifiedShadersHeader.c_str()))
 		{
@@ -183,11 +173,10 @@ namespace ShaderInjectorGUI
 			ImGui::Spacing();
 
 			ImGui::InputTextMultiline("##ModifiedShadersNote",
-				const_cast<char*>(noteModifiedShadersText),
-				strlen(noteModifiedShadersText) + 1,
-				ImVec2(-FLT_MIN, 0), // -FLT_MIN width = stretch to window edge, 0 height = auto
-				ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap
-			);
+									  const_cast<char*>(noteModifiedShadersText),
+									  strlen(noteModifiedShadersText) + 1,
+									  ImVec2(-FLT_MIN, 0), //-FLT_MIN width = stretch to window edge, 0 height = auto
+									  ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
 
 			if (!HookD3D12::gLoadedShaderTargetsOnce)
 				HookD3D12::RefreshLoadedShaderTargets();
@@ -379,7 +368,6 @@ namespace ShaderInjectorGUI
 			if (ImGui::Button("Delete##ModifiedShader"))
 				ImGui::OpenPopup("Delete Modified Shader?");
 
-
 			bool deletedModifiedShader = false;
 
 			if (ImGui::BeginPopupModal("Delete Modified Shader?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
@@ -444,4 +432,4 @@ namespace ShaderInjectorGUI
 			ImGui::Unindent(indentSpace);
 		}
 	}
-}
+} //namespace ShaderInjectorGUI

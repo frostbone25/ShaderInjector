@@ -88,4 +88,4 @@ namespace ShaderInjectorGUI
 		std::lock_guard<std::mutex> lock(gRuntimeLogMutex);
 		return runtimeLogText;
 	}
-}
+} //namespace ShaderInjectorGUI

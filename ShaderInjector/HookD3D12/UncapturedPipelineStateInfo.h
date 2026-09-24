@@ -15,7 +15,7 @@ namespace HookD3D12
 	struct UncapturedPipelineStateInfo
 	{
 		ID3D12PipelineState* pipelineState = nullptr;
-		// Keep the exact verified variant for render passes on warmed-cache runs.
+		//Keep the exact verified variant for render passes on warmed-cache runs.
 		std::shared_ptr<const PipelineStateInfo> rebuildTemplate;
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> rebuildRootSignature;
 		uint64_t cachedBlobHash = 0;
@@ -32,4 +32,4 @@ namespace HookD3D12
 		uint8_t shaderTargetApplyFailureCount = 0;
 		bool shaderTargetApplyRetryQueued = false;
 	};
-}
+} //namespace HookD3D12

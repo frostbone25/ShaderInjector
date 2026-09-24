@@ -10,4 +10,4 @@ namespace HookD3D12
 		IDXGISwapChain3* swapChain = nullptr;
 		ID3D12CommandQueue* commandQueue = nullptr;
 	};
-}
+} //namespace HookD3D12

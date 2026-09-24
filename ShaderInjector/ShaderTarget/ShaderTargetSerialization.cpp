@@ -166,4 +166,4 @@ namespace ShaderTarget
 		SHADER_TARGET_READ_FIELD(pipelineTemplates);
 #undef SHADER_TARGET_READ_FIELD
 	}
-}
+} //namespace ShaderTarget

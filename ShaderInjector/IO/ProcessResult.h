@@ -16,4 +16,4 @@ namespace ShaderInjectorIO
 			return processLaunched && processExitCode == 0;
 		}
 	};
-}
+} //namespace ShaderInjectorIO

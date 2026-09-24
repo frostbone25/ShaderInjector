@@ -15,12 +15,12 @@ namespace RenderPass
 	};
 
 	NLOHMANN_JSON_SERIALIZE_ENUM(ResourceAccess,
-	{
-		{ ResourceAccess::ShaderResource, "ShaderResource" },
-		{ ResourceAccess::UnorderedAccess, "UnorderedAccess" },
-		{ ResourceAccess::RenderTarget, "RenderTarget" },
-		{ ResourceAccess::DepthStencil, "DepthStencil" },
-		{ ResourceAccess::CopySource, "CopySource" },
-		{ ResourceAccess::CopyDestination, "CopyDestination" },
-	})
-}
+								 {
+									 {ResourceAccess::ShaderResource, "ShaderResource"},
+									 {ResourceAccess::UnorderedAccess, "UnorderedAccess"},
+									 {ResourceAccess::RenderTarget, "RenderTarget"},
+									 {ResourceAccess::DepthStencil, "DepthStencil"},
+									 {ResourceAccess::CopySource, "CopySource"},
+									 {ResourceAccess::CopyDestination, "CopyDestination"},
+								 })
+} //namespace RenderPass

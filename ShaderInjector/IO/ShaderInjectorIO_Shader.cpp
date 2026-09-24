@@ -1,16 +1,14 @@
 #include "ShaderInjectorIO.h"
+#include "LegacyShaderIncludeHandler.h"
 
 #include <filesystem>
 #include <fstream>
-#include <limits>
-#include <new>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #if defined(_WIN32)
-	#include <Windows.h>
-	#include <d3dcompiler.h>
+#include <Windows.h>
+#include <d3dcompiler.h>
 #endif
 
 #include "GUI/ShaderInjectorGUI.h"
@@ -44,7 +42,7 @@ namespace ShaderInjectorIO
 		const std::string dxilTextFilePath = PathToUTF8(disassemblyFilePath);
 
 		//write the disassembly beside the blob so each captured shader keeps its source and readable output together.
-		const ProcessResult processResult = RunProcess(shaderCompilerExecutablePath, { "-dumpbin", shaderBytecodeFilePath }, dxilTextFilePath);
+		const ProcessResult processResult = RunProcess(shaderCompilerExecutablePath, {"-dumpbin", shaderBytecodeFilePath}, dxilTextFilePath);
 
 		if (!processResult.Succeeded())
 		{
@@ -108,96 +106,6 @@ namespace ShaderInjectorIO
 		}
 
 #if defined(_WIN32)
-		class LegacyShaderIncludeHandler final : public ID3DInclude
-		{
-		private:
-			std::filesystem::path sourceDirectory;
-			std::filesystem::path sharedIncludesDirectory;
-			std::unordered_map<LPCVOID, std::filesystem::path> openFileDirectories;
-
-		public:
-			LegacyShaderIncludeHandler(std::filesystem::path sourceDirectoryPath, std::filesystem::path sharedIncludesDirectoryPath)
-				: sourceDirectory(std::move(sourceDirectoryPath)), sharedIncludesDirectory(std::move(sharedIncludesDirectoryPath))
-			{
-			}
-
-			~LegacyShaderIncludeHandler()
-			{
-				//release buffers still tracked in case the compiler did not close every include.
-				for (const auto& openIncludeFile : openFileDirectories)
-					delete[] static_cast<const char*>(openIncludeFile.first);
-			}
-
-			HRESULT STDMETHODCALLTYPE Open(D3D_INCLUDE_TYPE, LPCSTR fileName, LPCVOID parentIncludeData, LPCVOID* outputIncludeData, UINT* outputIncludeByteCount) override
-			{
-				if (!fileName || !outputIncludeData || !outputIncludeByteCount)
-					return E_INVALIDARG;
-
-				std::vector<std::filesystem::path> candidateIncludePaths;
-				const std::filesystem::path includePath = PathFromUTF8(fileName);
-
-				if (includePath.is_absolute())
-					candidateIncludePaths.push_back(includePath);
-				else
-				{
-					//relative includes first resolve beside their parent, then beside the shader, then in shared includes.
-					const auto parentIncludeDirectory = openFileDirectories.find(parentIncludeData);
-
-					if (parentIncludeDirectory != openFileDirectories.end())
-						candidateIncludePaths.push_back(parentIncludeDirectory->second / includePath);
-
-					candidateIncludePaths.push_back(sourceDirectory / includePath);
-					candidateIncludePaths.push_back(sharedIncludesDirectory / includePath);
-				}
-
-				for (const std::filesystem::path& candidateIncludePath : candidateIncludePaths)
-				{
-					std::ifstream includeFile(candidateIncludePath, std::ios::binary | std::ios::ate);
-
-					if (!includeFile.is_open())
-						continue;
-
-					const std::streamsize includeFileSize = includeFile.tellg();
-
-					if (includeFileSize < 0 || static_cast<uint64_t>(includeFileSize) > (std::numeric_limits<UINT>::max)())
-						continue;
-
-					includeFile.seekg(0, std::ios::beg);
-					size_t includeAllocationSize = 1;
-
-					if (includeFileSize > 0)
-						includeAllocationSize = static_cast<size_t>(includeFileSize);
-
-					//DXC expects an owned byte buffer and returns it to Close after compilation.
-					char* includeData = new (std::nothrow) char[includeAllocationSize];
-
-					if (!includeData)
-						return E_OUTOFMEMORY;
-
-					if (includeFileSize > 0 && !includeFile.read(includeData, includeFileSize))
-					{
-						delete[] includeData;
-						continue;
-					}
-
-					*outputIncludeData = includeData;
-					*outputIncludeByteCount = static_cast<UINT>(includeFileSize);
-					openFileDirectories[includeData] = candidateIncludePath.parent_path();
-					return S_OK;
-				}
-
-				return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
-			}
-
-			HRESULT STDMETHODCALLTYPE Close(LPCVOID includeData) override
-			{
-				openFileDirectories.erase(includeData);
-				delete[] static_cast<const char*>(includeData);
-				return S_OK;
-			}
-
-		};
-
 		using D3DCompileFromFileFunction = HRESULT(WINAPI*)(
 			LPCWSTR,
 			const D3D_SHADER_MACRO*,
@@ -312,7 +220,7 @@ namespace ShaderInjectorIO
 			return compilationSucceeded;
 		}
 #endif
-	}
+	} //namespace
 
 	//compile SM5 sources with the legacy compiler and newer shader models with DXC.
 	bool CompileSourceToDXILBlob(
@@ -345,29 +253,29 @@ namespace ShaderInjectorIO
 
 		if (UsesLegacyShaderCompiler(shaderProfile))
 		{
-			#if defined(_WIN32)
-				std::string compilerError;
+#if defined(_WIN32)
+			std::string compilerError;
 
-				if (!CompileShaderModel5(
+			if (!CompileShaderModel5(
 					shaderSourceFilePath,
 					shaderProfile,
 					entryPoint,
 					temporaryBlobFilePath,
 					compilerDiagnostics,
 					compilerError))
-				{
-					DeleteFileIfExists(temporaryBlobFilePath);
-					ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: legacy compiler failed: " + compilerError);
+			{
+				DeleteFileIfExists(temporaryBlobFilePath);
+				ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: legacy compiler failed: " + compilerError);
 
-					if (!compilerDiagnostics.empty())
-						ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath + " reported:\n" + compilerDiagnostics);
+				if (!compilerDiagnostics.empty())
+					ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath + " reported:\n" + compilerDiagnostics);
 
-					return false;
-				}
-			#else
-				ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: Shader Model 5 compilation is unavailable on this platform.");
 				return false;
-			#endif
+			}
+#else
+			ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: Shader Model 5 compilation is unavailable on this platform.");
+			return false;
+#endif
 		}
 		else
 		{
@@ -387,15 +295,14 @@ namespace ShaderInjectorIO
 				signaturePackingArgument = "-pack-optimized";
 
 			std::vector<std::string> shaderCompilerArguments =
-			{
-				"-T", shaderProfile,
-				"-E", entryPoint,
-				signaturePackingArgument,
-				"-I", shaderSourceDirectory,
-				"-I", modifiedShaderIncludesDirectory,
-				shaderSourceFilePath,
-				"-Fo", temporaryBlobFilePath
-			};
+				{
+					"-T", shaderProfile,
+					"-E", entryPoint,
+					signaturePackingArgument,
+					"-I", shaderSourceDirectory,
+					"-I", modifiedShaderIncludesDirectory,
+					shaderSourceFilePath,
+					"-Fo", temporaryBlobFilePath};
 
 			const ProcessResult processResult = RunProcess(shaderCompilerExecutablePath, shaderCompilerArguments, compilerOutputFilePath);
 			compilerDiagnostics = ReadCompilerDiagnostics(compilerOutputFilePath);
@@ -473,4 +380,4 @@ namespace ShaderInjectorIO
 		shaderBlobFile.seekg(0, std::ios::beg);
 		return static_cast<bool>(shaderBlobFile.read(reinterpret_cast<char*>(shaderBlobBytes.data()), shaderBlobFileSize));
 	}
-}
+} //namespace ShaderInjectorIO

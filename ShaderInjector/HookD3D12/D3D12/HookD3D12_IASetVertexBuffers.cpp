@@ -20,4 +20,4 @@ namespace HookD3D12
 
 		Original_IASetVertexBuffers(commandList, startSlot, viewCount, views);
 	}
-}
+} //namespace HookD3D12

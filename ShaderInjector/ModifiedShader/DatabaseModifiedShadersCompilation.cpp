@@ -18,13 +18,13 @@ namespace DatabaseModifiedShaders
 		static bool SemanticNamesEqual(const std::string& left, const std::string& right)
 		{
 			return left.size() == right.size() && std::equal(
-				left.begin(),
-				left.end(),
-				right.begin(),
-				[](unsigned char leftCharacter, unsigned char rightCharacter)
-				{
-					return std::tolower(leftCharacter) == std::tolower(rightCharacter);
-				});
+													  left.begin(),
+													  left.end(),
+													  right.begin(),
+													  [](unsigned char leftCharacter, unsigned char rightCharacter)
+													  {
+														  return std::tolower(leftCharacter) == std::tolower(rightCharacter);
+													  });
 		}
 
 		static bool SignatureLayoutsMatch(
@@ -34,7 +34,7 @@ namespace DatabaseModifiedShaders
 			if (expected.size() != candidate.size())
 				return false;
 
-			//match parameters by semantic name/index, then require the same register assignment and component layout. 
+			//match parameters by semantic name/index, then require the same register assignment and component layout.
 			//declaration order may differ.
 			for (const ShaderAnalysis::SignatureParameterDisk& expectedParameter : expected)
 			{
@@ -44,7 +44,7 @@ namespace DatabaseModifiedShaders
 					[&](const ShaderAnalysis::SignatureParameterDisk& parameter)
 					{
 						return SemanticNamesEqual(parameter.semanticName, expectedParameter.semanticName) &&
-							parameter.semanticIndex == expectedParameter.semanticIndex;
+							   parameter.semanticIndex == expectedParameter.semanticIndex;
 					});
 
 				if (candidateParameter == candidate.end() ||
@@ -67,10 +67,10 @@ namespace DatabaseModifiedShaders
 			const ShaderAnalysis::ShaderAnalysisDisk& candidate)
 		{
 			return expected.succeeded && candidate.succeeded &&
-				expected.shaderStage == candidate.shaderStage &&
-				SignatureLayoutsMatch(expected.inputParameters, candidate.inputParameters) &&
-				SignatureLayoutsMatch(expected.outputParameters, candidate.outputParameters) &&
-				SignatureLayoutsMatch(expected.patchConstantParameters, candidate.patchConstantParameters);
+				   expected.shaderStage == candidate.shaderStage &&
+				   SignatureLayoutsMatch(expected.inputParameters, candidate.inputParameters) &&
+				   SignatureLayoutsMatch(expected.outputParameters, candidate.outputParameters) &&
+				   SignatureLayoutsMatch(expected.patchConstantParameters, candidate.patchConstantParameters);
 		}
 
 		static bool PackageHasAnalyzedTargetInterface(const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
@@ -115,12 +115,16 @@ namespace DatabaseModifiedShaders
 				description += parameter.semanticName + std::to_string(parameter.semanticIndex) + "@r" + std::to_string(parameter.registerIndex);
 			}
 
-			return description.empty() ? "none" : description;
+			if (!description.empty())
+				return description;
+			return "none";
 		}
 
 		static std::string DescribeAnalysisError(const ShaderAnalysis::ShaderAnalysisDisk& analysis)
 		{
-			return analysis.error.empty() ? "none" : analysis.error;
+			if (!analysis.error.empty())
+				return analysis.error;
+			return "none";
 		}
 
 		bool AnalyzeCompiledBlob(
@@ -145,10 +149,10 @@ namespace DatabaseModifiedShaders
 			std::string compiledBlobPath = modifiedShader.compiledBlobPath;
 
 			if (!ShaderInjectorIO::CompileSourceToDXILBlob(
-				modifiedShader.sourcePath,
-				modifiedShader.shaderProfile,
-				modifiedShader.shaderEntryPoint,
-				compiledBlobPath))
+					modifiedShader.sourcePath,
+					modifiedShader.shaderProfile,
+					modifiedShader.shaderEntryPoint,
+					compiledBlobPath))
 			{
 				return false;
 			}
@@ -157,8 +161,8 @@ namespace DatabaseModifiedShaders
 			modifiedShader.compiledShaderAnalysis = {};
 
 			if (!ShaderInjectorIO::LoadDXILBlobFromDisk(
-				compiledBlobPath,
-				modifiedShader.compiledBlob) ||
+					compiledBlobPath,
+					modifiedShader.compiledBlob) ||
 				modifiedShader.compiledBlob.empty())
 			{
 				ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseModifiedShaders->CompileModifiedShader: compiled shader blob could not be loaded: " + compiledBlobPath);
@@ -186,13 +190,13 @@ namespace DatabaseModifiedShaders
 		{
 			std::string outputPath = candidatePath;
 			return ShaderInjectorIO::CompileSourceToDXILBlob(
-				modifiedShader.sourcePath,
-				modifiedShader.shaderProfile,
-				modifiedShader.shaderEntryPoint,
-				outputPath,
-				signaturePacking) &&
-				ShaderInjectorIO::LoadDXILBlobFromDisk(outputPath, outBlob) &&
-				AnalyzeCompiledBlob(outBlob, outAnalysis);
+					   modifiedShader.sourcePath,
+					   modifiedShader.shaderProfile,
+					   modifiedShader.shaderEntryPoint,
+					   outputPath,
+					   signaturePacking) &&
+				   ShaderInjectorIO::LoadDXILBlobFromDisk(outputPath, outBlob) &&
+				   AnalyzeCompiledBlob(outBlob, outAnalysis);
 		}
 
 		bool CompileModifiedShaderPackage(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
@@ -259,9 +263,9 @@ namespace DatabaseModifiedShaders
 					}
 				}
 
-				const std::string failureReason = prefixStableCompiled || optimizedCompiled
-					? "DXC produced shader bytecode, but no candidate has an interface compatible with the original game shader."
-					: "DXC did not produce a candidate that could be compiled and reflected.";
+				std::string failureReason = "DXC did not produce a candidate that could be compiled and reflected.";
+				if (prefixStableCompiled || optimizedCompiled)
+					failureReason = "DXC produced shader bytecode, but no candidate has an interface compatible with the original game shader.";
 
 				ShaderInjectorGUI::WriteToRuntimeLogError(
 					"DatabaseModifiedShaders->CompileModifiedShader: " + failureReason +
@@ -301,7 +305,7 @@ namespace DatabaseModifiedShaders
 
 			return true;
 		}
-	}
+	} //namespace Detail
 
 	bool CompileModifiedShader(const std::string& modifiedShaderId)
 	{
@@ -346,7 +350,7 @@ namespace DatabaseModifiedShaders
 		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 		const ShaderAnalysis::ShaderAnalysisDisk& targetAnalysis)
 	{
-		//preserve the injector's existing missing-blob fallback behavior. 
+		//preserve the injector's existing missing-blob fallback behavior.
 		//this check only rejects a blob that exists and is known to carry an incompatible stage interface.
 		if (modifiedShader.compiledBlob.empty())
 			return true;
@@ -355,6 +359,6 @@ namespace DatabaseModifiedShaders
 			return modifiedShader.compiledShaderInterfaceCompatible;
 
 		return modifiedShader.compiledShaderInterfaceCompatible &&
-			Detail::ShaderInterfaceLayoutsMatch(targetAnalysis, modifiedShader.compiledShaderAnalysis);
+			   Detail::ShaderInterfaceLayoutsMatch(targetAnalysis, modifiedShader.compiledShaderAnalysis);
 	}
-}
+} //namespace DatabaseModifiedShaders
