@@ -334,7 +334,6 @@
     <ClInclude Include="RenderPass\RuntimeDiagnostics.h" />
     <ClInclude Include="RenderPass\RuntimeResourceDefinitionDisk.h" />
     <ClInclude Include="RenderPass\SamplerStateDisk.h" />
-    <ClInclude Include="RenderPass\ShaderResourceReferenceDisk.h" />
     <ClInclude Include="RenderPass\ViewportPolicyDisk.h" />
     <ClInclude Include="ShaderAnalysis\ConstantBufferDisk.h" />
     <ClInclude Include="ShaderAnalysis\ConstantBufferVariableDisk.h" />

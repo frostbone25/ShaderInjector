@@ -248,7 +248,7 @@ namespace ShaderResource
 				return "Injector Runtime";
 			case ResourceOrigin::Disk:
 			default:
-				return "Offline / Disk";
+				return "Imported DDS";
 		}
 	}
 

@@ -44,8 +44,6 @@ namespace ShaderInjectorGUI
 	static std::string gRenderPassPendingDeletionId;
 	static std::string gRenderPassNameBufferId;
 	static char gRenderPassNameBuffer[256]{};
-	static std::string gSelectedRenderPassResourceOwnerId;
-	static size_t gSelectedRenderPassResourceIndex = 0;
 	static std::string gSelectedRuntimeResourceOwnerId;
 	static size_t gSelectedRuntimeResourceIndex = 0;
 	static std::string gSelectedLogicalInputOwnerId;
@@ -551,8 +549,10 @@ namespace ShaderInjectorGUI
 
 	void DrawRuntimeResources(RenderPass::RenderPassDisk& renderPass)
 	{
+		const std::string sectionLabel = "Runtime Textures: " + std::to_string(renderPass.runtimeResources.size()) + "###RenderPassRuntimeTextures";
+
 		if (!ImGui::TreeNodeEx(
-				"Runtime Textures##RenderPassRuntimeTextures",
+				sectionLabel.c_str(),
 				ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Framed))
 		{
 			return;
@@ -842,13 +842,10 @@ namespace ShaderInjectorGUI
 		std::string& selectedOwnerId,
 		size_t& selectedIndex)
 	{
-		const char* sectionId = "Inputs##RenderPassLogicalInputs";
-
-		if (outputs)
-			sectionId = "Outputs##RenderPassLogicalOutputs";
+		const std::string sectionLabel = (outputs ? "Outputs: " : "Inputs: ") + std::to_string(bindings.size()) + (outputs ? "###RenderPassLogicalOutputs" : "###RenderPassLogicalInputs");
 
 		if (!ImGui::TreeNodeEx(
-				sectionId,
+				sectionLabel.c_str(),
 				ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Framed))
 		{
 			return;
@@ -973,7 +970,7 @@ namespace ShaderInjectorGUI
 		ImGui::PushID(propertiesId);
 		const std::vector<ShaderResource::CatalogEntry> catalog = ShaderResourceCatalog::GetSnapshot();
 
-		if (!outputs && IsTextureCopyOperation(RenderPass::ResolvePassOperation(renderPass)))
+		if (!outputs)
 		{
 			ImGui::TextUnformatted("Origin");
 			ImGui::SameLine();
@@ -983,17 +980,43 @@ namespace ShaderInjectorGUI
 				const ShaderResource::ResourceOrigin origins[] = {
 					ShaderResource::ResourceOrigin::Game,
 					ShaderResource::ResourceOrigin::Runtime,
+					ShaderResource::ResourceOrigin::Disk,
 				};
 
 				for (ShaderResource::ResourceOrigin origin : origins)
 				{
+					if (IsTextureCopyOperation(RenderPass::ResolvePassOperation(renderPass)) &&
+						origin == ShaderResource::ResourceOrigin::Disk)
+						continue;
 					if (ImGui::Selectable(ShaderResource::ResourceOriginName(origin), binding.origin == origin))
 					{
 						binding.origin = origin;
-						binding.access = RenderPass::ResourceAccess::CopySource;
-
+						binding.resourceId.clear();
+						binding.temporalView = ShaderResource::TemporalView::Current;
+						binding.access = RenderPass::ResourceAccess::ShaderResource;
+						if (IsTextureCopyOperation(RenderPass::ResolvePassOperation(renderPass)))
+							binding.access = RenderPass::ResourceAccess::CopySource;
 						if (origin == ShaderResource::ResourceOrigin::Game)
-							binding.resourceId.clear();
+							renderPass.inheritedGameBindings.shaderResources = true;
+						if (origin == ShaderResource::ResourceOrigin::Disk)
+						{
+							const auto& imported = DatabaseShaderResources::GetShaderResources();
+							if (!imported.empty())
+							{
+								binding.resourceId = imported.front().id;
+								binding.hlslName = imported.front().name;
+							}
+						}
+						else if (origin == ShaderResource::ResourceOrigin::Runtime)
+						{
+							const auto available = std::find_if(catalog.begin(), catalog.end(), [&](const auto& resource)
+							{
+								return resource.origin == ShaderResource::ResourceOrigin::Runtime &&
+									resource.ownerRenderPassId != renderPass.id && IsExposedRuntimeResource(resource.id);
+							});
+							if (available != catalog.end())
+								binding.resourceId = available->id;
+						}
 					}
 				}
 
@@ -1039,6 +1062,38 @@ namespace ShaderInjectorGUI
 
 				ImGui::EndCombo();
 			}
+		}
+		else if (binding.origin == ShaderResource::ResourceOrigin::Disk && !outputs)
+		{
+			if (ImGui::Button("Refresh DDS Resources"))
+				DatabaseShaderResources::RefreshShaderResources();
+			const auto& imported = DatabaseShaderResources::GetShaderResources();
+			const ShaderResource::TextureDisk* selected = DatabaseShaderResources::FindShaderResourceById(binding.resourceId);
+			std::string preview = DisplayNameOrFallback(binding.resourceId, "(none)");
+			if (selected)
+				preview = selected->id + " [" + ShaderResource::TextureDimensionName(selected->dimension) + "]";
+			ImGui::TextUnformatted("DDS Texture");
+			ImGui::SameLine();
+			if (ImGui::BeginCombo("##DDSResource", preview.c_str()))
+			{
+				for (const ShaderResource::TextureDisk& resource : imported)
+				{
+					std::string label = resource.id + " [" + ShaderResource::TextureDimensionName(resource.dimension) + "]";
+					if (!resource.validationError.empty())
+						label += " (invalid)";
+					if (ImGui::Selectable(label.c_str(), binding.resourceId == resource.id))
+					{
+						binding.resourceId = resource.id;
+						if (binding.hlslName.empty())
+							binding.hlslName = resource.name;
+					}
+				}
+				ImGui::EndCombo();
+			}
+			if (selected && !selected->validationError.empty())
+				ImGui::TextWrapped("DDS Error: %s", selected->validationError.c_str());
+			if (imported.empty())
+				ImGui::TextUnformatted("Drop .dds files into ShaderInjector/ShaderResources, then refresh.");
 		}
 		else if (binding.origin == ShaderResource::ResourceOrigin::Game)
 		{
@@ -1141,17 +1196,30 @@ namespace ShaderInjectorGUI
 				RenderPass::ResourceAccess::CopyDestination,
 			};
 
-			const RenderPass::ResourceAccess gameInputAccesses[] = {
-				RenderPass::ResourceAccess::CopySource,
-			};
+			const RenderPass::ResourceAccess gameInputAccesses[] = { RenderPass::ResourceAccess::CopySource };
+			const RenderPass::ResourceAccess gameShaderInputAccesses[] = { RenderPass::ResourceAccess::ShaderResource };
+			const RenderPass::ResourceAccess diskInputAccesses[] = { RenderPass::ResourceAccess::ShaderResource };
 
 			const RenderPass::ResourceAccess* choices = inputAccesses;
 			size_t choiceCount = std::size(inputAccesses);
 
 			if (binding.origin == ShaderResource::ResourceOrigin::Game)
 			{
-				choices = gameInputAccesses;
-				choiceCount = std::size(gameInputAccesses);
+				if (IsTextureCopyOperation(RenderPass::ResolvePassOperation(renderPass)))
+				{
+					choices = gameInputAccesses;
+					choiceCount = std::size(gameInputAccesses);
+				}
+				else
+				{
+					choices = gameShaderInputAccesses;
+					choiceCount = std::size(gameShaderInputAccesses);
+				}
+			}
+			else if (binding.origin == ShaderResource::ResourceOrigin::Disk)
+			{
+				choices = diskInputAccesses;
+				choiceCount = std::size(diskInputAccesses);
 			}
 
 			if (outputs)
@@ -1188,7 +1256,8 @@ namespace ShaderInjectorGUI
 			ImGui::EndCombo();
 		}
 
-		const bool shaderBinding = binding.origin == ShaderResource::ResourceOrigin::Runtime &&
+		const bool shaderBinding = (binding.origin == ShaderResource::ResourceOrigin::Runtime ||
+								   binding.origin == ShaderResource::ResourceOrigin::Disk) &&
 								   ((!outputs && binding.access == RenderPass::ResourceAccess::ShaderResource) ||
 									(outputs && binding.access == RenderPass::ResourceAccess::UnorderedAccess));
 		if (shaderBinding)
@@ -1220,7 +1289,7 @@ namespace ShaderInjectorGUI
 			if (ImGui::DragInt("##Space", &registerSpace, 1.0f, 0, 4095))
 				binding.registerSpace = static_cast<uint32_t>((std::max)(0, registerSpace));
 
-			if (!outputs)
+			if (!outputs && binding.origin == ShaderResource::ResourceOrigin::Runtime)
 			{
 				ImGui::TextUnformatted("Temporal View");
 				ImGui::SameLine();
@@ -1852,159 +1921,6 @@ namespace ShaderInjectorGUI
 			renderPass->outputs,
 			gSelectedLogicalOutputOwnerId,
 			gSelectedLogicalOutputIndex);
-
-		if (ImGui::TreeNodeEx(
-				"Disk Shader Resources##RenderPassDiskShaderResources",
-				ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Framed))
-		{
-
-			if (ImGui::Button("Refresh DDS Resources"))
-				DatabaseShaderResources::RefreshShaderResources();
-
-			const std::vector<ShaderResource::TextureDisk>& shaderResources = DatabaseShaderResources::GetShaderResources();
-
-			ImGui::SameLine();
-			ImGui::BeginDisabled(shaderResources.empty());
-
-			if (ImGui::Button("Add"))
-			{
-				const auto availableIt = std::find_if(shaderResources.begin(), shaderResources.end(), [&](const auto& resource)
-													  { return std::none_of(renderPass->shaderResources.begin(), renderPass->shaderResources.end(), [&](const auto& reference)
-																			{ return reference.resourceId == resource.id; }); });
-				if (availableIt != shaderResources.end())
-				{
-					RenderPass::ShaderResourceReferenceDisk reference{};
-					reference.resourceId = availableIt->id;
-					reference.hlslName = availableIt->name;
-					uint32_t nextRegister = 0;
-
-					for (const auto& existing : renderPass->shaderResources)
-						nextRegister = (std::max)(nextRegister, existing.shaderRegister + 1);
-
-					reference.shaderRegister = nextRegister;
-					renderPass->shaderResources.push_back(std::move(reference));
-					gSelectedRenderPassResourceOwnerId = renderPass->id;
-					gSelectedRenderPassResourceIndex = renderPass->shaderResources.size() - 1;
-				}
-			}
-
-			ImGui::EndDisabled();
-			ImGui::SameLine();
-
-			const bool hasSelectedResource = !renderPass->shaderResources.empty() && gSelectedRenderPassResourceOwnerId == renderPass->id && gSelectedRenderPassResourceIndex < renderPass->shaderResources.size();
-
-			ImGui::BeginDisabled(!hasSelectedResource);
-
-			if (ImGui::Button("Remove"))
-			{
-				renderPass->shaderResources.erase(renderPass->shaderResources.begin() + gSelectedRenderPassResourceIndex);
-
-				if (gSelectedRenderPassResourceIndex >= renderPass->shaderResources.size() && gSelectedRenderPassResourceIndex > 0)
-				{
-					--gSelectedRenderPassResourceIndex;
-				}
-			}
-
-			ImGui::EndDisabled();
-
-			if (gSelectedRenderPassResourceOwnerId != renderPass->id)
-			{
-				gSelectedRenderPassResourceOwnerId = renderPass->id;
-				gSelectedRenderPassResourceIndex = 0;
-			}
-
-			if (ImGui::BeginChild("RenderPassShaderResourceList", ImVec2(0, 130), ImGuiChildFlags_Borders))
-			{
-				for (size_t resourceIndex = 0; resourceIndex < renderPass->shaderResources.size(); ++resourceIndex)
-				{
-					const auto& reference = renderPass->shaderResources[resourceIndex];
-					const ShaderResource::TextureDisk* resource = DatabaseShaderResources::FindShaderResourceById(reference.resourceId);
-					std::string target = reference.resourceId + " (missing)";
-
-					if (resource)
-						target = resource->id + " [" + ShaderResource::TextureDimensionName(resource->dimension) + "]";
-
-					std::string label = "t" + std::to_string(reference.shaderRegister) + ", space" + std::to_string(reference.registerSpace) + ": " + DisplayNameOrFallback(reference.hlslName, "Texture") + " -> " + target + "##RenderPassResource" + std::to_string(resourceIndex);
-
-					if (ImGui::Selectable(label.c_str(), gSelectedRenderPassResourceIndex == resourceIndex))
-						gSelectedRenderPassResourceIndex = resourceIndex;
-				}
-			}
-
-			ImGui::EndChild();
-
-			if (gSelectedRenderPassResourceIndex < renderPass->shaderResources.size())
-			{
-				RenderPass::ShaderResourceReferenceDisk& reference = renderPass->shaderResources[gSelectedRenderPassResourceIndex];
-				const ShaderResource::TextureDisk* selectedResource = DatabaseShaderResources::FindShaderResourceById(reference.resourceId);
-				std::string preview = reference.resourceId + " (missing)";
-
-				if (selectedResource)
-					preview = selectedResource->id + " [" + ShaderResource::TextureDimensionName(selectedResource->dimension) + "]";
-
-				ImGui::PushID("SelectedRenderPassShaderResource");
-				ImGui::TextUnformatted("DDS Texture");
-				ImGui::SameLine();
-
-				if (ImGui::BeginCombo("##DDSResource", preview.c_str()))
-				{
-					for (const ShaderResource::TextureDisk& resource : shaderResources)
-					{
-						const bool selected = resource.id == reference.resourceId;
-						std::string resourceLabel = resource.id + " [" + ShaderResource::TextureDimensionName(resource.dimension) + "]";
-
-						if (!resource.validationError.empty())
-							resourceLabel += " (invalid)";
-
-						if (ImGui::Selectable(resourceLabel.c_str(), selected))
-						{
-							reference.resourceId = resource.id;
-
-							if (reference.hlslName.empty())
-								reference.hlslName = resource.name;
-						}
-					}
-
-					ImGui::EndCombo();
-				}
-
-				if (selectedResource)
-				{
-					if (!selectedResource->validationError.empty())
-						ImGui::TextWrapped("DDS Error: %s", selectedResource->validationError.c_str());
-				}
-
-				char hlslName[128]{};
-				strncpy_s(hlslName, reference.hlslName.c_str(), _TRUNCATE);
-				ImGui::TextUnformatted("HLSL Texture Name");
-				ImGui::SameLine();
-
-				if (ImGui::InputText("##HLSLName", hlslName, sizeof(hlslName)))
-					reference.hlslName = hlslName;
-
-				int shaderRegister = static_cast<int>(reference.shaderRegister);
-				int registerSpace = static_cast<int>(reference.registerSpace);
-
-				ImGui::TextUnformatted("Texture Register");
-				ImGui::SameLine();
-
-				if (ImGui::DragInt("##TextureRegister", &shaderRegister, 1.0f, 0, 4095))
-					reference.shaderRegister = static_cast<uint32_t>((std::max)(0, shaderRegister));
-
-				ImGui::TextUnformatted("Register Space");
-				ImGui::SameLine();
-
-				if (ImGui::DragInt("##TextureRegisterSpace", &registerSpace, 1.0f, 0, 4095))
-					reference.registerSpace = static_cast<uint32_t>((std::max)(0, registerSpace));
-
-				ImGui::PopID();
-			}
-
-			if (shaderResources.empty())
-				ImGui::TextUnformatted("Drop .dds files into ShaderInjector/ShaderResources, then refresh.");
-
-			ImGui::TreePop();
-		}
 
 		const RenderPass::PassOperation resourceOperation = RenderPass::ResolvePassOperation(*renderPass);
 

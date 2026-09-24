@@ -1209,6 +1209,13 @@ namespace RenderPassRuntime
 						return input.origin == ShaderResource::ResourceOrigin::Runtime &&
 							   input.access == RenderPass::ResourceAccess::ShaderResource;
 					});
+				const bool hasImportedShaderInput = std::any_of(
+					renderPass.inputs.begin(), renderPass.inputs.end(),
+					[](const RenderPass::LogicalResourceBindingDisk& input)
+					{
+						return input.origin == ShaderResource::ResourceOrigin::Disk &&
+							input.access == RenderPass::ResourceAccess::ShaderResource;
+					});
 				const bool hasRuntimeUnorderedAccessOutput = std::any_of(
 					renderPass.outputs.begin(),
 					renderPass.outputs.end(),
@@ -1221,7 +1228,7 @@ namespace RenderPassRuntime
 				hasEnabledMipChainPass = hasEnabledMipChainPass ||
 										 renderPass.type == RenderPass::RenderPassType::MipChain;
 				hasShaderResourcePass = hasShaderResourcePass ||
-										!renderPass.shaderResources.empty() || hasRuntimeShaderInput ||
+										hasImportedShaderInput || hasRuntimeShaderInput ||
 										hasRuntimeUnorderedAccessOutput || hasGameInput;
 				hasInheritedGameBinding = hasInheritedGameBinding ||
 										  renderPass.inheritedGameBindings.shaderResources ||

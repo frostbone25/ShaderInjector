@@ -133,7 +133,10 @@ namespace RenderPass
 		if (operation == PassOperation::Copy || operation == PassOperation::TemporalHistory)
 		{
 			for (LogicalResourceBindingDisk& input : renderPass.inputs)
-				input.access = ResourceAccess::CopySource;
+			{
+				if (input.origin != ShaderResource::ResourceOrigin::Disk)
+					input.access = ResourceAccess::CopySource;
+			}
 
 			for (LogicalResourceBindingDisk& output : renderPass.outputs)
 			{
@@ -253,6 +256,33 @@ namespace RenderPass
 				legacyEvent.type = EventType::ModifiedShader;
 				legacyEvent.id = json.value("modifiedShaderId", std::string());
 				json["event"] = legacyEvent;
+			}
+
+			// existing packages stored imported textures separately; load them as inputs
+			// before decoding so their original registers survive the format change.
+			if (json.contains("shaderResources") && json["shaderResources"].is_array())
+			{
+				if (!json.contains("inputs") || !json["inputs"].is_array())
+					json["inputs"] = nlohmann::ordered_json::array();
+				for (const auto& resource : json["shaderResources"])
+				{
+					LogicalResourceBindingDisk input{};
+					input.resourceId = resource.value("resourceId", std::string());
+					input.hlslName = resource.value("hlslName", std::string());
+					input.origin = ShaderResource::ResourceOrigin::Disk;
+					input.access = ResourceAccess::ShaderResource;
+					input.shaderRegister = resource.value("shaderRegister", 0u);
+					input.registerSpace = resource.value("registerSpace", 0u);
+					const bool alreadyPresent = std::any_of(json["inputs"].begin(), json["inputs"].end(), [&](const auto& existing)
+					{
+						return existing.value("origin", std::string()) == "Disk" &&
+							existing.value("resourceId", std::string()) == input.resourceId &&
+							existing.value("shaderRegister", 0u) == input.shaderRegister &&
+							existing.value("registerSpace", 0u) == input.registerSpace;
+					});
+					if (!alreadyPresent)
+						json["inputs"].push_back(input);
+				}
 			}
 
 			RenderPassDisk renderPass = json.get<RenderPassDisk>();

@@ -20,7 +20,6 @@
 #include "RenderPass/ViewportPolicyDisk.h"
 #include "RenderPass/LogicalResourceBindingDisk.h"
 #include "RenderPass/RuntimeResourceDefinitionDisk.h"
-#include "RenderPass/ShaderResourceReferenceDisk.h"
 #include "RenderPass/SamplerStateDisk.h"
 #include "RenderPass/InheritedGameBindingsDisk.h"
 #include "RenderPass/EventReferenceDisk.h"
@@ -51,7 +50,6 @@ namespace RenderPass
 		bool trackResourceBindings = true;
 		uint32_t maximumTrackedDescriptors = 64;
 		InheritedGameBindingsDisk inheritedGameBindings;
-		std::vector<ShaderResourceReferenceDisk> shaderResources;
 		std::vector<SamplerStateDisk> samplers;
 		std::string vertexShaderSourceFile;
 		std::string fragmentShaderSourceFile;
@@ -97,7 +95,6 @@ namespace RenderPass
 			trackResourceBindings,
 			maximumTrackedDescriptors,
 			inheritedGameBindings,
-			shaderResources,
 			samplers,
 			vertexShaderSourceFile,
 			fragmentShaderSourceFile,

@@ -431,12 +431,15 @@ namespace DatabaseRenderPasses
 		RenderPass::NormalizeExecutionResources(*renderPass);
 		std::unordered_set<std::string> resourceBindings;
 
-		for (const RenderPass::ShaderResourceReferenceDisk& resource : renderPass->shaderResources)
+		for (const RenderPass::LogicalResourceBindingDisk& input : renderPass->inputs)
 		{
-			if (resource.resourceId.empty() || resource.hlslName.empty())
+			if (input.origin != ShaderResource::ResourceOrigin::Disk)
+				continue;
+			if (input.access != RenderPass::ResourceAccess::ShaderResource ||
+				input.resourceId.empty() || input.hlslName.empty())
 				return false;
 
-			const std::string bindingKey = std::to_string(resource.shaderRegister) + ':' + std::to_string(resource.registerSpace);
+			const std::string bindingKey = std::to_string(input.shaderRegister) + ':' + std::to_string(input.registerSpace);
 
 			if (!resourceBindings.insert(bindingKey).second)
 				return false;

@@ -436,7 +436,6 @@
     <ClInclude Include="RenderPass\RuntimeDiagnostics.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderPass\RuntimeResourceDefinitionDisk.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderPass\SamplerStateDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="RenderPass\ShaderResourceReferenceDisk.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderPass\ViewportPolicyDisk.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="ShaderAnalysis\ConstantBufferDisk.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="ShaderAnalysis\ConstantBufferVariableDisk.h"><Filter>Header Files</Filter></ClInclude>

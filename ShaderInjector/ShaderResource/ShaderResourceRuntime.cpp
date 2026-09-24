@@ -624,12 +624,13 @@ namespace ShaderResourceRuntime
 	{
 		outError.clear();
 
-		const bool hasRuntimeShaderResource = std::any_of(
+		const bool hasShaderInput = std::any_of(
 			renderPass.inputs.begin(),
 			renderPass.inputs.end(),
 			[](const RenderPass::LogicalResourceBindingDisk& input)
 			{
-				return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+				return (input.origin == ShaderResource::ResourceOrigin::Runtime ||
+						input.origin == ShaderResource::ResourceOrigin::Disk) &&
 					   input.access == RenderPass::ResourceAccess::ShaderResource;
 			});
 
@@ -642,9 +643,8 @@ namespace ShaderResourceRuntime
 					   output.access == RenderPass::ResourceAccess::UnorderedAccess;
 			});
 
-		const bool hasDescriptorOverrides = !renderPass.shaderResources.empty() ||
-											!renderPass.samplers.empty() ||
-											hasRuntimeShaderResource || hasRuntimeUnorderedAccess;
+		const bool hasDescriptorOverrides = !renderPass.samplers.empty() ||
+											hasShaderInput || hasRuntimeUnorderedAccess;
 
 		const bool hasInheritedBindings = renderPass.inheritedGameBindings.shaderResources ||
 										  renderPass.inheritedGameBindings.constantBuffers;
@@ -735,8 +735,7 @@ namespace ShaderResourceRuntime
 
 		slot.activeTables.clear();
 
-		const bool requiresResourceHeap = !renderPass.shaderResources.empty() ||
-										  hasRuntimeShaderResource || hasRuntimeUnorderedAccess;
+		const bool requiresResourceHeap = hasShaderInput || hasRuntimeUnorderedAccess;
 
 		const bool requiresSamplerHeap = !renderPass.samplers.empty();
 		UINT totalDescriptors = 0;
@@ -1035,51 +1034,49 @@ namespace ShaderResourceRuntime
 			return true;
 		};
 
-		for (const RenderPass::ShaderResourceReferenceDisk& reference : renderPass.shaderResources)
-		{
-			const ShaderResource::TextureDisk* disk = DatabaseShaderResources::FindShaderResourceById(reference.resourceId);
-
-			if (!disk)
-			{
-				outError = "Shader resource is missing: " + reference.resourceId;
-				return false;
-			}
-
-			TextureGPU* texture = nullptr;
-			const auto cachedTextureIt = slot.resolvedTextures.find(reference.resourceId);
-
-			if (cachedTextureIt != slot.resolvedTextures.end())
-				texture = cachedTextureIt->second;
-			else
-			{
-				texture = GetOrCreateTexture(device, commandList, *disk, outError);
-
-				if (texture)
-					slot.resolvedTextures.emplace(reference.resourceId, texture);
-			}
-
-			if (!texture)
-				return false;
-
-			if (!bindDescriptor(
-					D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-					reference.shaderRegister,
-					reference.registerSpace,
-					texture->shaderResourceViewHeap->GetCPUDescriptorHandleForHeapStart()))
-			{
-				return false;
-			}
-		}
-
 		for (size_t inputIndex = 0; inputIndex < renderPass.inputs.size(); ++inputIndex)
 		{
 			const auto& input = renderPass.inputs[inputIndex];
-
-			if (input.origin != ShaderResource::ResourceOrigin::Runtime ||
-				input.access != RenderPass::ResourceAccess::ShaderResource)
+			if (input.access != RenderPass::ResourceAccess::ShaderResource)
 			{
 				continue;
 			}
+			if (input.origin == ShaderResource::ResourceOrigin::Disk)
+			{
+				const ShaderResource::TextureDisk* disk = DatabaseShaderResources::FindShaderResourceById(input.resourceId);
+				if (!disk)
+				{
+					if (input.optional)
+						continue;
+					outError = "Imported DDS is missing: " + input.resourceId;
+					return false;
+				}
+				TextureGPU* texture = nullptr;
+				const auto cachedTextureIt = slot.resolvedTextures.find(input.resourceId);
+				if (cachedTextureIt != slot.resolvedTextures.end())
+					texture = cachedTextureIt->second;
+				else
+				{
+					texture = GetOrCreateTexture(device, commandList, *disk, outError);
+					if (texture)
+						slot.resolvedTextures.emplace(input.resourceId, texture);
+				}
+				if (!texture)
+				{
+					if (input.optional)
+					{
+						outError.clear();
+						continue;
+					}
+					return false;
+				}
+				if (!bindDescriptor(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, input.shaderRegister, input.registerSpace,
+					texture->shaderResourceViewHeap->GetCPUDescriptorHandleForHeapStart()))
+					return false;
+				continue;
+			}
+			if (input.origin != ShaderResource::ResourceOrigin::Runtime)
+				continue;
 
 			const D3D12_CPU_DESCRIPTOR_HANDLE sourceDescriptor = runtimeInputs[inputIndex].shaderResourceView;
 

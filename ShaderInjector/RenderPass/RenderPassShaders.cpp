@@ -355,12 +355,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const RenderPass::RenderPassDisk& renderPass,
 			std::unordered_set<std::string>& usedIdentifiers)
 		{
-			const bool hasRuntimeInputs = std::any_of(
+			const bool hasTextureInputs = std::any_of(
 				renderPass.inputs.begin(),
 				renderPass.inputs.end(),
 				[](const RenderPass::LogicalResourceBindingDisk& input)
 				{
-					return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+					return (input.origin == ShaderResource::ResourceOrigin::Runtime ||
+							input.origin == ShaderResource::ResourceOrigin::Disk) &&
 						   input.access == RenderPass::ResourceAccess::ShaderResource;
 				});
 			const bool hasRuntimeOutputs = std::any_of(
@@ -371,8 +372,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					return output.origin == ShaderResource::ResourceOrigin::Runtime &&
 						   output.access == RenderPass::ResourceAccess::UnorderedAccess;
 				});
-			if (renderPass.shaderResources.empty() && renderPass.samplers.empty() &&
-				!hasRuntimeInputs && !hasRuntimeOutputs)
+			if (renderPass.samplers.empty() && !hasTextureInputs && !hasRuntimeOutputs)
 				return;
 			if (!renderPass.samplers.empty())
 				source << "// Injector-owned sampler states configured on this Render Pass.\n";
@@ -391,45 +391,37 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					   << identifier << " : register(s" << sampler.shaderRegister
 					   << ", space" << sampler.registerSpace << ");\n";
 			}
-			if (!renderPass.shaderResources.empty())
-				source << "// Injector-owned DDS textures configured on this Render Pass.\n";
-			for (const RenderPass::ShaderResourceReferenceDisk& resource : renderPass.shaderResources)
-			{
-				const std::string fallback = "Texture_" + std::to_string(resource.shaderRegister);
-				std::string identifier = SanitizeIdentifier(resource.hlslName, fallback);
-				const std::string baseIdentifier = identifier;
-				for (uint32_t suffix = 2; !usedIdentifiers.insert(identifier).second; ++suffix)
-					identifier = baseIdentifier + "_" + std::to_string(suffix);
-				const ShaderResource::TextureDisk* texture =
-					DatabaseShaderResources::FindShaderResourceById(resource.resourceId);
-				ShaderResource::TextureDimension dimension = ShaderResource::TextureDimension::Unknown;
-				if (texture)
-					dimension = texture->dimension;
-				source << ShaderResource::TextureHlslTypeName(dimension) << ' ' << identifier << " : register(t"
-					   << resource.shaderRegister << ", space" << resource.registerSpace << ");\n";
-			}
-
-			if (hasRuntimeInputs)
-				source << "// Runtime textures produced by earlier Render Passes.\n";
+			if (hasTextureInputs)
+				source << "// Textures selected as inputs for this Render Pass.\n";
 			const std::vector<ShaderResource::CatalogEntry> catalog = ShaderResourceCatalog::GetSnapshot();
 			for (size_t inputIndex = 0; inputIndex < renderPass.inputs.size(); ++inputIndex)
 			{
 				const RenderPass::LogicalResourceBindingDisk& input = renderPass.inputs[inputIndex];
-				if (input.origin != ShaderResource::ResourceOrigin::Runtime ||
+				if ((input.origin != ShaderResource::ResourceOrigin::Runtime &&
+					 input.origin != ShaderResource::ResourceOrigin::Disk) ||
 					input.access != RenderPass::ResourceAccess::ShaderResource)
 				{
 					continue;
 				}
-				const std::string fallback = "RuntimeInput_" + std::to_string(inputIndex);
+				const std::string fallback = "TextureInput_" + std::to_string(inputIndex);
 				std::string identifier = SanitizeIdentifier(input.hlslName, fallback);
 				const std::string baseIdentifier = identifier;
 				for (uint32_t suffix = 2; !usedIdentifiers.insert(identifier).second; ++suffix)
 					identifier = baseIdentifier + "_" + std::to_string(suffix);
 				ShaderResource::TextureDimension dimension = ShaderResource::TextureDimension::Texture2D;
-				const auto catalogIt = std::find_if(catalog.begin(), catalog.end(), [&](const auto& entry)
-													{ return entry.origin == ShaderResource::ResourceOrigin::Runtime && entry.id == input.resourceId; });
-				if (catalogIt != catalog.end() && catalogIt->dimension != ShaderResource::TextureDimension::Unknown)
-					dimension = catalogIt->dimension;
+				if (input.origin == ShaderResource::ResourceOrigin::Disk)
+				{
+					const ShaderResource::TextureDisk* texture = DatabaseShaderResources::FindShaderResourceById(input.resourceId);
+					if (texture)
+						dimension = texture->dimension;
+				}
+				else
+				{
+					const auto catalogIt = std::find_if(catalog.begin(), catalog.end(), [&](const auto& entry)
+														{ return entry.origin == ShaderResource::ResourceOrigin::Runtime && entry.id == input.resourceId; });
+					if (catalogIt != catalog.end() && catalogIt->dimension != ShaderResource::TextureDimension::Unknown)
+						dimension = catalogIt->dimension;
+				}
 				source << ShaderResource::TextureHlslTypeName(dimension) << ' ' << identifier << " : register(t"
 					   << input.shaderRegister << ", space" << input.registerSpace << ");\n";
 			}
@@ -496,11 +488,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			}
 			if (inputType == D3D_SIT_TEXTURE)
 			{
-				return std::any_of(renderPass.shaderResources.begin(), renderPass.shaderResources.end(), [&](const auto& injected)
-								   { return injected.shaderRegister == resource.bindPoint &&
-											injected.registerSpace == resource.registerSpace; }) ||
-					   std::any_of(renderPass.inputs.begin(), renderPass.inputs.end(), [&](const auto& input)
-								   { return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+				return std::any_of(renderPass.inputs.begin(), renderPass.inputs.end(), [&](const auto& input)
+								   { return (input.origin == ShaderResource::ResourceOrigin::Runtime ||
+										 input.origin == ShaderResource::ResourceOrigin::Disk) &&
 											input.access == RenderPass::ResourceAccess::ShaderResource &&
 											input.shaderRegister == resource.bindPoint &&
 											input.registerSpace == resource.registerSpace; });

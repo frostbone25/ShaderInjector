@@ -21,7 +21,6 @@
 #include "RenderPass/ViewportPolicyDisk.h"
 #include "RenderPass/LogicalResourceBindingDisk.h"
 #include "RenderPass/RuntimeResourceDefinitionDisk.h"
-#include "RenderPass/ShaderResourceReferenceDisk.h"
 #include "RenderPass/SamplerStateDisk.h"
 #include "RenderPass/InheritedGameBindingsDisk.h"
 #include "RenderPass/EventReferenceDisk.h"
