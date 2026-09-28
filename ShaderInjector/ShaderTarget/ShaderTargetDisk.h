@@ -5,7 +5,7 @@
 
 #include "Enum/ShaderType.h"
 #include "JsonHelper.h"
-#include "ShaderAnalysis.h"
+#include "ShaderAnalysis/ShaderAnalysis.h"
 #include "ShaderTarget/ShaderPipelineTemplateDisk.h"
 
 namespace ShaderTarget

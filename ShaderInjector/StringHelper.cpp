@@ -308,11 +308,21 @@ namespace StringHelper
 			stagePrefix = "cs_";
 			shaderModel = Globals::gComputeShaderModel;
 			break;
+		case ShaderTarget::AmplificationShader:
+			stagePrefix = "as_";
+			shaderModel = Globals::gAmplificationShaderModel;
+			break;
+		case ShaderTarget::MeshShader:
+			stagePrefix = "ms_";
+			shaderModel = Globals::gMeshShaderModel;
+			break;
 		default:
 			return {};
 		}
 
 		shaderModel = ShaderModelDetector::GetEffectiveShaderModel(shaderType, shaderModel);
+		if ((shaderType == ShaderTarget::AmplificationShader || shaderType == ShaderTarget::MeshShader) && shaderModel < Globals::ShaderModel::ShaderModel6_5)
+			shaderModel = Globals::ShaderModel::ShaderModel6_5;
 		return std::string(stagePrefix) + ShaderModelToString(shaderModel);
 	}
 } //namespace StringHelper

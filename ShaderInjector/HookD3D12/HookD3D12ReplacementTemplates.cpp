@@ -167,6 +167,10 @@ namespace HookD3D12
 				return pipeline.pixelShaderHash;
 			case ShaderTarget::ComputeShader:
 				return pipeline.computeShaderHash;
+			case ShaderTarget::AmplificationShader:
+				return pipeline.amplificationShaderHash;
+			case ShaderTarget::MeshShader:
+				return pipeline.meshShaderHash;
 			default:
 				return 0;
 		}

@@ -6,9 +6,11 @@
 #include <string>
 #include <unordered_set>
 
+#include <d3d12shader.h>
+
 #include "GUI/ShaderInjectorGUI.h"
 #include "IO/ShaderInjectorIO.h"
-#include "ShaderAnalyzer.h"
+#include "ShaderAnalysis/ShaderAnalyzer.h"
 #include "StringHelper.h"
 
 namespace DatabaseModifiedShaders
@@ -66,6 +68,11 @@ namespace DatabaseModifiedShaders
 			const ShaderAnalysis::ShaderAnalysisDisk& expected,
 			const ShaderAnalysis::ShaderAnalysisDisk& candidate)
 		{
+			if (expected.shaderStage == D3D12_SHVER_MESH_SHADER &&
+				expected.executionProperties.geometryOutputTopology != 0 &&
+				expected.executionProperties.geometryOutputTopology != candidate.executionProperties.geometryOutputTopology)
+				return false;
+
 			return expected.succeeded && candidate.succeeded &&
 				   expected.shaderStage == candidate.shaderStage &&
 				   SignatureLayoutsMatch(expected.inputParameters, candidate.inputParameters) &&
@@ -100,14 +107,14 @@ namespace DatabaseModifiedShaders
 				});
 		}
 
-		static std::string DescribeInputSignature(const ShaderAnalysis::ShaderAnalysisDisk& analysis)
+		static std::string DescribeSignature(const ShaderAnalysis::ShaderAnalysisDisk& analysis, const std::vector<ShaderAnalysis::SignatureParameterDisk>& parameters)
 		{
 			if (!analysis.succeeded)
 				return "unavailable";
 
 			std::string description;
 
-			for (const ShaderAnalysis::SignatureParameterDisk& parameter : analysis.inputParameters)
+			for (const ShaderAnalysis::SignatureParameterDisk& parameter : parameters)
 			{
 				if (!description.empty())
 					description += ",";
@@ -117,6 +124,7 @@ namespace DatabaseModifiedShaders
 
 			if (!description.empty())
 				return description;
+
 			return "none";
 		}
 
@@ -124,6 +132,7 @@ namespace DatabaseModifiedShaders
 		{
 			if (!analysis.error.empty())
 				return analysis.error;
+
 			return "none";
 		}
 
@@ -137,6 +146,7 @@ namespace DatabaseModifiedShaders
 			//signature validation only needs structured reflection.
 			//an empty portable identity filter prevents the expensive disassembly analysis here.
 			static const std::unordered_set<std::string> noDisassemblyCandidates;
+
 			return ShaderAnalyzer::Analyze(
 				compiledBlob.data(),
 				compiledBlob.size(),
@@ -252,18 +262,23 @@ namespace DatabaseModifiedShaders
 
 			if (!selectedBlob || !selectedAnalysis || selectedBlob->empty())
 			{
-				std::string expectedSignature = "unavailable";
+				std::string expectedInput = "unavailable";
+				std::string expectedOutput = "unavailable";
+				std::string expectedPrimitiveOutput = "unavailable";
 
 				for (const ModifiedShader::ModifiedShaderTargetDisk& target : modifiedShader.targets)
 				{
 					if (target.shaderAnalysis.succeeded)
 					{
-						expectedSignature = DescribeInputSignature(target.shaderAnalysis);
+						expectedInput = DescribeSignature(target.shaderAnalysis, target.shaderAnalysis.inputParameters);
+						expectedOutput = DescribeSignature(target.shaderAnalysis, target.shaderAnalysis.outputParameters);
+						expectedPrimitiveOutput = DescribeSignature(target.shaderAnalysis, target.shaderAnalysis.patchConstantParameters);
 						break;
 					}
 				}
 
 				std::string failureReason = "DXC did not produce a candidate that could be compiled and reflected.";
+
 				if (prefixStableCompiled || optimizedCompiled)
 					failureReason = "DXC produced shader bytecode, but no candidate has an interface compatible with the original game shader.";
 
@@ -271,12 +286,18 @@ namespace DatabaseModifiedShaders
 					"DatabaseModifiedShaders->CompileModifiedShader: " + failureReason +
 					" The previous compiled blob was preserved. modifiedShader=" + modifiedShader.id +
 					" source=" + modifiedShader.sourcePath +
-					" expectedInput=" + expectedSignature +
-					" prefixStableInput=" + DescribeInputSignature(prefixStableAnalysis) +
-					" optimizedInput=" + DescribeInputSignature(optimizedAnalysis) +
+					" expectedInput=" + expectedInput +
+					" expectedOutput=" + expectedOutput +
+					" expectedPrimitiveOutput=" + expectedPrimitiveOutput +
+					" prefixStableInput=" + DescribeSignature(prefixStableAnalysis, prefixStableAnalysis.inputParameters) +
+					" prefixStableOutput=" + DescribeSignature(prefixStableAnalysis, prefixStableAnalysis.outputParameters) +
+					" prefixStablePrimitiveOutput=" + DescribeSignature(prefixStableAnalysis, prefixStableAnalysis.patchConstantParameters) +
+					" optimizedInput=" + DescribeSignature(optimizedAnalysis, optimizedAnalysis.inputParameters) +
+					" optimizedOutput=" + DescribeSignature(optimizedAnalysis, optimizedAnalysis.outputParameters) +
+					" optimizedPrimitiveOutput=" + DescribeSignature(optimizedAnalysis, optimizedAnalysis.patchConstantParameters) +
 					" prefixStableAnalysisError=" + DescribeAnalysisError(prefixStableAnalysis) +
 					" optimizedAnalysisError=" + DescribeAnalysisError(optimizedAnalysis) +
-					". Check the entry-point input semantics and declaration order against expectedInput.");
+					". Check the entry-point input, vertex-output, and primitive-output semantics against the captured interface.");
 
 				ShaderInjectorIO::DeleteFileIfExists(prefixStableCandidatePath);
 				ShaderInjectorIO::DeleteFileIfExists(optimizedCandidatePath);
@@ -338,6 +359,7 @@ namespace DatabaseModifiedShaders
 		}
 
 		const bool compiled = Detail::CompileModifiedShaderPackage(*modifiedShader);
+
 		if (!compiled && !ModifiedShader::WriteJson(*modifiedShader))
 		{
 			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseModifiedShaders->CompileModifiedShader: could not save package metadata: " + modifiedShader->jsonPath);

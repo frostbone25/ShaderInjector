@@ -134,6 +134,7 @@ namespace HookD3D12
 		}
 
 		++gOverlayStartupGate.stableFrameCount;
+
 		return gOverlayStartupGate.stableFrameCount >= kOverlayStartupStableFrameLimit &&
 			   (now - gOverlayStartupGate.firstStableTick) >= kOverlayStartupMinimumStableMs;
 	}

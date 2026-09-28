@@ -659,6 +659,7 @@ namespace HookD3D12
 
 					if (subobj->payloadData.pShaderBytecode && subobj->payloadData.BytecodeLength)
 					{
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::AmplificationShader, subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
 						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::VertexShader, subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
 						info.vertexShaderHash = Hash::HashMemory(subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
 						info.vertexShaderBytecodeSize = subobj->payloadData.BytecodeLength;
@@ -768,6 +769,7 @@ namespace HookD3D12
 
 					if (subobj->payloadData.pShaderBytecode && subobj->payloadData.BytecodeLength)
 					{
+						ShaderModelDetector::ObserveShaderBytecode(ShaderTarget::MeshShader, subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
 						info.meshShaderHash = Hash::HashMemory(subobj->payloadData.pShaderBytecode, subobj->payloadData.BytecodeLength);
 						info.meshShaderBytecodeSize = subobj->payloadData.BytecodeLength;
 						info.meshShaderBytecode.assign((const uint8_t*)subobj->payloadData.pShaderBytecode, (const uint8_t*)subobj->payloadData.pShaderBytecode + subobj->payloadData.BytecodeLength);

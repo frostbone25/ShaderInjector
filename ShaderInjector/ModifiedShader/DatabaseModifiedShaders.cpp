@@ -8,8 +8,8 @@
 
 #include "Globals.h"
 #include "IO/ShaderInjectorIO.h"
-#include "ShaderDiscovery.h"
-#include "ShaderAutomaticDiscovery.h"
+#include "ShaderDiscovery/ShaderDiscovery.h"
+#include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
 #include "StringHelper.h"
 
 namespace DatabaseModifiedShaders
@@ -84,14 +84,18 @@ namespace DatabaseModifiedShaders
 		}
 
 		std::sort(gModifiedShaders.begin(), gModifiedShaders.end(), [](const auto& left, const auto& right)
-				  {
+		{
 			std::string leftName = left.id;
 			std::string rightName = right.id;
+
 			if (!left.name.empty())
 				leftName = left.name;
+
 			if (!right.name.empty())
 				rightName = right.name;
-			return leftName < rightName; });
+
+			return leftName < rightName; 
+		});
 
 		ShaderAutomaticDiscovery::RefreshModifiedShaderIndex(gModifiedShaders);
 
@@ -107,8 +111,10 @@ namespace DatabaseModifiedShaders
 			for (const ModifiedShader::ModifiedShaderPackageDisk& package : gModifiedShaders)
 			{
 				std::string displayName = package.id;
+
 				if (!package.name.empty())
 					displayName = package.name;
+
 				ShaderInjectorIO::WriteToLogFileStatus("DatabaseModifiedShaders->RefreshModifiedShaders: loaded name=\"" + displayName + "\" id=" + package.id);
 			}
 		}

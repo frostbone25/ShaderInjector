@@ -11,7 +11,7 @@
 #include "HookD3D12.h"
 #include "CachedBlobContentMatch.h"
 #include "CapturedShaderLocation.h"
-#include "ShaderDiscovery.h"
+#include "ShaderDiscovery/ShaderDiscovery.h"
 #include "IO/ShaderInjectorIO.h"
 
 namespace HookD3D12
@@ -50,6 +50,10 @@ namespace HookD3D12
 				return Hash::ParseHashText(pipelineEntry.psHash);
 			case ShaderTarget::ComputeShader:
 				return Hash::ParseHashText(pipelineEntry.csHash);
+			case ShaderTarget::AmplificationShader:
+				return Hash::ParseHashText(pipelineEntry.asHash);
+			case ShaderTarget::MeshShader:
+				return Hash::ParseHashText(pipelineEntry.msHash);
 			default:
 				return 0;
 		}
@@ -73,6 +77,10 @@ namespace HookD3D12
 				return Hash::ParseHashText(pipelineEntry.psHash);
 			case ShaderTarget::ComputeShader:
 				return Hash::ParseHashText(pipelineEntry.csHash);
+			case ShaderTarget::AmplificationShader:
+				return Hash::ParseHashText(pipelineEntry.asHash);
+			case ShaderTarget::MeshShader:
+				return Hash::ParseHashText(pipelineEntry.msHash);
 			default:
 				return 0;
 		}
@@ -202,6 +210,10 @@ namespace HookD3D12
 				return pipeline.hullShaderBytecode;
 			case ShaderTarget::DomainShader:
 				return pipeline.domainShaderBytecode;
+			case ShaderTarget::AmplificationShader:
+				return pipeline.amplificationShaderBytecode;
+			case ShaderTarget::MeshShader:
+				return pipeline.meshShaderBytecode;
 			default:
 				return emptyBytecode;
 		}
@@ -228,6 +240,8 @@ namespace HookD3D12
 			ShaderTarget::GeometryShader,
 			ShaderTarget::HullShader,
 			ShaderTarget::DomainShader,
+			ShaderTarget::AmplificationShader,
+			ShaderTarget::MeshShader,
 		};
 
 		for (size_t pipelineIndex = 0; pipelineIndex < gGraphicsPipelines.size(); ++pipelineIndex)
@@ -907,7 +921,9 @@ namespace HookD3D12
 			   ReplacementHashMatches(pipeline.computeShaderHash, replacement.csHash) &&
 			   ReplacementHashMatches(pipeline.geometryShaderHash, replacement.gsHash) &&
 			   ReplacementHashMatches(pipeline.hullShaderHash, replacement.hsHash) &&
-			   ReplacementHashMatches(pipeline.domainShaderHash, replacement.dsHash);
+			   ReplacementHashMatches(pipeline.domainShaderHash, replacement.dsHash) &&
+			   ReplacementHashMatches(pipeline.amplificationShaderHash, replacement.asHash) &&
+			   ReplacementHashMatches(pipeline.meshShaderHash, replacement.msHash);
 	}
 
 	D3D12_PIPELINE_STATE_SUBOBJECT_TYPE SubobjectTypeForShaderType(ShaderTarget::ShaderType shaderType)
@@ -926,6 +942,10 @@ namespace HookD3D12
 				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS;
 			case ShaderTarget::ComputeShader:
 				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS;
+			case ShaderTarget::AmplificationShader:
+				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS;
+			case ShaderTarget::MeshShader:
+				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS;
 			default:
 				return D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MAX_VALID;
 		}

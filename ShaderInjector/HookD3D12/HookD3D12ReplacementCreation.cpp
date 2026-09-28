@@ -10,7 +10,7 @@
 #include "Hash/Hash.h"
 #include "GUI/ShaderInjectorGUI.h"
 #include "IO/ShaderInjectorIO.h"
-#include "ShaderAnalyzer.h"
+#include "ShaderAnalysis/ShaderAnalyzer.h"
 #include "ShaderTarget/ShaderTarget.h"
 #include "StringHelper.h"
 

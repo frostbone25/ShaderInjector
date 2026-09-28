@@ -20,6 +20,8 @@ namespace RenderPassTexturePool
 		const std::string& resourceId,
 		ShaderResource::TemporalView temporalView,
 		const TextureView& texture);
+	//Make a generated mip chain visible to later execution anchors in this frame.
+	void PublishGeneratedMipTexture(const std::string& resourceId, const TextureView& texture);
 	bool GetInputTexture(
 		const std::string& resourceId,
 		ShaderResource::TemporalView temporalView,

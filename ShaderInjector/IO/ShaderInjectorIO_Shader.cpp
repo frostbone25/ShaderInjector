@@ -253,29 +253,29 @@ namespace ShaderInjectorIO
 
 		if (UsesLegacyShaderCompiler(shaderProfile))
 		{
-#if defined(_WIN32)
-			std::string compilerError;
+			#if defined(_WIN32)
+				std::string compilerError;
 
-			if (!CompileShaderModel5(
+				if (!CompileShaderModel5(
 					shaderSourceFilePath,
 					shaderProfile,
 					entryPoint,
 					temporaryBlobFilePath,
 					compilerDiagnostics,
 					compilerError))
-			{
-				DeleteFileIfExists(temporaryBlobFilePath);
-				ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: legacy compiler failed: " + compilerError);
+				{
+					DeleteFileIfExists(temporaryBlobFilePath);
+					ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: legacy compiler failed: " + compilerError);
 
-				if (!compilerDiagnostics.empty())
-					ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath + " reported:\n" + compilerDiagnostics);
+					if (!compilerDiagnostics.empty())
+						ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: " + shaderSourceFilePath + " reported:\n" + compilerDiagnostics);
 
+					return false;
+				}
+			#else
+				ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: Shader Model 5 compilation is unavailable on this platform.");
 				return false;
-			}
-#else
-			ShaderInjectorGUI::WriteToRuntimeLogError("ShaderInjectorIO->CompileSourceToDXILBlob: Shader Model 5 compilation is unavailable on this platform.");
-			return false;
-#endif
+			#endif
 		}
 		else
 		{
@@ -295,14 +295,15 @@ namespace ShaderInjectorIO
 				signaturePackingArgument = "-pack-optimized";
 
 			std::vector<std::string> shaderCompilerArguments =
-				{
-					"-T", shaderProfile,
-					"-E", entryPoint,
-					signaturePackingArgument,
-					"-I", shaderSourceDirectory,
-					"-I", modifiedShaderIncludesDirectory,
-					shaderSourceFilePath,
-					"-Fo", temporaryBlobFilePath};
+			{
+				"-T", shaderProfile,
+				"-E", entryPoint,
+				signaturePackingArgument,
+				"-I", shaderSourceDirectory,
+				"-I", modifiedShaderIncludesDirectory,
+				shaderSourceFilePath,
+				"-Fo", temporaryBlobFilePath
+			};
 
 			const ProcessResult processResult = RunProcess(shaderCompilerExecutablePath, shaderCompilerArguments, compilerOutputFilePath);
 			compilerDiagnostics = ReadCompilerDiagnostics(compilerOutputFilePath);

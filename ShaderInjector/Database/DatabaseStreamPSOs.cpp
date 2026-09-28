@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "HookD3D12/HookD3D12.h"
-#include "ShaderAutomaticDiscovery.h"
+#include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
 
 namespace HookD3D12
 {

@@ -26,6 +26,7 @@ namespace HookD3D12
 	FunctionDrawInstancedD3D12 Original_DrawInstanced = nullptr;
 	FunctionDrawIndexedInstancedD3D12 Original_DrawIndexedInstanced = nullptr;
 	FunctionDispatchD3D12 Original_Dispatch = nullptr;
+	FunctionDispatchMeshD3D12 Original_DispatchMesh = nullptr;
 	FunctionIASetPrimitiveTopologyD3D12 Original_IASetPrimitiveTopology = nullptr;
 	FunctionRSSetViewportsD3D12 Original_RSSetViewports = nullptr;
 	FunctionRSSetScissorRectsD3D12 Original_RSSetScissorRects = nullptr;

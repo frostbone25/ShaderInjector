@@ -1,4 +1,4 @@
-#include "ShaderDiscovery.h"
+#include "ShaderDiscovery/ShaderDiscovery.h"
 #include "ShaderTarget/ShaderIdentityKey.h"
 #include "ShaderTarget/ShaderIdentityKeyHasher.h"
 
@@ -11,7 +11,7 @@
 
 #include "Hash/Hash.h"
 #include "Globals.h"
-#include "ShaderAnalyzer.h"
+#include "ShaderAnalysis/ShaderAnalyzer.h"
 #include "ShaderInjectorGUI.h"
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"

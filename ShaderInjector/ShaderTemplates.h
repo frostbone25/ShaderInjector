@@ -3,10 +3,17 @@
 //custom
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderTarget/ShaderTarget.h"
+#include <string>
+
+namespace ShaderAnalysis
+{
+	struct ShaderAnalysisDisk;
+}
 
 namespace ShaderTemplates
 {
 	const char* GetModifiedShaderSourceTemplate(ShaderTarget::ShaderType shaderType);
+	std::string BuildMeshShaderSourceTemplate(const ShaderAnalysis::ShaderAnalysisDisk& originalShader);
 
 	//NOTE: These are source code shader templates that the shader injector will auto-generate for various tasks.
 	//Now normally I would think it'd be wise to actually have these already serialized to the disk rather than holding them in memory.

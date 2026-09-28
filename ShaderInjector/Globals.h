@@ -56,6 +56,8 @@ namespace Globals
 	inline ShaderModel gGeometryShaderModel = ShaderModel::ShaderModel6_6;
 	inline ShaderModel gPixelShaderModel = ShaderModel::ShaderModel6_6;
 	inline ShaderModel gComputeShaderModel = ShaderModel::ShaderModel6_6;
+	inline ShaderModel gAmplificationShaderModel = ShaderModel::ShaderModel6_6;
+	inline ShaderModel gMeshShaderModel = ShaderModel::ShaderModel6_6;
 
 	//Shader discovery tuning. WorkerThreads = 0 means automatic half-core scaling.
 	extern ShaderDiscoveryMode gShaderDiscoveryMode;

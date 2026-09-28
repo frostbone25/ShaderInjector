@@ -86,6 +86,9 @@ namespace VTableIndex
 	//ID3D12GraphicsCommandList::Dispatch
 	constexpr size_t indexDispatch = 14;
 
+	//ID3D12GraphicsCommandList6::DispatchMesh
+	constexpr size_t indexDispatchMesh = 79;
+
 	//ID3D12GraphicsCommandList::IASetPrimitiveTopology
 	constexpr size_t indexIASetPrimitiveTopology = 20;
 

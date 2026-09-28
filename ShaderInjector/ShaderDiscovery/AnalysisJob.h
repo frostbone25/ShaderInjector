@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "ModifiedShader/ModifiedShaderPackageDisk.h"
-#include "ShaderAutomaticDiscovery/QueuedShader.h"
+#include "ShaderDiscovery/QueuedShader.h"
 
 namespace ShaderAutomaticDiscovery
 {

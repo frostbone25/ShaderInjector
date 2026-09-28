@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "JsonHelper.h"
-#include "ShaderAnalysis.h"
+#include "ShaderAnalysis/ShaderAnalysis.h"
 
 namespace ModifiedShader
 {

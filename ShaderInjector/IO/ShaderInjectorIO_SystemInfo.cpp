@@ -168,7 +168,10 @@ namespace ShaderInjectorIO
 		VS_FIXEDFILEINFO* fixedFileInfo = nullptr;
 		UINT fixedFileInfoBytes = 0;
 
-		if (VerQueryValueW(versionData.data(), L"\\", reinterpret_cast<LPVOID*>(&fixedFileInfo), &fixedFileInfoBytes) &&
+		if (VerQueryValueW(
+			versionData.data(), 
+			L"\\", reinterpret_cast<LPVOID*>(&fixedFileInfo), 
+			&fixedFileInfoBytes) &&
 			fixedFileInfo &&
 			fixedFileInfoBytes >= sizeof(VS_FIXEDFILEINFO) &&
 			fixedFileInfo->dwSignature == 0xFEEF04BD)
@@ -465,11 +468,12 @@ namespace ShaderInjectorIO
 	{
 		//emit this startup summary once even when multiple hooks request the same system details.
 		std::call_once(processAndSystemInfoLogFlag, []()
-					   {
+		{
 			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->ProcessAndSystemInfo: begin");
 			LogExecutableMetadata();
 			LogSystemInfo();
-			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->ProcessAndSystemInfo: end"); });
+			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->ProcessAndSystemInfo: end"); 
+		});
 	}
 
 	void LogD3D12DeviceInfo(ID3D12Device* d3d12Device)
@@ -479,10 +483,11 @@ namespace ShaderInjectorIO
 
 		//only the first created D3D12 device writes adapter and capability details.
 		std::call_once(d3d12DeviceInfoLogFlag, [d3d12Device]()
-					   {
+		{
 			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->D3D12DeviceInfo: begin");
 			LogAdapterInfo(d3d12Device);
 			LogD3D12FeatureSupport(d3d12Device);
-			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->D3D12DeviceInfo: end"); });
+			ShaderInjectorIO::WriteToLogFile("ShaderInjectorIO->D3D12DeviceInfo: end"); 
+		});
 	}
 } //namespace ShaderInjectorIO

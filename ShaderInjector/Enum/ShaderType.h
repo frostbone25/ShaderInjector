@@ -10,6 +10,8 @@ namespace ShaderTarget
 		GeometryShader = 3,
 		PixelShader = 4,
 		ComputeShader = 5,
-		Unknown = 6,
+		AmplificationShader = 6,
+		MeshShader = 7,
+		Unknown = 8,
 	};
 } //namespace ShaderTarget

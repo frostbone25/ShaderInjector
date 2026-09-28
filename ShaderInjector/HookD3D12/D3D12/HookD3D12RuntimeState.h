@@ -44,6 +44,7 @@ namespace HookD3D12
 	extern FunctionResizeBuffersD3D12 gRTSSOriginalResizeBuffers;
 	extern std::mutex gRTSSCompatibilityMutex;
 	extern std::atomic<bool> gRuntimeReady;
+	extern std::atomic<ID3D12PipelineState*> gHiddenMeshPipelineState;
 
 	CommandListPipelineState& GetCommandListPipelineState(ID3D12GraphicsCommandList* commandList);
 	void UpdateUncapturedPipelineRootSignatureLocked(ID3D12PipelineState* pipelineState, ID3D12RootSignature* rootSignature, bool computeRootSignature);

@@ -24,10 +24,10 @@
 #include "ModifiedShader/ModifiedShaderCreation.h"
 #include "RenderDoc/RenderDocIntegration.h"
 #include "RenderPass/RenderPassRuntime.h"
-#include "ShaderAutomaticDiscovery.h"
+#include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
 #include "StringHelper.h"
 #include "GUI/ShaderInjectorGUITooltips.h"
-#include "Keycodes.h"
+#include "Input/Keycodes.h"
 #include "ShaderInjectorVersion.h"
 #include "ShaderInjectorInternalResources.h"
 #include "ShaderModelDetector.h"
@@ -51,7 +51,7 @@ namespace
 		{Globals::ShaderModel::ShaderModel6_6, "Shader Model 6.6 (DXIL)"},
 	};
 
-	bool DrawShaderModelCombo(const char* label, Globals::ShaderModel& shaderModel)
+	bool DrawShaderModelCombo(const char* label, Globals::ShaderModel& shaderModel, Globals::ShaderModel minimumShaderModel)
 	{
 		const char* previewLabel = shaderModelOptions[8].displayLabel;
 
@@ -72,6 +72,9 @@ namespace
 		{
 			for (const ShaderModelOption& option : shaderModelOptions)
 			{
+				if (option.shaderModel < minimumShaderModel)
+					continue;
+
 				const bool selected = shaderModel == option.shaderModel;
 
 				if (ImGui::Selectable(option.displayLabel, selected))
@@ -98,10 +101,17 @@ namespace
 		Globals::ShaderModel displayedShaderModel = ShaderModelDetector::GetEffectiveShaderModel(shaderType, configuredShaderModel);
 		Globals::ShaderModel detectedShaderModel = configuredShaderModel;
 		const bool modelDetected = ShaderModelDetector::TryGetDetectedShaderModel(shaderType, detectedShaderModel);
+		Globals::ShaderModel minimumShaderModel = Globals::ShaderModel::ShaderModel5_0;
+		if (shaderType == ShaderTarget::AmplificationShader || shaderType == ShaderTarget::MeshShader)
+		{
+			minimumShaderModel = Globals::ShaderModel::ShaderModel6_5;
+			if (displayedShaderModel < minimumShaderModel)
+				displayedShaderModel = minimumShaderModel;
+		}
 
 		ImGui::BeginDisabled(Globals::gAutoDetectShaderModels);
 
-		if (DrawShaderModelCombo(label, displayedShaderModel) && !Globals::gAutoDetectShaderModels)
+		if (DrawShaderModelCombo(label, displayedShaderModel, minimumShaderModel) && !Globals::gAutoDetectShaderModels)
 			configuredShaderModel = displayedShaderModel;
 
 		ImGui::EndDisabled();
@@ -253,6 +263,8 @@ namespace ShaderInjectorGUI
 		DrawShaderModelSetting("Geometry Shader", ShaderTarget::GeometryShader, Globals::gGeometryShaderModel);
 		DrawShaderModelSetting("Pixel Shader", ShaderTarget::PixelShader, Globals::gPixelShaderModel);
 		DrawShaderModelSetting("Compute Shader", ShaderTarget::ComputeShader, Globals::gComputeShaderModel);
+		DrawShaderModelSetting("Amplification Shader", ShaderTarget::AmplificationShader, Globals::gAmplificationShaderModel);
+		DrawShaderModelSetting("Mesh Shader", ShaderTarget::MeshShader, Globals::gMeshShaderModel);
 
 		if (ImGui::Button("Apply Shader Levels"))
 		{
@@ -327,9 +339,8 @@ namespace ShaderInjectorGUI
 
 					ImGui::Spacing();
 
+					DrawGraphicsPipelines();
 					DrawStreamPipelines();
-
-					//show stream pipelines here because they contain the shader stages users edit in this game.
 					ImGui::EndTabItem();
 				}
 
@@ -389,11 +400,44 @@ namespace ShaderInjectorGUI
 		}
 	}
 
+	void DrawGraphicsPipelines()
+	{
+		const std::string headerText = "Graphics Pipelines: " + std::to_string(HookD3D12::gGraphicsPipelines.size()) + " PSOs";
+		static bool wasOpen = false;
+		const bool isOpen = ImGui::CollapsingHeader(headerText.c_str());
+
+		if (isOpen)
+		{
+			DrawShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::pixelShaderHash, &HookD3D12::GraphicsPipelineInfo::pixelShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::pixelShaderBytecode>(
+				"Pixel Shaders", "GraphicsPS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PipelineSourceList::Graphics, true, false, &HookD3D12::GraphicsPipelineInfo::pixelShaderDisabled, &HookD3D12::GraphicsPipelineInfo::pipelineStateWithoutPixelShader);
+
+			DrawShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::vertexShaderHash, &HookD3D12::GraphicsPipelineInfo::vertexShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::vertexShaderBytecode>(
+				"Vertex Shaders", "GraphicsVS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::VertexShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, HookD3D12::PipelineSourceList::Graphics, false, false, nullptr, nullptr);
+
+			DrawShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::geometryShaderHash, &HookD3D12::GraphicsPipelineInfo::geometryShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::geometryShaderBytecode>(
+				"Geometry Shaders", "GraphicsGS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::GeometryShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, HookD3D12::PipelineSourceList::Graphics, false, false, nullptr, nullptr);
+
+			DrawShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::hullShaderHash, &HookD3D12::GraphicsPipelineInfo::hullShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::hullShaderBytecode>(
+				"Hull Shaders", "GraphicsHS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::HullShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, HookD3D12::PipelineSourceList::Graphics, false, false, nullptr, nullptr);
+
+			DrawShaderStageList<HookD3D12::GraphicsPipelineInfo, &HookD3D12::GraphicsPipelineInfo::domainShaderHash, &HookD3D12::GraphicsPipelineInfo::domainShaderBytecodeSize, &HookD3D12::GraphicsPipelineInfo::domainShaderBytecode>(
+				"Domain Shaders", "GraphicsDS", "Graphics", HookD3D12::gGraphicsPipelines, ShaderTarget::DomainShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, HookD3D12::PipelineSourceList::Graphics, false, false, nullptr, nullptr);
+		}
+		else if (wasOpen)
+		{
+			HookD3D12::ClearShaderMarkers();
+		}
+
+		wasOpen = isOpen;
+	}
+
 	void DrawStreamPipelines()
 	{
 		std::string headerText = "Stream Pipelines: " + std::to_string(HookD3D12::gPipelineStates.size()) + " PSOs";
+		static bool wasOpen = false;
+		const bool isOpen = ImGui::CollapsingHeader(headerText.c_str());
 
-		if (ImGui::CollapsingHeader(headerText.c_str()))
+		if (isOpen)
 		{
 			DrawShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::pixelShaderHash, &HookD3D12::PipelineStateInfo::pixelShaderBytecodeSize, &HookD3D12::PipelineStateInfo::pixelShaderBytecode>(
 				"Pixel Shaders", "StreamPS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::PixelShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, HookD3D12::PipelineSourceList::Stream, true, false, &HookD3D12::PipelineStateInfo::pixelShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutPixelShader);
@@ -412,11 +456,19 @@ namespace ShaderInjectorGUI
 
 			DrawShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::domainShaderHash, &HookD3D12::PipelineStateInfo::domainShaderBytecodeSize, &HookD3D12::PipelineStateInfo::domainShaderBytecode>(
 				"Domain Shaders", "StreamDS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::DomainShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, HookD3D12::PipelineSourceList::Stream, true, true, &HookD3D12::PipelineStateInfo::domainShaderDisabled, &HookD3D12::PipelineStateInfo::pipelineStateWithoutDomainShader);
+
+			DrawShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::amplificationShaderHash, &HookD3D12::PipelineStateInfo::amplificationShaderBytecodeSize, &HookD3D12::PipelineStateInfo::amplificationShaderBytecode>(
+				"Amplification Shaders", "StreamAS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::AmplificationShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS, HookD3D12::PipelineSourceList::Stream, false, false, nullptr, nullptr);
+
+			DrawShaderStageList<HookD3D12::PipelineStateInfo, &HookD3D12::PipelineStateInfo::meshShaderHash, &HookD3D12::PipelineStateInfo::meshShaderBytecodeSize, &HookD3D12::PipelineStateInfo::meshShaderBytecode>(
+				"Mesh Shaders", "StreamMS", "Stream", HookD3D12::gPipelineStates, ShaderTarget::MeshShader, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS, HookD3D12::PipelineSourceList::Stream, false, false, nullptr, nullptr);
 		}
-		else
+		else if (wasOpen)
 		{
 			HookD3D12::ClearShaderMarkers();
 		}
+
+		wasOpen = isOpen;
 	}
 
 	//UI "Template" for each of the shader stages
@@ -542,6 +594,12 @@ namespace ShaderInjectorGUI
 					{
 						HookD3D12::ClearShaderMarkers();
 					}
+					else if (shaderType == ShaderTarget::MeshShader)
+					{
+						HookD3D12::ClearShaderMarkers();
+						if (selectionStyle == HookD3D12::PixelShaderSelectionStyle::Hidden)
+							HookD3D12::gHiddenMeshPipelineState.store(pipeline.pipelineState, std::memory_order_release);
+					}
 					else if (allowMarkerToggle && disabledMember && rebuiltPSOMember)
 					{
 						HookD3D12::gShaderSelectionStyle = selectionStyle;
@@ -553,6 +611,10 @@ namespace ShaderInjectorGUI
 						{
 							HookD3D12::gPendingRebuilds.push_back({pendingSource, selectedIndex, subobjectType});
 						}
+					}
+					else
+					{
+						HookD3D12::ClearShaderMarkers();
 					}
 				}
 
@@ -602,6 +664,11 @@ namespace ShaderInjectorGUI
 
 			if ((HookD3D12::PixelShaderSelectionStyle)gSelectionStyleIndex == HookD3D12::PixelShaderSelectionStyle::None)
 				ImGui::Text("Selection Style is None.");
+		}
+		else if (shaderType == ShaderTarget::MeshShader)
+		{
+			const bool hidden = HookD3D12::gHiddenMeshPipelineState.load(std::memory_order_acquire) == pipeline.pipelineState;
+			ImGui::Text("Selection: %s", hidden ? "hidden" : "inactive");
 		}
 
 		if (bytecode.empty())

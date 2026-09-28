@@ -1,3 +1,4 @@
+#include "HookD3D12RuntimeState.h"
 #include "../HookD3D12.h"
 
 #include <atomic>
@@ -10,6 +11,7 @@
 namespace HookD3D12
 {
 	std::atomic<bool> gLoggedExecuteIndirectHook = false;
+	static std::atomic<bool> loggedHiddenMeshIndirect = false;
 
 	void STDMETHODCALLTYPE Hook_ExecuteIndirect(ID3D12GraphicsCommandList* commandList, ID3D12CommandSignature* commandSignature, UINT maximumCommandCount, ID3D12Resource* argumentBuffer, UINT64 argumentBufferOffset, ID3D12Resource* countBuffer, UINT64 countBufferOffset)
 	{
@@ -18,6 +20,21 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_ExecuteIndirect(ID3D12GraphicsCommandList* commandList, ID3D12CommandSignature* commandSignature, UINT maximumCommandCount, ID3D12Resource* argumentBuffer, UINT64 argumentBufferOffset, ID3D12Resource* countBuffer, UINT64 countBufferOffset)
 	{
+		thread_local bool commandHookLogChecked = false;
+		if (!commandHookLogChecked)
+		{
+			LogFirstCommandHookHit(gLoggedExecuteIndirectHook, "Hook_ExecuteIndirect", commandList);
+			commandHookLogChecked = true;
+		}
+
+		ID3D12PipelineState* hiddenMeshPipeline = gHiddenMeshPipelineState.load(std::memory_order_acquire);
+		if (hiddenMeshPipeline && Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() &&
+			GetCommandListPipelineState(commandList).pipelineState.load(std::memory_order_acquire) == hiddenMeshPipeline)
+		{
+			LogFirstCommandHookHit(loggedHiddenMeshIndirect, "HiddenMeshExecuteIndirect", commandList);
+			return;
+		}
+
 		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) || IsInsideRenderPassInjection())
 		{
 			Original_ExecuteIndirect(commandList, commandSignature, maximumCommandCount, argumentBuffer, argumentBufferOffset, countBuffer, countBufferOffset);
@@ -25,13 +42,6 @@ namespace HookD3D12
 		}
 
 		PerformanceMetrics::Increment(PerformanceMetrics::Counter::ExecuteIndirect);
-		thread_local bool commandHookLogChecked = false;
-
-		if (!commandHookLogChecked)
-		{
-			LogFirstCommandHookHit(gLoggedExecuteIndirectHook, "Hook_ExecuteIndirect", commandList);
-			commandHookLogChecked = true;
-		}
 
 		uint32_t boundaryMask = 0;
 		{

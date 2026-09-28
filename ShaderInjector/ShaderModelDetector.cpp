@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include <d3d12shader.h>
+
 namespace ShaderModelDetector
 {
 	namespace
@@ -76,6 +78,12 @@ namespace ShaderModelDetector
 				break;
 			case 5:
 				decodedShaderType = ShaderTarget::ComputeShader;
+				break;
+			case D3D12_SHVER_MESH_SHADER:
+				decodedShaderType = ShaderTarget::MeshShader;
+				break;
+			case D3D12_SHVER_AMPLIFICATION_SHADER:
+				decodedShaderType = ShaderTarget::AmplificationShader;
 				break;
 			default:
 				return false;

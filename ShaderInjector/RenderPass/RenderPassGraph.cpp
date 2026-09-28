@@ -458,9 +458,19 @@ namespace RenderPassGraph
 				}
 				if (producer.modifiedShaderId != node.modifiedShaderId || producer.rootBoundary != node.rootBoundary)
 				{
-					node.valid = false;
-					node.error = "Runtime resource crosses incompatible execution anchors: " + input.resourceId + ".";
-					compilation.diagnostics.push_back(node.error);
+					//Cross-anchor resources cannot be topologically ordered by this plan.
+					//Only an explicit generated mip input is allowed. Its runtime view
+					//is published for this frame; ordinary persistent textures have no
+					//same-frame write guard. The caller must still place the mip producer
+					//at an earlier game event.
+					const bool generatedMip = RenderPass::FindMipChainRuntimeSource(producerPass) &&
+						input.resourceId == RenderPass::MipChainOutputResourceId(producerPass);
+					if (!input.allowCrossAnchor || !generatedMip)
+					{
+						node.valid = false;
+						node.error = "Runtime resource crosses incompatible execution anchors: " + input.resourceId + ".";
+						compilation.diagnostics.push_back(node.error);
+					}
 					continue;
 				}
 				AddDependency(node, producerIt->second);

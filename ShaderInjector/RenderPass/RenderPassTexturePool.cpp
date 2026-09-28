@@ -33,6 +33,12 @@ namespace RenderPassTexturePool
 		std::mutex gPoolMutex;
 		std::unordered_map<std::string, DefinitionRecord> gDefinitions;
 		std::unordered_map<std::string, TextureEntry> gTextures;
+		struct GeneratedMipEntry
+		{
+			TextureView texture;
+			uint64_t frameIndex = 0;
+		};
+		std::unordered_map<std::string, GeneratedMipEntry> gGeneratedMips;
 		std::unordered_map<ID3D12GraphicsCommandList*, std::unordered_map<ID3D12Resource*, RecordedTextureVersion>> gRecordedTextures;
 		std::unordered_map<ID3D12CommandQueue*, QueueFence> gQueueFences;
 		std::unordered_map<ID3D12CommandQueue*, std::unordered_map<ID3D12Resource*, RecordedTextureVersion>> gPendingQueueTextures;
@@ -674,6 +680,15 @@ namespace RenderPassTexturePool
 		gInputTextureOverrides.push_back({resourceId, temporalView, texture});
 	}
 
+	void PublishGeneratedMipTexture(const std::string& resourceId, const TextureView& texture)
+	{
+		std::lock_guard<std::mutex> lock(gPoolMutex);
+		if (texture.resource)
+			gGeneratedMips[resourceId] = {texture, CurrentFrameIndex()};
+		else
+			gGeneratedMips.erase(resourceId);
+	}
+
 	bool GetInputTexture(
 		const std::string& resourceId,
 		ShaderResource::TemporalView temporalView,
@@ -684,6 +699,16 @@ namespace RenderPassTexturePool
 			if (overrideIt->resourceId == resourceId && overrideIt->temporalView == temporalView)
 			{
 				outTexture = overrideIt->texture;
+				return outTexture.resource != nullptr;
+			}
+		}
+		if (temporalView == ShaderResource::TemporalView::Current)
+		{
+			std::lock_guard<std::mutex> lock(gPoolMutex);
+			const auto generated = gGeneratedMips.find(resourceId);
+			if (generated != gGeneratedMips.end() && generated->second.frameIndex == CurrentFrameIndex())
+			{
+				outTexture = generated->second.texture;
 				return outTexture.resource != nullptr;
 			}
 		}
@@ -739,6 +764,7 @@ namespace RenderPassTexturePool
 
 		std::lock_guard<std::mutex> lock(gPoolMutex);
 		gDefinitions = std::move(definitions);
+		gGeneratedMips.clear();
 		gHistoryBootstrapTextures.clear();
 		for (auto textureIt = gTextures.begin(); textureIt != gTextures.end();)
 		{
@@ -1189,6 +1215,7 @@ namespace RenderPassTexturePool
 		gDefinitions.clear();
 		gHistoryBootstrapTextures.clear();
 		gTextures.clear();
+		gGeneratedMips.clear();
 		gRecordedTextures.clear();
 		gPendingQueueTextures.clear();
 		gHasPendingQueueTextures.store(false, std::memory_order_release);

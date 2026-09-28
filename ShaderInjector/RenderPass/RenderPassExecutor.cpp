@@ -12,7 +12,7 @@
 #include "RenderPass/ExecutorThreadPipelineLookup.h"
 #include "RenderPass/RenderPassReplacement.h"
 #include "RenderPass/RenderPassTexturePool.h"
-#include "ShaderResource/ShaderResourceRuntime.h"
+#include "ShaderResource/Runtime/ShaderResourceRuntime.h"
 #include "Globals.h"
 #include "RenderDoc/RenderDocIntegration.h"
 #include "IO/ShaderInjectorIO.h"

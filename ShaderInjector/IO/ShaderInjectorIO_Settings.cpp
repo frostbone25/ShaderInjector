@@ -32,6 +32,8 @@ namespace ShaderInjectorIO
 	static const char* const settingsNameGeometryShaderModel = "GeometryShaderModel";
 	static const char* const settingsNamePixelShaderModel = "PixelShaderModel";
 	static const char* const settingsNameComputeShaderModel = "ComputeShaderModel";
+	static const char* const settingsNameAmplificationShaderModel = "AmplificationShaderModel";
+	static const char* const settingsNameMeshShaderModel = "MeshShaderModel";
 
 	static const char* const settingsNameEnabled = "Enabled";
 	static const char* const settingsNameAutoAttach = "AutoAttach";
@@ -86,6 +88,8 @@ namespace ShaderInjectorIO
 		injectorSettingsINI[settingsSectionShaderCompiler][settingsNameGeometryShaderModel] = static_cast<int>(Globals::gGeometryShaderModel);
 		injectorSettingsINI[settingsSectionShaderCompiler][settingsNamePixelShaderModel] = static_cast<int>(Globals::gPixelShaderModel);
 		injectorSettingsINI[settingsSectionShaderCompiler][settingsNameComputeShaderModel] = static_cast<int>(Globals::gComputeShaderModel);
+		injectorSettingsINI[settingsSectionShaderCompiler][settingsNameAmplificationShaderModel] = static_cast<int>(Globals::gAmplificationShaderModel);
+		injectorSettingsINI[settingsSectionShaderCompiler][settingsNameMeshShaderModel] = static_cast<int>(Globals::gMeshShaderModel);
 
 		//render doc settings control capture integration and automatic attachment.
 		injectorSettingsINI[settingsSectionRenderDoc][settingsNameEnabled] = Globals::gRenderDocIntegrationEnabled;
@@ -159,6 +163,8 @@ namespace ShaderInjectorIO
 			const int geometryShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameGeometryShaderModel, static_cast<int>(Globals::gGeometryShaderModel));
 			const int pixelShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNamePixelShaderModel, static_cast<int>(Globals::gPixelShaderModel));
 			const int computeShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameComputeShaderModel, static_cast<int>(Globals::gComputeShaderModel));
+			const int amplificationShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameAmplificationShaderModel, static_cast<int>(Globals::gAmplificationShaderModel));
+			const int meshShaderModel = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionShaderCompiler, settingsNameMeshShaderModel, static_cast<int>(Globals::gMeshShaderModel));
 
 			//apply values as a snapshot so other startup code never observes a half-loaded configuration.
 			Globals::keyOpenShaderInjectorGUI = keyOpenShaderInjectorGUI;
@@ -189,6 +195,8 @@ namespace ShaderInjectorIO
 			Globals::gGeometryShaderModel = StringHelper::ShaderModelFromValue(geometryShaderModel, Globals::gGeometryShaderModel);
 			Globals::gPixelShaderModel = StringHelper::ShaderModelFromValue(pixelShaderModel, Globals::gPixelShaderModel);
 			Globals::gComputeShaderModel = StringHelper::ShaderModelFromValue(computeShaderModel, Globals::gComputeShaderModel);
+			Globals::gAmplificationShaderModel = StringHelper::ShaderModelFromValue(amplificationShaderModel, Globals::gAmplificationShaderModel);
+			Globals::gMeshShaderModel = StringHelper::ShaderModelFromValue(meshShaderModel, Globals::gMeshShaderModel);
 
 			WriteToLogFile(
 				"ShaderInjectorIO->ReadInjectorSettings: parsed injector settings"
@@ -213,7 +221,9 @@ namespace ShaderInjectorIO
 				" domainShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::DomainShader) +
 				" geometryShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::GeometryShader) +
 				" pixelShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::PixelShader) +
-				" computeShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::ComputeShader));
+				" computeShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::ComputeShader) +
+				" amplificationShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::AmplificationShader) +
+				" meshShaderProfile=" + StringHelper::ShaderProfileForType(ShaderTarget::MeshShader));
 		}
 		catch (...)
 		{

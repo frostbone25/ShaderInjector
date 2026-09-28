@@ -6,7 +6,7 @@
 #include "DatabaseShaderTargets.h"
 #include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "HookD3D12.h"
-#include "ShaderDiscovery.h"
+#include "ShaderDiscovery/ShaderDiscovery.h"
 #include "GUI/ShaderInjectorGUI.h"
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderTarget.h"

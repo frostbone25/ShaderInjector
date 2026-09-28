@@ -30,6 +30,8 @@ namespace RenderPass
 		uint32_t shaderRegister = 0;
 		uint32_t registerSpace = 0;
 		bool optional = false;
+		//Explicitly permit a same-frame generated mip chain at an earlier shader anchor.
+		bool allowCrossAnchor = false;
 
 		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
 			LogicalResourceBindingDisk,
@@ -41,6 +43,7 @@ namespace RenderPass
 			temporalView,
 			shaderRegister,
 			registerSpace,
-			optional)
+			optional,
+			allowCrossAnchor)
 	};
 } //namespace RenderPass

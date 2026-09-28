@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <atomic>
 #include <cstdint>
 #include <d3d12.h>
 #include <dxgi.h>
@@ -101,6 +102,7 @@ namespace HookD3D12
 	using FunctionDrawInstancedD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, UINT, UINT, UINT);
 	using FunctionDrawIndexedInstancedD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, UINT, UINT, INT, UINT);
 	using FunctionDispatchD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, UINT, UINT);
+	using FunctionDispatchMeshD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList6*, UINT, UINT, UINT);
 	using FunctionIASetPrimitiveTopologyD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, D3D12_PRIMITIVE_TOPOLOGY);
 	using FunctionRSSetViewportsD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, const D3D12_VIEWPORT*);
 	using FunctionRSSetScissorRectsD3D12 = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, const D3D12_RECT*);
@@ -116,6 +118,7 @@ namespace HookD3D12
 	extern FunctionDrawInstancedD3D12 Original_DrawInstanced;
 	extern FunctionDrawIndexedInstancedD3D12 Original_DrawIndexedInstanced;
 	extern FunctionDispatchD3D12 Original_Dispatch;
+	extern FunctionDispatchMeshD3D12 Original_DispatchMesh;
 	extern FunctionIASetPrimitiveTopologyD3D12 Original_IASetPrimitiveTopology;
 	extern FunctionRSSetViewportsD3D12 Original_RSSetViewports;
 	extern FunctionRSSetScissorRectsD3D12 Original_RSSetScissorRects;
@@ -240,6 +243,7 @@ namespace HookD3D12
 	extern char gShaderTargetNameBuffer[256];
 	extern bool gLoadedShaderTargetsOnce;
 	extern PixelShaderSelectionStyle gShaderSelectionStyle;
+	extern std::atomic<ID3D12PipelineState*> gHiddenMeshPipelineState;
 
 	//Look up replacements and schedule or invalidate PSO rebuild work when state changes.
 	int FindEnabledShaderTarget(uint64_t shaderHash, ShaderTarget::ShaderType shaderType);
@@ -546,6 +550,7 @@ namespace HookD3D12
 	void STDMETHODCALLTYPE Hook_DrawInstanced(ID3D12GraphicsCommandList*, UINT, UINT, UINT, UINT);
 	void STDMETHODCALLTYPE Hook_DrawIndexedInstanced(ID3D12GraphicsCommandList*, UINT, UINT, UINT, INT, UINT);
 	void STDMETHODCALLTYPE Hook_Dispatch(ID3D12GraphicsCommandList*, UINT, UINT, UINT);
+	void STDMETHODCALLTYPE Hook_DispatchMesh(ID3D12GraphicsCommandList6*, UINT, UINT, UINT);
 
 	//Preserve raster and input-assembly state for the active draw.
 	void STDMETHODCALLTYPE Hook_IASetPrimitiveTopology(ID3D12GraphicsCommandList*, D3D12_PRIMITIVE_TOPOLOGY);

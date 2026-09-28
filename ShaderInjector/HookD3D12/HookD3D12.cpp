@@ -45,13 +45,13 @@
 #include "dsound_proxy.h"
 #include "HookD3D12.h"
 #include "ShaderTarget/DatabaseShaderTargets.h"
-#include "HookInput.h"
+#include "Input/HookInput.h"
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderTarget/ShaderTarget.h"
 #include "GUI/ShaderInjectorGUI.h"
 #include "Hash/Hash.h"
 #include "FPSCounter.h"
-#include "ShaderAutomaticDiscovery.h"
+#include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
 #include "RenderPass/RenderPassRuntime.h"
 #include "RenderPass/RenderPassExecutor.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
@@ -226,6 +226,7 @@ namespace HookD3D12
 	static constexpr uint8_t gMaximumShaderTargetApplyFailureCount = 4;
 
 	PixelShaderSelectionStyle gShaderSelectionStyle = PixelShaderSelectionStyle::BluePixelShader;
+	std::atomic<ID3D12PipelineState*> gHiddenMeshPipelineState = nullptr;
 
 	//shared pipeline state and replacement bookkeeping
 
@@ -378,6 +379,7 @@ namespace HookD3D12
 	void ClearShaderMarkers()
 	{
 		bool changed = false;
+		gHiddenMeshPipelineState.store(nullptr, std::memory_order_release);
 
 		for (auto& pipeline : gGraphicsPipelines)
 		{
@@ -1688,6 +1690,8 @@ namespace HookD3D12
 			{pipeline.geometryShaderHash, ShaderTarget::GeometryShader},
 			{pipeline.hullShaderHash, ShaderTarget::HullShader},
 			{pipeline.domainShaderHash, ShaderTarget::DomainShader},
+			{pipeline.amplificationShaderHash, ShaderTarget::AmplificationShader},
+			{pipeline.meshShaderHash, ShaderTarget::MeshShader},
 		};
 
 		for (const ShaderCandidate& candidate : candidates)

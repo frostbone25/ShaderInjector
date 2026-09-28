@@ -1,6 +1,6 @@
 #include "ShaderTarget.h"
 
-#include "SimilarityScore.h"
+#include "ShaderAnalysis/SimilarityScore.h"
 
 namespace ShaderTarget
 {

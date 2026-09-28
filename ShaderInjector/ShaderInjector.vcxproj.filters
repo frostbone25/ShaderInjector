@@ -64,6 +64,21 @@
     <Filter Include="DDS">
       <UniqueIdentifier>{7d91b3fa-69b1-4634-9c11-00fcfa6126f3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ShaderAnalysis">
+      <UniqueIdentifier>{63f8ed86-614c-4d82-9a64-6d0d86c1b8af}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ShaderDiscovery">
+      <UniqueIdentifier>{4675911b-3f60-433d-8d74-3d913c93d8dc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ShaderResource">
+      <UniqueIdentifier>{03ad187b-9e97-4e9c-a187-154071eec92f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ShaderResource\Runtime">
+      <UniqueIdentifier>{4a4b9c46-f3b6-47af-b8b4-e168c4f0068a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Input">
+      <UniqueIdentifier>{8f3eaaf5-8f99-4f2e-a44e-1f8254bbaf76}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dsound_proxy.h">
@@ -102,8 +117,8 @@
     <ClInclude Include="HooksDummyObjectCleanupGuard.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="HookInput.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Input\HookInput.h">
+      <Filter>Input</Filter>
     </ClInclude>
     <ClInclude Include="ShaderInjectorVersion.h">
       <Filter>Header Files</Filter>
@@ -129,14 +144,14 @@
     <ClInclude Include="ShaderTarget\ShaderIdentityKeyHasher.h">
       <Filter>ShaderTarget</Filter>
     </ClInclude>
-    <ClInclude Include="ShaderAutomaticDiscovery\QueuedShader.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="ShaderDiscovery\QueuedShader.h">
+      <Filter>ShaderDiscovery</Filter>
     </ClInclude>
-    <ClInclude Include="ShaderAutomaticDiscovery\AnalysisJob.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="ShaderDiscovery\AnalysisJob.h">
+      <Filter>ShaderDiscovery</Filter>
     </ClInclude>
-    <ClInclude Include="ShaderAutomaticDiscovery\AnalysisResult.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="ShaderDiscovery\AnalysisResult.h">
+      <Filter>ShaderDiscovery</Filter>
     </ClInclude>
     <ClInclude Include="FPSCounter.h">
       <Filter>Header Files</Filter>
@@ -144,8 +159,8 @@
     <ClInclude Include="Hash\Hash.h">
       <Filter>Hash</Filter>
     </ClInclude>
-    <ClInclude Include="Keycodes.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Input\Keycodes.h">
+      <Filter>Input</Filter>
     </ClInclude>
     <ClInclude Include="StringHelper.h">
       <Filter>Header Files</Filter>
@@ -437,21 +452,21 @@
     <ClInclude Include="RenderPass\RuntimeResourceDefinitionDisk.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderPass\SamplerStateDisk.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderPass\ViewportPolicyDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAnalysis\ConstantBufferDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAnalysis\ConstantBufferVariableDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAnalysis\ContainerPartDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAnalysis\ExecutionPropertiesDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAnalysis\InstructionStatisticsDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAnalysis\ResourceBindingDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAnalysis\ShaderAnalysisDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAnalysis\SignatureParameterDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAnalysis\TypeLayoutDisk.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\ConstantBufferDisk.h"><Filter>ShaderAnalysis</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\ConstantBufferVariableDisk.h"><Filter>ShaderAnalysis</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\ContainerPartDisk.h"><Filter>ShaderAnalysis</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\ExecutionPropertiesDisk.h"><Filter>ShaderAnalysis</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\InstructionStatisticsDisk.h"><Filter>ShaderAnalysis</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\ResourceBindingDisk.h"><Filter>ShaderAnalysis</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\ShaderAnalysisDisk.h"><Filter>ShaderAnalysis</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\SignatureParameterDisk.h"><Filter>ShaderAnalysis</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\TypeLayoutDisk.h"><Filter>ShaderAnalysis</Filter></ClInclude>
     <ClInclude Include="HookD3D12\PSOSubobject.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAnalysis.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAnalyzer.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderAutomaticDiscovery.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderDiscovery.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="SimilarityScore.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\ShaderAnalysis.h"><Filter>ShaderAnalysis</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\ShaderAnalyzer.h"><Filter>ShaderAnalysis</Filter></ClInclude>
+    <ClInclude Include="ShaderDiscovery\ShaderAutomaticDiscovery.h"><Filter>ShaderDiscovery</Filter></ClInclude>
+    <ClInclude Include="ShaderDiscovery\ShaderDiscovery.h"><Filter>ShaderDiscovery</Filter></ClInclude>
+    <ClInclude Include="ShaderAnalysis\SimilarityScore.h"><Filter>ShaderAnalysis</Filter></ClInclude>
     <ClInclude Include="HookD3D12\CachedBlobContentMatch.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="HookD3D12\CommandListPipelineState.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="HookD3D12\HookDefinition.h"><Filter>Header Files</Filter></ClInclude>
@@ -466,18 +481,18 @@
     <ClInclude Include="HookD3D12\SwapChainCommandQueueBinding.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="HookD3D12\ThreadDescriptorIncrements.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="ShaderResource\DatabaseShaderResources.h">
-      <Filter>Header Files</Filter>
+      <Filter>ShaderResource</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\ShaderResource.h">
-      <Filter>Header Files</Filter>
+      <Filter>ShaderResource</Filter>
     </ClInclude>
-    <ClInclude Include="ShaderResource\ResolutionPolicyDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderResource\TextureDescriptionDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderResource\TextureDisk.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderResource\CatalogEntry.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="ShaderResource\TextureFormatOption.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ShaderResource\ResolutionPolicyDisk.h"><Filter>ShaderResource</Filter></ClInclude>
+    <ClInclude Include="ShaderResource\TextureDescriptionDisk.h"><Filter>ShaderResource</Filter></ClInclude>
+    <ClInclude Include="ShaderResource\TextureDisk.h"><Filter>ShaderResource</Filter></ClInclude>
+    <ClInclude Include="ShaderResource\CatalogEntry.h"><Filter>ShaderResource</Filter></ClInclude>
+    <ClInclude Include="ShaderResource\TextureFormatOption.h"><Filter>ShaderResource</Filter></ClInclude>
     <ClInclude Include="ShaderResource\ShaderResourceCatalog.h">
-      <Filter>Header Files</Filter>
+      <Filter>ShaderResource</Filter>
     </ClInclude>
     <ClInclude Include="DDS\DDSMetadata.h">
       <Filter>DDS</Filter>
@@ -497,32 +512,32 @@
     <ClInclude Include="DDS\DDS.h">
       <Filter>DDS</Filter>
     </ClInclude>
-    <ClInclude Include="ShaderResource\ShaderResourceRuntime.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="ShaderResource\Runtime\ShaderResourceRuntime.h">
+      <Filter>ShaderResource\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\Runtime\TextureGPU.h">
-      <Filter>Header Files</Filter>
+      <Filter>ShaderResource\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\Runtime\RootTableRestore.h">
-      <Filter>Header Files</Filter>
+      <Filter>ShaderResource\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\Runtime\ActiveTable.h">
-      <Filter>Header Files</Filter>
+      <Filter>ShaderResource\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\Runtime\DescriptorHeapPage.h">
-      <Filter>Header Files</Filter>
+      <Filter>ShaderResource\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\Runtime\DescriptorExecutionSlot.h">
-      <Filter>Header Files</Filter>
+      <Filter>ShaderResource\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\Runtime\DescriptorAllocation.h">
-      <Filter>Header Files</Filter>
+      <Filter>ShaderResource\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\Runtime\CommandListSlot.h">
-      <Filter>Header Files</Filter>
+      <Filter>ShaderResource\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="ShaderResource\Runtime\QueueFence.h">
-      <Filter>Header Files</Filter>
+      <Filter>ShaderResource\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="Performance\PerformanceMetrics.h">
       <Filter>Performance</Filter>
@@ -763,20 +778,20 @@
     <ClCompile Include="Hooks.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="HookInput.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Input\HookInput.cpp">
+      <Filter>Input</Filter>
     </ClCompile>
-    <ClCompile Include="ShaderAnalyzer.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="ShaderAnalysis\ShaderAnalyzer.cpp">
+      <Filter>ShaderAnalysis</Filter>
     </ClCompile>
-    <ClCompile Include="ShaderAnalysis.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="ShaderAnalysis\ShaderAnalysis.cpp">
+      <Filter>ShaderAnalysis</Filter>
     </ClCompile>
-    <ClCompile Include="ShaderDiscovery.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="ShaderDiscovery\ShaderDiscovery.cpp">
+      <Filter>ShaderDiscovery</Filter>
     </ClCompile>
-    <ClCompile Include="ShaderAutomaticDiscovery.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="ShaderDiscovery\ShaderAutomaticDiscovery.cpp">
+      <Filter>ShaderDiscovery</Filter>
     </ClCompile>
     <ClCompile Include="ShaderModelDetector.cpp">
       <Filter>Source Files</Filter>
@@ -790,8 +805,8 @@
     <ClCompile Include="Hash\Hash.cpp">
       <Filter>Hash</Filter>
     </ClCompile>
-    <ClCompile Include="Keycodes.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Input\Keycodes.cpp">
+      <Filter>Input</Filter>
     </ClCompile>
     <ClCompile Include="StringHelper.cpp">
       <Filter>Source Files</Filter>
@@ -869,6 +884,9 @@
       <Filter>D3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_Dispatch.cpp">
+      <Filter>D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\D3D12\HookD3D12_DispatchMesh.cpp">
       <Filter>D3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_DrawInstanced.cpp">
@@ -1043,19 +1061,19 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ShaderResource\DatabaseShaderResources.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>ShaderResource</Filter>
     </ClCompile>
     <ClCompile Include="DDS\DDS.cpp">
       <Filter>DDS</Filter>
     </ClCompile>
-    <ClCompile Include="ShaderResource\ShaderResourceRuntime.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="ShaderResource\Runtime\ShaderResourceRuntime.cpp">
+      <Filter>ShaderResource\Runtime</Filter>
     </ClCompile>
     <ClCompile Include="ShaderResource\ShaderResource.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>ShaderResource</Filter>
     </ClCompile>
     <ClCompile Include="ShaderResource\ShaderResourceCatalog.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>ShaderResource</Filter>
     </ClCompile>
     <ClCompile Include="Performance\PerformanceMetrics.cpp">
       <Filter>Performance</Filter>

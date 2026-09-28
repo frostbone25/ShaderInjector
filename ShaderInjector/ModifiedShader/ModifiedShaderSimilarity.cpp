@@ -2,7 +2,7 @@
 
 #include <unordered_set>
 
-#include "SimilarityScore.h"
+#include "ShaderAnalysis/SimilarityScore.h"
 
 namespace ModifiedShader
 {

@@ -32,10 +32,10 @@
 #include "RenderPass/RenderPassRuntime.h"
 #include "ShaderResource/DatabaseShaderResources.h"
 #include "ShaderResource/ShaderResourceCatalog.h"
-#include "ShaderAutomaticDiscovery.h"
+#include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
 #include "StringHelper.h"
 #include "GUI/ShaderInjectorGUITooltips.h"
-#include "Keycodes.h"
+#include "Input/Keycodes.h"
 #include "ShaderInjectorVersion.h"
 
 namespace ShaderInjectorGUI

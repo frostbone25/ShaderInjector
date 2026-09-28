@@ -2,7 +2,7 @@
 
 #include <unordered_set>
 
-#include "ShaderAnalysis.h"
+#include "ShaderAnalysis/ShaderAnalysis.h"
 
 namespace ShaderAnalyzer
 {

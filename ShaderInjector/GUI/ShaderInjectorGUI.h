@@ -61,6 +61,7 @@ namespace ShaderInjectorGUI
 	void DrawD3D12PipelineInfo();
 
 	//===================== pipelines =====================
+	void DrawGraphicsPipelines();
 	void DrawStreamPipelines();
 
 	template <

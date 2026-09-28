@@ -1,6 +1,6 @@
-#include "ShaderAnalysis.h"
+#include "ShaderAnalysis/ShaderAnalysis.h"
 
-#include "SimilarityScore.h"
+#include "ShaderAnalysis/SimilarityScore.h"
 
 namespace ShaderAnalysis
 {

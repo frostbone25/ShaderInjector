@@ -23,10 +23,10 @@
 #include "ModifiedShader/ModifiedShaderCreation.h"
 #include "RenderDoc/RenderDocIntegration.h"
 #include "RenderPass/RenderPassRuntime.h"
-#include "ShaderAutomaticDiscovery.h"
+#include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
 #include "StringHelper.h"
 #include "GUI/ShaderInjectorGUITooltips.h"
-#include "Keycodes.h"
+#include "Input/Keycodes.h"
 #include "ShaderInjectorVersion.h"
 
 namespace

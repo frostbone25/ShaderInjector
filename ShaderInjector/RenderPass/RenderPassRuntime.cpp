@@ -38,7 +38,7 @@
 #include "RenderPass/Runtime/ShaderTargetBinding.h"
 #include "RenderPass/Runtime/ThreadGameTextureBindingLookup.h"
 #include "ShaderResource/ShaderResourceCatalog.h"
-#include "ShaderResource/ShaderResourceRuntime.h"
+#include "ShaderResource/Runtime/ShaderResourceRuntime.h"
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
@@ -2613,11 +2613,13 @@ namespace RenderPassRuntime
 					outputId, ShaderResource::TemporalView::Current, generatedMipTexture);
 				if (executionSucceeded)
 				{
+					RenderPassTexturePool::PublishGeneratedMipTexture(outputId, generatedMipTexture);
 					unavailableRuntimeResources.erase(mipRuntimeSource->resourceId);
 					unavailableRuntimeResources.erase(outputId);
 				}
 				else
 				{
+					RenderPassTexturePool::PublishGeneratedMipTexture(outputId, {});
 					unavailableRuntimeResources.insert(mipRuntimeSource->resourceId);
 					unavailableRuntimeResources.insert(outputId);
 				}

@@ -1,7 +1,7 @@
-#include "ShaderAutomaticDiscovery.h"
-#include "ShaderAutomaticDiscovery/AnalysisJob.h"
-#include "ShaderAutomaticDiscovery/AnalysisResult.h"
-#include "ShaderAutomaticDiscovery/QueuedShader.h"
+#include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
+#include "ShaderDiscovery/AnalysisJob.h"
+#include "ShaderDiscovery/AnalysisResult.h"
+#include "ShaderDiscovery/QueuedShader.h"
 #include "ShaderTarget/ShaderIdentityKey.h"
 #include "ShaderTarget/ShaderIdentityKeyHasher.h"
 #include "Enum/ShaderAutomaticDiscoveryPipelineSource.h"
@@ -26,8 +26,8 @@
 #include "Globals.h"
 #include "Hash/Hash.h"
 #include "HookD3D12.h"
-#include "ShaderAnalysis.h"
-#include "ShaderDiscovery.h"
+#include "ShaderAnalysis/ShaderAnalysis.h"
+#include "ShaderDiscovery/ShaderDiscovery.h"
 #include "GUI/ShaderInjectorGUI.h"
 #include "StringHelper.h"
 
@@ -163,9 +163,12 @@ namespace ShaderAutomaticDiscovery
 
 			const size_t lowerTolerance = (std::max<size_t>)(1, (byteLength * byteLengthLowerTolerancePercent) / 100);
 			const size_t upperTolerance = (std::max<size_t>)(1, (byteLength * byteLengthUpperTolerancePercent) / 100);
+
 			size_t minimumLength = 1;
+
 			if (byteLength > lowerTolerance)
 				minimumLength = byteLength - lowerTolerance;
+
 			const size_t maximumLength = byteLength + upperTolerance;
 			gPlausibleByteLengthRanges[shaderTypeIndex].push_back({minimumLength, maximumLength});
 		}
@@ -243,6 +246,8 @@ namespace ShaderAutomaticDiscovery
 			case ShaderTarget::HullShader:
 			case ShaderTarget::DomainShader:
 			case ShaderTarget::GeometryShader:
+			case ShaderTarget::AmplificationShader:
+			case ShaderTarget::MeshShader:
 				return 90000.0;
 			case ShaderTarget::ComputeShader:
 				return 0.0;
@@ -1375,6 +1380,8 @@ namespace ShaderAutomaticDiscovery
 		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::GeometryShader, pipeline.geometryShaderHash, pipeline.geometryShaderBytecode, false);
 		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::HullShader, pipeline.hullShaderHash, pipeline.hullShaderBytecode, false);
 		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::DomainShader, pipeline.domainShaderHash, pipeline.domainShaderBytecode, false);
+		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::AmplificationShader, pipeline.amplificationShaderHash, pipeline.amplificationShaderBytecode, false);
+		Enqueue(PipelineSource::Stream, pipeline.pipelineState, -1, ShaderTarget::MeshShader, pipeline.meshShaderHash, pipeline.meshShaderBytecode, false);
 	}
 
 	bool ProcessCapturedShader(

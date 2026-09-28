@@ -2,8 +2,8 @@
 
 #include <string>
 
-#include "ShaderAnalysis.h"
-#include "ShaderAutomaticDiscovery/QueuedShader.h"
+#include "ShaderAnalysis/ShaderAnalysis.h"
+#include "ShaderDiscovery/QueuedShader.h"
 
 namespace ShaderAutomaticDiscovery
 {

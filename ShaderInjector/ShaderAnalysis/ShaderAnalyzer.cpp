@@ -1,4 +1,4 @@
-#include "ShaderAnalyzer.h"
+#include "ShaderAnalysis/ShaderAnalyzer.h"
 
 #include <algorithm>
 #include <cctype>
@@ -72,6 +72,10 @@ namespace ShaderAnalyzer
 				return {"ComputeShader", "cs"};
 			case D3D12_SHVER_LIBRARY:
 				return {"Library", "lib"};
+			case D3D12_SHVER_AMPLIFICATION_SHADER:
+				return {"AmplificationShader", "as"};
+			case D3D12_SHVER_MESH_SHADER:
+				return {"MeshShader", "ms"};
 			default:
 				return {"Unknown", "unknown"};
 			}

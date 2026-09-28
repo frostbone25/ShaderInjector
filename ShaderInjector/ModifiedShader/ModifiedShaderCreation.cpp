@@ -3,7 +3,7 @@
 #include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "Hash/Hash.h"
 #include "ModifiedShader/ModifiedShader.h"
-#include "ShaderAnalyzer.h"
+#include "ShaderAnalysis/ShaderAnalyzer.h"
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderTemplates.h"
 #include "StringHelper.h"
@@ -60,13 +60,17 @@ namespace ModifiedShaderCreation
 		ShaderAnalyzer::Analyze(shaderBytecode, shaderBytecodeLength, target.shaderAnalysis);
 		package.targets.push_back(std::move(target));
 
-		const char* sourceTemplate = ShaderTemplates::GetModifiedShaderSourceTemplate(shaderType);
+		const char* defaultSourceTemplate = ShaderTemplates::GetModifiedShaderSourceTemplate(shaderType);
 
-		if (!sourceTemplate || package.shaderProfile.empty())
+		if (!defaultSourceTemplate || package.shaderProfile.empty())
 		{
 			outMessage = "No Modified Shader source template is available for " + shaderTypeName + ".";
 			return false;
 		}
+
+		std::string sourceTemplate = defaultSourceTemplate;
+		if (shaderType == ShaderTarget::MeshShader)
+			sourceTemplate = ShaderTemplates::BuildMeshShaderSourceTemplate(package.targets.back().shaderAnalysis);
 
 		ShaderInjectorIO::DirectoryCreate(packageDirectory);
 

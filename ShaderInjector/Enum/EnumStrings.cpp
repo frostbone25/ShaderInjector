@@ -130,6 +130,10 @@ namespace StringHelper
 				return "PixelShader";
 			case ShaderTarget::ComputeShader:
 				return "ComputeShader";
+			case ShaderTarget::AmplificationShader:
+				return "AmplificationShader";
+			case ShaderTarget::MeshShader:
+				return "MeshShader";
 			default:
 				return "Unknown";
 		}

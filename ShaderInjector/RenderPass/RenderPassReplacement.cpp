@@ -116,6 +116,7 @@ namespace RenderPassReplacement
 				ID3D12PipelineState* replacement = nullptr;
 				HookD3D12::ScopedRenderPassInjection injectionScope;
 				HRESULT result = E_NOINTERFACE;
+
 				if (HookD3D12::Original_CreateGraphicsPipelineState)
 					result = HookD3D12::Original_CreateGraphicsPipelineState(HookD3D12::GetCapturedDevice(), &description, IID_PPV_ARGS(&replacement));
 

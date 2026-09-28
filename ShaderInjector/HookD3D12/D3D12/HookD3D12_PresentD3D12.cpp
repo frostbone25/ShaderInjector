@@ -4,7 +4,7 @@
 #include "FPSCounter.h"
 #include "Globals.h"
 #include "GUI/ShaderInjectorGUI.h"
-#include "HookInput.h"
+#include "Input/HookInput.h"
 #include "IO/ShaderInjectorIO.h"
 #include "Performance/PerformanceMetrics.h"
 #include "RenderDoc/RenderDocIntegration.h"

@@ -24,10 +24,12 @@ namespace HookD3D12
 	static std::mutex hookInstallationMutex;
 	static std::unordered_set<void*> graphicsPipelineHookedDeviceVTables;
 	static std::unordered_set<void*> graphicsCommandListHookedVTables;
+	static std::unordered_set<void*> meshCommandListHookedVTables;
 	static std::unordered_set<void*> renderPassHookedDeviceVTables;
 	static std::unordered_set<void*> renderPassHookedCommandListVTables;
 	static void** capturedGraphicsCommandListVTable = nullptr;
 	static std::atomic<void*> fastCommandListHookedVTable = nullptr;
+	static std::atomic<void*> fastMeshCommandListHookedVTable = nullptr;
 	static std::atomic<void*> fastDeferredDeviceVTable = nullptr;
 	static std::atomic<void*> fastDeferredCommandListVTable = nullptr;
 
@@ -140,10 +142,44 @@ namespace HookD3D12
 			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12Install->InstallPipelineHooksForDevice: CreateRootSignature hook failed");
 	}
 
+	static void InstallMeshDispatchHookForCommandList(ID3D12GraphicsCommandList* commandList)
+	{
+		ID3D12GraphicsCommandList6* meshCommandList = nullptr;
+		if (FAILED(commandList->QueryInterface(IID_PPV_ARGS(&meshCommandList))))
+			return;
+
+		void** meshVTable = *reinterpret_cast<void***>(meshCommandList);
+		if (fastMeshCommandListHookedVTable.load(std::memory_order_acquire) != meshVTable)
+		{
+			std::lock_guard<std::mutex> installationLock(hookInstallationMutex);
+			if (meshCommandListHookedVTables.find(meshVTable) == meshCommandListHookedVTables.end())
+			{
+				const MH_STATUS createStatus = MH_CreateHook(meshVTable[VTableIndex::indexDispatchMesh], &Hook_DispatchMesh, reinterpret_cast<void**>(&Original_DispatchMesh));
+				const MH_STATUS enableStatus = MH_EnableHook(meshVTable[VTableIndex::indexDispatchMesh]);
+				if ((createStatus == MH_OK || createStatus == MH_ERROR_ALREADY_CREATED) && (enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED) && Original_DispatchMesh)
+				{
+					meshCommandListHookedVTables.insert(meshVTable);
+					fastMeshCommandListHookedVTable.store(meshVTable, std::memory_order_release);
+					ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12Install->InstallMeshDispatchHookForCommandList: DispatchMesh hook installed");
+				}
+				else
+				{
+					ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12Install->InstallMeshDispatchHookForCommandList: DispatchMesh hook failed");
+				}
+			}
+			else
+				fastMeshCommandListHookedVTable.store(meshVTable, std::memory_order_release);
+		}
+
+		meshCommandList->Release();
+	}
+
 	void InstallCommandListHooksForCommandList(ID3D12GraphicsCommandList* commandList)
 	{
 		if (!commandList)
 			return;
+
+		InstallMeshDispatchHookForCommandList(commandList);
 
 		void** commandListVTable = *reinterpret_cast<void***>(commandList);
 
@@ -166,6 +202,8 @@ namespace HookD3D12
 
 		MH_STATUS setPipelineCreate = MH_CreateHook(commandListVTable[VTableIndex::indexSetPipelineState], &Hook_SetPipelineState, reinterpret_cast<void**>(&Original_SetPipelineState));
 		MH_STATUS setPipelineEnable = MH_EnableHook(commandListVTable[VTableIndex::indexSetPipelineState]);
+		MH_STATUS executeIndirectCreate = MH_CreateHook(commandListVTable[VTableIndex::indexExecuteIndirect], &Hook_ExecuteIndirect, reinterpret_cast<void**>(&Original_ExecuteIndirect));
+		MH_STATUS executeIndirectEnable = MH_EnableHook(commandListVTable[VTableIndex::indexExecuteIndirect]);
 
 		MH_STATUS setComputeRootCreate = MH_CreateHook(commandListVTable[VTableIndex::indexSetComputeRootSignature], &Hook_SetComputeRootSignature, reinterpret_cast<void**>(&Original_SetComputeRootSignature));
 		MH_STATUS setComputeRootEnable = MH_EnableHook(commandListVTable[VTableIndex::indexSetComputeRootSignature]);
@@ -182,6 +220,11 @@ namespace HookD3D12
 			ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12Install->InstallCommandListHooksForCommandList: SetPipelineState hook installed");
 		else
 			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12Install->InstallCommandListHooksForCommandList: SetPipelineState hook failed");
+
+		if ((executeIndirectCreate == MH_OK || executeIndirectCreate == MH_ERROR_ALREADY_CREATED) && (executeIndirectEnable == MH_OK || executeIndirectEnable == MH_ERROR_ENABLED))
+			ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12Install->InstallCommandListHooksForCommandList: ExecuteIndirect hook installed");
+		else
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12Install->InstallCommandListHooksForCommandList: ExecuteIndirect hook failed");
 
 		if (setComputeRootCreate == MH_OK && setComputeRootEnable == MH_OK)
 			ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12Install->InstallCommandListHooksForCommandList: SetComputeRootSignature hook installed");
@@ -340,7 +383,7 @@ namespace HookD3D12
 				{VTableIndex::indexIASetVertexBuffers, reinterpret_cast<void*>(&Hook_IASetVertexBuffers), reinterpret_cast<void**>(&Original_IASetVertexBuffers)},
 				{VTableIndex::indexOMSetRenderTargets, reinterpret_cast<void*>(&Hook_OMSetRenderTargets), reinterpret_cast<void**>(&Original_OMSetRenderTargets)},
 				{VTableIndex::indexExecuteIndirect, reinterpret_cast<void*>(&Hook_ExecuteIndirect), reinterpret_cast<void**>(&Original_ExecuteIndirect)},
-				};
+			};
 
 			bool commandListHooksInstalled = true;
 
