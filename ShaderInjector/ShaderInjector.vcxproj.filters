@@ -171,6 +171,10 @@
     <ClInclude Include="HookD3D12\HookD3D12.h">
       <Filter>HookD3D12</Filter>
     </ClInclude>
+    <ClInclude Include="HookD3D12\DeviceRuntimeState.h"><Filter>HookD3D12</Filter></ClInclude>
+    <ClInclude Include="HookD3D12\HookD3D12DeviceLifecycle.h"><Filter>HookD3D12</Filter></ClInclude>
+    <ClInclude Include="HookD3D12\OverlayInitializationScope.h"><Filter>HookD3D12</Filter></ClInclude>
+    <ClInclude Include="HookD3D12\UncapturedRootSignatureAttempts.h"><Filter>HookD3D12</Filter></ClInclude>
     <ClInclude Include="HookD3D12\ComputePipelineInfo.h">
       <Filter>HookD3D12</Filter>
     </ClInclude>
@@ -355,6 +359,9 @@
       <Filter>RenderPass</Filter>
     </ClInclude>
     <ClInclude Include="RenderPass\Registry\DescriptorPage.h">
+      <Filter>RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderPass\Registry\ScopedDescriptorMirrorOperation.h">
       <Filter>RenderPass</Filter>
     </ClInclude>
     <ClInclude Include="RenderPass\Registry\DescriptorHeapRecord.h">
@@ -615,6 +622,9 @@
       <Filter>ModifiedShader</Filter>
     </ClInclude>
     <ClInclude Include="ModifiedShader\ModifiedShaderCreation.h">
+      <Filter>ModifiedShader</Filter>
+    </ClInclude>
+    <ClInclude Include="ModifiedShader\ModifiedShaderRecapture.h">
       <Filter>ModifiedShader</Filter>
     </ClInclude>
     <ClInclude Include="ShaderTarget\DatabaseShaderTargets.h">
@@ -1015,6 +1025,8 @@
     <ClCompile Include="HookD3D12\HookD3D12PipelineUtils.cpp">
       <Filter>HookD3D12</Filter>
     </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12PipelineIdentity.cpp"><Filter>HookD3D12</Filter></ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12DeviceLifecycle.cpp"><Filter>HookD3D12</Filter></ClCompile>
     <ClCompile Include="HookD3D12\HookD3D12RenderPass.cpp">
       <Filter>HookD3D12</Filter>
     </ClCompile>
@@ -1171,6 +1183,9 @@
     <ClCompile Include="ModifiedShader\DatabaseModifiedShadersPackages.cpp">
       <Filter>ModifiedShader</Filter>
     </ClCompile>
+    <ClCompile Include="ModifiedShader\DatabaseModifiedShadersRecapture.cpp">
+      <Filter>ModifiedShader</Filter>
+    </ClCompile>
     <ClCompile Include="ModifiedShader\ModifiedShader.cpp">
       <Filter>ModifiedShader</Filter>
     </ClCompile>
@@ -1178,6 +1193,9 @@
       <Filter>ModifiedShader</Filter>
     </ClCompile>
     <ClCompile Include="ModifiedShader\ModifiedShaderCreation.cpp">
+      <Filter>ModifiedShader</Filter>
+    </ClCompile>
+    <ClCompile Include="ModifiedShader\ModifiedShaderRecapture.cpp">
       <Filter>ModifiedShader</Filter>
     </ClCompile>
     <ClCompile Include="ShaderTarget\DatabaseShaderTargets.cpp">

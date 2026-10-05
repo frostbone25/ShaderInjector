@@ -1,0 +1,2 @@
+CPU-only descriptor mirror clone benchmark: descriptors=326 iterations=10000 total_us=280277 avg_us_per_clone=28.0277 (not an in-game FPS measurement)
+Descriptor mirror validation passed.

@@ -12,7 +12,7 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_IASetIndexBuffer(ID3D12GraphicsCommandList* commandList, const D3D12_INDEX_BUFFER_VIEW* view)
 	{
-		if (Globals::gShaderInjectorEnabled &&
+		if (IsInjectorEnabledForCommandList(commandList) &&
 			RenderPassRuntime::IsResourceTrackingRequired() &&
 			RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) &&
 			!IsInsideRenderPassInjection())

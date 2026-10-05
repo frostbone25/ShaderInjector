@@ -15,7 +15,12 @@ namespace HookD3D12
 	{
 		Original_CreateUnorderedAccessView(device, resource, counterResource, description, destination);
 
-		if (Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() && RenderPassRuntime::IsDescriptorRegistryTrackingRequired())
-			RenderPassResourceRegistry::RegisterUnorderedAccessView(resource, counterResource, description, destination);
+		if (!IsInsideRenderPassInjection() && !RenderPassResourceRegistry::IsInsideDescriptorMirrorOperation() && (ShouldTrackRenderPassDescriptorMetadata() || RenderPassResourceRegistry::IsDescriptorMirroringActive()))
+		{
+			RenderPassResourceRegistry::MirrorUnorderedAccessView(device, resource, counterResource, description, destination);
+
+			if (ShouldTrackRenderPassDescriptorMetadata())
+				RenderPassResourceRegistry::RegisterUnorderedAccessView(resource, counterResource, description, destination);
+		}
 	}
 } //namespace HookD3D12

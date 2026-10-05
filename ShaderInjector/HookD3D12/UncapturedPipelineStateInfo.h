@@ -8,6 +8,7 @@
 #include <wrl/client.h>
 
 #include "HookD3D12/PipelineStateInfo.h"
+#include "HookD3D12/UncapturedRootSignatureAttempts.h"
 #include "ShaderTarget/ShaderTarget.h"
 
 namespace HookD3D12
@@ -23,6 +24,8 @@ namespace HookD3D12
 		std::vector<uint8_t> cachedBlob;
 		bool attemptedReplacement = false;
 		bool retryReplacementOnRootSignatureChange = false;
+		UncapturedRootSignatureAttempts rootSignatureAttempts;
+		ShaderTarget::ShaderType matchedShaderType = ShaderTarget::Unknown;
 		ID3D12PipelineState* replacementPipelineState = nullptr;
 		ID3D12RootSignature* observedGraphicsRootSignature = nullptr;
 		ID3D12RootSignature* observedComputeRootSignature = nullptr;

@@ -15,5 +15,7 @@ namespace RenderPassResourceRegistry
 		size_t descriptorMetadataCount = 0;
 		size_t bufferResourceCount = 0;
 		size_t rootSignatureCount = 0;
+		size_t descriptorMirrorHeapCount = 0;
+		size_t descriptorMirrorCapacity = 0;
 	};
 } //namespace RenderPassResourceRegistry

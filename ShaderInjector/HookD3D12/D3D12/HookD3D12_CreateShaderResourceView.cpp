@@ -16,17 +16,16 @@ namespace HookD3D12
 	{
 		Original_CreateShaderResourceView(device, resource, description, destination);
 
-		if (Globals::gShaderInjectorEnabled &&
-			!IsInsideRenderPassInjection() &&
-			RenderPassRuntime::IsDescriptorRegistryTrackingRequired())
+		if (!IsInsideRenderPassInjection() && !RenderPassResourceRegistry::IsInsideDescriptorMirrorOperation() && (ShouldTrackRenderPassDescriptorMetadata() || RenderPassResourceRegistry::IsDescriptorMirroringActive()))
 		{
-			PerformanceMetrics::ScopedTimer registrationTimer(PerformanceMetrics::Timing::RegisterShaderResourceView, 64);
+			RenderPassResourceRegistry::MirrorShaderResourceView(device, resource, description, destination);
 
-			RenderPassResourceRegistry::RegisterShaderResourceView(
-				resource,
-				description,
-				destination,
-				RenderPassRuntime::IsResourceTrackingRequired() || RenderPassRuntime::IsGameTextureDescriptorTrackingRequired());
+			if (ShouldTrackRenderPassDescriptorMetadata())
+			{
+				PerformanceMetrics::ScopedTimer registrationTimer(PerformanceMetrics::Timing::RegisterShaderResourceView, 64);
+
+				RenderPassResourceRegistry::RegisterShaderResourceView(resource, description, destination, ShouldTrackRenderPassResourceMetadata());
+			}
 		}
 	}
 } //namespace HookD3D12

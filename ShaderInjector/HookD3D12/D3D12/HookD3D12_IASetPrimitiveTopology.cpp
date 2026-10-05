@@ -12,7 +12,7 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_IASetPrimitiveTopology(ID3D12GraphicsCommandList* commandList, D3D12_PRIMITIVE_TOPOLOGY topology)
 	{
-		if (Globals::gShaderInjectorEnabled &&
+		if (IsInjectorEnabledForCommandList(commandList) &&
 			RenderPassRuntime::IsGraphicsStateTrackingRequired() &&
 			!IsInsideRenderPassInjection())
 			RenderPassRuntime::TrackPrimitiveTopology(commandList, topology);

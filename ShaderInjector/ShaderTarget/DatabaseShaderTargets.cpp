@@ -56,8 +56,8 @@ namespace HookD3D12
 		//rebuild the runtime list from disk so external edits or deleted replacement folders are reflected in the UI.
 		ResetCachedBlobContentLookup();
 		ShaderDiscovery::ResetRuntimeCache();
-		gLoadedShaderTargets.clear();
-		gLoadedShaderTargetBlobs.clear();
+		std::vector<ShaderTarget::ShaderTargetDisk> loadedTargets;
+		std::vector<std::vector<uint8_t>> loadedTargetBlobs;
 		gSelectedShaderTargetIndex = -1;
 		gShaderTargetNameBufferIndex = -1;
 		gShaderTargetNameBuffer[0] = '\0';
@@ -98,16 +98,23 @@ namespace HookD3D12
 					ShaderInjectorIO::WriteToLogFileError("DatabaseShaderTargets->RefreshLoadedShaderTargets: refusing incompatible compiled shader interface for " + replacement.name + " from " + modifiedShader->id);
 				}
 
-				gLoadedShaderTargets.push_back(replacement);
-				gLoadedShaderTargetBlobs.push_back(compiledReplacementBlob);
+				loadedTargets.push_back(std::move(replacement));
+				loadedTargetBlobs.push_back(std::move(compiledReplacementBlob));
 			}
 		}
 
-		if (!gLoadedShaderTargets.empty())
-			gSelectedShaderTargetIndex = 0;
+		{
+			//publish the completed list atomically with retry reset; bind hooks cannot observe a partial refresh.
+			std::lock_guard<std::mutex> pipelineLock(gPipelineMutex);
+			gLoadedShaderTargets = std::move(loadedTargets);
+			gLoadedShaderTargetBlobs = std::move(loadedTargetBlobs);
 
-		ResetUncapturedReplacementAttempts();
-		gLoadedShaderTargetsOnce = true;
+			if (!gLoadedShaderTargets.empty())
+				gSelectedShaderTargetIndex = 0;
+
+			ResetUncapturedReplacementAttempts();
+			gLoadedShaderTargetsOnce = true;
+		}
 
 		//IMPORTANT: let the rest of the injector know that our shader replacement is dirty (needs to be updated)
 		MarkShaderTargetApplyDirty();

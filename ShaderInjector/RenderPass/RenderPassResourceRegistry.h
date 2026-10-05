@@ -46,6 +46,17 @@ namespace RenderPassResourceRegistry
 		D3D12_CPU_DESCRIPTOR_HANDLE destination);
 	void RegisterSampler(D3D12_CPU_DESCRIPTOR_HANDLE destination);
 
+	//mirror direct writes as well as copies; preserve the game's exact view description and null/default views.
+	bool IsInsideDescriptorMirrorOperation();
+	bool IsDescriptorMirroringActive();
+	void MirrorConstantBufferView(ID3D12Device* device, const D3D12_CONSTANT_BUFFER_VIEW_DESC* description, D3D12_CPU_DESCRIPTOR_HANDLE destination);
+	void MirrorShaderResourceView(ID3D12Device* device, ID3D12Resource* resource, const D3D12_SHADER_RESOURCE_VIEW_DESC* description, D3D12_CPU_DESCRIPTOR_HANDLE destination);
+	void MirrorUnorderedAccessView(ID3D12Device* device, ID3D12Resource* resource, ID3D12Resource* counterResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC* description, D3D12_CPU_DESCRIPTOR_HANDLE destination);
+	void MirrorSampler(ID3D12Device* device, const D3D12_SAMPLER_DESC* description, D3D12_CPU_DESCRIPTOR_HANDLE destination);
+
+	//clone complete tables from CPU-only mirrors, retaining owners and read locks through the native copy.
+	bool CopyDescriptorTables(ID3D12Device* device, D3D12_CPU_DESCRIPTOR_HANDLE destination, UINT destinationDescriptorCount, UINT sourceRangeCount, const D3D12_CPU_DESCRIPTOR_HANDLE* originalSources, const UINT* sourceSizes, D3D12_DESCRIPTOR_HEAP_TYPE heapType);
+
 	bool CopyDescriptors(
 		UINT destinationRangeCount,
 		const D3D12_CPU_DESCRIPTOR_HANDLE* destinationRangeStarts,
@@ -53,12 +64,16 @@ namespace RenderPassResourceRegistry
 		UINT sourceRangeCount,
 		const D3D12_CPU_DESCRIPTOR_HANDLE* sourceRangeStarts,
 		const UINT* sourceRangeSizes,
-		UINT descriptorIncrementSize);
+		UINT descriptorIncrementSize,
+		ID3D12Device* device = nullptr,
+		bool trackMetadata = true);
 	bool CopyDescriptorsSimple(
 		UINT descriptorCount,
 		D3D12_CPU_DESCRIPTOR_HANDLE destinationStart,
 		D3D12_CPU_DESCRIPTOR_HANDLE sourceStart,
-		UINT descriptorIncrementSize);
+		UINT descriptorIncrementSize,
+		ID3D12Device* device = nullptr,
+		bool trackMetadata = true);
 
 	bool ResolveDescriptor(
 		D3D12_CPU_DESCRIPTOR_HANDLE descriptor,

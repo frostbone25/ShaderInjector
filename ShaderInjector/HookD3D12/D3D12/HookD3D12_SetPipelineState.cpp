@@ -20,8 +20,9 @@ namespace HookD3D12
 			return;
 		}
 
-		if (!Globals::gShaderInjectorEnabled)
+		if (!IsInjectorEnabledForCommandList(commandList))
 		{
+			GetCommandListPipelineState(commandList).pipelineState.store(pipelineState, std::memory_order_release);
 			Original_SetPipelineState(commandList, pipelineState);
 			return;
 		}

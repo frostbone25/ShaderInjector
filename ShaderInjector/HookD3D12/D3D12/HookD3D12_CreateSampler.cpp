@@ -15,9 +15,12 @@ namespace HookD3D12
 	{
 		Original_CreateSampler(device, description, destination);
 
-		if (Globals::gShaderInjectorEnabled &&
-			!IsInsideRenderPassInjection() &&
-			RenderPassRuntime::IsResourceTrackingRequired())
-			RenderPassResourceRegistry::RegisterSampler(destination);
+		if (!IsInsideRenderPassInjection() && !RenderPassResourceRegistry::IsInsideDescriptorMirrorOperation() && (ShouldTrackRenderPassDescriptorMetadata() || RenderPassResourceRegistry::IsDescriptorMirroringActive()))
+		{
+			RenderPassResourceRegistry::MirrorSampler(device, description, destination);
+
+			if (ShouldTrackRenderPassDescriptorMetadata() && ShouldTrackRenderPassResourceMetadata())
+				RenderPassResourceRegistry::RegisterSampler(destination);
+		}
 	}
 } //namespace HookD3D12

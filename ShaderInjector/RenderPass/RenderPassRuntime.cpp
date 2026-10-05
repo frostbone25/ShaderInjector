@@ -646,11 +646,14 @@ namespace RenderPassRuntime
 		}
 
 		outError = StringHelper::Format(
-			"No live %s texture metadata is available for %c%u, space%u. Reload the scene or application after saving this pass if the descriptor predates tracking.",
+			"No live %s texture metadata is available for %c%u, space%u (rootSignature=%p rootBindings=%llu descriptorHeaps=%llu).",
 			expectedBindingType,
 			registerPrefix,
 			binding.shaderRegister,
-			binding.registerSpace);
+			binding.registerSpace,
+			rootSignature,
+			static_cast<unsigned long long>(rootBindings.size()),
+			static_cast<unsigned long long>(state.descriptorHeaps.size()));
 		return false;
 	}
 
@@ -658,7 +661,9 @@ namespace RenderPassRuntime
 	bool RequiredGameInputsAreAvailable(
 		const std::vector<RequiredGameInput>& requiredInputs,
 		const CommandListRenderState& state,
-		bool computePipeline)
+		bool computePipeline,
+		const RequiredGameInput*& unavailableInput,
+		std::string& outError)
 	{
 		//a modified shader can back several PSOs with different root tables.
 		//run the graph only when this invocation exposes every required game texture.
@@ -669,15 +674,15 @@ namespace RenderPassRuntime
 				continue;
 
 			RenderPassTexturePool::TextureView texture;
-			std::string ignoredError;
 			if (!ResolveGameTexture(
 					*requirement.renderPass,
 					*requirement.input,
 					state,
 					computePipeline,
 					texture,
-					ignoredError))
+					outError))
 			{
+				unavailableInput = &requirement;
 				return false;
 			}
 		}
@@ -1477,8 +1482,47 @@ namespace RenderPassRuntime
 	//publish the completed binding map so recording threads never use a half-built map.
 	void CommitShaderTargetBindingUpdate()
 	{
-		RenderPassReplacement::InvalidateFailedPipelines();
 		std::lock_guard<std::mutex> lock(gConfigurationPublishMutex);
+		const ShaderTargetBindingMap& currentBindings = *gPublishedShaderTargetBindings.load(std::memory_order_acquire);
+		bool bindingsChanged = currentBindings.size() != gPendingShaderTargetBindings.size();
+
+		if (!bindingsChanged)
+		{
+			for (const auto& pendingEntry : gPendingShaderTargetBindings)
+			{
+				const auto currentEntry = currentBindings.find(pendingEntry.first);
+
+				if (currentEntry == currentBindings.end())
+				{
+					bindingsChanged = true;
+					break;
+				}
+
+				const ShaderTargetBinding& pending = pendingEntry.second;
+				const ShaderTargetBinding& current = currentEntry->second;
+				const PipelineOutputState& pendingOutput = pending.outputState;
+				const PipelineOutputState& currentOutput = current.outputState;
+
+				const bool shaderIdentityChanged = pending.modifiedShaderId != current.modifiedShaderId || pending.name != current.name || pending.hash != current.hash || pending.type != current.type;
+
+				const bool outputLayoutChanged = pendingOutput.renderTargetCount != currentOutput.renderTargetCount || pendingOutput.depthStencilFormat != currentOutput.depthStencilFormat || pendingOutput.sampleCount != currentOutput.sampleCount || pendingOutput.sampleQuality != currentOutput.sampleQuality;
+
+				const bool renderTargetFormatsChanged = !std::equal(std::begin(pendingOutput.renderTargetFormats), std::end(pendingOutput.renderTargetFormats), std::begin(currentOutput.renderTargetFormats));
+
+				if (shaderIdentityChanged || outputLayoutChanged || renderTargetFormatsChanged)
+				{
+					bindingsChanged = true;
+					break;
+				}
+			}
+		}
+
+		//toggles and unrelated marker changes can republish an identical map. reuse its immutable snapshot.
+		//this also keeps failed render-pass PSOs cached until something relevant actually changes.
+		if (!bindingsChanged)
+			return;
+
+		RenderPassReplacement::InvalidateFailedPipelines();
 		auto snapshot = std::make_unique<const ShaderTargetBindingMap>(gPendingShaderTargetBindings);
 		const ShaderTargetBindingMap* snapshotPointer = snapshot.get();
 		gOwnedShaderTargetBindingSnapshots.push_back(std::move(snapshot));
@@ -1493,6 +1537,9 @@ namespace RenderPassRuntime
 			std::memory_order_release);
 		RefreshExecutionTrackingFlags(*configuration, *snapshotPointer);
 		RefreshPendingResourceSnapshots(*configuration, *snapshotPointer);
+
+		//publish diagnostics only when bindings change, not on every draw or an identical refresh.
+		ShaderInjectorIO::WriteToLogFile(StringHelper::Format("RenderPassRuntime->CommitShaderTargetBindingUpdate: bindings=%llu linked=%u graphicsBoundaries=%u computeBoundaries=%u trackingFlags=0x%X", static_cast<unsigned long long>(snapshotPointer->size()), static_cast<unsigned>(gHasExecutableRenderPassBinding.load(std::memory_order_relaxed)), gGraphicsExecutionBoundaryMask.load(std::memory_order_relaxed), gComputeExecutionBoundaryMask.load(std::memory_order_relaxed), gTrackingModeFlags.load(std::memory_order_relaxed)));
 	}
 
 	//drop the previous recording's state before the game starts filling this command list again.
@@ -1582,8 +1629,10 @@ namespace RenderPassRuntime
 			return;
 
 		*currentRootSignature = rootSignature;
-		if (!computePipeline)
-			HookD3D12::EnsureRenderPassRootSignatureRegistered(rootSignature);
+
+		//early roots were captured before pass loading; compute layouts need the same lazy registration as graphics.
+		HookD3D12::EnsureRenderPassRootSignatureRegistered(rootSignature);
+
 		ResetRootBindings(RootBindings(state, computePipeline));
 	}
 
@@ -1964,11 +2013,46 @@ namespace RenderPassRuntime
 			executionPlan->executionOrders[boundaryIndex];
 		if (executionOrder.empty())
 			return;
+		const RequiredGameInput* unavailableInput = nullptr;
+		std::string unavailableInputError;
+
 		if (!RequiredGameInputsAreAvailable(
 				executionPlan->requiredGameInputs[boundaryIndex],
 				state,
-				computePipeline))
+				computePipeline,
+				unavailableInput,
+				unavailableInputError))
+		{
+			//a blocked graph used to disappear before any diagnostic counters were updated.
+			//count every skipped pass, but report only once per configuration to avoid noisy PSO variants.
+			for (const RenderPass::RenderPassDisk* blockedPass : executionOrder)
+			{
+				const size_t blockedPassIndex = static_cast<size_t>(blockedPass - configuration->renderPasses.data());
+				RuntimeCounters& counters = *configuration->runtimeCounters[blockedPassIndex];
+				counters.triggerCount.fetch_add(1, std::memory_order_relaxed);
+				const bool firstBlockedInput = counters.blockedInputCount.fetch_add(1, std::memory_order_relaxed) == 0;
+
+				if (!firstBlockedInput)
+					continue;
+
+				counters.lastExecutionResult.store(3, std::memory_order_relaxed);
+
+				const std::string& sourcePassName = unavailableInput->renderPass->name;
+				const std::string executionError = "Required game input for " + sourcePassName + ": " + unavailableInputError;
+
+				{
+					std::lock_guard<std::mutex> diagnosticsLock(gDiagnosticsMutex);
+					RenderPass::RuntimeDiagnostics& diagnostics = gDiagnosticsByRenderPassId[blockedPass->id];
+					diagnostics.lastExecutionError = executionError;
+					diagnostics.lastModifiedShaderId = targetIt->second.modifiedShaderId;
+					diagnostics.lastShaderTargetName = targetIt->second.name;
+				}
+
+				ShaderInjectorIO::WriteToLogFileWarning(StringHelper::Format("RenderPassRuntime->RecordExecutionBoundary: blocked pass=%s target=%s requestedPSO=%p sourcePass=%s reason=%s", blockedPass->name.c_str(), targetIt->second.name.c_str(), state.pipelineState, sourcePassName.c_str(), unavailableInputError.c_str()));
+			}
+
 			return;
+		}
 		RenderPassTexturePool::ScopedInputTextureOverrides inputTextureOverrides(commandList);
 
 		thread_local std::vector<RenderPassMipChain::ExecutionResult> mipChainResults;
@@ -2867,7 +2951,7 @@ namespace RenderPassRuntime
 		const RenderPassResourceRegistry::RegistryStatistics registryStatistics =
 			RenderPassResourceRegistry::GetStatistics();
 		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
-			"RenderPassResourceRegistry->Performance: descriptors=%llu descriptorHeaps=%llu retiredDescriptorHeaps=%llu heapDescriptors=%llu fallbackDescriptors=%llu metadataRecords=%llu bufferResources=%llu rootSignatures=%llu",
+			"RenderPassResourceRegistry->Performance: descriptors=%llu descriptorHeaps=%llu retiredDescriptorHeaps=%llu heapDescriptors=%llu fallbackDescriptors=%llu metadataRecords=%llu bufferResources=%llu rootSignatures=%llu descriptorMirrorHeaps=%llu descriptorMirrorCapacity=%llu",
 			static_cast<unsigned long long>(registryStatistics.descriptorCount),
 			static_cast<unsigned long long>(registryStatistics.descriptorHeapCount),
 			static_cast<unsigned long long>(registryStatistics.retiredDescriptorHeapCount),
@@ -2875,7 +2959,9 @@ namespace RenderPassRuntime
 			static_cast<unsigned long long>(registryStatistics.fallbackDescriptorCount),
 			static_cast<unsigned long long>(registryStatistics.descriptorMetadataCount),
 			static_cast<unsigned long long>(registryStatistics.bufferResourceCount),
-			static_cast<unsigned long long>(registryStatistics.rootSignatureCount)));
+			static_cast<unsigned long long>(registryStatistics.rootSignatureCount),
+			static_cast<unsigned long long>(registryStatistics.descriptorMirrorHeapCount),
+			static_cast<unsigned long long>(registryStatistics.descriptorMirrorCapacity)));
 
 		const RenderPassConfigurationSnapshot* configuration =
 			gPublishedConfiguration.load(std::memory_order_acquire);
@@ -2892,6 +2978,7 @@ namespace RenderPassRuntime
 			const uint64_t triggerCount = counters.triggerCount.load(std::memory_order_relaxed);
 			const uint64_t executionCount = counters.executionCount.load(std::memory_order_relaxed);
 			const uint64_t failureCount = counters.executionFailureCount.load(std::memory_order_relaxed);
+			const uint64_t blockedInputCount = counters.blockedInputCount.load(std::memory_order_relaxed);
 			const uint64_t previousTriggers = counters.reportedTriggerCount.exchange(
 				triggerCount,
 				std::memory_order_relaxed);
@@ -2904,17 +2991,21 @@ namespace RenderPassRuntime
 			const uint64_t triggerDelta = triggerCount - previousTriggers;
 			const uint64_t executionDelta = executionCount - previousExecutions;
 			const uint64_t failureDelta = failureCount - previousFailures;
-			if (!triggerDelta && !executionDelta && !failureDelta)
+			const uint64_t previousBlockedInputs = counters.reportedBlockedInputCount.exchange(blockedInputCount, std::memory_order_relaxed);
+			const uint64_t blockedInputDelta = blockedInputCount - previousBlockedInputs;
+
+			if (!triggerDelta && !executionDelta && !failureDelta && !blockedInputDelta)
 				continue;
 
 			ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
-				"RenderPassRuntime->Performance: pass=%s type=%s enabled=%u triggers=%llu successes=%llu failures=%llu",
+				"RenderPassRuntime->Performance: pass=%s type=%s enabled=%u triggers=%llu successes=%llu failures=%llu blockedInputs=%llu",
 				renderPass.name.c_str(),
 				RenderPass::TypeName(renderPass.type),
 				static_cast<unsigned>(renderPass.enabled),
 				static_cast<unsigned long long>(triggerDelta),
 				static_cast<unsigned long long>(executionDelta),
-				static_cast<unsigned long long>(failureDelta)));
+				static_cast<unsigned long long>(failureDelta),
+				static_cast<unsigned long long>(blockedInputDelta)));
 		}
 	}
 
@@ -2939,6 +3030,7 @@ namespace RenderPassRuntime
 			diagnostics.executionCount = counters.executionCount.load(std::memory_order_relaxed);
 			diagnostics.executionFailureCount =
 				counters.executionFailureCount.load(std::memory_order_relaxed);
+			diagnostics.blockedInputCount = counters.blockedInputCount.load(std::memory_order_relaxed);
 		}
 		return diagnostics;
 	}
@@ -2957,9 +3049,11 @@ namespace RenderPassRuntime
 			counters.triggerCount.store(0, std::memory_order_relaxed);
 			counters.executionCount.store(0, std::memory_order_relaxed);
 			counters.executionFailureCount.store(0, std::memory_order_relaxed);
+			counters.blockedInputCount.store(0, std::memory_order_relaxed);
 			counters.reportedTriggerCount.store(0, std::memory_order_relaxed);
 			counters.reportedExecutionCount.store(0, std::memory_order_relaxed);
 			counters.reportedFailureCount.store(0, std::memory_order_relaxed);
+			counters.reportedBlockedInputCount.store(0, std::memory_order_relaxed);
 			counters.lastExecutionResult.store(0, std::memory_order_relaxed);
 		}
 

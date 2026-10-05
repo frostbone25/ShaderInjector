@@ -84,7 +84,10 @@ namespace ShaderInjectorGUI
 		if (ImGui::Begin(windowTitle.c_str(), context.showWindow, flags))
 		{
 			//injector enable checkbox
-			ImGui::Checkbox("##InjectorEnabled", &Globals::gShaderInjectorEnabled);
+			bool injectorEnabled = Globals::gShaderInjectorEnabled.load(std::memory_order_acquire);
+
+			if (ImGui::Checkbox("##InjectorEnabled", &injectorEnabled))
+				Globals::gShaderInjectorEnabled.store(injectorEnabled, std::memory_order_release);
 			ImGui::SameLine();
 			const char* injectorStatus = "Disabled!";
 

@@ -1,0 +1,11 @@
+Starting WARP descriptor mirror validation.
+Running descriptor copy and concurrency checks.
+  heaps registered
+  simple and scatter/gather native copies passed
+  missing source rejected
+  late-observed descriptor rejected
+  unpopulated mirror source rejected
+  late-registered and fresh-heap observation cases passed
+  concurrent mirror reads/writes joined
+Running GPU descriptor table clone dispatch.
+Running bounded CPU-only clone benchmark.

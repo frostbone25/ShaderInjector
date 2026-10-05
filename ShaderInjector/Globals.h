@@ -3,6 +3,7 @@
 #include "Enum/ShaderModel.h"
 
 #include <windows.h>
+#include <atomic>
 #include <vector>
 
 namespace Globals
@@ -22,7 +23,7 @@ namespace Globals
 	//Shared runtime state. These must be extern rather than static so every translation unit
 	//observes the settings loaded from ShaderInjector.ini instead of keeping its own copy.
 	extern bool gShowShaderInjectorGUI;
-	extern bool gShaderInjectorEnabled;
+	extern std::atomic<bool> gShaderInjectorEnabled;
 	extern bool gRenderDocIntegrationEnabled;
 	extern bool gRenderDocAutoAttachEnabled;
 

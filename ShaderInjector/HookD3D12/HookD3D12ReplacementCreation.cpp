@@ -6,6 +6,7 @@
 
 //custom
 #include "ModifiedShader/DatabaseModifiedShaders.h"
+#include "ModifiedShader/ModifiedShaderRecapture.h"
 #include "HookD3D12.h"
 #include "Hash/Hash.h"
 #include "GUI/ShaderInjectorGUI.h"
@@ -49,7 +50,8 @@ namespace HookD3D12
 		const PipelineStateInfo* streamInfo,
 		const std::string& modifiedShaderId,
 		bool generateShaderDisassembly,
-		const ShaderAnalysis::ShaderAnalysisDisk* originalShaderAnalysis)
+		const ShaderAnalysis::ShaderAnalysisDisk* originalShaderAnalysis,
+		ShaderTarget::ShaderTargetDisk* recapturedTarget = nullptr)
 	{
 		if (!shaderHash || !shaderBytecode || shaderBytecodeLength == 0)
 		{
@@ -74,7 +76,9 @@ namespace HookD3D12
 		const std::string hashText = Hash::FormatHash(shaderHash);
 		const std::string shaderTypeText = StringHelper::ShaderTypeToString(shaderType);
 		const std::string replacementName = "ShaderTarget_" + shaderTypeText + "_" + hashText;
-		const std::string replacementDirectory = ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetShaderTargetsDirectory(), replacementName);
+		std::string replacementDirectory = ShaderInjectorIO::JoinPath(ShaderInjectorIO::GetShaderTargetsDirectory(), replacementName);
+		if (recapturedTarget)
+			replacementDirectory = recapturedTarget->replacementDirectory;
 
 		if (!ShaderInjectorIO::DirectoryExists(replacementDirectory))
 			ShaderInjectorIO::DirectoryCreate(replacementDirectory);
@@ -86,7 +90,6 @@ namespace HookD3D12
 		}
 
 		ShaderTarget::ShaderTargetDisk replacement{};
-		replacement.schemaVersion = 6;
 		//Replacements remain enabled unless the user explicitly disables them.
 		//Matching safety is enforced by exact hashes and verified blob content.
 		replacement.enabled = true;
@@ -99,6 +102,14 @@ namespace HookD3D12
 		replacement.replacementDirectory = replacementDirectory;
 		replacement.originalShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalShaderBytecode" + ShaderInjectorIO::extensionBIN);
 		replacement.modifiedShaderId = modifiedShaderId;
+		if (recapturedTarget)
+		{
+			//keep user choices and version aliases; only the original PSO capture is being replaced.
+			replacement.enabled = recapturedTarget->enabled;
+			replacement.name = recapturedTarget->name;
+			replacement.shaderBytecodeHashAliases = recapturedTarget->shaderBytecodeHashAliases;
+			replacement.pipelineTemplates = recapturedTarget->pipelineTemplates;
+		}
 
 		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
 
@@ -117,6 +128,8 @@ namespace HookD3D12
 		}
 
 		replacement.jsonPath = ShaderInjectorIO::JoinPath(replacementDirectory, "ShaderTarget" + ShaderInjectorIO::extensionJSON);
+		if (recapturedTarget)
+			replacement.jsonPath = recapturedTarget->jsonPath;
 		replacement.sourceList = sourceList;
 		replacement.pipelineIndex = std::to_string(pipelineIndex);
 		replacement.pipelineStateType = "GraphicsPipelineStateDesc";
@@ -199,6 +212,28 @@ namespace HookD3D12
 				replacement.meshShaderBlobPath = ShaderInjectorIO::JoinPath(replacementDirectory, "OriginalMeshShaderBytecode" + ShaderInjectorIO::extensionBIN);
 		}
 
+		bool sameCapturedPipeline = false;
+		if (recapturedTarget)
+		{
+			sameCapturedPipeline = PipelineTemplateHasSameRebuildIdentity(TopLevelPipelineTemplate(*recapturedTarget), TopLevelPipelineTemplate(replacement));
+			sameCapturedPipeline = sameCapturedPipeline && recapturedTarget->rootSignatureHash == replacement.rootSignatureHash;
+			if (graphicsInfo)
+				sameCapturedPipeline = ModifiedShaderRecapture::MatchesGraphicsPipelineState(*recapturedTarget, replacement);
+		}
+		if (recapturedTarget && sameCapturedPipeline)
+		{
+			replacement.pipelineCachedBlobHashAliases = recapturedTarget->pipelineCachedBlobHashAliases;
+			if (replacement.pipelineCachedBlobHash.empty())
+			{
+				//keep a usable saved cache when the driver cannot return a fresh blob for this otherwise identical PSO.
+				replacement.pipelineCachedBlobHash = recapturedTarget->pipelineCachedBlobHash;
+				replacement.pipelineCachedBlobLength = recapturedTarget->pipelineCachedBlobLength;
+				replacement.pipelineCachedBlobPath = recapturedTarget->pipelineCachedBlobPath;
+			}
+			if (!recapturedTarget->pipelineCachedBlobHash.empty() && recapturedTarget->pipelineCachedBlobHash != replacement.pipelineCachedBlobHash && std::find(replacement.pipelineCachedBlobHashAliases.begin(), replacement.pipelineCachedBlobHashAliases.end(), recapturedTarget->pipelineCachedBlobHash) == replacement.pipelineCachedBlobHashAliases.end())
+				replacement.pipelineCachedBlobHashAliases.push_back(recapturedTarget->pipelineCachedBlobHash);
+		}
+
 		bool ok = true;
 		ok = ShaderInjectorIO::WriteBinaryFile(replacement.originalShaderBlobPath, shaderBytecode, shaderBytecodeLength) && ok;
 
@@ -250,7 +285,8 @@ namespace HookD3D12
 		if (generateShaderDisassembly)
 			ok = ShaderInjectorIO::GenerateShaderTextDXIL(replacement.originalShaderBlobPath) && ok;
 
-		ok = ShaderTarget::WriteShaderTargetJson(replacement) && ok;
+		if (ok)
+			ok = ShaderTarget::WriteShaderTargetJson(replacement);
 
 		if (!ok)
 		{
@@ -260,6 +296,12 @@ namespace HookD3D12
 
 		const ULONGLONG creationDurationMs = GetTickCount64() - creationStartTick;
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12ReplacementCreation->CreateReplacementShaderTemplate: Created replacement shader template: " + replacement.jsonPath + " durationMs=" + std::to_string(creationDurationMs));
+
+		if (recapturedTarget)
+		{
+			*recapturedTarget = std::move(replacement);
+			return true;
+		}
 
 		if (gLoadedShaderTargetsOnce)
 		{
@@ -315,5 +357,17 @@ namespace HookD3D12
 		const ShaderAnalysis::ShaderAnalysisDisk* originalShaderAnalysis)
 	{
 		return CreateShaderTarget(sourceList, pipelineIndex, shaderType, shaderHash, shaderBytecodeLength, shaderBytecode, pipeline.pipelineState, nullptr, &pipeline, modifiedShaderId, generateShaderDisassembly, originalShaderAnalysis);
+	}
+
+	bool RecaptureShaderTargetForPipeline(ShaderTarget::ShaderTargetDisk& shaderTarget, int pipelineIndex, GraphicsPipelineInfo& pipeline, const ShaderAnalysis::ShaderAnalysisDisk& analysis)
+	{
+		const auto& bytecode = GraphicsShaderBytecode(pipeline, shaderTarget.shaderType);
+		return CreateShaderTarget("Graphics", pipelineIndex, shaderTarget.shaderType, GraphicsShaderHashForType(pipeline, shaderTarget.shaderType), bytecode.size(), bytecode.data(), pipeline.pipelineState, &pipeline, nullptr, shaderTarget.modifiedShaderId, false, &analysis, &shaderTarget);
+	}
+
+	bool RecaptureShaderTargetForPipeline(ShaderTarget::ShaderTargetDisk& shaderTarget, int pipelineIndex, PipelineStateInfo& pipeline, const ShaderAnalysis::ShaderAnalysisDisk& analysis)
+	{
+		const auto& bytecode = StreamShaderBytecode(pipeline, shaderTarget.shaderType);
+		return CreateShaderTarget("Stream", pipelineIndex, shaderTarget.shaderType, StreamShaderHashForType(pipeline, shaderTarget.shaderType), bytecode.size(), bytecode.data(), pipeline.pipelineState, nullptr, &pipeline, shaderTarget.modifiedShaderId, false, &analysis, &shaderTarget);
 	}
 } //namespace HookD3D12

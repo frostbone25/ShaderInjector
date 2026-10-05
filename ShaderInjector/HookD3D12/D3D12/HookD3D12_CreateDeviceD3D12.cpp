@@ -1,4 +1,5 @@
 #include "../HookD3D12.h"
+#include "../HookD3D12DeviceLifecycle.h"
 
 #include "GUI/ShaderInjectorGUI.h"
 #include "IO/ShaderInjectorIO.h"
@@ -24,7 +25,7 @@ namespace HookD3D12
 				InstallPipelineHooksForDevice(device);
 				InstallRenderPassResourceHooksForDevice(device);
 
-				ShaderInjectorIO::LogD3D12DeviceInfo(device);
+				RegisterDevice(device);
 
 				ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12Install->Hook_CreateDeviceD3D12: D3D12CreateDevice captured device and installed pipeline hooks");
 

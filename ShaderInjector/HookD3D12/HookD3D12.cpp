@@ -44,6 +44,7 @@
 #include "Globals.h"
 #include "dsound_proxy.h"
 #include "HookD3D12.h"
+#include "HookD3D12DeviceLifecycle.h"
 #include "ShaderTarget/DatabaseShaderTargets.h"
 #include "Input/HookInput.h"
 #include "IO/ShaderInjectorIO.h"
@@ -221,6 +222,8 @@ namespace HookD3D12
 	static std::deque<size_t> gUncapturedShaderTargetRetryQueue;
 	static constexpr size_t gMaximumCapturedReplacementAttemptsPerListPerFrame = 32;
 	static constexpr size_t gMaximumUncapturedCandidatesPerFrame = 32;
+	//count actual driver creation calls, not already-built entries or unsuccessful identity checks.
+	static uint64_t gReplacementPSOCreateAttemptCount = 0;
 	static size_t gUncapturedCandidateAttemptCount = 0;
 	static size_t gReportedUncapturedCandidateAttemptCount = 0;
 	static constexpr uint8_t gMaximumShaderTargetApplyFailureCount = 4;
@@ -286,6 +289,40 @@ namespace HookD3D12
 		return *gCachedCommandListState;
 	}
 
+	bool IsInjectorEnabledForCommandList(ID3D12GraphicsCommandList* commandList)
+	{
+		if (!gRuntimeReady.load(std::memory_order_acquire))
+			return false;
+
+		CommandListPipelineState& state = GetCommandListPipelineState(commandList);
+
+		if (!state.injectorEnabledForRecording)
+			return false;
+
+		//resolve the owning device once; normal draw hooks read only the cached removal flag.
+		if (!state.deviceRuntimeState)
+		{
+			Microsoft::WRL::ComPtr<ID3D12Device> device;
+
+			if (FAILED(commandList->GetDevice(IID_PPV_ARGS(&device))))
+				return false;
+
+			state.deviceRuntimeState = RegisterDevice(device.Get());
+		}
+
+		return state.deviceRuntimeState && SUCCEEDED(state.deviceRuntimeState->removalReason.load(std::memory_order_acquire));
+	}
+
+	bool ShouldTrackRenderPassResourceMetadata()
+	{
+		return !gRuntimeReady.load(std::memory_order_acquire) || RenderPassRuntime::IsResourceTrackingRequired() || RenderPassRuntime::IsGameTextureDescriptorTrackingRequired();
+	}
+
+	bool ShouldTrackRenderPassDescriptorMetadata()
+	{
+		return !gRuntimeReady.load(std::memory_order_acquire) || RenderPassRuntime::IsDescriptorRegistryTrackingRequired();
+	}
+
 	ScopedPipelineActivity::ScopedPipelineActivity(bool trackActivity)
 		: shouldTrackActivity(trackActivity)
 	{
@@ -340,6 +377,8 @@ namespace HookD3D12
 			UnregisterKnownPipelineStateLocked(uncaptured.pipelineState);
 			uncaptured.attemptedReplacement = false;
 			uncaptured.retryReplacementOnRootSignatureChange = false;
+			uncaptured.rootSignatureAttempts.Clear();
+			uncaptured.matchedShaderType = ShaderTarget::Unknown;
 			ResetShaderTargetRetryState(uncaptured);
 
 			if (uncaptured.cachedBlobHash &&
@@ -765,7 +804,23 @@ namespace HookD3D12
 
 	void GatherPipelineInfo(IDXGISwapChain3* swapChain)
 	{
-		GatherD3D12PipelineInfo(swapChain, gDevice, gCommandQueue, gPipelineInfo);
+		DeviceRuntimeState* deviceState = RegisterDevice(gDevice);
+
+		if (!deviceState || !swapChain)
+			return;
+
+		//GPU capabilities were queried at device creation; only swap-chain and queue data can change here.
+		gPipelineInfo = deviceState->pipelineInfo;
+		DXGI_SWAP_CHAIN_DESC description{};
+
+		if (SUCCEEDED(swapChain->GetDesc(&description)))
+		{
+			gPipelineInfo.swapChainBufferCount = description.BufferCount;
+			gPipelineInfo.swapChainFormat = description.BufferDesc.Format;
+		}
+
+		if (gCommandQueue)
+			gPipelineInfo.commandQueueType = gCommandQueue->GetDesc().Type;
 	}
 
 	//root-signature tracking for uncaptured pipelines
@@ -819,11 +874,24 @@ namespace HookD3D12
 		if (!retryingFailedReplacement)
 			return;
 
+		//a command list carries separate graphics and compute roots, often left over from another PSO.
+		//once the shader stage is known, the other bind point cannot improve this rebuild.
+		if (uncaptured.matchedShaderType != ShaderTarget::Unknown && computeRootSignature != (uncaptured.matchedShaderType == ShaderTarget::ComputeShader))
+			return;
+
+		if (uncaptured.rootSignatureAttempts.Contains(rootSignature, computeRootSignature))
+			return;
+
 		uncaptured.attemptedReplacement = false;
 		uncaptured.retryReplacementOnRootSignatureChange = false;
 		uncaptured.shaderTargetApplyFailureCount = 0;
 
-		gUncapturedShaderTargetApplyCursor = (std::min)(gUncapturedShaderTargetApplyCursor, uncapturedIndex);
+		//retry this PSO alone instead of rewinding every intervening candidate in the database.
+		if (!uncaptured.shaderTargetApplyRetryQueued)
+		{
+			uncaptured.shaderTargetApplyRetryQueued = true;
+			gUncapturedShaderTargetRetryQueue.push_back(uncapturedIndex);
+		}
 
 		QueueShaderTargetApplyWork();
 
@@ -1184,7 +1252,7 @@ namespace HookD3D12
 
 	bool RebuildGraphicsPSOWithReplacement(GraphicsPipelineInfo& pipeline, int replacementIndex, uint64_t shaderHash, ShaderTarget::ShaderType shaderType)
 	{
-		if (!gDevice || replacementIndex < 0 || replacementIndex >= (int)gLoadedShaderTargets.size())
+		if (!pipeline.pipelineState || replacementIndex < 0 || replacementIndex >= (int)gLoadedShaderTargets.size())
 			return false;
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
@@ -1287,7 +1355,13 @@ namespace HookD3D12
 			pipeline.pipelineState,
 			static_cast<unsigned long long>(replacementBytecodeSize)));
 
-		HRESULT result = Original_CreateGraphicsPipelineState(gDevice, &desc, IID_PPV_ARGS(&rebuiltPipelineState));
+		Microsoft::WRL::ComPtr<ID3D12Device> pipelineDevice;
+
+		if (FAILED(pipeline.pipelineState->GetDevice(IID_PPV_ARGS(&pipelineDevice))) || FAILED(pipelineDevice->GetDeviceRemovedReason()))
+			return false;
+
+		++gReplacementPSOCreateAttemptCount;
+		HRESULT result = Original_CreateGraphicsPipelineState(pipelineDevice.Get(), &desc, IID_PPV_ARGS(&rebuiltPipelineState));
 		const ULONGLONG rebuildDurationMs = GetTickCount64() - rebuildStartTick;
 
 		if (FAILED(result) || !rebuiltPipelineState)
@@ -1297,8 +1371,8 @@ namespace HookD3D12
 
 			HRESULT removedReason = E_POINTER;
 
-			if (gDevice)
-				removedReason = gDevice->GetDeviceRemovedReason();
+			removedReason = pipelineDevice->GetDeviceRemovedReason();
+			NotifyDeviceRemoved(pipelineDevice.Get(), removedReason);
 
 			ShaderInjectorGUI::WriteToRuntimeLogError(
 				"HookD3D12->RebuildGraphicsPSOWithReplacement: failed result = " +
@@ -1333,7 +1407,7 @@ namespace HookD3D12
 
 	bool RebuildStreamPSOWithReplacement(PipelineStateInfo& pipeline, int replacementIndex, uint64_t shaderHash, ShaderTarget::ShaderType shaderType, ID3D12RootSignature* rootSignatureOverride = nullptr)
 	{
-		if (!gDevice || pipeline.streamBlob.empty() || replacementIndex < 0 || replacementIndex >= (int)gLoadedShaderTargets.size())
+		if (!pipeline.pipelineState || pipeline.streamBlob.empty() || replacementIndex < 0 || replacementIndex >= (int)gLoadedShaderTargets.size())
 			return false;
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
@@ -1364,8 +1438,9 @@ namespace HookD3D12
 			return false;
 
 		ID3D12Device2* deviceInterface = nullptr;
+		Microsoft::WRL::ComPtr<ID3D12Device> pipelineDevice;
 
-		if (FAILED(gDevice->QueryInterface(IID_PPV_ARGS(&deviceInterface))))
+		if (FAILED(pipeline.pipelineState->GetDevice(IID_PPV_ARGS(&pipelineDevice))) || FAILED(pipelineDevice->GetDeviceRemovedReason()) || FAILED(pipelineDevice->QueryInterface(IID_PPV_ARGS(&deviceInterface))))
 			return false;
 
 		std::vector<uint8_t> patchedBlob = pipeline.streamBlob;
@@ -1524,6 +1599,7 @@ namespace HookD3D12
 			static_cast<unsigned long long>(replacementBytecodeSize),
 			rootSignatureOverride));
 
+		++gReplacementPSOCreateAttemptCount;
 		HRESULT result = CreatePipelineStateInternal(deviceInterface, &patchedDesc, IID_PPV_ARGS(&rebuiltPipelineState));
 		const ULONGLONG rebuildDurationMs = GetTickCount64() - rebuildStartTick;
 
@@ -1587,8 +1663,8 @@ namespace HookD3D12
 
 			HRESULT removedReason = E_POINTER;
 
-			if (gDevice)
-				removedReason = gDevice->GetDeviceRemovedReason();
+			removedReason = pipelineDevice->GetDeviceRemovedReason();
+			NotifyDeviceRemoved(pipelineDevice.Get(), removedReason);
 
 			SIZE_T originalTargetByteCount = 0;
 
@@ -1745,6 +1821,13 @@ namespace HookD3D12
 		if (!LoadPersistedStreamTemplateFromReplacement(templateReplacement, persistedPipeline))
 			return false;
 
+		//the saved stream has no live device pointer; the original PSO supplies the authoritative owner.
+		persistedPipeline.pipelineState = uncaptured.pipelineState;
+		Microsoft::WRL::ComPtr<ID3D12Device> pipelineDevice;
+
+		if (FAILED(uncaptured.pipelineState->GetDevice(IID_PPV_ARGS(&pipelineDevice))))
+			return false;
+
 		ID3D12RootSignature* observedRootSignature = nullptr;
 		const bool preferComputeRootSignature = shaderType == ShaderTarget::ComputeShader || (persistedPipeline.isCompute && !persistedPipeline.isGraphics);
 
@@ -1752,18 +1835,14 @@ namespace HookD3D12
 		{
 			observedRootSignature = uncaptured.observedComputeRootSignature;
 
-			if (!observedRootSignature)
-				observedRootSignature = uncaptured.observedGraphicsRootSignature;
 		}
 		else
 		{
 			observedRootSignature = uncaptured.observedGraphicsRootSignature;
 
-			if (!observedRootSignature)
-				observedRootSignature = uncaptured.observedComputeRootSignature;
 		}
 
-		ID3D12RootSignature* persistedRootSignature = GetOrCreatePersistedRootSignature(templateReplacement, gDevice);
+		ID3D12RootSignature* persistedRootSignature = GetOrCreatePersistedRootSignature(templateReplacement, pipelineDevice.Get());
 		bool attemptedAnyRootSignature = false;
 
 		auto TryRebuildWithRootSignature = [&](ID3D12RootSignature* rootSignatureForRebuild, const char* rootSignatureSource) -> bool
@@ -1835,6 +1914,8 @@ namespace HookD3D12
 		}
 
 		uncaptured.retryReplacementOnRootSignatureChange = false;
+		uncaptured.rootSignatureAttempts.Remember(uncaptured.observedGraphicsRootSignature, false);
+		uncaptured.rootSignatureAttempts.Remember(uncaptured.observedComputeRootSignature, true);
 
 		int replacementIndex = FindEnabledShaderTargetByCachedBlob(uncaptured.cachedBlobHash);
 		const char* matchMethod = "cached blob hash";
@@ -1932,6 +2013,7 @@ namespace HookD3D12
 
 		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
 		const uint64_t shaderHash = Hash::ParseHashText(replacement.originalShaderBytecodeHash);
+		uncaptured.matchedShaderType = replacement.shaderType;
 		const bool hasPersistedStreamTemplate =
 			!replacement.pipelineStreamBlobPath.empty() ||
 			std::any_of(
@@ -2065,6 +2147,7 @@ namespace HookD3D12
 		std::lock_guard<std::mutex> lock(gPipelineMutex);
 
 		bool capturedReplacementAttempted = false;
+		const uint64_t initialCreateAttemptCount = gReplacementPSOCreateAttemptCount;
 
 		while (!capturedReplacementAttempted && !gGraphicsShaderTargetRetryQueue.empty())
 		{
@@ -2084,7 +2167,7 @@ namespace HookD3D12
 				continue;
 			}
 
-			capturedReplacementAttempted = true;
+			capturedReplacementAttempted = gReplacementPSOCreateAttemptCount != initialCreateAttemptCount;
 
 			if (result == ShaderTargetApplyResult::Applied)
 				ResetShaderTargetRetryState(pipeline);
@@ -2110,7 +2193,7 @@ namespace HookD3D12
 				continue;
 			}
 
-			capturedReplacementAttempted = true;
+			capturedReplacementAttempted = gReplacementPSOCreateAttemptCount != initialCreateAttemptCount;
 
 			if (result == ShaderTargetApplyResult::Applied)
 				ResetShaderTargetRetryState(pipeline);
@@ -2129,7 +2212,7 @@ namespace HookD3D12
 			const ShaderTargetApplyResult result = TryApplyGraphicsReplacement(pipeline);
 			++gGraphicsShaderTargetApplyCursor;
 			++graphicsAttemptsThisFrame;
-			capturedReplacementAttempted = result != ShaderTargetApplyResult::NoMatch;
+			capturedReplacementAttempted = gReplacementPSOCreateAttemptCount != initialCreateAttemptCount;
 
 			if (result == ShaderTargetApplyResult::Applied)
 				ResetShaderTargetRetryState(pipeline);
@@ -2148,7 +2231,7 @@ namespace HookD3D12
 			const ShaderTargetApplyResult result = TryApplyStreamReplacement(pipeline);
 			++gStreamShaderTargetApplyCursor;
 			++streamAttemptsThisFrame;
-			capturedReplacementAttempted = result != ShaderTargetApplyResult::NoMatch;
+			capturedReplacementAttempted = gReplacementPSOCreateAttemptCount != initialCreateAttemptCount;
 
 			if (result == ShaderTargetApplyResult::Applied)
 				ResetShaderTargetRetryState(pipeline);
@@ -2181,7 +2264,7 @@ namespace HookD3D12
 
 			//a failed identity comparison is not a PSO rebuild. keep looking within
 			//the bounded candidate budget, but still rebuild at most one PSO per call.
-			capturedReplacementAttempted = applied || uncaptured.retryReplacementOnRootSignatureChange;
+			capturedReplacementAttempted = gReplacementPSOCreateAttemptCount != initialCreateAttemptCount;
 
 			if (applied)
 			{
@@ -2230,7 +2313,7 @@ namespace HookD3D12
 			}
 
 			const bool applied = TryApplyUncapturedReplacement(uncaptured);
-			capturedReplacementAttempted = applied || uncaptured.retryReplacementOnRootSignatureChange;
+			capturedReplacementAttempted = gReplacementPSOCreateAttemptCount != initialCreateAttemptCount;
 
 			if (uncaptured.replacementPipelineState)
 				gPipelineStateOverridesDirty.store(true, std::memory_order_release);
@@ -2284,7 +2367,23 @@ namespace HookD3D12
 
 	void SetRuntimeReady(bool ready)
 	{
-		gRuntimeReady.store(ready, std::memory_order_release);
+		if (ready)
+		{
+			//the package index did not exist when these startup PSOs were first captured.
+			//replay under the database lock so a simultaneous creation is not lost between phases.
+			std::lock_guard<std::mutex> pipelineLock(gPipelineMutex);
+
+			for (const GraphicsPipelineInfo& pipeline : gGraphicsPipelines)
+				ShaderAutomaticDiscovery::ProcessCapturedGraphicsPipeline(pipeline);
+
+			for (const PipelineStateInfo& pipeline : gPipelineStates)
+				ShaderAutomaticDiscovery::ProcessCapturedStreamPipeline(pipeline);
+
+			gRuntimeReady.store(true, std::memory_order_release);
+			QueueShaderTargetApplyWork();
+		}
+		else
+			gRuntimeReady.store(false, std::memory_order_release);
 	}
 
 	ID3D12Device* GetCapturedDevice()
@@ -2337,6 +2436,15 @@ namespace HookD3D12
 		}
 
 		bool registeredNewBinding = false;
+		Microsoft::WRL::ComPtr<ID3D12Device> queueDevice;
+
+		if (SUCCEEDED(commandQueue->GetDevice(IID_PPV_ARGS(&queueDevice))))
+		{
+			RegisterDevice(queueDevice.Get());
+			InstallPipelineHooksForDevice(queueDevice.Get());
+			InstallRenderPassResourceHooksForDevice(queueDevice.Get());
+		}
+
 		{
 			std::lock_guard<std::mutex> lock(gCommandQueueCaptureMutex);
 
@@ -2446,6 +2554,9 @@ namespace HookD3D12
 
 		if (swapChainDevice)
 			swapChainDevice->Release();
+
+		if (!AdoptOverlayDeviceResources(gDevice))
+			return false;
 
 		ID3D12CommandQueue* exactCommandQueue = FindRegisteredSwapChainCommandQueue(swapChain);
 
@@ -2900,6 +3011,8 @@ namespace HookD3D12
 			gDevice->Release();
 			gDevice = nullptr;
 		}
+
+		ReleaseDeviceRuntimeStates();
 	}
 
 	bool IsInitialized()

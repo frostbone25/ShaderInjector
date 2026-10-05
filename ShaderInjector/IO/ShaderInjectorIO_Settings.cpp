@@ -76,7 +76,7 @@ namespace ShaderInjectorIO
 		//write menu and injector state to the first section.
 		injectorSettingsINI[settingsSectionInjector][settingsNameOpenMenuKey] = Globals::keyOpenShaderInjectorGUI;
 		injectorSettingsINI[settingsSectionInjector][settingsNameToggleInjectorKey] = Globals::keyToggleShaderInjector;
-		injectorSettingsINI[settingsSectionInjector][settingsNameInjectorEnabled] = Globals::gShaderInjectorEnabled;
+		injectorSettingsINI[settingsSectionInjector][settingsNameInjectorEnabled] = Globals::gShaderInjectorEnabled.load(std::memory_order_acquire);
 		injectorSettingsINI[settingsSectionInjector][settingsNameMenuOpen] = Globals::gShowShaderInjectorGUI;
 		injectorSettingsINI[settingsSectionInjector][settingsNameMenuScale] = static_cast<double>(Globals::gShaderInjectorGUIScale);
 
@@ -131,7 +131,7 @@ namespace ShaderInjectorIO
 			//read menu state first, using current globals whenever a key is missing.
 			const int keyOpenShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameOpenMenuKey, Globals::keyOpenShaderInjectorGUI);
 			const int keyToggleShaderInjector = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameToggleInjectorKey, Globals::keyToggleShaderInjector);
-			const bool shaderInjectorEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameInjectorEnabled, Globals::gShaderInjectorEnabled);
+			const bool shaderInjectorEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameInjectorEnabled, Globals::gShaderInjectorEnabled.load(std::memory_order_acquire));
 			const bool showShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameMenuOpen, Globals::gShowShaderInjectorGUI);
 			const double shaderInjectorGUIScale = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameMenuScale, static_cast<double>(Globals::gShaderInjectorGUIScale));
 
@@ -169,7 +169,7 @@ namespace ShaderInjectorIO
 			//apply values as a snapshot so other startup code never observes a half-loaded configuration.
 			Globals::keyOpenShaderInjectorGUI = keyOpenShaderInjectorGUI;
 			Globals::keyToggleShaderInjector = keyToggleShaderInjector;
-			Globals::gShaderInjectorEnabled = shaderInjectorEnabled;
+			Globals::gShaderInjectorEnabled.store(shaderInjectorEnabled, std::memory_order_release);
 			Globals::gShowShaderInjectorGUI = showShaderInjectorGUI;
 			Globals::gShaderInjectorGUIScale = static_cast<float>((std::clamp)(shaderInjectorGUIScale, 0.5, 4.0));
 

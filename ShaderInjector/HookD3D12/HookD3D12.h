@@ -87,6 +87,13 @@ namespace HookD3D12
 	std::string StreamOutputSignature(const std::vector<D3D12_SO_DECLARATION_ENTRY>& declarations, const std::vector<UINT>& strides);
 	std::string PipelineStreamSubobjectTypeSignature(const std::vector<uint8_t>& streamBlob);
 	uint64_t CanonicalPipelineFixedFunctionStateHash(const std::vector<uint8_t>& streamBlob);
+
+	//keep injection stable for one command-list recording, including all resource bindings.
+	bool IsInjectorEnabledForCommandList(ID3D12GraphicsCommandList* commandList);
+
+	//retain metadata for long-lived game objects even while actual shader injection is disabled.
+	bool ShouldTrackRenderPassResourceMetadata();
+	bool ShouldTrackRenderPassDescriptorMetadata();
 	void FillInputAndStreamOutputSignatures(ShaderTarget::ShaderTargetDisk& replacement, const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputElements, const std::vector<D3D12_SO_DECLARATION_ENTRY>& streamOutputDeclarations, const std::vector<UINT>& streamOutputStrides);
 	void FillGraphicsReplacementPortableState(ShaderTarget::ShaderTargetDisk& replacement, const GraphicsPipelineInfo& pipeline);
 	void FillStreamReplacementPortableStateFromBlob(ShaderTarget::ShaderTargetDisk& replacement, const PipelineStateInfo& pipeline);
@@ -165,6 +172,12 @@ namespace HookD3D12
 	void BackfillReplacementPortableMetadataFromSidecars(ShaderTarget::ShaderTargetDisk& replacement);
 	uint64_t StreamShaderHashForType(const PipelineStateInfo& pipeline, ShaderTarget::ShaderType shaderType);
 	bool StreamPipelineHasShaderHash(const PipelineStateInfo& pipeline, ShaderTarget::ShaderType shaderType, uint64_t shaderHash);
+	uint64_t GraphicsShaderHashForType(const GraphicsPipelineInfo& pipeline, ShaderTarget::ShaderType shaderType);
+	uint64_t StreamShaderHashForType(const PipelineStateInfo& pipeline, ShaderTarget::ShaderType shaderType);
+	const std::vector<uint8_t>& GraphicsShaderBytecode(const GraphicsPipelineInfo& pipeline, ShaderTarget::ShaderType shaderType);
+	const std::vector<uint8_t>& StreamShaderBytecode(const PipelineStateInfo& pipeline, ShaderTarget::ShaderType shaderType);
+	bool PipelineTemplateHasSameRebuildIdentity(const ShaderTarget::ShaderPipelineTemplateDisk& left, const ShaderTarget::ShaderPipelineTemplateDisk& right);
+	ShaderTarget::ShaderPipelineTemplateDisk TopLevelPipelineTemplate(const ShaderTarget::ShaderTargetDisk& replacement);
 	void FillPipelineTemplateCommonState(ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate, const PipelineStateInfo& pipeline);
 	ShaderTarget::ShaderTargetDisk ReplacementWithPipelineTemplate(const ShaderTarget::ShaderTargetDisk& replacement, const ShaderTarget::ShaderPipelineTemplateDisk& pipelineTemplate);
 	SIZE_T CountMatchingBytes(const std::vector<uint8_t>& lhs, const std::vector<uint8_t>& rhs);
@@ -298,6 +311,10 @@ namespace HookD3D12
 		const std::string& modifiedShaderId,
 		bool generateShaderDisassembly,
 		const ShaderAnalysis::ShaderAnalysisDisk* originalShaderAnalysis = nullptr);
+
+	//rewrite a target's original capture while preserving its name, enabled state, package link, and saved variants.
+	bool RecaptureShaderTargetForPipeline(ShaderTarget::ShaderTargetDisk& shaderTarget, int pipelineIndex, GraphicsPipelineInfo& pipeline, const ShaderAnalysis::ShaderAnalysisDisk& analysis);
+	bool RecaptureShaderTargetForPipeline(ShaderTarget::ShaderTargetDisk& shaderTarget, int pipelineIndex, PipelineStateInfo& pipeline, const ShaderAnalysis::ShaderAnalysisDisk& analysis);
 
 	//Release captured resources and report whether the hook runtime is active.
 	extern void Release();

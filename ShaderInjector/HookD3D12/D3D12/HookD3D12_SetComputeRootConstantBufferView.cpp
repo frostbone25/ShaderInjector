@@ -12,7 +12,7 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_SetComputeRootConstantBufferView(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS address)
 	{
-		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsPipelineExecutionTrackingRequired(true) &&
+		if (IsInjectorEnabledForCommandList(commandList) && RenderPassRuntime::IsPipelineExecutionTrackingRequired(true) &&
 			RenderPassRuntime::IsRootBindingTrackingRequired() && !IsInsideRenderPassInjection())
 		{
 			RenderPassRuntime::TrackRootDescriptor(commandList, true, "CBV", rootParameterIndex, address);

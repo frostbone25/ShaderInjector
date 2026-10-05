@@ -13,15 +13,15 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_SetGraphicsRootSignature(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature)
 	{
-		if (!Globals::gShaderInjectorEnabled)
+		if (IsInsideRenderPassInjection())
 		{
-			GetCommandListPipelineState(commandList).graphicsRootSignature.store(rootSignature, std::memory_order_release);
 			Original_SetGraphicsRootSignature(commandList, rootSignature);
 			return;
 		}
 
-		if (IsInsideRenderPassInjection())
+		if (!IsInjectorEnabledForCommandList(commandList))
 		{
+			GetCommandListPipelineState(commandList).graphicsRootSignature.store(rootSignature, std::memory_order_release);
 			Original_SetGraphicsRootSignature(commandList, rootSignature);
 			return;
 		}

@@ -1,6 +1,8 @@
 
 #include "HookD3D12RuntimeState.h"
 #include "../HookD3D12.h"
+#include "../HookD3D12DeviceLifecycle.h"
+#include "../OverlayInitializationScope.h"
 #include "FPSCounter.h"
 #include "Globals.h"
 #include "GUI/ShaderInjectorGUI.h"
@@ -71,6 +73,9 @@ namespace HookD3D12
 					operation = "Present1";
 
 				LogOverlayDeviceFailure(operation, presentResult);
+
+				if (gDevice)
+					NotifyDeviceRemoved(gDevice, gDevice->GetDeviceRemovedReason());
 			}
 
 			return presentResult;
@@ -79,12 +84,16 @@ namespace HookD3D12
 		if ((Flags & DXGI_PRESENT_TEST) != 0)
 			return CallOriginalPresent();
 
+		PollDeviceRemovals();
 		RenderPassRuntime::AdvanceFrame();
 
 		//ExecuteCommandLists records the most recently submitted direct queue. The queue
 		//immediately preceding Present is the safest fallback when the swap chain was
 		//created before this DLL installed its hooks.
 		AdoptMostRecentDirectCommandQueue(pSwapChain);
+
+		if (gDevice && !IsOverlayDeviceAvailable())
+			return CallOriginalPresent();
 
 		if (!gCommandQueue)
 		{
@@ -124,7 +133,7 @@ namespace HookD3D12
 		//the first present creates overlay resources after the game has supplied a swap chain.
 		if (!gInitialized)
 		{
-
+			OverlayInitializationScope initializationScope;
 			//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
 			if (!gDevice && FAILED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice)))
 			{
@@ -132,15 +141,9 @@ namespace HookD3D12
 				return CallOriginalPresent();
 			}
 
-			if (!gDevice2)
-			{
-				HRESULT hr = gDevice->QueryInterface(IID_PPV_ARGS(&gDevice2));
-
-				if (FAILED(hr))
-				{
-					ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: Failed to get ID3D12Device2");
-				}
-			}
+			//only swap-chain assets are created here; device interfaces and fences were prepared earlier.
+			if (!AdoptOverlayDeviceResources(gDevice))
+				return CallOriginalPresent();
 
 			//Swap Chain description
 			DXGI_SWAP_CHAIN_DESC desc = startupSwapChainDesc;
@@ -256,29 +259,6 @@ namespace HookD3D12
 			//ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12->HandlePresentD3D12: ImGui initialized");
 
 			HookInput::Initialize(desc.OutputWindow);
-
-			if (!gOverlayFence)
-			{
-				//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
-				if (FAILED(gDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gOverlayFence))))
-				{
-					ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->HandlePresentD3D12: CreateFence fail");
-					return CallOriginalPresent();
-				}
-			}
-
-			if (!gFenceEvent)
-			{
-				gFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-
-				//IMPORTANT NOTE: this seems to pass fortunately, it doesn't fail
-				if (!gFenceEvent)
-				{
-					char buffer[256];
-					sprintf_s(buffer, "HookD3D12->HandlePresentD3D12: Failed to create fence event: %lu", GetLastError());
-					ShaderInjectorGUI::WriteToRuntimeLogError(buffer);
-				}
-			}
 
 			GatherPipelineInfo(pSwapChain);
 			InstallPipelineHooks();

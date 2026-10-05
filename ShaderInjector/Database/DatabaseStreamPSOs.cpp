@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "HookD3D12/HookD3D12.h"
+#include "HookD3D12/D3D12/HookD3D12RuntimeState.h"
 #include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
 
 namespace HookD3D12
@@ -17,6 +18,7 @@ namespace HookD3D12
 
 		PipelineStateInfo capturedStreamPipeline{};
 		capturedStreamPipeline.pipelineState = pipelineState;
+		capturedStreamPipeline.capturedPipelineLifetime = pipelineState;
 
 		//preserve the exact byte stream because warm-cache rebuilds need every original subobject.
 		const uint8_t* streamDataStart = static_cast<const uint8_t*>(pipelineStreamDescription->pPipelineStateSubobjectStream);
@@ -37,6 +39,7 @@ namespace HookD3D12
 		}
 
 		//analyze after the database entry is stored so discovery can use the captured stream immediately.
-		ShaderAutomaticDiscovery::ProcessCapturedStreamPipeline(capturedStreamPipeline);
+		if (gRuntimeReady.load(std::memory_order_acquire))
+			ShaderAutomaticDiscovery::ProcessCapturedStreamPipeline(capturedStreamPipeline);
 	}
 } //namespace HookD3D12

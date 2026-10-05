@@ -12,7 +12,7 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_IASetVertexBuffers(ID3D12GraphicsCommandList* commandList, UINT startSlot, UINT viewCount, const D3D12_VERTEX_BUFFER_VIEW* views)
 	{
-		if (Globals::gShaderInjectorEnabled &&
+		if (IsInjectorEnabledForCommandList(commandList) &&
 			RenderPassRuntime::IsResourceTrackingRequired() &&
 			RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) &&
 			!IsInsideRenderPassInjection())

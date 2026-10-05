@@ -18,7 +18,7 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_Dispatch(ID3D12GraphicsCommandList* commandList, UINT threadGroupCountX, UINT threadGroupCountY, UINT threadGroupCountZ)
 	{
-		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsPipelineExecutionTrackingRequired(true) || IsInsideRenderPassInjection())
+		if (!IsInjectorEnabledForCommandList(commandList) || !RenderPassRuntime::IsPipelineExecutionTrackingRequired(true) || IsInsideRenderPassInjection())
 		{
 			Original_Dispatch(commandList, threadGroupCountX, threadGroupCountY, threadGroupCountZ);
 			return;

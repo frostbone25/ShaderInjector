@@ -12,7 +12,7 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_SetGraphicsRootDescriptorTable(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE descriptorHandle)
 	{
-		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsDescriptorTableTrackingRequired() &&
+		if (IsInjectorEnabledForCommandList(commandList) && RenderPassRuntime::IsDescriptorTableTrackingRequired() &&
 			RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) && !IsInsideRenderPassInjection())
 		{
 			RenderPassRuntime::TrackRootDescriptorTable(commandList, false, rootParameterIndex, descriptorHandle);

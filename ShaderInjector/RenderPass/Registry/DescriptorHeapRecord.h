@@ -5,6 +5,7 @@
 #include <memory>
 
 #include <d3d12.h>
+#include <wrl/client.h>
 
 #include "RenderPass/Registry/DescriptorPage.h"
 
@@ -19,6 +20,12 @@ namespace RenderPassResourceRegistry
 		UINT descriptorCount = 0;
 		UINT descriptorIncrementSize = 0;
 		D3D12_DESCRIPTOR_HEAP_TYPE type = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
+		bool shaderVisible = false;
+		//only a heap captured at creation can prove that unwritten slots were originally empty.
+		bool descriptorContentsObservedFromCreation = false;
+		//this CPU-only heap mirrors descriptor contents, not the textures or buffers they reference.
+		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptorMirror;
+		D3D12_CPU_DESCRIPTOR_HANDLE mirrorStart{};
 		std::unique_ptr<std::atomic<DescriptorPage*>[]> pages;
 		size_t pageCount = 0;
 		std::atomic<size_t> trackedDescriptorCount{0};

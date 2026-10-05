@@ -358,6 +358,20 @@ namespace ShaderInjectorGUI
 
 			ImGui::SameLine();
 
+			if (ImGui::Button("Recapture##ModifiedShader"))
+			{
+				std::string recaptureMessage;
+				if (DatabaseModifiedShaders::RecaptureModifiedShader(gSelectedModifiedShaderId, recaptureMessage))
+					WriteToRuntimeLogSuccess(recaptureMessage);
+				else
+					WriteToRuntimeLogError(recaptureMessage);
+				selectedModifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(gSelectedModifiedShaderId);
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Refresh the original shader fingerprint and linked PSO data. Preserve the source HLSL and compiled replacement bytecode.");
+
+			ImGui::SameLine();
+
 			if (ImGui::Button("Open Folder##ModifiedShaderSelected") && !ShaderInjectorIO::OpenDirectory(selectedModifiedShader->packageDirectory))
 			{
 				WriteToRuntimeLogError("Could not open Modified Shader package folder: " + selectedModifiedShader->packageDirectory);

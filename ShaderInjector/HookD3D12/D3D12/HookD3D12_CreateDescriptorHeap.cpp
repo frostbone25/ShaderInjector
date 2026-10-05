@@ -22,7 +22,8 @@ namespace HookD3D12
 			!descriptorHeapObject ||
 			!*descriptorHeapObject ||
 			IsInsideRenderPassInjection() ||
-			!RenderPassRuntime::IsDescriptorRegistryTrackingRequired())
+			RenderPassResourceRegistry::IsInsideDescriptorMirrorOperation() ||
+			(!ShouldTrackRenderPassDescriptorMetadata() && !RenderPassResourceRegistry::IsDescriptorMirroringActive()))
 		{
 			return result;
 		}

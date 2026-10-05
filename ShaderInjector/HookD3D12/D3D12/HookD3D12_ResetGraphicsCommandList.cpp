@@ -1,6 +1,7 @@
 
 #include "HookD3D12RuntimeState.h"
 #include "../HookD3D12.h"
+#include "../DeviceRuntimeState.h"
 #include "Globals.h"
 #include "RenderPass/RenderPassRuntime.h"
 
@@ -13,29 +14,33 @@ namespace HookD3D12
 
 	HRESULT STDMETHODCALLTYPE Handle_ResetGraphicsCommandList(ID3D12GraphicsCommandList* commandList, ID3D12CommandAllocator* allocator, ID3D12PipelineState* initialState)
 	{
-		const bool trackRenderPassState = Globals::gShaderInjectorEnabled && RenderPassRuntime::IsTrackingRequired();
-		const bool retireRecordedRenderPassWork = RenderPassRuntime::HasPendingCommandListSubmissionWork();
+		CommandListPipelineState& commandListState = GetCommandListPipelineState(commandList);
+		commandListState.injectorEnabledForRecording = Globals::gShaderInjectorEnabled.load(std::memory_order_acquire);
+		const bool injectorEnabledForRecording = IsInjectorEnabledForCommandList(commandList);
 
-		if (trackRenderPassState)
-			RenderPassRuntime::ResetCommandList(commandList, initialState);
+		RenderPassRuntime::ResetCommandList(commandList, initialState);
 
 		const auto resetCommandList = [&](ID3D12PipelineState* pipelineState)
 		{
 			const HRESULT result = Original_ResetGraphicsCommandList(commandList, allocator, pipelineState);
 
-			if (trackRenderPassState || retireRecordedRenderPassWork)
-				RenderPassRuntime::CompleteCommandListReset(commandList, SUCCEEDED(result));
+			if (SUCCEEDED(result) && commandListState.deviceRuntimeState &&
+				FAILED(commandListState.deviceRuntimeState->removalReason.load(std::memory_order_acquire)))
+			{
+				commandListState.deviceRuntimeState = nullptr;
+			}
+
+			RenderPassRuntime::CompleteCommandListReset(commandList, SUCCEEDED(result));
 
 			return result;
 		};
 
-		CommandListPipelineState& commandListState = GetCommandListPipelineState(commandList);
 		commandListState.graphicsRootSignature.store(nullptr, std::memory_order_release);
 		commandListState.computeRootSignature.store(nullptr, std::memory_order_release);
 
-		if (!Globals::gShaderInjectorEnabled)
+		if (!injectorEnabledForRecording)
 		{
-			commandListState.pipelineState.store(nullptr, std::memory_order_release);
+			commandListState.pipelineState.store(initialState, std::memory_order_release);
 			return resetCommandList(initialState);
 		}
 

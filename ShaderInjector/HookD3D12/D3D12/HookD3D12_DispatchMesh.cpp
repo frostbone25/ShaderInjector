@@ -18,10 +18,10 @@ namespace HookD3D12
 			commandHookLogChecked = true;
 		}
 
+		ID3D12GraphicsCommandList* baseCommandList = static_cast<ID3D12GraphicsCommandList*>(commandList);
 		ID3D12PipelineState* hiddenPipeline = gHiddenMeshPipelineState.load(std::memory_order_acquire);
-		if (hiddenPipeline && Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection())
+		if (hiddenPipeline && IsInjectorEnabledForCommandList(baseCommandList) && !IsInsideRenderPassInjection())
 		{
-			ID3D12GraphicsCommandList* baseCommandList = static_cast<ID3D12GraphicsCommandList*>(commandList);
 			ID3D12PipelineState* boundPipeline = GetCommandListPipelineState(baseCommandList).pipelineState.load(std::memory_order_acquire);
 			if (boundPipeline == hiddenPipeline)
 			{

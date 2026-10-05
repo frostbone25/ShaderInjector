@@ -242,7 +242,9 @@ namespace HookD3D12
 
 	void InstallRenderPassResourceHooksForDevice(ID3D12Device* device)
 	{
-		if (!device || !RenderPassRuntime::HasEnabledMipChainPasses())
+		//device capture runs before packages load, so waiting for a mip pass would lose startup descriptors.
+		//these hooks only observe metadata; command injection remains gated by runtime readiness.
+		if (!device)
 			return;
 
 		std::lock_guard<std::mutex> installationLock(hookInstallationMutex);
@@ -282,7 +284,7 @@ namespace HookD3D12
 		if (resourceHooksInstalled)
 		{
 			renderPassHookedDeviceVTables.insert(deviceVTableKey);
-			ShaderInjectorIO::WriteToLogFileSuccess("HookD3D12Install->InstallRenderPassResourceHooksForDevice: mip resource hooks installed");
+			ShaderInjectorIO::WriteToLogFileSuccess("HookD3D12Install->InstallRenderPassResourceHooksForDevice: resource observation hooks installed before game resource creation");
 		}
 		else
 		{
@@ -305,9 +307,7 @@ namespace HookD3D12
 
 		InstallRenderPassResourceHooksForDevice(device);
 
-		//The game performs its most intensive pipeline/query work before the overlay is
-		//ready. Render-pass observation is unnecessary during that phase, especially on
-		//a fresh shader-cache run where no shader target can be resolved yet.
+		//device resource observation starts early; draw and binding hooks can still wait for an active graph.
 		std::lock_guard<std::mutex> installationLock(hookInstallationMutex);
 
 		void** deviceVTable = *reinterpret_cast<void***>(device);

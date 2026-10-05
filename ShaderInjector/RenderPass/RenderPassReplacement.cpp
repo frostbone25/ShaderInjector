@@ -7,6 +7,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+#include <wrl/client.h>
 
 #include "Hash/Hash.h"
 #include "HookD3D12/HookD3D12.h"
@@ -117,8 +118,10 @@ namespace RenderPassReplacement
 				HookD3D12::ScopedRenderPassInjection injectionScope;
 				HRESULT result = E_NOINTERFACE;
 
-				if (HookD3D12::Original_CreateGraphicsPipelineState)
-					result = HookD3D12::Original_CreateGraphicsPipelineState(HookD3D12::GetCapturedDevice(), &description, IID_PPV_ARGS(&replacement));
+				Microsoft::WRL::ComPtr<ID3D12Device> pipelineDevice;
+
+				if (SUCCEEDED(original->GetDevice(IID_PPV_ARGS(&pipelineDevice))) && HookD3D12::Original_CreateGraphicsPipelineState)
+					result = HookD3D12::Original_CreateGraphicsPipelineState(pipelineDevice.Get(), &description, IID_PPV_ARGS(&replacement));
 
 				if (FAILED(result) || !replacement)
 					outError = "Replacement pixel PSO creation failed with " + StringHelper::FormatHRESULT(result);
@@ -259,7 +262,7 @@ namespace RenderPassReplacement
 
 				ID3D12Device2* device = nullptr;
 
-				if (FAILED(HookD3D12::GetCapturedDevice()->QueryInterface(IID_PPV_ARGS(&device))) || !device)
+				if (FAILED(original->GetDevice(IID_PPV_ARGS(&device))) || !device)
 					return nullptr;
 
 				D3D12_PIPELINE_STATE_STREAM_DESC description{stream.size(), stream.data()};
@@ -293,8 +296,10 @@ namespace RenderPassReplacement
 				ID3D12PipelineState* replacement = nullptr;
 				HookD3D12::ScopedRenderPassInjection injectionScope;
 				HRESULT result = E_NOINTERFACE;
-				if (HookD3D12::Original_CreateComputePipelineState)
-					result = HookD3D12::Original_CreateComputePipelineState(HookD3D12::GetCapturedDevice(), &description, IID_PPV_ARGS(&replacement));
+				Microsoft::WRL::ComPtr<ID3D12Device> pipelineDevice;
+
+				if (SUCCEEDED(original->GetDevice(IID_PPV_ARGS(&pipelineDevice))) && HookD3D12::Original_CreateComputePipelineState)
+					result = HookD3D12::Original_CreateComputePipelineState(pipelineDevice.Get(), &description, IID_PPV_ARGS(&replacement));
 
 				if (FAILED(result) || !replacement)
 					outError = "Replacement compute PSO creation failed with " + StringHelper::FormatHRESULT(result);

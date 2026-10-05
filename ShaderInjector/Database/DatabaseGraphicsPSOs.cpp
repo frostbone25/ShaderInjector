@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "HookD3D12/HookD3D12.h"
+#include "HookD3D12/D3D12/HookD3D12RuntimeState.h"
 #include "Hash/Hash.h"
 #include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
 #include "ShaderModelDetector.h"
@@ -19,6 +20,7 @@ namespace HookD3D12
 
 		GraphicsPipelineInfo capturedGraphicsPipeline{};
 		capturedGraphicsPipeline.pipelineState = pipelineState;
+		capturedGraphicsPipeline.capturedPipelineLifetime = pipelineState;
 
 		//copy every shader blob because the D3D12 descriptor only borrows the caller's memory.
 		//these vectors remain valid after the game's CreateGraphicsPipelineState call returns.
@@ -160,6 +162,7 @@ namespace HookD3D12
 		}
 
 		//run discovery after the durable capture has been registered.
-		ShaderAutomaticDiscovery::ProcessCapturedGraphicsPipeline(capturedGraphicsPipeline);
+		if (gRuntimeReady.load(std::memory_order_acquire))
+			ShaderAutomaticDiscovery::ProcessCapturedGraphicsPipeline(capturedGraphicsPipeline);
 	}
 } //namespace HookD3D12

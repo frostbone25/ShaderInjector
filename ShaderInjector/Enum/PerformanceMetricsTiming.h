@@ -30,6 +30,10 @@ namespace PerformanceMetrics
 		ExecuteCustomPass,
 		ResolveReplacementPipeline,
 		RetireMipSubmissions,
+		CloneShaderResourceTables,
+		ApplyShaderResourceOverrides,
+		UpdateDescriptorMirrors,
+		ResolveDescriptorMirrorTables,
 		Count,
 	};
 } //namespace PerformanceMetrics

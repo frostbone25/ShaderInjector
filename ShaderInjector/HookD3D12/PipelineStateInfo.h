@@ -4,6 +4,7 @@
 #include <d3d12.h>
 #include <string>
 #include <vector>
+#include <wrl/client.h>
 
 #include "ShaderTarget/ShaderTarget.h"
 
@@ -12,6 +13,8 @@ namespace HookD3D12
 	struct PipelineStateInfo
 	{
 		ID3D12PipelineState* pipelineState = nullptr;
+		//retain the original object while the database uses its address as a stable lookup key.
+		Microsoft::WRL::ComPtr<ID3D12PipelineState> capturedPipelineLifetime;
 
 		uint64_t vertexShaderHash = 0;
 		SIZE_T vertexShaderBytecodeSize = 0;

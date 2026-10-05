@@ -29,6 +29,16 @@ namespace PerformanceMetrics
 		ReplacementPassSucceeded,
 		ShaderResourceBindAttempted,
 		ShaderResourceBindSucceeded,
+		DescriptorMetadataChanged,
+		DescriptorMetadataUnchanged,
+		ShaderResourceTableDescriptorsCopied,
+		ShaderResourceOverridesCopied,
+		ShaderResourceCopyBatches,
+		ShaderResourceTableCopySourceMissing,
+		DescriptorMirrorCreated,
+		DescriptorMirrorCreationFailed,
+		DescriptorMirrorDescriptorsWritten,
+		DescriptorMirrorSourceMissing,
 		Count,
 	};
 } //namespace PerformanceMetrics

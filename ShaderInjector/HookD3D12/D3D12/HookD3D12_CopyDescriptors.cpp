@@ -16,14 +16,17 @@ namespace HookD3D12
 	{
 		Original_CopyDescriptors(device, destinationRangeCount, destinationRangeStarts, destinationRangeSizes, sourceRangeCount, sourceRangeStarts, sourceRangeSizes, heapType);
 
-		if (!Globals::gShaderInjectorEnabled ||
-			IsInsideRenderPassInjection() ||
-			!RenderPassRuntime::IsDescriptorRegistryTrackingRequired() ||
-			(heapType != D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV &&
-			 !RenderPassRuntime::IsResourceTrackingRequired()))
-		{
+		if (IsInsideRenderPassInjection() || RenderPassResourceRegistry::IsInsideDescriptorMirrorOperation())
 			return;
-		}
+
+		const bool mirrorHeapType = heapType == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV || heapType == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
+
+		const bool trackMetadata = ShouldTrackRenderPassDescriptorMetadata() && (mirrorHeapType || ShouldTrackRenderPassResourceMetadata());
+
+		const bool trackMirrors = mirrorHeapType && RenderPassResourceRegistry::IsDescriptorMirroringActive();
+
+		if (!trackMetadata && !trackMirrors)
+			return;
 
 		PerformanceMetrics::Increment(PerformanceMetrics::Counter::DescriptorCopy);
 		PerformanceMetrics::ScopedTimer descriptorCopyTimer(PerformanceMetrics::Timing::DescriptorCopyPropagation, 256);
@@ -35,7 +38,7 @@ namespace HookD3D12
 			sourceRangeCount,
 			sourceRangeStarts,
 			sourceRangeSizes,
-			DescriptorIncrementSize(device, heapType));
+			DescriptorIncrementSize(device, heapType), device, trackMetadata);
 
 		if (inspectedRegistry)
 			PerformanceMetrics::Increment(PerformanceMetrics::Counter::DescriptorCopyRegistryHit);

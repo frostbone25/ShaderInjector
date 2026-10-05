@@ -31,8 +31,8 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 
 	RenderDocIntegration::Initialize();
 
-	//initialize MinHook before the delay so early swap chains can be observed.
-	//the rendering hooks are installed later, after packages and internal shaders are ready.
+	//capture device and pipeline creation before package loading can miss the game's startup work.
+	//Present and draw injection remain gated until all injector resources are ready.
 	MH_STATUS minHookStatus = MH_Initialize();
 
 	if (minHookStatus != MH_OK)
@@ -45,8 +45,19 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 
 	Hooks::PrepareSwapChainCapture();
 
-	//give the game's D3D12 startup time to settle before installing the remaining hooks.
-	Sleep(5000);
+	HMODULE d3d12Module = GetModuleHandleA("d3d12.dll");
+
+	if (!d3d12Module)
+		d3d12Module = LoadLibraryW(L"d3d12.dll");
+
+	if (!d3d12Module)
+	{
+		ShaderInjectorIO::WriteToLogFileError("dllmain->OnAttachDLL: d3d12.dll handle not found!");
+		return 0;
+	}
+
+	HookD3D12::InstallD3D12CreateDeviceHook(d3d12Module);
+	Hooks::Initialize();
 
 	//prepare the injector's folders, settings files, and bundled shader sources.
 	ShaderInjectorIO::Initialize();
@@ -66,24 +77,10 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 
 	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: startup worker initialized.");
 
-	//prepare, compile, and load the internal marker/null shaders before the D3D12 hooks can observe any game pipeline state.
+	//prepare internal marker/null shaders before the captured pipelines can receive an injected replacement.
 	ShaderInjectorInternalResources::Initialize();
 
-	//the device hook needs the D3D12 module that the game has already loaded.
-	HMODULE d3d12Module = GetModuleHandleA("d3d12.dll");
-
-	if (!d3d12Module)
-	{
-		ShaderInjectorIO::WriteToLogFileError("dllmain->OnAttachDLL: d3d12.dll handle not found!");
-		return 0;
-	}
-
-	ShaderInjectorIO::WriteToLogFile(StringHelper::Format("dllmain->OnAttachDLL: d3d12.dll = %p", d3d12Module));
-
-	//install the device entry hook, then publish the runtime-ready flag after setup completes.
-	HookD3D12::InstallD3D12CreateDeviceHook(d3d12Module);
-
-	Hooks::Initialize();
+	//replay early captures against the loaded package index, then allow shader application.
 	HookD3D12::SetRuntimeReady(true);
 
 	ShaderInjectorIO::WriteToLogFile("dllmain->OnAttachDLL: hook initialization complete.");

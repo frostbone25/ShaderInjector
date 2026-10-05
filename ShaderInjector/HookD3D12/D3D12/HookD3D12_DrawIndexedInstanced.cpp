@@ -18,7 +18,7 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_DrawIndexedInstanced(ID3D12GraphicsCommandList* commandList, UINT indexCountPerInstance, UINT instanceCount, UINT startIndexLocation, INT baseVertexLocation, UINT startInstanceLocation)
 	{
-		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) || IsInsideRenderPassInjection())
+		if (!IsInjectorEnabledForCommandList(commandList) || !RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) || IsInsideRenderPassInjection())
 		{
 			Original_DrawIndexedInstanced(commandList, indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation);
 			return;

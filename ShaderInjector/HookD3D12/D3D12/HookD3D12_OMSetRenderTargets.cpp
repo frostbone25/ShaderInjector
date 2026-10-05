@@ -12,7 +12,7 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_OMSetRenderTargets(ID3D12GraphicsCommandList* commandList, UINT renderTargetCount, const D3D12_CPU_DESCRIPTOR_HANDLE* renderTargetDescriptors, BOOL descriptorsAreContiguous, const D3D12_CPU_DESCRIPTOR_HANDLE* depthStencilDescriptor)
 	{
-		if (Globals::gShaderInjectorEnabled &&
+		if (IsInjectorEnabledForCommandList(commandList) &&
 			!IsInsideRenderPassInjection() &&
 			RenderPassRuntime::IsGraphicsStateTrackingRequired())
 		{

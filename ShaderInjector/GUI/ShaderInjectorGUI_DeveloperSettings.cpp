@@ -488,6 +488,7 @@ namespace ShaderInjectorGUI
 	{
 		static int selectedIndex = -1;
 		static int sortMode = 0;
+		static std::string recaptureModifiedShaderId;
 
 		const int count = CountShaderStage<PipelineT, HashMember>(pipelines);
 		std::string stageNodeLabel = std::string(stageLabel) + ": " + std::to_string(count) + "##" + idPrefix;
@@ -715,6 +716,49 @@ namespace ShaderInjectorGUI
 			if (ImGui::Button(dumpButtonLabel.c_str()))
 			{
 				ShaderInjectorIO::DumpShaderBytecode(bytecode.data(), bytecode.size(), hash, StringHelper::ShaderTypeToString(shaderType), ShaderInjectorIO::GetDumpsDirectory());
+			}
+
+			const auto& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
+			const auto* recapturePackage = DatabaseModifiedShaders::FindModifiedShaderById(recaptureModifiedShaderId);
+			if (!recapturePackage || recapturePackage->shaderType != shaderType)
+			{
+				recaptureModifiedShaderId.clear();
+				for (const auto& package : modifiedShaders)
+				{
+					if (package.shaderType == shaderType)
+					{
+						recaptureModifiedShaderId = package.id;
+						break;
+					}
+				}
+				recapturePackage = DatabaseModifiedShaders::FindModifiedShaderById(recaptureModifiedShaderId);
+			}
+			if (recapturePackage)
+			{
+				ImGui::TextUnformatted("Recapture Into Modified Shader");
+				const std::string comboId = "##RecaptureModifiedShader" + std::string(idPrefix);
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				if (ImGui::BeginCombo(comboId.c_str(), recapturePackage->name.c_str()))
+				{
+					for (const auto& package : modifiedShaders)
+					{
+						if (package.shaderType != shaderType)
+							continue;
+						const std::string label = DatabaseModifiedShaders::DisplayName(package) + "##" + package.id;
+						if (ImGui::Selectable(label.c_str(), package.id == recaptureModifiedShaderId))
+							recaptureModifiedShaderId = package.id;
+					}
+					ImGui::EndCombo();
+				}
+				const std::string buttonId = "Recapture Modified Shader##" + std::string(idPrefix);
+				if (ImGui::Button(buttonId.c_str()))
+				{
+					std::string recaptureMessage;
+					if (DatabaseModifiedShaders::RecaptureModifiedShader(recaptureModifiedShaderId, recaptureMessage, hash))
+						WriteToRuntimeLogSuccess(recaptureMessage);
+					else
+						WriteToRuntimeLogError(recaptureMessage);
+				}
 			}
 		}
 

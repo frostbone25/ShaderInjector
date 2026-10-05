@@ -15,9 +15,12 @@ namespace HookD3D12
 	{
 		Original_CreateConstantBufferView(device, description, destination);
 
-		if (Globals::gShaderInjectorEnabled &&
-			!IsInsideRenderPassInjection() &&
-			RenderPassRuntime::IsResourceTrackingRequired())
-			RenderPassResourceRegistry::RegisterConstantBufferView(description, destination);
+		if (!IsInsideRenderPassInjection() && !RenderPassResourceRegistry::IsInsideDescriptorMirrorOperation() && (ShouldTrackRenderPassDescriptorMetadata() || RenderPassResourceRegistry::IsDescriptorMirroringActive()))
+		{
+			RenderPassResourceRegistry::MirrorConstantBufferView(device, description, destination);
+
+			if (ShouldTrackRenderPassDescriptorMetadata() && ShouldTrackRenderPassResourceMetadata())
+				RenderPassResourceRegistry::RegisterConstantBufferView(description, destination);
+		}
 	}
 } //namespace HookD3D12

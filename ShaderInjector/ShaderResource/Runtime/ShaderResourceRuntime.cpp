@@ -873,14 +873,23 @@ namespace ShaderResourceRuntime
 		const D3D12_GPU_DESCRIPTOR_HANDLE gpuStart = descriptorAllocation.gpuStart;
 		const D3D12_CPU_DESCRIPTOR_HANDLE samplerCpuStart = samplerAllocation.cpuStart;
 		const D3D12_GPU_DESCRIPTOR_HANDLE samplerGpuStart = samplerAllocation.gpuStart;
+
+		//retain scratch capacity between passes so batching does not introduce per-draw allocations.
+		thread_local std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> overrideCopyDestinations;
+		thread_local std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> overrideCopySources;
+		overrideCopyDestinations.clear();
+		overrideCopySources.clear();
+		const size_t maximumOverrideCount = renderPass.inputs.size() + renderPass.outputs.size();
+		overrideCopyDestinations.reserve(maximumOverrideCount);
+		overrideCopySources.reserve(maximumOverrideCount);
 		thread_local std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> copySources;
 		thread_local std::vector<UINT> copySourceSizes;
 		const auto copyActiveTables = [&](D3D12_DESCRIPTOR_HEAP_TYPE heapType,
 										  D3D12_CPU_DESCRIPTOR_HANDLE destination,
-										  UINT destinationDescriptorCount)
+										  UINT destinationDescriptorCount) -> bool
 		{
 			if (!destination.ptr || !destinationDescriptorCount)
-				return;
+				return true;
 
 			copySources.clear();
 			copySourceSizes.clear();
@@ -891,28 +900,50 @@ namespace ShaderResourceRuntime
 			{
 				if (table.heapType != heapType || !table.descriptorCount)
 					continue;
+
 				copySources.push_back(table.originalCpu);
 				copySourceSizes.push_back(table.descriptorCount);
 			}
 
 			if (!copySources.empty())
 			{
-				device->CopyDescriptors(
-					1,
-					&destination,
-					&destinationDescriptorCount,
-					static_cast<UINT>(copySources.size()),
-					copySources.data(),
-					copySourceSizes.data(),
-					heapType);
+				{
+					PerformanceMetrics::ScopedTimer timer(PerformanceMetrics::Timing::CloneShaderResourceTables);
+					if (!RenderPassResourceRegistry::CopyDescriptorTables(
+							device,
+							destination,
+							destinationDescriptorCount,
+							static_cast<UINT>(copySources.size()),
+							copySources.data(),
+							copySourceSizes.data(),
+							heapType))
+					{
+						outError = "Could not copy descriptor tables because an active source mirror is unavailable.";
+						PerformanceMetrics::Increment(
+							PerformanceMetrics::Counter::ShaderResourceTableCopySourceMissing);
+						return false;
+					}
+				}
+				PerformanceMetrics::Increment(
+					PerformanceMetrics::Counter::ShaderResourceTableDescriptorsCopied,
+					destinationDescriptorCount);
+				PerformanceMetrics::Increment(PerformanceMetrics::Counter::ShaderResourceCopyBatches);
 			}
+
+			return true;
 		};
 
 		if (descriptorAllocation.heap)
-			copyActiveTables(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, cpuStart, totalDescriptors);
+		{
+			if (!copyActiveTables(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, cpuStart, totalDescriptors))
+				return false;
+		}
 
 		if (samplerAllocation.heap)
-			copyActiveTables(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, samplerCpuStart, totalSamplerDescriptors);
+		{
+			if (!copyActiveTables(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, samplerCpuStart, totalSamplerDescriptors))
+				return false;
+		}
 
 		const auto resolveDescriptorDestination = [&](D3D12_DESCRIPTOR_RANGE_TYPE rangeType,
 													  uint32_t shaderRegister,
@@ -1023,14 +1054,24 @@ namespace ShaderResourceRuntime
 				return false;
 			}
 
-			D3D12_DESCRIPTOR_HEAP_TYPE heapType = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-			if (rangeType == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER)
-				heapType = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
-			device->CopyDescriptorsSimple(
-				1,
-				destination,
-				sourceDescriptor,
-				heapType);
+			//coalesce duplicate destinations to preserve last-override-wins and avoid overlapping copy ranges.
+			const auto existingDestination = std::find_if(
+				overrideCopyDestinations.begin(),
+				overrideCopyDestinations.end(),
+				[&](const D3D12_CPU_DESCRIPTOR_HANDLE& queuedDestination)
+				{
+					return queuedDestination.ptr == destination.ptr;
+				});
+			if (existingDestination != overrideCopyDestinations.end())
+			{
+				const size_t destinationIndex = static_cast<size_t>(
+					existingDestination - overrideCopyDestinations.begin());
+				overrideCopySources[destinationIndex] = sourceDescriptor;
+				return true;
+			}
+
+			overrideCopyDestinations.push_back(destination);
+			overrideCopySources.push_back(sourceDescriptor);
 			return true;
 		};
 
@@ -1167,6 +1208,25 @@ namespace ShaderResourceRuntime
 			description.MinLOD = sampler.minimumLod;
 			description.MaxLOD = (std::max)(sampler.minimumLod, sampler.maximumLod);
 			device->CreateSampler(&description, destination);
+		}
+
+		if (!overrideCopyDestinations.empty())
+		{
+			{
+				PerformanceMetrics::ScopedTimer timer(PerformanceMetrics::Timing::ApplyShaderResourceOverrides);
+				device->CopyDescriptors(
+					static_cast<UINT>(overrideCopyDestinations.size()),
+					overrideCopyDestinations.data(),
+					nullptr,
+					static_cast<UINT>(overrideCopySources.size()),
+					overrideCopySources.data(),
+					nullptr,
+					D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+			}
+			PerformanceMetrics::Increment(
+				PerformanceMetrics::Counter::ShaderResourceOverridesCopied,
+				overrideCopySources.size());
+			PerformanceMetrics::Increment(PerformanceMetrics::Counter::ShaderResourceCopyBatches);
 		}
 
 		ID3D12DescriptorHeap* originalResourceHeap = nullptr;

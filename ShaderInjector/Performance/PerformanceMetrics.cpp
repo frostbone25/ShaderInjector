@@ -93,7 +93,20 @@ namespace PerformanceMetrics
 			"replacementPassSucceeded",
 			"shaderResourceBindAttempted",
 			"shaderResourceBindSucceeded",
+			"descriptorMetadataChanged",
+			"descriptorMetadataUnchanged",
+			"shaderResourceTableDescriptorsCopied",
+			"shaderResourceOverridesCopied",
+			"shaderResourceCopyBatches",
+			"shaderResourceTableCopySourceMissing",
+			"descriptorMirrorCreated",
+			"descriptorMirrorCreationFailed",
+			"descriptorMirrorDescriptorsWritten",
+			"descriptorMirrorSourceMissing",
 		};
+
+		//keep telemetry labels aligned when a new counter is added to the enum.
+		static_assert(sizeof(names) / sizeof(names[0]) == counterCount);
 
 		return names[static_cast<size_t>(counter)];
 	}
@@ -126,7 +139,13 @@ namespace PerformanceMetrics
 			"executeCustomPass",
 			"resolveReplacementPipeline",
 			"retireMipSubmissions",
+			"cloneShaderResourceTables",
+			"applyShaderResourceOverrides",
+			"updateDescriptorMirrors",
+			"resolveDescriptorMirrorTables",
 		};
+
+		static_assert(sizeof(names) / sizeof(names[0]) == timingCount);
 
 		return names[static_cast<size_t>(timing)];
 	}

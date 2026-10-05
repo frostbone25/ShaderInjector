@@ -59,64 +59,6 @@ namespace HookD3D12
 		return "";
 	}
 
-	uint64_t CanonicalPipelineFixedFunctionStateHash(const std::vector<uint8_t>& streamBlob)
-	{
-		if (streamBlob.empty())
-			return 0;
-
-		std::vector<uint8_t> canonicalStream = streamBlob;
-		uint8_t* streamPosition = canonicalStream.data();
-		uint8_t* streamEnd = streamPosition + canonicalStream.size();
-
-		while (streamPosition < streamEnd)
-		{
-			if (streamPosition + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE) > streamEnd)
-				return 0;
-
-			const auto type = *reinterpret_cast<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE*>(streamPosition);
-			const UINT typeIndex = static_cast<UINT>(type);
-
-			if (typeIndex >= ARRAYSIZE(subobjectSizes) || subobjectSizes[typeIndex] == 0)
-				return 0;
-
-			const size_t subobjectSize = subobjectSizes[typeIndex];
-
-			if (streamPosition + subobjectSize > streamEnd)
-				return 0;
-
-			//Pointer-bearing payloads and the driver cache are process-local. Removing
-			//them leaves the blend/raster/depth/formats/topology state that identifies
-			//distinct PSO variants of the same shader.
-			switch (type)
-			{
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_STREAM_OUTPUT:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CACHED_PSO:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS:
-				case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS:
-					std::memset(
-						streamPosition + sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE),
-						0,
-						subobjectSize - sizeof(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE));
-					break;
-				default:
-					break;
-			}
-
-			streamPosition += subobjectSize;
-		}
-
-		return Hash::HashMemory(canonicalStream.data(), canonicalStream.size());
-	}
-
 	std::string JoinUIntValues(const UINT* values, UINT count)
 	{
 		std::ostringstream stream;
@@ -847,13 +789,15 @@ namespace HookD3D12
 
 	void GatherD3D12PipelineInfo(IDXGISwapChain3* swapChain, ID3D12Device* device, ID3D12CommandQueue* commandQueue, D3D12PipelineInfo& pipelineInfo)
 	{
-		if (!swapChain || !device)
+		if (!device)
 			return;
 
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineUtils->GatherD3D12PipelineInfo: gathering pipeline info...");
 
 		DXGI_SWAP_CHAIN_DESC desc{};
-		swapChain->GetDesc(&desc);
+
+		if (swapChain)
+			swapChain->GetDesc(&desc);
 
 		pipelineInfo.swapChainBufferCount = desc.BufferCount;
 		pipelineInfo.swapChainFormat = desc.BufferDesc.Format;
@@ -861,71 +805,26 @@ namespace HookD3D12
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineUtils->GatherD3D12PipelineInfo: swapChainBuffers: " + std::to_string(pipelineInfo.swapChainBufferCount));
 		ShaderInjectorGUI::WriteToRuntimeLog("HookD3D12PipelineUtils->GatherD3D12PipelineInfo: swapChainFormat: " + std::to_string(pipelineInfo.swapChainFormat));
 
-		IDXGIDevice* dxgiDevice = nullptr;
+		//D3D12 devices expose their adapter LUID directly; selecting the first GPU can report the wrong device.
+		//reference - https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12device-getadapterluid
+		Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
+		Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
 
-		if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dxgiDevice))))
+		if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) && SUCCEEDED(factory->EnumAdapterByLuid(device->GetAdapterLuid(), IID_PPV_ARGS(&adapter))))
 		{
-			IDXGIAdapter* adapter = nullptr;
+			DXGI_ADAPTER_DESC1 adapterDescription{};
 
-			if (SUCCEEDED(dxgiDevice->GetAdapter(&adapter)))
+			if (SUCCEEDED(adapter->GetDesc1(&adapterDescription)))
 			{
-				DXGI_ADAPTER_DESC adapterDesc{};
-				adapter->GetDesc(&adapterDesc);
-
 				char graphicsProcessorName[256]{};
-				wcstombs_s(nullptr, graphicsProcessorName, adapterDesc.Description, sizeof(graphicsProcessorName));
-
+				wcstombs_s(nullptr, graphicsProcessorName, sizeof(graphicsProcessorName), adapterDescription.Description, _TRUNCATE);
 				pipelineInfo.graphicsProcessorName = graphicsProcessorName;
-				pipelineInfo.vendorID = adapterDesc.VendorId;
-				pipelineInfo.deviceID = adapterDesc.DeviceId;
-				pipelineInfo.dedicatedVideoMemory = adapterDesc.DedicatedVideoMemory;
-				pipelineInfo.dedicatedSystemMemory = adapterDesc.DedicatedSystemMemory;
-				pipelineInfo.sharedSystemMemory = adapterDesc.SharedSystemMemory;
-
-				adapter->Release();
+				pipelineInfo.vendorID = adapterDescription.VendorId;
+				pipelineInfo.deviceID = adapterDescription.DeviceId;
+				pipelineInfo.dedicatedVideoMemory = adapterDescription.DedicatedVideoMemory;
+				pipelineInfo.dedicatedSystemMemory = adapterDescription.DedicatedSystemMemory;
+				pipelineInfo.sharedSystemMemory = adapterDescription.SharedSystemMemory;
 			}
-
-			dxgiDevice->Release();
-		}
-		else
-		{
-			IDXGIFactory6* factory = nullptr;
-			HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
-
-			if (FAILED(hr))
-			{
-				pipelineInfo.graphicsProcessorName = "CreateDXGIFactory1 failed";
-				return;
-			}
-
-			IDXGIAdapter1* adapter = nullptr;
-
-			for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i)
-			{
-				DXGI_ADAPTER_DESC1 desc;
-				adapter->GetDesc1(&desc);
-
-				if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-				{
-					adapter->Release();
-					continue;
-				}
-
-				char graphicsProcessorName[256];
-				wcstombs_s(nullptr, graphicsProcessorName, sizeof(graphicsProcessorName), desc.Description, _TRUNCATE);
-
-				pipelineInfo.graphicsProcessorName = graphicsProcessorName;
-				pipelineInfo.vendorID = desc.VendorId;
-				pipelineInfo.deviceID = desc.DeviceId;
-				pipelineInfo.dedicatedVideoMemory = desc.DedicatedVideoMemory;
-				pipelineInfo.dedicatedSystemMemory = desc.DedicatedSystemMemory;
-				pipelineInfo.sharedSystemMemory = desc.SharedSystemMemory;
-
-				adapter->Release();
-				break;
-			}
-
-			factory->Release();
 		}
 
 		D3D12_FEATURE_DATA_D3D12_OPTIONS options{};

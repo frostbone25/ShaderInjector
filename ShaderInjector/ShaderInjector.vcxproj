@@ -225,6 +225,10 @@
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\imstb_truetype.h" />
     <ClInclude Include="Globals.h" />
     <ClInclude Include="HookD3D12\HookD3D12.h" />
+    <ClInclude Include="HookD3D12\DeviceRuntimeState.h" />
+    <ClInclude Include="HookD3D12\HookD3D12DeviceLifecycle.h" />
+    <ClInclude Include="HookD3D12\OverlayInitializationScope.h" />
+    <ClInclude Include="HookD3D12\UncapturedRootSignatureAttempts.h" />
     <ClInclude Include="HookD3D12\ComputePipelineInfo.h" />
     <ClInclude Include="HookD3D12\D3D12PipelineInfo.h" />
     <ClInclude Include="HookD3D12\FrameContext.h" />
@@ -251,6 +255,7 @@
     <ClInclude Include="ModifiedShader\ModifiedShaderPackageDisk.h" />
     <ClInclude Include="ModifiedShader\ModifiedShaderTargetDisk.h" />
     <ClInclude Include="ModifiedShader\ModifiedShaderCreation.h" />
+    <ClInclude Include="ModifiedShader\ModifiedShaderRecapture.h" />
     <ClInclude Include="Performance\PerformanceMetrics.h" />
     <ClInclude Include="Performance\ThreadMetrics.h" />
     <ClInclude Include="Performance\TimingAccumulator.h" />
@@ -296,6 +301,7 @@
     <ClInclude Include="RenderPass\Registry\RootParameterLayout.h" />
     <ClInclude Include="RenderPass\Registry\RootSignatureLayout.h" />
     <ClInclude Include="RenderPass\Registry\DescriptorPage.h" />
+    <ClInclude Include="RenderPass\Registry\ScopedDescriptorMirrorOperation.h" />
     <ClInclude Include="RenderPass\Registry\DescriptorHeapRecord.h" />
     <ClInclude Include="RenderPass\Registry\DescriptorHeapLookupCache.h" />
     <ClInclude Include="RenderPass\Registry\DescriptorCopySegment.h" />
@@ -507,6 +513,8 @@
     <ClCompile Include="HookD3D12\HookD3D12PipelineLibrary.cpp" />
     <ClCompile Include="HookD3D12\HookD3D12PipelineRegistry.cpp" />
     <ClCompile Include="HookD3D12\HookD3D12PipelineUtils.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12PipelineIdentity.cpp" />
+    <ClCompile Include="HookD3D12\HookD3D12DeviceLifecycle.cpp" />
     <ClCompile Include="HookD3D12\HookD3D12RenderPass.cpp" />
     <ClCompile Include="HookD3D12\HookD3D12ReplacementCreation.cpp" />
     <ClCompile Include="HookD3D12\HookD3D12ReplacementLookup.cpp" />
@@ -528,9 +536,11 @@
     <ClCompile Include="ModifiedShader\DatabaseModifiedShaders.cpp" />
     <ClCompile Include="ModifiedShader\DatabaseModifiedShadersCompilation.cpp" />
     <ClCompile Include="ModifiedShader\DatabaseModifiedShadersPackages.cpp" />
+    <ClCompile Include="ModifiedShader\DatabaseModifiedShadersRecapture.cpp" />
     <ClCompile Include="ModifiedShader\ModifiedShader.cpp" />
     <ClCompile Include="ModifiedShader\ModifiedShaderSimilarity.cpp" />
     <ClCompile Include="ModifiedShader\ModifiedShaderCreation.cpp" />
+    <ClCompile Include="ModifiedShader\ModifiedShaderRecapture.cpp" />
     <ClCompile Include="Performance\PerformanceMetrics.cpp" />
     <ClCompile Include="RenderDoc\RenderDocIntegration.cpp" />
     <ClCompile Include="RenderPass\DatabaseRenderPasses.cpp" />

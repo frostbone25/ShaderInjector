@@ -19,6 +19,7 @@ namespace HookD3D12
 
 		ComputePipelineInfo capturedComputePipeline{};
 		capturedComputePipeline.pipelineState = pipelineState;
+		capturedComputePipeline.capturedPipelineLifetime = pipelineState;
 
 		//copy the shader bytes because the D3D12 descriptor only borrows the caller's memory.
 		//the copy stays valid after the game's CreateComputePipelineState call returns.

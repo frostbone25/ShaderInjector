@@ -68,7 +68,13 @@ namespace HookInput
 
 			if (key == Globals::keyToggleShaderInjector)
 			{
-				Globals::gShaderInjectorEnabled = !Globals::gShaderInjectorEnabled;
+				bool injectorEnabled = Globals::gShaderInjectorEnabled.load(std::memory_order_acquire);
+
+				while (!Globals::gShaderInjectorEnabled.compare_exchange_weak(injectorEnabled, !injectorEnabled, std::memory_order_acq_rel, std::memory_order_acquire))
+				{
+					continue;
+				}
+
 				HookD3D12::MarkShaderTargetApplyDirty();
 				return TRUE;
 			}

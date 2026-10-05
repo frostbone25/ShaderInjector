@@ -12,7 +12,7 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_SetGraphicsRoot32BitConstant(ID3D12GraphicsCommandList* commandList, UINT rootParameterIndex, UINT value, UINT destinationOffset)
 	{
-		if (Globals::gShaderInjectorEnabled && RenderPassRuntime::IsRootBindingTrackingRequired() &&
+		if (IsInjectorEnabledForCommandList(commandList) && RenderPassRuntime::IsRootBindingTrackingRequired() &&
 			RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) && !IsInsideRenderPassInjection())
 		{
 			RenderPassRuntime::TrackRootConstants(commandList, false, rootParameterIndex, 1, &value, destinationOffset);

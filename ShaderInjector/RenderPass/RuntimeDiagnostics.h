@@ -25,6 +25,7 @@ namespace RenderPass
 		uint64_t triggerCount = 0;
 		uint64_t executionCount = 0;
 		uint64_t executionFailureCount = 0;
+		uint64_t blockedInputCount = 0;
 		std::string lastTiming;
 		std::string lastOperation;
 		std::string lastExecutionError;

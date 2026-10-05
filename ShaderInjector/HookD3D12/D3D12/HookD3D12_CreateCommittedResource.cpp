@@ -14,9 +14,7 @@ namespace HookD3D12
 	{
 		const HRESULT result = Original_CreateCommittedResource(device, heapProperties, heapFlags, description, initialState, clearValue, interfaceId, resource);
 
-		if (Globals::gShaderInjectorEnabled &&
-			!IsInsideRenderPassInjection() &&
-			RenderPassRuntime::IsResourceTrackingRequired())
+		if (!IsInsideRenderPassInjection() && ShouldTrackRenderPassResourceMetadata())
 			RegisterCreatedResource(result, resource);
 
 		return result;

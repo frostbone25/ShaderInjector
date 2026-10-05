@@ -2525,6 +2525,7 @@ namespace ShaderInjectorGUI
 			ImGui::Text("Triggers: %llu", static_cast<unsigned long long>(diagnostics.triggerCount));
 			ImGui::Text("Executions: %llu", static_cast<unsigned long long>(diagnostics.executionCount));
 			ImGui::Text("Execution Failures: %llu", static_cast<unsigned long long>(diagnostics.executionFailureCount));
+			ImGui::Text("Blocked Inputs: %llu", static_cast<unsigned long long>(diagnostics.blockedInputCount));
 			ImGui::Text("Last Event: %s:%s", TextOrNone(diagnostics.lastEventType), TextOrNone(diagnostics.lastEventId));
 			ImGui::Text("Last Event Timing: %s", TextOrNone(diagnostics.lastTiming));
 			ImGui::Text("Last Command: %s", TextOrNone(diagnostics.lastOperation));

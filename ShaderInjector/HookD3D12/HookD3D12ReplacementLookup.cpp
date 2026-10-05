@@ -4,6 +4,7 @@
 #include <unordered_map>
 
 //custom
+#include "Globals.h"
 #include "Hash/Hash.h"
 #include "ShaderTarget/DatabaseShaderTargets.h"
 #include "ShaderTarget/ShaderIdentityKey.h"
@@ -981,6 +982,10 @@ namespace HookD3D12
 				}
 			}
 		}
+
+		//hash-only misses need no bytecode at all; scanning every captured PSO here makes startup work quadratic.
+		if (Globals::gShaderDiscoveryMode == Globals::ShaderDiscoveryMode::HashLookup)
+			return -1;
 
 		bool streamPipeline = false;
 		const std::vector<uint8_t>* shaderBytecode = FindCapturedShaderBytecode(shaderHash, shaderType, streamPipeline);

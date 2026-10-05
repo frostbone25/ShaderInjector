@@ -28,14 +28,14 @@ namespace HookD3D12
 		}
 
 		ID3D12PipelineState* hiddenMeshPipeline = gHiddenMeshPipelineState.load(std::memory_order_acquire);
-		if (hiddenMeshPipeline && Globals::gShaderInjectorEnabled && !IsInsideRenderPassInjection() &&
+		if (hiddenMeshPipeline && IsInjectorEnabledForCommandList(commandList) && !IsInsideRenderPassInjection() &&
 			GetCommandListPipelineState(commandList).pipelineState.load(std::memory_order_acquire) == hiddenMeshPipeline)
 		{
 			LogFirstCommandHookHit(loggedHiddenMeshIndirect, "HiddenMeshExecuteIndirect", commandList);
 			return;
 		}
 
-		if (!Globals::gShaderInjectorEnabled || !RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) || IsInsideRenderPassInjection())
+		if (!IsInjectorEnabledForCommandList(commandList) || !RenderPassRuntime::IsPipelineExecutionTrackingRequired(false) || IsInsideRenderPassInjection())
 		{
 			Original_ExecuteIndirect(commandList, commandSignature, maximumCommandCount, argumentBuffer, argumentBufferOffset, countBuffer, countBufferOffset);
 			return;
