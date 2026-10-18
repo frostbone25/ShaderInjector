@@ -296,6 +296,7 @@ Open this file in a text/code editor and you'll find the following fields...
 
 Most of the noise at the moment will come from the SSGI_BOUNCE_LIGHT effect which tries to calculate localized bounce light from direct lights and emissive materials. For the most part this looks ok but it can rear it's ugly head in low lighting situations. Here's what you can do to reduce the noise...
 
+- **Keep ```SSGI_SPATIOTEMPORAL_NOISE``` enabled (default):** The SSGI/AO rays use low discrepancy noise (animated interleaved gradient noise for the slice angle, a hilbert curve R2 sequence for the step and arc jitter) instead of hashed white noise. Neighboring pixels and consecutive frames get evenly spread samples, so the game's TAA/DLSS blends the noise away faster, at no extra cost.
 - **Increase ```SSGI_RAY_COUNT```:** This has a direct impact to the quality of the noise *(more samples become more expensive quickly)*
 - **Increase ```SSGI_RAYMARCHING_STEP_COUNT```:** This will improve the quality of the raymarch and reduce noise somewhat but of course at a big cost.
 - **Increase Rendering Resolution:** This will make the impact of the SSGI signifcantly higher because it scales with screen resolution, but more pixels means the noise becomes smaller and the final result appears cleaner.
