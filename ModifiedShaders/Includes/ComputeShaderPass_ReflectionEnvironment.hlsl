@@ -147,6 +147,16 @@
 //and also in its current state, there is no filtering so this can contribute to quite a bit noise in the final image
 #define SSGI_BOUNCE_LIGHT
 
+//(SSGI_BOUNCE_LIGHT ONLY) caps how bright a single bounce sample can be, so tiny but very bright spots (lantern glass, bulbs, glints)
+//do not turn into sparkles on the surfaces around them (the game's own lights already light those surfaces)
+#define SSGI_BOUNCE_LIGHT_FIREFLY_CLAMP
+
+//(SSGI_BOUNCE_LIGHT_FIREFLY_CLAMP ONLY) the cap, in exposed scene brightness (about 1 = white at the current exposure)
+//lower = fewer sparkles but less bounce light from bright surfaces
+//[CONFIG TYPE]: float
+//[CONFIG DEFAULT]: 1.0
+#define SSGI_BOUNCE_LIGHT_MAX_LUMINANCE 1.0
+
 //shade half of the expensive SSGI rays each frame and reconstruct the missing half from the two computed neighbors in the same 2x2 pixel quad
 //NOTE: checkerboard rendering is a definite WIN for performance especially at high resolutions, I think it's wise to leave this on even at the expense of quality
 // #define SSGI_CHECKERBOARD
@@ -1764,6 +1774,13 @@ float4 ComputeGTVBGI(
 
                             float Visibility = (float)countbits(NewlyVisibleBits) * inv32;
                             float3 SampledRadiance = OutTextureColor[SampleBufferPixel].rgb;
+
+                            #if defined(SSGI_BOUNCE_LIGHT_FIREFLY_CLAMP)
+                                // OutTextureColor is pre-exposed, so the cap follows the current exposure (keeps the hue).
+                                float SampledLuminance = LuminanceRec709(SampledRadiance);
+                                SampledRadiance *= min(1.0f, SSGI_BOUNCE_LIGHT_MAX_LUMINANCE / max(SampledLuminance, 1.0e-6f));
+                            #endif
+
                             SliceGI += SampledRadiance * Visibility;
                         }
                     }

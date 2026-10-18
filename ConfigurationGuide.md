@@ -298,6 +298,7 @@ Most of the noise at the moment will come from the SSGI_BOUNCE_LIGHT effect whic
 
 - **Increase ```SSGI_RAY_COUNT```:** This has a direct impact to the quality of the noise *(more samples become more expensive quickly)*
 - **Increase ```SSGI_RAYMARCHING_STEP_COUNT```:** This will improve the quality of the raymarch and reduce noise somewhat but of course at a big cost.
+- **Lower ```SSGI_BOUNCE_LIGHT_MAX_LUMINANCE```:** With ```SSGI_BOUNCE_LIGHT_FIREFLY_CLAMP``` (default) each bounce sample is capped at this brightness (about 1 = white at the current exposure), so small and very bright spots like lantern glass or bulbs don't turn into sparkles on the surfaces around them. Lower = fewer sparkles but less bounce light from bright surfaces.
 - **Increase Rendering Resolution:** This will make the impact of the SSGI signifcantly higher because it scales with screen resolution, but more pixels means the noise becomes smaller and the final result appears cleaner.
 - **Update Game's DLSS Preset:** I have noticed while testing on multiple game versions that 1.0.0.5 seems to have an updated DLSS variant that actually led to reduced noise when SSGI was enabled. I would experiment with this as a potential avenue for improving the noise situation. **Presets L and K** reportedly have had the best results for resolving the noise much more cleanly.
 - If none of the above satisfy you enough, you can just simply disable the effect.
