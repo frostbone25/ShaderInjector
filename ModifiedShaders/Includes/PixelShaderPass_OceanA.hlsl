@@ -29,6 +29,27 @@
 #define CAUSTICS_SHALLOW_FADE 0.02
 #define CAUSTICS_DEPTH_FALLOFF 0.0008
 
+//stable screen space reflections: the original reflections (along the wave normal, with the reflection captures where
+//they miss) traced without the per frame jitter, over the full resolution scene depth, and with per pixel wave
+//normals instead of the 2x2 pixel blocks of ddx/ddy.
+//comment out to get the original reflections back.
+#define WATER_SSR_STABLE
+//the march starts with steps of WATER_SSR_FIRST_STEP_PIXELS that grow by WATER_SSR_STEP_GROWTH per step:
+//fine near the water, where reflections meet their objects, and coarser further along the ray
+#define WATER_SSR_MAX_STEPS 128
+#define WATER_SSR_FIRST_STEP_PIXELS 1.5
+#define WATER_SSR_STEP_GROWTH 1.02
+#define WATER_SSR_REFINE_STEPS 5
+//ray length in pixel depths (the original traces 1; 2 also reaches objects further from the water)
+#define WATER_SSR_RAY_LENGTH_SCALE 2.0
+#define WATER_SSR_THICKNESS 0.02
+#define WATER_SSR_EDGE_FADE 0.1
+//how strongly a hit replaces the reflection captures (the original forces every hit to 1)
+#define WATER_SSR_ALPHA_GAIN 4.0
+//wave octaves finer than this many pixels fade out of the normal (0 keeps all of them, like the original) and add
+//their slopes to the roughness instead
+#define WATER_SURFACE_NORMAL_FOOTPRINT 0.0
+
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -2521,6 +2542,232 @@ float4 EvaluateScreenSpaceReflection(
     return screenSpaceReflection;
 }
 
+#if defined(WATER_SSR_STABLE)
+
+//slope variance along each axis of one full height wave octave (all six have the same slopes, since the
+//amplitude halves with the wavelength), measured numerically from the octave function
+#define OCEAN_WAVE_OCTAVE_SLOPE_VARIANCE 4.45e-4
+
+//the procedural wave height of EvaluateWaterSurface (six octaves of warped ridges, 4 m down to 12.5 cm), with each
+//octave faded out as its detail (a quarter of its wavelength) approaches minimumWavelength world units.
+//removedSlopeVariance returns the slope variance of what was left out.
+float OceanWaveHeightFiltered(float2 densityPosition, float2 densityTranslation, float materialPhase, float minimumWavelength, out float removedSlopeVariance)
+{
+    float amplitude = 2.5;
+    float frequency = 1.0;
+    float height = 0.0;
+    removedSlopeVariance = 0.0;
+
+    [unroll]
+    for (int octave = 0; octave < 6; ++octave)
+    {
+        float2 scaledPosition = densityPosition * frequency;
+        float2 scaledTranslation = densityTranslation * frequency;
+        float2 noisePosition = frac(frac(scaledTranslation * 0.01) + frac(scaledPosition * 0.01)) * 256.0;
+        float valueNoise = 0.5 * WrappedValueNoise2D(noisePosition);
+        float phaseJitter = frac(materialPhase * 7.95775 * sqrt(frequency * 0.00153938));
+        float2 phase = frac(frac(scaledTranslation) + frac(scaledPosition) + phaseJitter + valueNoise) * 6.28319;
+
+        float2 ridge = 1.0 - abs(sin(phase));
+        float2 roundedRidge = (abs(cos(phase)) - ridge) * ridge + ridge;
+        float octaveDensity = 1.0 - sqrt(roundedRidge.x * roundedRidge.y);
+        float octaveWeight = saturate(log2(100.0 / (frequency * minimumWavelength)));
+        height = mad(octaveDensity, amplitude * octaveWeight, height);
+        removedSlopeVariance += 1.0 - octaveWeight * octaveWeight;
+
+        densityPosition = RotateDensityOctave(densityPosition);
+        densityTranslation = RotateDensityOctave(densityTranslation);
+        frequency *= 2.0;
+        amplitude *= 0.5;
+    }
+
+    removedSlopeVariance *= OCEAN_WAVE_OCTAVE_SLOPE_VARIANCE;
+    return height;
+}
+
+//the wave normal of EvaluateWaterSurface from per pixel differences of the wave height. The original takes
+//ddx_fine/ddy_fine of the displaced position, which give both pixels of a quad row (or column) the same difference
+//and show up as 2x2 pixel blocks. The waves (wave height times heightScale) are differenced per pixel; the slowly
+//varying shore scale and the foam bumps (heightOffset) keep the quad differences.
+float3 OceanWaveNormalPerPixel(
+    float3 positionDx,
+    float3 positionDy,
+    float2 densityPosition,
+    float2 densityTranslation,
+    float materialPhase,
+    float heightScale,
+    float heightOffset,
+    float minimumWavelength,
+    float3 baseGeometricNormal,
+    float3 tangentAxis,
+    float3 tangentFrameThirdAxis,
+    float3 vertexNormal,
+    float normalFade,
+    out float removedSlopeVariance)
+{
+    float unusedVarianceX;
+    float unusedVarianceY;
+    float height = OceanWaveHeightFiltered(densityPosition, densityTranslation, materialPhase, minimumWavelength, removedSlopeVariance);
+    float heightX = OceanWaveHeightFiltered(densityPosition + ddx_fine(densityPosition), densityTranslation, materialPhase, minimumWavelength, unusedVarianceX);
+    float heightY = OceanWaveHeightFiltered(densityPosition + ddy_fine(densityPosition), densityTranslation, materialPhase, minimumWavelength, unusedVarianceY);
+    removedSlopeVariance *= heightScale * heightScale;
+
+    float slopeX = heightScale * (heightX - height) + height * ddx_fine(heightScale) + ddx_fine(heightOffset);
+    float slopeY = heightScale * (heightY - height) + height * ddy_fine(heightScale) + ddy_fine(heightOffset);
+    float3 displacedGeometricNormal = SafeNormalize(cross(positionDx + baseGeometricNormal * slopeX, positionDy + baseGeometricNormal * slopeY));
+    float3 correctedNormal = SafeNormalize(vertexNormal - baseGeometricNormal + displacedGeometricNormal);
+    float3 tangentNormal = lerp(
+        float3(tangentAxis.z, tangentFrameThirdAxis.z, vertexNormal.z),
+        float3(dot(tangentAxis, correctedNormal), dot(tangentFrameThirdAxis, correctedNormal), dot(vertexNormal, correctedNormal)),
+        normalFade);
+
+    tangentNormal = SafeNormalize(tangentNormal);
+    return SafeNormalize(tangentAxis * tangentNormal.x + tangentFrameThirdAxis * tangentNormal.y + vertexNormal * tangentNormal.z);
+}
+
+float2 WaterNdcToBufferUv(float2 ndc)
+{
+    return ndc * View_ScreenPositionScaleBias.xy + View_ScreenPositionScaleBias.wz;
+}
+
+float WaterLoadSceneDeviceZ(float2 bufferUv)
+{
+    int2 viewportMin = int2(View_ViewRectMin.xy);
+    int2 viewportMax = int2(View_ViewRectMin.xy + View_ViewSizeAndInvSize.xy) - 1;
+    int2 texel = clamp(int2(bufferUv * View_BufferSizeAndInvSize.xy), viewportMin, viewportMax);
+    return TranslucentBasePass_SceneTextures_SceneDepthTexture.Load(int3(texel, 0)).x;
+}
+
+float3 WaterSampleSceneColor(float2 bufferUv)
+{
+    bufferUv = clamp(bufferUv, View_BufferBilinearUVMinMax.xy, View_BufferBilinearUVMinMax.zw);
+    float3 sceneColor = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, bufferUv, 0.0).rgb;
+    return View_OneOverPreExposure * min(sceneColor, 65504.0);
+}
+
+//screen space reflection without per frame jitter: a march over the full resolution scene depth with steps that
+//start at WATER_SSR_FIRST_STEP_PIXELS and grow by WATER_SSR_STEP_GROWTH, a binary refinement of the crossing and a
+//bilinear read of the hit colour. Like the original, the ray is rayLengthScale times the pixel depth long.
+float4 EvaluateStableScreenSpaceReflection(
+    SurfaceState surface,
+    float3 traceNormal,
+    float pixelDepth,
+    float rayLengthScale)
+{
+    float3 rayOrigin = surface.TranslatedWorldPosition;
+    float3 rayDirection = reflect(surface.CameraToPixelDirection, traceNormal);
+    float minimumW = max(View_NearPlane, 1.0e-3);
+
+    float4 startClip = mul(float4(rayOrigin, 1.0), View_TranslatedWorldToClip);
+    float4 endClip = mul(float4(rayOrigin + rayDirection * (pixelDepth * rayLengthScale), 1.0), View_TranslatedWorldToClip);
+
+    if (!all(isfinite(startClip)) || !all(isfinite(endClip)) || startClip.w <= minimumW)
+        return 0.0;
+
+    //keep the end of the ray in front of the camera
+    if (endClip.w < minimumW)
+        endClip = lerp(startClip, endClip, saturate((startClip.w - minimumW) / max(startClip.w - endClip.w, 1.0e-6)));
+
+    float3 startNdc = startClip.xyz / startClip.w;
+    float3 deltaNdc = endClip.xyz / endClip.w - startNdc;
+
+    //keep the part of the ray that is on screen
+    float exitX = abs(deltaNdc.x) > 1.0e-6 ? ((deltaNdc.x > 0.0 ? 1.0 : -1.0) - startNdc.x) / deltaNdc.x : 1.0;
+    float exitY = abs(deltaNdc.y) > 1.0e-6 ? ((deltaNdc.y > 0.0 ? 1.0 : -1.0) - startNdc.y) / deltaNdc.y : 1.0;
+    float rayFraction = saturate(min(1.0, min(exitX, exitY)));
+    deltaNdc *= rayFraction;
+
+    float2 startUv = WaterNdcToBufferUv(startNdc.xy);
+    float2 deltaUv = deltaNdc.xy * View_ScreenPositionScaleBias.xy;
+    float rayPixels = length(deltaUv * View_BufferSizeAndInvSize.xy);
+
+    if (!(rayPixels >= 1.0))
+        return 0.0;
+
+    //the first n steps cover WATER_SSR_FIRST_STEP_PIXELS * (growth^n - 1) / (growth - 1) pixels
+    float stepGrowthLog = log2(WATER_SSR_STEP_GROWTH);
+    float stepDistanceScale = WATER_SSR_FIRST_STEP_PIXELS / (WATER_SSR_STEP_GROWTH - 1.0);
+    float marchPixels = stepDistanceScale * (exp2((float)WATER_SSR_MAX_STEPS * stepGrowthLog) - 1.0);
+    float pixelsToT = 1.0 / rayPixels;
+    float previousT = 0.0;
+    float previousRayDepth = DeviceZToWorldDepth(startNdc.z);
+    float frontT = 0.0;
+    float hitT = -1.0;
+
+    //four samples per iteration, so their depth reads overlap
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < WATER_SSR_MAX_STEPS; stepIndex += 4u)
+    {
+        float4 stepPosition = (float)stepIndex + float4(1.0, 2.0, 3.0, 4.0);
+        float4 sampleT = stepDistanceScale * (exp2(stepPosition * stepGrowthLog) - 1.0) * pixelsToT;
+        float4 rayDeviceZ = startNdc.z + deltaNdc.z * sampleT;
+        float4 sceneDeviceZ;
+
+        [unroll]
+        for (uint sampleIndex = 0u; sampleIndex < 4u; ++sampleIndex)
+            sceneDeviceZ[sampleIndex] = WaterLoadSceneDeviceZ(startUv + deltaUv * min(sampleT[sampleIndex], 1.0));
+
+        [unroll]
+        for (uint sampleIndex = 0u; sampleIndex < 4u; ++sampleIndex)
+        {
+            if (hitT < 0.0 && sampleT[sampleIndex] <= 1.0)
+            {
+                float rayDepth = DeviceZToWorldDepth(rayDeviceZ[sampleIndex]);
+
+                //reversed Z: the ray is behind the opaque surface when its device Z is smaller
+                if (sceneDeviceZ[sampleIndex] > rayDeviceZ[sampleIndex])
+                {
+                    float sceneDepth = DeviceZToWorldDepth(sceneDeviceZ[sampleIndex]);
+                    float thickness = max(abs(rayDepth - previousRayDepth) * 2.0, sceneDepth * WATER_SSR_THICKNESS);
+
+                    if (rayDepth - sceneDepth <= thickness)
+                    {
+                        frontT = previousT;
+                        hitT = sampleT[sampleIndex];
+                    }
+                }
+
+                previousT = sampleT[sampleIndex];
+                previousRayDepth = rayDepth;
+            }
+        }
+
+        if (hitT >= 0.0 || sampleT.w >= 1.0)
+            break;
+    }
+
+    if (hitT < 0.0)
+        return 0.0;
+
+    float behindT = hitT;
+
+    [unroll]
+    for (uint refineIndex = 0u; refineIndex < WATER_SSR_REFINE_STEPS; ++refineIndex)
+    {
+        float middleT = 0.5 * (frontT + behindT);
+        float rayDeviceZ = startNdc.z + deltaNdc.z * middleT;
+
+        if (WaterLoadSceneDeviceZ(startUv + deltaUv * middleT) > rayDeviceZ)
+            behindT = middleT;
+        else
+            frontT = middleT;
+    }
+
+    //fade out at the screen edges and towards the end of the ray or of the march
+    float2 hitNdc = startNdc.xy + deltaNdc.xy * behindT;
+    float2 edgeFade = saturate((1.0 - abs(hitNdc)) / WATER_SSR_EDGE_FADE);
+    float rayEnd = behindT * max(rayFraction, rayPixels / marchPixels);
+    float confidence = edgeFade.x * edgeFade.y * (1.0 - smoothstep(0.85, 1.0, rayEnd));
+    float3 reflectedSceneColor = WaterSampleSceneColor(startUv + deltaUv * behindT);
+
+    float4 screenSpaceReflection;
+    screenSpaceReflection.rgb = all(isfinite(reflectedSceneColor)) ? max(reflectedSceneColor, 0.0) : 0.0;
+    screenSpaceReflection.a = isfinite(confidence) ? saturate(confidence) : 0.0;
+    return screenSpaceReflection;
+}
+
+#endif
+
 struct WaterSurfaceEvaluation
 {
     SurfaceState Surface;
@@ -2729,6 +2976,21 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
 
     tangentNormal = SafeNormalize(tangentNormal);
     surface.Normal = SafeNormalize(_IN.TEXCOORD10.xyz * tangentNormal.x + tangentFrameThirdAxis * tangentNormal.y + _IN.TEXCOORD11.xyz * tangentNormal.z);
+
+#if defined(WATER_SSR_STABLE)
+    //world size of one pixel on the water along its longer axis
+    float wavePixelFootprint = sqrt(max(dot(basePositionDx, basePositionDx), dot(basePositionDy, basePositionDy)));
+    float2 waveDensityPosition = (surface.TranslatedWorldPosition.xy - _IN.VERTEX_EXPRESSION.xy) * 0.0025;
+    float2 waveDensityTranslation = View_PreViewTranslation.xy * -0.0025;
+    float waveShoreScale = 1.0 - sqrt(surfaceTerm8);
+    //the shore foam bumps that surfaceTerm18 adds on top of the waves
+    float foamHeight = surfaceTerm18 - waveShoreScale * proceduralDensity;
+    float removedSlopeVariance;
+    surface.Normal = OceanWaveNormalPerPixel(
+        basePositionDx, basePositionDy, waveDensityPosition, waveDensityTranslation, materialPhase,
+        waveShoreScale, foamHeight, max(wavePixelFootprint * WATER_SURFACE_NORMAL_FOOTPRINT, 1.0e-4), baseGeometricNormal,
+        _IN.TEXCOORD10.xyz, tangentFrameThirdAxis, _IN.TEXCOORD11.xyz, normalFade, removedSlopeVariance);
+#endif
     float4 surfacePrimitiveReserved0Data = float4(Primitive_Reserved0, Primitive_Reserved1, Primitive_PixelAttribute, Primitive_DynamicCoverage);
     bool surfaceTest1 = ((surfacePrimitiveReserved0Data[3]) > (((blueNoiseSample[3]) * 0.996094) + 0.00195313));
 
@@ -2753,6 +3015,11 @@ WaterSurfaceEvaluation EvaluateWaterSurface(InputStruct _IN)
     float3 normalDx = ddx_fine(surface.Normal);
     float3 normalDy = ddy_fine(surface.Normal);
     float normalVariance = dot(normalDx, normalDx) + dot(normalDy, normalDy);
+#if defined(WATER_SSR_STABLE)
+    //the wave octaves left out of the normal count as if they aliased at the pixel scale: 8 = 2 axes x 2
+    //derivatives x 2 for the difference of two uncorrelated pixels
+    normalVariance += 8.0 * removedSlopeVariance;
+#endif
     surface.FilteredRoughness = sqrt(saturate(min(normalVariance * 0.159155, 0.18) + normalCoverage * normalCoverage));
 
     bool hasParticipatingMedium = View_FogContextMediumIOR > 1.0;
@@ -3209,15 +3476,22 @@ OutputStruct main(InputStruct _IN)
     float specularStrength = saturate(1.0 - material.AverageFresnelResponse) * 0.81 * max(1.0, 1.00001 - material.ParticipatingMediumMask * 4.57652e-6);
     float3 specularLighting = (specularStrength * secondarySpecular + direct.Primary.Specular) * material.SurfaceCoverage;
 
+#if defined(WATER_SSR_STABLE)
+    float4 screenSpaceReflection = EvaluateStableScreenSpaceReflection(surface, surface.Normal, _IN.SV_Position.w, WATER_SSR_RAY_LENGTH_SCALE);
+    screenSpaceReflection.a = saturate(screenSpaceReflection.a * WATER_SSR_ALPHA_GAIN);
+#else
     float4 screenSpaceReflection = EvaluateScreenSpaceReflection(surface, _IN.SV_Position.w, material.BlueNoise.x);
+#endif
     float3 safeReflectionColor = max(1.0e-9, screenSpaceReflection.rgb);
     float3 safeTransmissionColor = max(1.0e-9, balancedIndirectDiffuse * secondaryDiffuseScale);
 
     //occlude reflections in shadow
     safeTransmissionColor *= lerp(0.15, 1.0, saturate(directional.Visibility));
 
+#if !defined(WATER_SSR_STABLE)
     //SSR contribution should be very strong, because it's the most accurate reflection data we have access to
     screenSpaceReflection.a = saturate(screenSpaceReflection.a * 1000000);
+#endif
 
     float3 blendedTransmissionColor = exp2(lerp(log2(safeTransmissionColor), log2(safeReflectionColor), screenSpaceReflection.a));
     //float3 blendedTransmissionColor = lerp(safeTransmissionColor, safeReflectionColor, screenSpaceReflection.a);

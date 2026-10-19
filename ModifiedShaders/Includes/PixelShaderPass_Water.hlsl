@@ -51,6 +51,23 @@
 #define WATER_MAX_INDIRECT_ENERGY_SCALE 8.0
 #define WATER_MAX_OUTPUT_LUMINANCE 64.0
 
+//stable screen space reflections: the original reflections (along the surface normal, with the reflection captures
+//where they miss) traced without the per frame jitter and over the full resolution scene depth.
+//comment out to get the original reflections back.
+#define WATER_SSR_STABLE
+//the march starts with steps of WATER_SSR_FIRST_STEP_PIXELS that grow by WATER_SSR_STEP_GROWTH per step:
+//fine near the water, where reflections meet their objects, and coarser further along the ray
+#define WATER_SSR_MAX_STEPS 128
+#define WATER_SSR_FIRST_STEP_PIXELS 1.5
+#define WATER_SSR_STEP_GROWTH 1.02
+#define WATER_SSR_REFINE_STEPS 5
+//ray length in pixel depths (the original traces 1; 2 also reaches objects further from the water)
+#define WATER_SSR_RAY_LENGTH_SCALE 2.0
+#define WATER_SSR_THICKNESS 0.02
+#define WATER_SSR_EDGE_FADE 0.1
+//how strongly a hit replaces the reflection captures (the original forces every hit to 1)
+#define WATER_SSR_ALPHA_GAIN 4.0
+
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
 //|||||||||||||||||||||||||||||||||| RESOURCES ||||||||||||||||||||||||||||||||||
@@ -2641,6 +2658,151 @@ float4 EvaluateScreenSpaceReflection(
     return screenSpaceReflection;
 }
 
+#if defined(WATER_SSR_STABLE)
+
+float2 WaterNdcToBufferUv(float2 ndc)
+{
+    return ndc * View_ScreenPositionScaleBias.xy + View_ScreenPositionScaleBias.wz;
+}
+
+float WaterLoadSceneDeviceZ(float2 bufferUv)
+{
+    int2 viewportMin = int2(View_ViewRectMin.xy);
+    int2 viewportMax = int2(View_ViewRectMin.xy + View_ViewSizeAndInvSize.xy) - 1;
+    int2 texel = clamp(int2(bufferUv * View_BufferSizeAndInvSize.xy), viewportMin, viewportMax);
+    return TranslucentBasePass_SceneTextures_SceneDepthTexture.Load(int3(texel, 0)).x;
+}
+
+float3 WaterSampleSceneColor(float2 bufferUv)
+{
+    bufferUv = clamp(bufferUv, View_BufferBilinearUVMinMax.xy, View_BufferBilinearUVMinMax.zw);
+    float3 sceneColor = TranslucentBasePass_SceneColorCopyTexture.SampleLevel(View_SharedBilinearClampedSampler, bufferUv, 0.0).rgb;
+    return View_OneOverPreExposure * min(sceneColor, 65504.0);
+}
+
+//screen space reflection without per frame jitter: a march over the full resolution scene depth with steps that
+//start at WATER_SSR_FIRST_STEP_PIXELS and grow by WATER_SSR_STEP_GROWTH, a binary refinement of the crossing and a
+//bilinear read of the hit colour. Like the original, the ray is rayLengthScale times the pixel depth long.
+float4 EvaluateStableScreenSpaceReflection(
+    SurfaceState surface,
+    float3 traceNormal,
+    float pixelDepth,
+    float rayLengthScale)
+{
+    float3 rayOrigin = surface.TranslatedWorldPosition;
+    float3 rayDirection = reflect(surface.CameraToPixelDirection, traceNormal);
+    float minimumW = max(View_NearPlane, 1.0e-3);
+
+    float4 startClip = mul(float4(rayOrigin, 1.0), View_TranslatedWorldToClip);
+    float4 endClip = mul(float4(rayOrigin + rayDirection * (pixelDepth * rayLengthScale), 1.0), View_TranslatedWorldToClip);
+
+    if (!all(isfinite(startClip)) || !all(isfinite(endClip)) || startClip.w <= minimumW)
+        return 0.0;
+
+    //keep the end of the ray in front of the camera
+    if (endClip.w < minimumW)
+        endClip = lerp(startClip, endClip, saturate((startClip.w - minimumW) / max(startClip.w - endClip.w, 1.0e-6)));
+
+    float3 startNdc = startClip.xyz / startClip.w;
+    float3 deltaNdc = endClip.xyz / endClip.w - startNdc;
+
+    //keep the part of the ray that is on screen
+    float exitX = abs(deltaNdc.x) > 1.0e-6 ? ((deltaNdc.x > 0.0 ? 1.0 : -1.0) - startNdc.x) / deltaNdc.x : 1.0;
+    float exitY = abs(deltaNdc.y) > 1.0e-6 ? ((deltaNdc.y > 0.0 ? 1.0 : -1.0) - startNdc.y) / deltaNdc.y : 1.0;
+    float rayFraction = saturate(min(1.0, min(exitX, exitY)));
+    deltaNdc *= rayFraction;
+
+    float2 startUv = WaterNdcToBufferUv(startNdc.xy);
+    float2 deltaUv = deltaNdc.xy * View_ScreenPositionScaleBias.xy;
+    float rayPixels = length(deltaUv * View_BufferSizeAndInvSize.xy);
+
+    if (!(rayPixels >= 1.0))
+        return 0.0;
+
+    //the first n steps cover WATER_SSR_FIRST_STEP_PIXELS * (growth^n - 1) / (growth - 1) pixels
+    float stepGrowthLog = log2(WATER_SSR_STEP_GROWTH);
+    float stepDistanceScale = WATER_SSR_FIRST_STEP_PIXELS / (WATER_SSR_STEP_GROWTH - 1.0);
+    float marchPixels = stepDistanceScale * (exp2((float)WATER_SSR_MAX_STEPS * stepGrowthLog) - 1.0);
+    float pixelsToT = 1.0 / rayPixels;
+    float previousT = 0.0;
+    float previousRayDepth = DeviceZToWorldDepth(startNdc.z);
+    float frontT = 0.0;
+    float hitT = -1.0;
+
+    //four samples per iteration, so their depth reads overlap
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < WATER_SSR_MAX_STEPS; stepIndex += 4u)
+    {
+        float4 stepPosition = (float)stepIndex + float4(1.0, 2.0, 3.0, 4.0);
+        float4 sampleT = stepDistanceScale * (exp2(stepPosition * stepGrowthLog) - 1.0) * pixelsToT;
+        float4 rayDeviceZ = startNdc.z + deltaNdc.z * sampleT;
+        float4 sceneDeviceZ;
+
+        [unroll]
+        for (uint sampleIndex = 0u; sampleIndex < 4u; ++sampleIndex)
+            sceneDeviceZ[sampleIndex] = WaterLoadSceneDeviceZ(startUv + deltaUv * min(sampleT[sampleIndex], 1.0));
+
+        [unroll]
+        for (uint sampleIndex = 0u; sampleIndex < 4u; ++sampleIndex)
+        {
+            if (hitT < 0.0 && sampleT[sampleIndex] <= 1.0)
+            {
+                float rayDepth = DeviceZToWorldDepth(rayDeviceZ[sampleIndex]);
+
+                //reversed Z: the ray is behind the opaque surface when its device Z is smaller
+                if (sceneDeviceZ[sampleIndex] > rayDeviceZ[sampleIndex])
+                {
+                    float sceneDepth = DeviceZToWorldDepth(sceneDeviceZ[sampleIndex]);
+                    float thickness = max(abs(rayDepth - previousRayDepth) * 2.0, sceneDepth * WATER_SSR_THICKNESS);
+
+                    if (rayDepth - sceneDepth <= thickness)
+                    {
+                        frontT = previousT;
+                        hitT = sampleT[sampleIndex];
+                    }
+                }
+
+                previousT = sampleT[sampleIndex];
+                previousRayDepth = rayDepth;
+            }
+        }
+
+        if (hitT >= 0.0 || sampleT.w >= 1.0)
+            break;
+    }
+
+    if (hitT < 0.0)
+        return 0.0;
+
+    float behindT = hitT;
+
+    [unroll]
+    for (uint refineIndex = 0u; refineIndex < WATER_SSR_REFINE_STEPS; ++refineIndex)
+    {
+        float middleT = 0.5 * (frontT + behindT);
+        float rayDeviceZ = startNdc.z + deltaNdc.z * middleT;
+
+        if (WaterLoadSceneDeviceZ(startUv + deltaUv * middleT) > rayDeviceZ)
+            behindT = middleT;
+        else
+            frontT = middleT;
+    }
+
+    //fade out at the screen edges and towards the end of the ray or of the march
+    float2 hitNdc = startNdc.xy + deltaNdc.xy * behindT;
+    float2 edgeFade = saturate((1.0 - abs(hitNdc)) / WATER_SSR_EDGE_FADE);
+    float rayEnd = behindT * max(rayFraction, rayPixels / marchPixels);
+    float confidence = edgeFade.x * edgeFade.y * (1.0 - smoothstep(0.85, 1.0, rayEnd));
+    float3 reflectedSceneColor = WaterSampleSceneColor(startUv + deltaUv * behindT);
+
+    float4 screenSpaceReflection;
+    screenSpaceReflection.rgb = all(isfinite(reflectedSceneColor)) ? max(reflectedSceneColor, 0.0) : 0.0;
+    screenSpaceReflection.a = isfinite(confidence) ? saturate(confidence) : 0.0;
+    return screenSpaceReflection;
+}
+
+#endif
+
 struct WaterSurfaceEvaluation
 {
     SurfaceState Surface;
@@ -3340,15 +3502,22 @@ OutputStruct main(InputStruct _IN)
     float specularStrength = saturate(1.0 - material.AverageFresnelResponse) * 0.81 * max(1.0, 1.00001 - material.ParticipatingMediumMask * 4.57652e-6);
     float3 specularLighting = (specularStrength * secondarySpecular + direct.Primary.Specular) * material.SurfaceCoverage;
 
+#if defined(WATER_SSR_STABLE)
+    float4 screenSpaceReflection = EvaluateStableScreenSpaceReflection(surface, surface.Normal, _IN.SV_Position.w, WATER_SSR_RAY_LENGTH_SCALE);
+    screenSpaceReflection.a = saturate(screenSpaceReflection.a * WATER_SSR_ALPHA_GAIN);
+#else
     float4 screenSpaceReflection = EvaluateScreenSpaceReflection(surface, _IN.SV_Position.w, material.BlueNoise.x);
+#endif
     float3 safeReflectionColor = max(1.0e-9, WaterSanitizeColor(screenSpaceReflection.rgb));
     float3 safeTransmissionColor = max(1.0e-9, WaterSanitizeColor(balancedIndirectDiffuse * secondaryDiffuseScale));
 
     //occlude reflections in shadow
     safeTransmissionColor *= lerp(0.15, 1.0, saturate(directional.Visibility));
 
+#if !defined(WATER_SSR_STABLE)
     //SSR contribution should be very strong, because it's the most accurate reflection data we have access to
     screenSpaceReflection.a = isfinite(screenSpaceReflection.a) ? saturate(screenSpaceReflection.a * 1000000) : 0.0;
+#endif
 
     float3 blendedTransmissionColor = exp2(lerp(log2(safeTransmissionColor), log2(safeReflectionColor), screenSpaceReflection.a));
 
