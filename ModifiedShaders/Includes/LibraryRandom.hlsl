@@ -29,57 +29,6 @@ float InterleavedGradientNoise(float2 pixCoord)
 	return frac(magic.z * frac(dot(pixCoord, magic.xy)));
 }
 
-//||||||||||||||||||||||||||||||| HILBERT R2 NOISE |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| HILBERT R2 NOISE |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| HILBERT R2 NOISE |||||||||||||||||||||||||||||||
-
-//reference - https://github.com/GameTechDev/XeGTAO (MIT), based on https://www.shadertoy.com/view/3tB3z3
-//position of a pixel along a hilbert curve that covers a 64x64 tile
-uint HilbertIndex(uint2 pixCoord)
-{
-	uint index = 0u;
-
-	for (uint curLevel = 32u; curLevel > 0u; curLevel /= 2u)
-	{
-		uint regionX = (pixCoord.x & curLevel) > 0u;
-		uint regionY = (pixCoord.y & curLevel) > 0u;
-		index += curLevel * curLevel * ((3u * regionX) ^ regionY);
-
-		if (regionY == 0u)
-		{
-			if (regionX == 1u)
-				pixCoord = 63u - pixCoord;
-
-			pixCoord = pixCoord.yx;
-		}
-	}
-
-	return index;
-}
-
-//walking the hilbert curve through the R2 sequence gives neighboring pixels evenly spread values (a cheap stand-in for a blue noise texture)
-//to animate it, add a different irrational step per channel each frame (golden ratio, silver ratio...) and frac
-//reference - http://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
-float2 HilbertR2Noise(uint2 pixCoord)
-{
-	return frac(0.5f + HilbertIndex(pixCoord % 64u) * float2(0.75487766624669276005f, 0.5698402909980532659114f));
-}
-
-//||||||||||||||||||||||||||||||| ANIMATED INTERLEAVED GRADIENT NOISE |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| ANIMATED INTERLEAVED GRADIENT NOISE |||||||||||||||||||||||||||||||
-//||||||||||||||||||||||||||||||| ANIMATED INTERLEAVED GRADIENT NOISE |||||||||||||||||||||||||||||||
-
-//moving the pattern 5.588238 pixels every frame also makes each pixel step through evenly spread values over time,
-//so TAA/DLSS blends it away much faster than white noise (or the frameMagicScale variant above)
-//reference - https://blog.demofox.org/2022/01/01/interleaved-gradient-noise-a-different-kind-of-low-discrepancy-sequence/
-float InterleavedGradientNoiseAnimated(float2 pixCoord, int frameCount)
-{
-	const float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
-	pixCoord += 5.588238f * (float)(frameCount & 63);
-
-	return frac(magic.z * frac(dot(pixCoord, magic.xy)));
-}
-
 //||||||||||||||||||||||||||||||| WHITE NOISE |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| WHITE NOISE |||||||||||||||||||||||||||||||
 //||||||||||||||||||||||||||||||| WHITE NOISE |||||||||||||||||||||||||||||||

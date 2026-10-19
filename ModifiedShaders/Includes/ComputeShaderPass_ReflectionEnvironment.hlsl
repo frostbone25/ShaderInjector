@@ -4,6 +4,7 @@
 //NOTE: this is where we have various useful shader functions
 #include "LibraryMath.hlsl"
 #include "LibraryRandom.hlsl"
+#include "LibraryBlueNoise.hlsl"
 #include "LibraryColor.hlsl"
 #include "LibraryGBuffer.hlsl"
 
@@ -92,8 +93,8 @@
 //(SSGI) changes the noise pattern every frame for the new SSGI / AO (HIGHLY recomended, so the TAA in the game natrually blends results)
 #define RANDOM_ANIMATE_NOISE
 
-//(SSGI) use low discrepancy noise (animated interleaved gradient noise + hilbert curve R2) for the SSGI / AO rays instead of hashed white noise
-//neighboring pixels and consecutive frames get evenly spread samples, so the TAA/DLSS in the game blends away the noise much faster (no extra cost)
+//(SSGI) use spatiotemporal blue noise (a blue noise pattern every frame, stepped along a low discrepancy sequence over time) for the SSGI / AO rays instead of hashed white noise
+//neighboring pixels and consecutive frames get evenly spread samples, so the TAA/DLSS in the game blends away the noise without leaving a pattern behind (no extra cost)
 #define SSGI_SPATIOTEMPORAL_NOISE
 
 //how many SSGI/AO rays we fire
@@ -1613,16 +1614,9 @@ float4 ComputeGTVBGI(
     #endif
 
     #if defined(SSGI_SPATIOTEMPORAL_NOISE)
-        //we do not have blue noise in this shader, so use low discrepancy noise that also changes every frame in an evenly spread way.
-        //animated interleaved gradient noise for the slice rotation (the one that matters most),
-        //hilbert curve R2 noise stepped by the golden / silver ratio each frame for the step and arc jitter.
-        uint2 NoisePixel = (uint2)PixelXY;
-        uint NoiseFrame = (uint)frameIndex & 63u;
-        float2 NoiseR2 = HilbertR2Noise(NoisePixel);
-        float3 random = float3(
-            InterleavedGradientNoiseAnimated((float2)NoisePixel, frameIndex),
-            frac(NoiseR2.y + NoiseFrame * 0.61803398875f),
-            frac(NoiseR2.x + NoiseFrame * 0.41421356237f));
+        //blue noise in space, low discrepancy steps in time (see LibraryBlueNoise.hlsl).
+        //NOTE: animated interleaved gradient noise for the slice rotation left a still grid on the ground next to characters under DLSS
+        float3 random = SpatiotemporalBlueNoise((uint2)PixelXY, (uint)frameIndex);
     #else
         //we do not have blue noise in this shader, so use hashed white noise.
         float3 random = float3(GenerateHashedRandomFloat(uint4(PixelXY, frameIndex, 0x68bc21ebu)), GenerateHashedRandomFloat(uint4(PixelXY, frameIndex, 0x02e5be93u)), GenerateHashedRandomFloat(uint4(PixelXY, frameIndex, 0x03e56253u)));
