@@ -1903,7 +1903,9 @@ PSOutput main(PSInput input)
 	//contact shadows!
 	#if defined(ENABLE_CONTACT_SHADOWS)
         #if defined(RANDOM_INTERLEAVED_GRADIENT_NOISE)
-            float random = InterleavedGradientNoise(pixelPos, View_FrameNumber);
+            //the animated variant: InterleavedGradientNoise(pixel, frame) changes only about a tenth per frame, so TAA/DLSS averages
+            //nearly the same pattern for many frames, and it loses float precision as the frame count grows during long sessions
+            float random = InterleavedGradientNoiseAnimated(pixelPos, View_FrameNumber);
         #elif defined(RANDOM_BLUE_NOISE)
             float random = LoadSpatiotemporalBlueNoise(input);
         #else
