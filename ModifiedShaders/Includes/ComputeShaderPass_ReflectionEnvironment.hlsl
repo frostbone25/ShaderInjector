@@ -62,6 +62,11 @@
 //far less of a "frog face" look.
 // #define FLATTEN_CHARACTER_AMBIENT
 
+//keeps character clothes that use the game's "cloth" material (Cloud's pants and top, for example) from going black in shade:
+//keeps the game's soft cloth sheen and the full fabric color (the cloth shading below dropped the sheen and divided the color by pi),
+//and darkens cloth by the AO once (not by the AO and again by the SSGI fallback mask) for both its diffuse light and its sheen
+#define CLOTH_AMBIENT_FIX
+
 //controls how strong the AO term is in ambient light (use in tandem with SSAO_BRIGHTNESS)
 //NOTE: original game SSAO is much weaker than the SSGI AO, if your flipping back and fourth you'll need to readjust the values
 //Higher Values: more contrast
@@ -140,6 +145,11 @@
 //this heavier than the original games SSAO, but it's far higher quality
 //the added bonus is that this sets up alot of infrastructure for the bounce light
 #define SSGI_AMBIENT_OCCLUSION
+
+//(SSGI_AMBIENT_OCCLUSION + SSGI_BOUNCE_LIGHT) darkens the ambient light only once where nearby surfaces block it:
+//the AO already removes the blocked part and the bounce light fills it back in from what is on screen,
+//so the fallback mask is not applied on top (that removed the blocked part a second time and made shaded areas much darker)
+#define SSGI_OCCLUDE_ONCE
 
 //calculate bounce light portion for SSGI pass, reusing the same information as the ambient occlusion
 //this dramatically improves the lighting quality. adding bounce light from the sun, catching emissives or materials in the games that previously were not emitting light
@@ -1548,6 +1558,15 @@ void EvaluateMaterialLobes(
         specularLobe += baseWeight * (1.0 - m.CustomData.x) * diffuse;
         //*/
 
+        #if defined(CLOTH_AMBIENT_FIX)
+            //the game's cloth sheen from the block above, while the fuzz part of the fabric color moves into the diffuse lobe
+            //(lit by the ambient irradiance like other materials, so it does not look "wet")
+            float f0 = 0.0672154 - 0.0528935 * medium;
+            float2 gf = View_PreIntegratedGF.SampleLevel(View_SharedBilinearClampedSampler, float2(NoV, m.Roughness), 0.0).rg;
+            float sheen = saturate(gf.x * (0.5 + NoV * 0.315) * f0 + gf.y * (0.5 + NoV * 0.1) * min(f0 * 50.0, 1.0));
+            specularLobe = sheen;
+            diffuseLobe = baseWeight * (1.0 - sheen);
+        #else
         //*
         float3 spec;
         float diffuse;
@@ -1559,6 +1578,7 @@ void EvaluateMaterialLobes(
         diffuseLobe /= MATH_PI;
         //diffuseLobe *= baseWeight * 1.0f + (m.Roughness * (1.0 - NoV)) * MATH_PI;
         //*/
+        #endif
     }
 }
 
@@ -2063,6 +2083,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	//it factors in roughness and view direction to modulate the occlusion term and its physically plausible... so lets use it!
     float specularOcclusion = GetSpecularOcclusionFromBentAO(vector_viewDirection, gbufferData.WorldNormal, gbufferData.WorldNormal, ambientOcclusion, gbufferData.Roughness);
 
+    #if defined(CLOTH_AMBIENT_FIX)
+        //on such rough fabric the sheen is about as wide as the diffuse lobe, so it gets the same occlusion
+        if (gbufferData.ShadingModelID == SHADINGMODELID_CLOTH)
+            specularOcclusion = ambientOcclusion;
+    #endif
+
     //SSR reflections are the most accurate that we have access too, because of that they should recieve essentially no specular occlusion
     //the most problematic reflections are the rougher cubemap/irradiance ones, because they are the most imprecise and blobby
     //the consequence of that lack of precision/quality leads to alot of "glowing" apperances and light/specular leaking
@@ -2148,6 +2174,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			ssgiBoost = 1.0f; //reduce SSGI for these shading models (characters specifically, looks too weird)
 
 		//diffuse = 0; //debug to see SSGI only
+
+		#if defined(SSGI_AMBIENT_OCCLUSION)
+			//the SSGI AO above already took away the ambient light that nearby surfaces block, and the fallback mask
+			//(the directions where bounce light was found) lies inside that blocked part, so applying it as well darkens shaded areas twice
+			#if defined(SSGI_OCCLUDE_ONCE)
+				ssgiMask = 1.0f;
+			#elif defined(CLOTH_AMBIENT_FIX)
+				if (gbufferData.ShadingModelID == SHADINGMODELID_CLOTH)
+					ssgiMask = 1.0f;
+			#endif
+		#endif
+
 		diffuse *= ssgiMask;
 		diffuse += max(0.0002, ssgi.rgb * ssgiBoost);
 	#endif
