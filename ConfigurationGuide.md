@@ -100,24 +100,56 @@ If you do not be sure to check for compilation errors in the runtime logs at the
 
 #### Auto Exposure Notes
 
-The current implemetation is still experimental, and is unfortunately slow and prone to flicker. In future updates this should get resolved but it will take some work so in the meantime this is what you can do.
+The metering was rewritten. It is now measured once per wave instead of once per pixel, and it reads the glare (bloom) chain, which is already a downsampled and blurred copy of the scene. That means every metering sample is an area average rather than a single point, which is what removes most of the flicker: point samples of the raw framebuffer land on different scene content every time the camera moves, averaged samples do not.
 
-For reducing flicker you have 3 options, the first one being that you can increase the "grid points" that are taken of the overall image.
+**This reduces the flicker, it does not eliminate it.** You may still see some in certain conditions. If it bothers you, lowering `AUTO_EXPOSURE_STRENGTH` is the first thing to try, and tightening the rejection window below can help with sudden jumps.
+
+**Brightness changes are still instantaneous.** There is no adaptation over time yet, because that needs state that survives between frames and the injector cannot provide that today.
+
+If you want to trade some responsiveness for extra stability, lower the strength:
 ```GLSL
-//more samples = more stable auto exposure (less flicker) but can be slower
-//less samples = less stable auto exposure (more flicker) but faster
-#define AUTO_EXPOSURE_GRID_X 16
-#define AUTO_EXPOSURE_GRID_Y 16
+#define AUTO_EXPOSURE_STRENGTH 0.5
 ```
 
-The other is you can increase or decrease the concentration of these points which can help for no performance cost.
-By default 1.0 means it will do an average of the entire framebuffer, and values closer to zero will be more focused towards the very center of the screen. If you want stability I recomend increasing up to 1.0.
+You can also change the sample count. The samples are shared across the wave rather than repeated per pixel, which is where the speedup comes from, but the cost still scales with how many you ask for.
+
+Measured in game on a 4070 Ti at 1440p native, TAA, no upscaling, camera locked in photo mode. Cost of the metering itself, taking `AUTO_EXPOSURE` disabled as the zero point:
+
+| `AUTO_EXPOSURE_SAMPLE_COUNT` | metering cost |
+|---|---|
+| 16 | 0.05 ms |
+| 128 | 0.19 ms |
+| **256 (default)** | **0.34 ms** |
+| 512 | 0.66 ms |
+| *old 16x16 per-pixel grid* | *1.39 ms* |
+
+That works out at 0.00122 ms per sample plus about 0.03 ms of fixed cost, and it stays linear across the whole range, so there is no cliff to fall off. If you are short on frametime, dropping to 128 saves you 0.15 ms. If you want more stability, leave `AUTO_EXPOSURE_SOURCE_GLARE` on rather than raising this: area averaged samples buy far more stability per unit of cost, and nothing above 256 has been shown to look any steadier.
 ```GLSL
-#define AUTO_EXPOSURE_CENTER_FOCUS     0.5
+#define AUTO_EXPOSURE_SAMPLE_COUNT 256
 ```
 
-Lastly if you are still not satisfied, ultimately you can just disable the auto exposure effect entirely which will eliminate the flicker.
+```AUTO_EXPOSURE_CENTER_FOCUS``` controls how much the middle of the screen counts towards the average. **Note that the meaning of this setting changed.** It used to shrink the sampled region, so at 0.5 the exposure was only ever looking at the middle quarter of the image and anything bright wandering through the center swung the exposure hard. It is now a weight: the samples always cover the whole screen, they just count for more towards the middle. 0.0 weights everything equally, 1.0 weights the center heavily.
+```GLSL
+#define AUTO_EXPOSURE_CENTER_FOCUS 0.5
+```
 
+Bright outliers like the sun, speculars and spell effects are the main cause of sudden exposure jumps, so samples that sit far from the average get clamped before being counted. Widen these if the exposure feels too unresponsive to genuinely bright or dark areas, tighten them if it still jumps.
+```GLSL
+#define AUTO_EXPOSURE_REJECT_LOW_EV 3.0
+#define AUTO_EXPOSURE_REJECT_HIGH_EV 2.0
+```
+
+If the image comes out consistently too dark or too bright once auto exposure is on, adjust the glare calibration. The glare chain sits at roughly 1/15th of scene brightness and this converts it back, so lower it to darken and raise it to brighten.
+```GLSL
+#define AUTO_EXPOSURE_GLARE_CALIBRATION_EV 3.9
+```
+
+If the game's bloom is ever unavailable, you can meter the raw scene color instead. This is less stable, since it loses the area averaging.
+```GLSL
+//#define AUTO_EXPOSURE_SOURCE_GLARE
+```
+
+Lastly you can still disable the effect entirely.
 ```GLSL
 //#define AUTO_EXPOSURE
 ```
@@ -127,6 +159,8 @@ The other note is that you can also control the maximum ranges at which the auto
 #define AUTO_EXPOSURE_MIN_EV          -6.0
 #define AUTO_EXPOSURE_MAX_EV           1.0
 ```
+
+*NOTE: ```AUTO_EXPOSURE_GRID_X``` and ```AUTO_EXPOSURE_GRID_Y``` no longer exist, they were replaced by ```AUTO_EXPOSURE_SAMPLE_COUNT```. If you had saved values for them in the Shader Configuration UI they will simply be dropped.*
 
 ### Tonemapping
 
