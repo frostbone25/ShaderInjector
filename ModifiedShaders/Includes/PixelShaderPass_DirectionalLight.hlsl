@@ -37,7 +37,9 @@
 //simulates micro-level shadowing on materials (using material ao) super cheap and performant! (from uncharted 4)
 //but this can lead to some materials/objects looking much darker than usual.
 //if this is not desired you can just disable to revert to (mostly) original shading
-#define ENABLE_MICRO_SHADOWS
+//NOTE: off by default: the uncharted 4 term darkens light even when it comes straight down the open part of a crevice (material AO 0.5 halves sunlight hitting it head on)
+//the game's own micro shadowing (used when this is off) keeps full light inside the open cone and fades it only toward the edge
+// #define ENABLE_MICRO_SHADOWS
 
 //applies microshadows to skin, generally shadowing terms should be mostly unified, however this can lead to an overly dark appearance characters in certain conditions and areas
 //I would leave it off if you desire characters to stay true to their original game shading
