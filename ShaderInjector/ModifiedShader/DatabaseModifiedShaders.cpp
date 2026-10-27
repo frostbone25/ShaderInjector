@@ -116,6 +116,8 @@ namespace DatabaseModifiedShaders
 
 	const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& GetModifiedShaders()
 	{
+		//the package list is owned by the render thread, which is the only thread that rebuilds it.
+		//compile workers never read it: they copy their snapshot before a job starts.
 		EnsureModifiedShadersLoaded();
 		return gModifiedShaders;
 	}

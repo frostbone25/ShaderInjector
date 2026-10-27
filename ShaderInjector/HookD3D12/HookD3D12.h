@@ -262,6 +262,8 @@ namespace HookD3D12
 	int FindEnabledShaderTarget(uint64_t shaderHash, ShaderTarget::ShaderType shaderType);
 	void MarkShaderTargetApplyDirty();
 	void QueueShaderTargetApplyWork();
+	//a new shader target can match pipelines the apply pass already visited; revisit every captured pipeline.
+	void RestartShaderTargetApplyScan();
 	void InvalidateAllReplacementPSOs();
 	void ResetUncapturedReplacementAttempts();
 	void ClearShaderMarkers();
@@ -282,8 +284,10 @@ namespace HookD3D12
 	void RefreshLoadedShaderTargets();
 	void SyncShaderTargetNameBuffer();
 	bool SaveShaderTarget(int index);
-	bool CompileShaderTarget(int index);
+	bool QueueShaderTargetCompile(int index);
 	bool ReloadShaderTarget(int index);
+	//install a freshly compiled blob for a loaded target; ProcessCompletedCompiles holds gPipelineMutex while applying results.
+	void UpdateShaderTargetBlobLocked(int index, const std::vector<uint8_t>& blob);
 	bool DeleteShaderTarget(int index);
 	bool IsShaderTargetEffectivelyEnabled(const ShaderTarget::ShaderTargetDisk& replacement);
 	void RefreshShaderTargetsForModifiedShaderStateChange();

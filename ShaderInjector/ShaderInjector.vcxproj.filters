@@ -1279,6 +1279,9 @@
     <ClCompile Include="ModifiedShader\DatabaseModifiedShadersCompilation.cpp">
       <Filter>ModifiedShader</Filter>
     </ClCompile>
+    <ClCompile Include="ModifiedShader\DatabaseModifiedShadersCompileQueue.cpp">
+      <Filter>ModifiedShader</Filter>
+    </ClCompile>
     <ClCompile Include="ModifiedShader\DatabaseModifiedShadersPackages.cpp">
       <Filter>ModifiedShader</Filter>
     </ClCompile>

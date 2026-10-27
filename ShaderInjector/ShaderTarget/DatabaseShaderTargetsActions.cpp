@@ -16,7 +16,7 @@ namespace HookD3D12
 
 	//using the selected index of currently selected shader replacement...
 	//find the source HLSL shader file it is pointing to and compile it into a ready to use shader bytecode blob
-	bool CompileShaderTarget(int replacementIndex)
+	bool QueueShaderTargetCompile(int replacementIndex)
 	{
 		if (replacementIndex < 0 || replacementIndex >= (int)gLoadedShaderTargets.size())
 			return false;
@@ -29,30 +29,29 @@ namespace HookD3D12
 
 		if (!modifiedShader)
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->CompileShaderTarget: ModifiedShader package not found: " + replacement.modifiedShaderId);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->QueueShaderTargetCompile: ModifiedShader package not found: " + replacement.modifiedShaderId);
 			return false;
 		}
 
 		if (!modifiedShader->enabled || modifiedShader->shaderType != replacement.shaderType)
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->CompileShaderTarget: package is disabled or has the wrong shader type: " + modifiedShader->id);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->QueueShaderTargetCompile: package is disabled or has the wrong shader type: " + modifiedShader->id);
 			return false;
 		}
 
 		if (modifiedShader->sourcePath.empty() || !ShaderInjectorIO::FileExists(modifiedShader->sourcePath))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->CompileShaderTarget: package source file not found: " + modifiedShader->sourcePath);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->QueueShaderTargetCompile: package source file not found: " + modifiedShader->sourcePath);
 			return false;
 		}
 
 		if (!DatabaseModifiedShaders::CompileModifiedShader(modifiedShader->id))
 		{
-			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->CompileShaderTarget: compile failed for " + modifiedShader->sourcePath);
+			ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseShaderTargets->QueueShaderTargetCompile: could not queue a compile for " + modifiedShader->sourcePath);
 			return false;
 		}
-
 		replacement.modifiedShaderBlobPath = modifiedShader->compiledBlobPath;
-		ShaderInjectorGUI::WriteToRuntimeLogSuccess("DatabaseShaderTargets->CompileShaderTarget: Compiled ModifiedShader: " + modifiedShader->id + " -> " + modifiedShader->compiledBlobPath);
+		ShaderInjectorGUI::WriteToRuntimeLogSuccess("DatabaseShaderTargets->QueueShaderTargetCompile: Queued ModifiedShader compile: " + modifiedShader->id + " -> " + modifiedShader->compiledBlobPath);
 		return true;
 	}
 
@@ -75,7 +74,7 @@ namespace HookD3D12
 		std::vector<uint8_t> compiledReplacementBlob;
 
 		if (modifiedShader && IsShaderTargetEffectivelyEnabled(replacement))
-			compiledReplacementBlob = modifiedShader->compiledBlob;
+			DatabaseModifiedShaders::TryGetCompiledBlobForShader(*modifiedShader, replacement.originalShaderBytecodeHash, replacement.shaderBytecodeHashAliases, compiledReplacementBlob);
 
 		if (!modifiedShader || compiledReplacementBlob.empty())
 		{
@@ -99,6 +98,20 @@ namespace HookD3D12
 		MarkShaderTargetApplyDirty();
 		ShaderDiscovery::ResetRuntimeCache();
 		return !gLoadedShaderTargetBlobs[replacementIndex].empty();
+	}
+
+	//install a freshly compiled blob (background recompile). called on the render thread with gPipelineMutex held;
+	//readers of gLoadedShaderTargetBlobs take the same lock.
+	void UpdateShaderTargetBlobLocked(int replacementIndex, const std::vector<uint8_t>& blob)
+	{
+		if (replacementIndex < 0 || replacementIndex >= (int)gLoadedShaderTargets.size())
+			return;
+
+		if (replacementIndex >= (int)gLoadedShaderTargetBlobs.size())
+			gLoadedShaderTargetBlobs.resize(gLoadedShaderTargets.size());
+
+		gLoadedShaderTargetBlobs[replacementIndex] = blob;
+		InvalidateAllReplacementPSOs();
 	}
 
 	//using the selected index of currently selected shader replacement...

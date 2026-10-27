@@ -56,9 +56,9 @@ namespace ShaderInjectorGUI
 	ModifiedShaderRecompileResult RecompileModifiedShaderAndReloadLinkedTargets(const std::string& modifiedShaderId)
 	{
 		ModifiedShaderRecompileResult result{};
-		result.compiled = DatabaseModifiedShaders::CompileModifiedShader(modifiedShaderId);
+		result.compileQueued = DatabaseModifiedShaders::CompileModifiedShader(modifiedShaderId);
 
-		if (!result.compiled)
+		if (!result.compileQueued)
 			return result;
 
 		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
@@ -84,11 +84,36 @@ namespace ShaderInjectorGUI
 				continue;
 			}
 
-			if (HookD3D12::ReloadShaderTarget(shaderTargetIndex))
-				++result.reloadedShaderTargetCount;
+			//the background compile swaps the new blob into this target when it is ready.
+			++result.pendingReloadShaderTargetCount;
 		}
 
 		return result;
+	}
+
+	//background compile progress; drawn under the Modified Shaders header so it stays visible while collapsed.
+	static void DrawModifiedShaderCompileProgress()
+	{
+		const DatabaseModifiedShaders::CompileProgress progress = DatabaseModifiedShaders::GetCompileProgress();
+
+		if (progress.total == 0 || progress.completed >= progress.total)
+			return;
+
+		std::string overlay = "Compiling shaders " + std::to_string(progress.completed) + "/" + std::to_string(progress.total);
+
+		if (progress.failed > 0)
+			overlay += " (" + std::to_string(progress.failed) + " failed)";
+
+		ImGui::ProgressBar(static_cast<float>(progress.completed) / static_cast<float>(progress.total), ImVec2(-FLT_MIN, 0), overlay.c_str());
+
+		if (ImGui::IsItemHovered())
+		{
+			ImGui::SetTooltip(
+				"Shaders in use compile first. Current replacements stay active until their new version is ready.\n"
+				"running=%d queued=%d",
+				progress.running,
+				progress.queued);
+		}
 	}
 
 	ModifiedShaderBatchRecompileResult RecompileModifiedShaders(bool includeInactivePackages)
@@ -117,16 +142,16 @@ namespace ShaderInjectorGUI
 		{
 			const ModifiedShaderRecompileResult result = RecompileModifiedShaderAndReloadLinkedTargets(modifiedShaderId);
 
-			if (!result.compiled)
+			if (!result.compileQueued)
 			{
 				++batchResult.failedPackageCount;
-				WriteToRuntimeLogError("Failed to compile Modified Shader: " + modifiedShaderId);
+				WriteToRuntimeLogError("Failed to queue Modified Shader compile: " + modifiedShaderId);
 				continue;
 			}
 
-			++batchResult.compiledPackageCount;
+			++batchResult.queuedPackageCount;
 			batchResult.linkedShaderTargetCount += result.linkedShaderTargetCount;
-			batchResult.reloadedShaderTargetCount += result.reloadedShaderTargetCount;
+			batchResult.pendingReloadShaderTargetCount += result.pendingReloadShaderTargetCount;
 			batchResult.skippedInactiveShaderTargetCount += result.skippedInactiveShaderTargetCount;
 		}
 
@@ -137,19 +162,19 @@ namespace ShaderInjectorGUI
 
 		const std::string summary =
 			actionName +
-			": compiled=" + std::to_string(batchResult.compiledPackageCount) +
+			": queued=" + std::to_string(batchResult.queuedPackageCount) +
 			"/" + std::to_string(batchResult.selectedPackageCount) +
 			" failed=" + std::to_string(batchResult.failedPackageCount) +
 			" skippedInactivePackages=" +
 			std::to_string(batchResult.skippedInactivePackageCount) +
-			" reloadedTargets=" +
-			std::to_string(batchResult.reloadedShaderTargetCount) +
+			" targetsToReload=" +
+			std::to_string(batchResult.pendingReloadShaderTargetCount) +
 			"/" + std::to_string(batchResult.linkedShaderTargetCount) +
 			" skippedInactiveTargets=" +
 			std::to_string(batchResult.skippedInactiveShaderTargetCount);
 
 		if (batchResult.failedPackageCount == 0 &&
-			batchResult.reloadedShaderTargetCount + batchResult.skippedInactiveShaderTargetCount == batchResult.linkedShaderTargetCount)
+			batchResult.pendingReloadShaderTargetCount + batchResult.skippedInactiveShaderTargetCount == batchResult.linkedShaderTargetCount)
 		{
 			WriteToRuntimeLogSuccess(summary);
 		}
@@ -167,7 +192,10 @@ namespace ShaderInjectorGUI
 		const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
 		const std::string modifiedShadersHeader = "Modified Shaders: " + std::to_string(modifiedShaders.size()) + "###ModifiedShaders";
 
-		if (ImGui::CollapsingHeader(modifiedShadersHeader.c_str()))
+		const bool modifiedShadersOpen = ImGui::CollapsingHeader(modifiedShadersHeader.c_str());
+		DrawModifiedShaderCompileProgress();
+
+		if (modifiedShadersOpen)
 		{
 			ImGui::Indent(indentSpace);
 			ImGui::Spacing();
@@ -337,22 +365,18 @@ namespace ShaderInjectorGUI
 			{
 				const ModifiedShaderRecompileResult result = RecompileModifiedShaderAndReloadLinkedTargets(gSelectedModifiedShaderId);
 
-				if (!result.compiled)
+				if (!result.compileQueued)
 				{
-					WriteToRuntimeLogError("Failed to compile Modified Shader: " + gSelectedModifiedShaderId);
+					WriteToRuntimeLogError("Failed to queue Modified Shader compile: " + gSelectedModifiedShaderId);
 				}
 				else
 				{
 					const int activeLinkedShaderTargetCount = result.linkedShaderTargetCount - result.skippedInactiveShaderTargetCount;
 
-					if (result.linkedShaderTargetCount == 0)
-						WriteToRuntimeLogSuccess("Compiled Modified Shader: " + gSelectedModifiedShaderId);
-					else if (activeLinkedShaderTargetCount == 0)
-						WriteToRuntimeLogSuccess("Compiled Modified Shader; linked shader targets are inactive: " + gSelectedModifiedShaderId);
-					else if (result.reloadedShaderTargetCount == activeLinkedShaderTargetCount)
-						WriteToRuntimeLogSuccess("Compiled Modified Shader and reloaded all linked replacements: " + gSelectedModifiedShaderId);
+					if (activeLinkedShaderTargetCount == 0)
+						WriteToRuntimeLogSuccess("Queued Modified Shader compile: " + gSelectedModifiedShaderId);
 					else
-						WriteToRuntimeLogError("Reloaded " + std::to_string(result.reloadedShaderTargetCount) + " of " + std::to_string(activeLinkedShaderTargetCount) + " active linked replacements.");
+						WriteToRuntimeLogSuccess("Queued Modified Shader compile; " + std::to_string(activeLinkedShaderTargetCount) + " active linked replacements update when ready: " + gSelectedModifiedShaderId);
 				}
 			}
 

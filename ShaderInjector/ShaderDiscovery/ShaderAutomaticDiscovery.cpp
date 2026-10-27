@@ -422,6 +422,13 @@ namespace ShaderAutomaticDiscovery
 
 				++enabledModifiedShaderCount;
 
+				//a package with per-target defines needs one target per permutation, and the set of
+				//permutations the game uses is only known once discovery has seen them all. "one target
+				//exists" therefore says nothing about this package being done, and pruning here would
+				//discard the queued permutations that are still waiting for their target.
+				if (modifiedShader.HasPerTargetDefines())
+					return false;
+
 				if (!ModifiedShaderHasTargetLocked(modifiedShader.id))
 					return false;
 			}
@@ -905,14 +912,7 @@ namespace ShaderAutomaticDiscovery
 				if (!existingTarget.enabled)
 					return;
 
-				const ModifiedShader::ModifiedShaderPackageDisk* existingPackage = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
-
-				if (existingPackage && existingPackage->compiledBlob.empty())
-				{
-					if (!DatabaseModifiedShaders::CompileModifiedShader(modifiedShaderId) || !HookD3D12::ReloadShaderTarget(targetIndex))
-						return;
-				}
-
+				//a target without a compiled variant queues its own background compile on lookup.
 				HookD3D12::QueueShaderTargetApplyWork();
 				return;
 			}
@@ -922,15 +922,9 @@ namespace ShaderAutomaticDiscovery
 			if (!selectedPackage)
 				return;
 
-			if (ModifiedShaderAlreadyHasGeneratedTarget(modifiedShaderId))
+			if (!selectedPackage->HasPerTargetDefines() && ModifiedShaderAlreadyHasGeneratedTarget(modifiedShaderId))
 			{
 				ShaderInjectorGUI::WriteToRuntimeLogWarning("ShaderAutomaticDiscovery: skipped duplicate ShaderTarget candidate " + Hash::FormatHash(queued.shaderKey.shaderHash) + " for " + modifiedShaderId);
-				return;
-			}
-
-			if (selectedPackage->compiledBlob.empty() && !DatabaseModifiedShaders::CompileModifiedShader(modifiedShaderId))
-			{
-				ShaderInjectorGUI::WriteToRuntimeLogError("ShaderAutomaticDiscovery: failed to compile " + modifiedShaderId);
 				return;
 			}
 

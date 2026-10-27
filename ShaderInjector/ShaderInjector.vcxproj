@@ -567,6 +567,7 @@
     <ClCompile Include="Input\Keycodes.cpp" />
     <ClCompile Include="ModifiedShader\DatabaseModifiedShaders.cpp" />
     <ClCompile Include="ModifiedShader\DatabaseModifiedShadersCompilation.cpp" />
+    <ClCompile Include="ModifiedShader\DatabaseModifiedShadersCompileQueue.cpp" />
     <ClCompile Include="ModifiedShader\DatabaseModifiedShadersPackages.cpp" />
     <ClCompile Include="ModifiedShader\DatabaseModifiedShadersRecapture.cpp" />
     <ClCompile Include="ModifiedShader\ModifiedShader.cpp" />

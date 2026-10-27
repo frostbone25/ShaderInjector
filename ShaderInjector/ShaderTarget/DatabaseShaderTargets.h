@@ -5,7 +5,7 @@
 
 namespace HookD3D12
 {
-	bool CompileShaderTarget(int replacementIndex);
+	bool QueueShaderTargetCompile(int replacementIndex);
 	bool ReloadShaderTarget(int replacementIndex);
 	bool SaveShaderTarget(int replacementIndex);
 	bool DeleteShaderTarget(int replacementIndex);

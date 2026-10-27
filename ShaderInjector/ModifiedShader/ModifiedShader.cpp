@@ -51,6 +51,17 @@ namespace ModifiedShader
 		return nullptr;
 	}
 
+	ModifiedShaderCompiledVariant* ModifiedShaderPackageDisk::FindVariantForDefinesMutable(const std::vector<ModifiedShader::ShaderDefine>& defines)
+	{
+		for (ModifiedShaderCompiledVariant& variant : compiledVariants)
+		{
+			if (variant.defines == defines)
+				return &variant;
+		}
+
+		return nullptr;
+	}
+
 	bool ModifiedShaderPackageDisk::HasPerTargetDefines() const
 	{
 		for (const ModifiedShaderTargetDisk& target : targets)

@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 #if defined(_WIN32)
@@ -52,6 +53,12 @@ namespace ShaderInjectorIO
 	}
 #endif
 
+#if defined(_WIN32)
+	//an inheritable output handle leaks into any child created while it is open, so a parallel compile's dxc
+	//would keep another compile's log file open. launches are serialized until the parent closes its copy.
+	static std::mutex gProcessLaunchMutex;
+#endif
+
 	ProcessResult RunProcess(const std::string& executablePath, const std::vector<std::string>& arguments, const std::string& standardOutputPath)
 	{
 		ProcessResult processResult{};
@@ -88,6 +95,7 @@ namespace ShaderInjectorIO
 
 		HANDLE standardOutputHandle = INVALID_HANDLE_VALUE;
 		BOOL inheritHandles = FALSE;
+		std::unique_lock<std::mutex> launchLock(gProcessLaunchMutex);
 
 		if (!standardOutputPath.empty())
 		{
@@ -132,6 +140,8 @@ namespace ShaderInjectorIO
 
 		if (standardOutputHandle != INVALID_HANDLE_VALUE)
 			CloseHandle(standardOutputHandle);
+
+		launchLock.unlock();
 
 		if (!processCreated)
 		{

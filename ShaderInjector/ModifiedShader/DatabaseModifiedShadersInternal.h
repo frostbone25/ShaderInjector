@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,9 @@ namespace DatabaseModifiedShaders::Detail
 		const ShaderAnalysis::ShaderAnalysisDisk& candidateAnalysis,
 		const std::vector<ModifiedShader::ShaderDefine>* defineFilter = nullptr);
 
+	//guards compiledVariants and the compile queue. lock order: gPipelineMutex, then this.
+	extern std::mutex gCompileMutex;
+
 	void UpdatePackageCompiledState(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader);
 
 	void LoadPackageVariants(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader, bool preserveLoadedBlobs = false);
@@ -33,6 +37,7 @@ namespace DatabaseModifiedShaders::Detail
 
 	std::string VariantBlobPath(const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader, const std::vector<ModifiedShader::ShaderDefine>& defines);
 
+	//worker-only: reads the package snapshot and writes candidate files.
 	bool CompileVariant(
 		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 		const std::vector<ModifiedShader::ShaderDefine>& defines,
@@ -40,5 +45,9 @@ namespace DatabaseModifiedShaders::Detail
 		std::vector<uint8_t>& outBlob,
 		ShaderAnalysis::ShaderAnalysisDisk& outAnalysis);
 
-	bool CompileModifiedShaderPackage(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader);
+	//an explicit request supersedes a queued or running job and clears a previous failure.
+	//returns how many jobs were accepted.
+	int QueuePackageCompiles(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader);
+
+	void RequestVariantCompile(const std::string& packageId, const std::vector<ModifiedShader::ShaderDefine>& defines);
 } //namespace DatabaseModifiedShaders::Detail
