@@ -66,19 +66,7 @@ namespace DatabaseModifiedShaders
 				continue;
 			}
 
-			if (ShaderInjectorIO::FileExists(package.compiledBlobPath))
-			{
-				ShaderInjectorIO::LoadDXILBlobFromDisk(package.compiledBlobPath, package.compiledBlob);
-				Detail::AnalyzeCompiledBlob(package.compiledBlob, package.compiledShaderAnalysis);
-				package.compiledShaderInterfaceCompatible = Detail::ShaderInterfaceMatchesAnyPackageTarget(package, package.compiledShaderAnalysis);
-
-				if (!package.compiledShaderInterfaceCompatible)
-				{
-					//repair an existing blob only when its reflected interface disagrees with every analyzed target in this package.
-					ShaderInjectorIO::WriteToLogFileWarning("DatabaseModifiedShaders->RefreshModifiedShaders: repairing incompatible compiled interface for " + package.id);
-					package.compiledShaderInterfaceCompatible = Detail::CompileModifiedShaderPackage(package);
-				}
-			}
+			Detail::LoadPackageVariants(package);
 
 			gModifiedShaders.push_back(std::move(package));
 		}

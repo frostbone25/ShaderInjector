@@ -260,6 +260,7 @@
     <ClInclude Include="ModifiedShader\ModifiedShader.h" />
     <ClInclude Include="ModifiedShader\ModifiedShaderPackageDisk.h" />
     <ClInclude Include="ModifiedShader\ModifiedShaderTargetDisk.h" />
+    <ClInclude Include="ModifiedShader\ShaderDefineDisk.h" />
     <ClInclude Include="ModifiedShader\ModifiedShaderCreation.h" />
     <ClInclude Include="ModifiedShader\ModifiedShaderRecapture.h" />
     <ClInclude Include="Performance\PerformanceMetrics.h" />

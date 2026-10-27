@@ -1,0 +1,35 @@
+{
+    "column": "permutation",
+    "bits": [
+        {"name": "ENABLED_APPENDIX", "shift": 0, "width": 1},
+        {"name": "ENABLED_NOISE", "shift": 1, "width": 1},
+        {"name": "ENABLED_CORRECTION", "shift": 2, "width": 1},
+        {"name": "ENABLED_HDR_COMPOSITION", "shift": 3, "width": 1},
+        {"name": "ENABLED_COMPOSITE_SDR", "shift": 4, "width": 1},
+        {"name": "ENABLED_COMPOSITE_SDR_EXTRA", "shift": 5, "width": 1},
+        {"name": "ENABLED_COMPOSITE_SURFACE", "shift": 6, "width": 1},
+        {"name": "DESTINATION_ENCODING", "shift": 7, "width": 8}
+    ],
+    "constants": {
+        "ENABLED_GLARE": 1,
+        "ENABLED_VIGNETTE": 1,
+        "ENABLED_TONEMAP": 1,
+        "ENABLED_HARD_CLIP_SDR": 1
+    },
+    "configurations": [
+        {
+            "name": "RENODX_PEAK_WHITE_NITS",
+            "value": "1000.0",
+            "type": "float",
+            "range": "80 - 10000",
+            "description": "HDR peak white luminance in nits (match your display's peak brightness)."
+        },
+        {
+            "name": "RENODX_DIFFUSE_WHITE_NITS",
+            "value": "203.0",
+            "type": "float",
+            "range": "80 - 500",
+            "description": "HDR diffuse (paper) white luminance in nits for the game image. 203 is the BT.2408 reference white."
+        }
+    ]
+}

@@ -690,6 +690,9 @@
     <ClInclude Include="ModifiedShader\ModifiedShaderTargetDisk.h">
       <Filter>ModifiedShader</Filter>
     </ClInclude>
+    <ClInclude Include="ModifiedShader\ShaderDefineDisk.h">
+      <Filter>ModifiedShader</Filter>
+    </ClInclude>
     <ClInclude Include="ModifiedShader\ModifiedShaderCreation.h">
       <Filter>ModifiedShader</Filter>
     </ClInclude>

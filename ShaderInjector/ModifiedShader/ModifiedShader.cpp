@@ -40,6 +40,89 @@ namespace ModifiedShader
 		return false;
 	}
 
+	const ModifiedShaderCompiledVariant* ModifiedShaderPackageDisk::FindVariantForDefines(const std::vector<ModifiedShader::ShaderDefine>& defines) const
+	{
+		for (const ModifiedShaderCompiledVariant& variant : compiledVariants)
+		{
+			if (variant.defines == defines)
+				return &variant;
+		}
+
+		return nullptr;
+	}
+
+	bool ModifiedShaderPackageDisk::HasPerTargetDefines() const
+	{
+		for (const ModifiedShaderTargetDisk& target : targets)
+		{
+			if (!target.defines.empty())
+				return true;
+		}
+
+		return false;
+	}
+
+	void ModifiedShaderPackageDisk::RebuildVariantIndex()
+	{
+		variantIndexByShaderHash.clear();
+		defaultVariantIndex = SIZE_MAX;
+
+		for (size_t variantIndex = 0; variantIndex < compiledVariants.size(); ++variantIndex)
+		{
+			if (compiledVariants[variantIndex].defines.empty())
+				defaultVariantIndex = variantIndex;
+		}
+
+		for (const ModifiedShaderTargetDisk& target : targets)
+		{
+			const ModifiedShaderCompiledVariant* variant = FindVariantForDefines(target.defines);
+
+			if (!variant)
+				continue;
+
+			const size_t variantIndex = static_cast<size_t>(variant - compiledVariants.data());
+
+			for (const std::string& knownHash : target.knownShaderBytecodeHashes)
+			{
+				const uint64_t shaderHash = Hash::ParseHashText(knownHash);
+
+				if (!shaderHash)
+					continue;
+
+				//a hash listed under two define sets would resolve to an arbitrary permutation, so keep the
+				//first one and report the conflict instead of letting the map order decide.
+				if (!variantIndexByShaderHash.emplace(shaderHash, variantIndex).second)
+				{
+					ShaderInjectorIO::WriteToLogFileWarning(
+						"ModifiedShader->RebuildVariantIndex: shader " + Hash::FormatHash(shaderHash) +
+						" is listed under more than one define set in " + id + "; using the first target");
+				}
+			}
+		}
+	}
+
+	const ModifiedShaderCompiledVariant* ModifiedShaderPackageDisk::FindVariantForShader(
+		const std::string& originalShaderBytecodeHash,
+		const std::vector<std::string>& shaderBytecodeHashAliases) const
+	{
+		auto found = variantIndexByShaderHash.find(Hash::ParseHashText(originalShaderBytecodeHash));
+
+		for (size_t aliasIndex = 0; found == variantIndexByShaderHash.end() && aliasIndex < shaderBytecodeHashAliases.size(); ++aliasIndex)
+			found = variantIndexByShaderHash.find(Hash::ParseHashText(shaderBytecodeHashAliases[aliasIndex]));
+
+		//in a package with per-target defines every variant targets one permutation, so a fingerprint match
+		//would get an arbitrary permutation; only define-free packages fall back to the default variant.
+		if (found == variantIndexByShaderHash.end() && (defaultVariantIndex >= compiledVariants.size() || HasPerTargetDefines()))
+			return nullptr;
+
+		const size_t variantIndex = found != variantIndexByShaderHash.end() ? found->second : defaultVariantIndex;
+
+		if (variantIndex >= compiledVariants.size())
+			return nullptr;
+
+		return &compiledVariants[variantIndex];
+	}
+
 	bool WriteJson(const ModifiedShaderPackageDisk& package)
 	{
 		if (package.jsonPath.empty())

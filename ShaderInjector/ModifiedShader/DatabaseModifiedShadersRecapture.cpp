@@ -332,6 +332,8 @@ namespace DatabaseModifiedShaders
 		if (!package.compiledBlob.empty() && !package.compiledShaderInterfaceCompatible)
 			ShaderInjectorIO::WriteToLogFileWarning("DatabaseModifiedShaders->RecaptureModifiedShader: the preserved compiled blob is incompatible with the refreshed fingerprint for " + modifiedShaderId + "; recompile explicitly to change replacement bytecode");
 		*loadedPackage = std::move(package);
+		//recapture can add targets, so the variant list and its hash lookups must be rebuilt.
+		Detail::LoadPackageVariants(*loadedPackage, true);
 		ShaderDiscovery::ResetRuntimeCache();
 		ShaderAutomaticDiscovery::RefreshModifiedShaderIndex(GetModifiedShaders());
 		HookD3D12::RefreshLoadedShaderTargets();

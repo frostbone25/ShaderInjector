@@ -98,7 +98,9 @@ namespace ShaderInjectorIO
 		const std::string& shaderProfile,
 		const std::string& entryPoint,
 		std::string& compiledBlobFilePath,
-		ShaderSignaturePacking signaturePacking = ShaderSignaturePacking::PrefixStable);
+		ShaderSignaturePacking signaturePacking = ShaderSignaturePacking::PrefixStable,
+		const std::vector<std::string>& defines = {},
+		const std::vector<std::string>& extraCompilerArguments = {});
 	bool LoadDXILBlobFromDisk(const std::string& shaderBlobFilePath, std::vector<uint8_t>& shaderBlobBytes);
 
 	//recreate built-in shader source files from the embedded templates.

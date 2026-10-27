@@ -5,10 +5,12 @@
 #include <cctype>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
 #include <d3d12shader.h>
 
 #include "GUI/ShaderInjectorGUI.h"
+#include "Hash/Hash.h"
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderAnalysis/ShaderAnalyzer.h"
 #include "StringHelper.h"
@@ -64,7 +66,7 @@ namespace DatabaseModifiedShaders
 			return true;
 		}
 
-		static bool ShaderInterfaceLayoutsMatch(
+		bool ShaderInterfaceLayoutsMatch(
 			const ShaderAnalysis::ShaderAnalysisDisk& expected,
 			const ShaderAnalysis::ShaderAnalysisDisk& candidate)
 		{
@@ -80,22 +82,29 @@ namespace DatabaseModifiedShaders
 				   SignatureLayoutsMatch(expected.patchConstantParameters, candidate.patchConstantParameters);
 		}
 
-		static bool PackageHasAnalyzedTargetInterface(const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
+		//a define filter limits the comparison to the targets that share one variant's define set.
+		static bool TargetMatchesDefineFilter(const ModifiedShader::ModifiedShaderTargetDisk& target, const std::vector<ModifiedShader::ShaderDefine>* defineFilter)
+		{
+			return !defineFilter || target.defines == *defineFilter;
+		}
+
+		static bool PackageHasAnalyzedTargetInterface(const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader, const std::vector<ModifiedShader::ShaderDefine>* defineFilter)
 		{
 			return std::any_of(
 				modifiedShader.targets.begin(),
 				modifiedShader.targets.end(),
-				[](const ModifiedShader::ModifiedShaderTargetDisk& target)
+				[&](const ModifiedShader::ModifiedShaderTargetDisk& target)
 				{
-					return target.shaderAnalysis.succeeded;
+					return TargetMatchesDefineFilter(target, defineFilter) && target.shaderAnalysis.succeeded;
 				});
 		}
 
 		bool ShaderInterfaceMatchesAnyPackageTarget(
 			const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
-			const ShaderAnalysis::ShaderAnalysisDisk& candidateAnalysis)
+			const ShaderAnalysis::ShaderAnalysisDisk& candidateAnalysis,
+			const std::vector<ModifiedShader::ShaderDefine>* defineFilter)
 		{
-			if (!PackageHasAnalyzedTargetInterface(modifiedShader))
+			if (!PackageHasAnalyzedTargetInterface(modifiedShader, defineFilter))
 				return true;
 
 			return std::any_of(
@@ -103,8 +112,40 @@ namespace DatabaseModifiedShaders
 				modifiedShader.targets.end(),
 				[&](const ModifiedShader::ModifiedShaderTargetDisk& target)
 				{
-					return ShaderInterfaceLayoutsMatch(target.shaderAnalysis, candidateAnalysis);
+					return TargetMatchesDefineFilter(target, defineFilter) && ShaderInterfaceLayoutsMatch(target.shaderAnalysis, candidateAnalysis);
 				});
+		}
+
+		//the compiler layer takes "NAME=VALUE" strings so it does not need the package types.
+		std::string FormatDefine(const ModifiedShader::ShaderDefine& define)
+		{
+			return define.name + "=" + define.value;
+		}
+
+		std::string DescribeDefines(const std::vector<ModifiedShader::ShaderDefine>& defines)
+		{
+			std::string description;
+
+			for (const ModifiedShader::ShaderDefine& define : defines)
+			{
+				if (!description.empty())
+					description += ";";
+
+				description += FormatDefine(define);
+			}
+
+			return description;
+		}
+
+		static std::vector<std::string> CompilerDefineStrings(const std::vector<ModifiedShader::ShaderDefine>& defines)
+		{
+			std::vector<std::string> defineStrings;
+			defineStrings.reserve(defines.size());
+
+			for (const ModifiedShader::ShaderDefine& define : defines)
+				defineStrings.push_back(FormatDefine(define));
+
+			return defineStrings;
 		}
 
 		static std::string DescribeSignature(const ShaderAnalysis::ShaderAnalysisDisk& analysis, const std::vector<ShaderAnalysis::SignatureParameterDisk>& parameters)
@@ -154,45 +195,47 @@ namespace DatabaseModifiedShaders
 				&noDisassemblyCandidates);
 		}
 
-		static bool CompileWithoutAnalyzedInterface(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
+		static bool CompileWithoutAnalyzedInterface(
+			const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
+			const std::vector<ModifiedShader::ShaderDefine>& defines,
+			const std::string& candidateBasePath,
+			std::vector<uint8_t>& outBlob,
+			ShaderAnalysis::ShaderAnalysisDisk& outAnalysis)
 		{
-			std::string compiledBlobPath = modifiedShader.compiledBlobPath;
+			std::string compiledBlobPath = candidateBasePath + ".candidate";
 
 			if (!ShaderInjectorIO::CompileSourceToDXILBlob(
 					modifiedShader.sourcePath,
 					modifiedShader.shaderProfile,
 					modifiedShader.shaderEntryPoint,
-					compiledBlobPath))
-			{
-				return false;
-			}
-
-			modifiedShader.compiledBlob.clear();
-			modifiedShader.compiledShaderAnalysis = {};
-
-			if (!ShaderInjectorIO::LoadDXILBlobFromDisk(
 					compiledBlobPath,
-					modifiedShader.compiledBlob) ||
-				modifiedShader.compiledBlob.empty())
+					ShaderInjectorIO::ShaderSignaturePacking::PrefixStable,
+					CompilerDefineStrings(defines),
+					modifiedShader.compilerArguments))
 			{
-				ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseModifiedShaders->CompileModifiedShader: compiled shader blob could not be loaded: " + compiledBlobPath);
+				ShaderInjectorIO::DeleteFileIfExists(compiledBlobPath);
 				return false;
 			}
 
-			AnalyzeCompiledBlob(modifiedShader.compiledBlob, modifiedShader.compiledShaderAnalysis);
-			modifiedShader.compiledShaderInterfaceCompatible = true;
+			outBlob.clear();
+			outAnalysis = {};
 
-			if (!ModifiedShader::WriteJson(modifiedShader))
+			const bool loaded = ShaderInjectorIO::LoadDXILBlobFromDisk(compiledBlobPath, outBlob) && !outBlob.empty();
+			ShaderInjectorIO::DeleteFileIfExists(compiledBlobPath);
+
+			if (!loaded)
 			{
-				ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseModifiedShaders->CompileModifiedShader: compiled successfully, but could not save package metadata: " + modifiedShader.jsonPath);
+				ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseModifiedShaders->CompileVariant: compiled shader blob could not be loaded: " + compiledBlobPath);
 				return false;
 			}
 
+			AnalyzeCompiledBlob(outBlob, outAnalysis);
 			return true;
 		}
 
 		static bool CompileAndAnalyzeCandidate(
 			const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
+			const std::vector<ModifiedShader::ShaderDefine>& defines,
 			const std::string& candidatePath,
 			ShaderInjectorIO::ShaderSignaturePacking signaturePacking,
 			std::vector<uint8_t>& outBlob,
@@ -204,20 +247,27 @@ namespace DatabaseModifiedShaders
 					   modifiedShader.shaderProfile,
 					   modifiedShader.shaderEntryPoint,
 					   outputPath,
-					   signaturePacking) &&
+					   signaturePacking,
+					   CompilerDefineStrings(defines),
+					   modifiedShader.compilerArguments) &&
 				   ShaderInjectorIO::LoadDXILBlobFromDisk(outputPath, outBlob) &&
 				   AnalyzeCompiledBlob(outBlob, outAnalysis);
 		}
 
-		bool CompileModifiedShaderPackage(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
+		bool CompileVariant(
+			const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
+			const std::vector<ModifiedShader::ShaderDefine>& defines,
+			const std::string& candidateBasePath,
+			std::vector<uint8_t>& outBlob,
+			ShaderAnalysis::ShaderAnalysisDisk& outAnalysis)
 		{
 			//DXBC packages and older fingerprints may lack analyzable interface data.
 			//compile them without rejecting an otherwise valid shader.
-			if (!PackageHasAnalyzedTargetInterface(modifiedShader))
-				return CompileWithoutAnalyzedInterface(modifiedShader);
+			if (!PackageHasAnalyzedTargetInterface(modifiedShader, &defines))
+				return CompileWithoutAnalyzedInterface(modifiedShader, defines, candidateBasePath, outBlob, outAnalysis);
 
-			const std::string prefixStableCandidatePath = modifiedShader.compiledBlobPath + ".prefix-stable-candidate";
-			const std::string optimizedCandidatePath = modifiedShader.compiledBlobPath + ".optimized-candidate";
+			const std::string prefixStableCandidatePath = candidateBasePath + ".prefix-stable-candidate";
+			const std::string optimizedCandidatePath = candidateBasePath + ".optimized-candidate";
 			ShaderInjectorIO::DeleteFileIfExists(prefixStableCandidatePath);
 			ShaderInjectorIO::DeleteFileIfExists(optimizedCandidatePath);
 
@@ -226,23 +276,24 @@ namespace DatabaseModifiedShaders
 
 			const bool prefixStableCompiled = CompileAndAnalyzeCandidate(
 				modifiedShader,
+				defines,
 				prefixStableCandidatePath,
 				ShaderInjectorIO::ShaderSignaturePacking::PrefixStable,
 				prefixStableBlob,
 				prefixStableAnalysis);
 
-			const bool prefixStableMatches = prefixStableCompiled && ShaderInterfaceMatchesAnyPackageTarget(modifiedShader, prefixStableAnalysis);
+			const bool prefixStableMatches = prefixStableCompiled && ShaderInterfaceMatchesAnyPackageTarget(modifiedShader, prefixStableAnalysis, &defines);
 
 			std::vector<uint8_t> optimizedBlob;
 			ShaderAnalysis::ShaderAnalysisDisk optimizedAnalysis;
 			bool optimizedCompiled = false;
 			bool optimizedMatches = false;
 
-			if (!prefixStableMatches && PackageHasAnalyzedTargetInterface(modifiedShader))
+			if (!prefixStableMatches && PackageHasAnalyzedTargetInterface(modifiedShader, &defines))
 			{
 				//a second packing mode is only needed when the first compiled candidate does not match an interface captured from the original game shader.
-				optimizedCompiled = CompileAndAnalyzeCandidate(modifiedShader, optimizedCandidatePath, ShaderInjectorIO::ShaderSignaturePacking::Optimized, optimizedBlob, optimizedAnalysis);
-				optimizedMatches = optimizedCompiled && ShaderInterfaceMatchesAnyPackageTarget(modifiedShader, optimizedAnalysis);
+				optimizedCompiled = CompileAndAnalyzeCandidate(modifiedShader, defines, optimizedCandidatePath, ShaderInjectorIO::ShaderSignaturePacking::Optimized, optimizedBlob, optimizedAnalysis);
+				optimizedMatches = optimizedCompiled && ShaderInterfaceMatchesAnyPackageTarget(modifiedShader, optimizedAnalysis, &defines);
 			}
 
 			const std::vector<uint8_t>* selectedBlob = nullptr;
@@ -257,7 +308,7 @@ namespace DatabaseModifiedShaders
 			{
 				selectedBlob = &optimizedBlob;
 				selectedAnalysis = &optimizedAnalysis;
-				ShaderInjectorIO::WriteToLogFile("DatabaseModifiedShaders->CompileModifiedShader: selected optimized signature packing for " + modifiedShader.id);
+				ShaderInjectorIO::WriteToLogFile("DatabaseModifiedShaders->CompileVariant: selected optimized signature packing for " + modifiedShader.id + " defines=" + DescribeDefines(defines));
 			}
 
 			if (!selectedBlob || !selectedAnalysis || selectedBlob->empty())
@@ -268,7 +319,7 @@ namespace DatabaseModifiedShaders
 
 				for (const ModifiedShader::ModifiedShaderTargetDisk& target : modifiedShader.targets)
 				{
-					if (target.shaderAnalysis.succeeded)
+					if (target.defines == defines && target.shaderAnalysis.succeeded)
 					{
 						expectedInput = DescribeSignature(target.shaderAnalysis, target.shaderAnalysis.inputParameters);
 						expectedOutput = DescribeSignature(target.shaderAnalysis, target.shaderAnalysis.outputParameters);
@@ -283,8 +334,9 @@ namespace DatabaseModifiedShaders
 					failureReason = "DXC produced shader bytecode, but no candidate has an interface compatible with the original game shader.";
 
 				ShaderInjectorGUI::WriteToRuntimeLogError(
-					"DatabaseModifiedShaders->CompileModifiedShader: " + failureReason +
+					"DatabaseModifiedShaders->CompileVariant: " + failureReason +
 					" The previous compiled blob was preserved. modifiedShader=" + modifiedShader.id +
+					" defines=" + DescribeDefines(defines) +
 					" source=" + modifiedShader.sourcePath +
 					" expectedInput=" + expectedInput +
 					" expectedOutput=" + expectedOutput +
@@ -304,19 +356,171 @@ namespace DatabaseModifiedShaders
 				return false;
 			}
 
-			const bool wroteCompiledBlob = ShaderInjectorIO::WriteBinaryFile(modifiedShader.compiledBlobPath, selectedBlob->data(), selectedBlob->size());
 			ShaderInjectorIO::DeleteFileIfExists(prefixStableCandidatePath);
 			ShaderInjectorIO::DeleteFileIfExists(optimizedCandidatePath);
 
-			if (!wroteCompiledBlob)
+			outBlob = *selectedBlob;
+			outAnalysis = *selectedAnalysis;
+			return true;
+		}
+
+		//the variant without defines keeps the package blob path; others use
+		//<compiled blob path without extension>.<FNV-1a of "NAME=VALUE;NAME=VALUE...">.blob
+		std::string VariantBlobPath(const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader, const std::vector<ModifiedShader::ShaderDefine>& defines)
+		{
+			if (defines.empty())
+				return modifiedShader.compiledBlobPath;
+
+			const std::string description = DescribeDefines(defines);
+			const std::string defineHash = Hash::FormatHash(Hash::HashMemory(description.data(), description.size()));
+			std::string basePath = modifiedShader.compiledBlobPath;
+			const size_t extension = basePath.find_last_of('.');
+			const size_t separator = basePath.find_last_of("/\\");
+
+			if (extension != std::string::npos && (separator == std::string::npos || extension > separator))
+				basePath.erase(extension);
+
+			return basePath + "." + defineHash + ShaderInjectorIO::extensionBLOB;
+		}
+
+		//keep the package-level blob populated so existing "is this package compiled" checks keep working.
+		void UpdatePackageCompiledState(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
+		{
+			modifiedShader.compiledBlob.clear();
+			modifiedShader.compiledShaderAnalysis = {};
+			modifiedShader.compiledShaderInterfaceCompatible = true;
+
+			for (const ModifiedShader::ModifiedShaderCompiledVariant& variant : modifiedShader.compiledVariants)
 			{
-				ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseModifiedShaders->CompileModifiedShader: compatible shader compiled, but the blob could not be written: " + modifiedShader.compiledBlobPath);
+				if (variant.compiledBlob.empty() || !variant.compiledShaderInterfaceCompatible)
+					continue;
+
+				modifiedShader.compiledBlob = variant.compiledBlob;
+				modifiedShader.compiledShaderAnalysis = variant.compiledShaderAnalysis;
+				return;
+			}
+		}
+
+		static bool CompileVariantToDisk(const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader, ModifiedShader::ModifiedShaderCompiledVariant& variant)
+		{
+			std::vector<uint8_t> compiledBlob;
+			ShaderAnalysis::ShaderAnalysisDisk compiledAnalysis;
+
+			if (!CompileVariant(modifiedShader, variant.defines, variant.compiledBlobPath, compiledBlob, compiledAnalysis))
+				return false;
+
+			if (!ShaderInjectorIO::WriteBinaryFile(variant.compiledBlobPath, compiledBlob.data(), compiledBlob.size()))
+			{
+				ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseModifiedShaders->CompileModifiedShader: compatible shader compiled, but the blob could not be written: " + variant.compiledBlobPath);
 				return false;
 			}
 
-			modifiedShader.compiledBlob = *selectedBlob;
-			modifiedShader.compiledShaderAnalysis = *selectedAnalysis;
-			modifiedShader.compiledShaderInterfaceCompatible = true;
+			variant.compiledBlob = std::move(compiledBlob);
+			variant.compiledShaderAnalysis = compiledAnalysis;
+			variant.compiledShaderInterfaceCompatible = true;
+			return true;
+		}
+
+		//sort by define name then value so variant keys, blob file names, and compare-equal collapses do not
+		//depend on JSON attribute order. argument order is irrelevant for the used macro forms.
+		static void SortTargetDefines(ModifiedShader::ModifiedShaderTargetDisk& target)
+		{
+			std::sort(target.defines.begin(), target.defines.end(), [](const ModifiedShader::ShaderDefine& left, const ModifiedShader::ShaderDefine& right)
+			{
+				if (left.name != right.name)
+					return left.name < right.name;
+
+				return left.value < right.value;
+			});
+		}
+
+		//one variant per distinct define set, in target order; packages without defines get one variant.
+		//recapture rebuilds the list after adding targets and keeps the blobs it already loaded in memory.
+		void LoadPackageVariants(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader, bool preserveLoadedBlobs)
+		{
+			std::vector<ModifiedShader::ModifiedShaderCompiledVariant> variants;
+
+			for (ModifiedShader::ModifiedShaderTargetDisk& target : modifiedShader.targets)
+			{
+				SortTargetDefines(target);
+
+				const bool alreadyListed = std::any_of(variants.begin(), variants.end(), [&](const ModifiedShader::ModifiedShaderCompiledVariant& variant)
+				{
+					return variant.defines == target.defines;
+				});
+
+				if (alreadyListed)
+					continue;
+
+				ModifiedShader::ModifiedShaderCompiledVariant variant;
+				variant.defines = target.defines;
+
+				if (preserveLoadedBlobs)
+				{
+					const ModifiedShader::ModifiedShaderCompiledVariant* loadedVariant = modifiedShader.FindVariantForDefines(variant.defines);
+
+					if (loadedVariant)
+					{
+						//recapture keeps the compiled bytecode exactly as it is; only the compatibility
+						//flag is re-derived because recapture can add targets.
+						variant.compiledBlob = loadedVariant->compiledBlob;
+						variant.compiledShaderAnalysis = loadedVariant->compiledShaderAnalysis;
+						variant.compiledShaderInterfaceCompatible = loadedVariant->compiledBlob.empty() ||
+							ShaderInterfaceMatchesAnyPackageTarget(modifiedShader, loadedVariant->compiledShaderAnalysis, &variant.defines);
+					}
+				}
+
+				variants.push_back(std::move(variant));
+			}
+
+			if (variants.empty())
+				variants.emplace_back();
+
+			for (ModifiedShader::ModifiedShaderCompiledVariant& variant : variants)
+			{
+				variant.compiledBlobPath = VariantBlobPath(modifiedShader, variant.defines);
+
+				if (!variant.compiledBlob.empty())
+					continue;
+
+				if (!ShaderInjectorIO::FileExists(variant.compiledBlobPath) ||
+					!ShaderInjectorIO::LoadDXILBlobFromDisk(variant.compiledBlobPath, variant.compiledBlob) ||
+					variant.compiledBlob.empty())
+				{
+					variant.compiledBlob.clear();
+					continue;
+				}
+
+				AnalyzeCompiledBlob(variant.compiledBlob, variant.compiledShaderAnalysis);
+				variant.compiledShaderInterfaceCompatible = ShaderInterfaceMatchesAnyPackageTarget(modifiedShader, variant.compiledShaderAnalysis, &variant.defines);
+
+				//repair an existing blob only when its reflected interface disagrees with every analyzed target of its define set.
+				if (!variant.compiledShaderInterfaceCompatible)
+				{
+					ShaderInjectorIO::WriteToLogFileWarning("DatabaseModifiedShaders->LoadPackageVariants: repairing incompatible compiled interface for " + modifiedShader.id + " defines=" + DescribeDefines(variant.defines));
+					variant.compiledShaderInterfaceCompatible = CompileVariantToDisk(modifiedShader, variant);
+				}
+			}
+
+			modifiedShader.compiledVariants = std::move(variants);
+			modifiedShader.RebuildVariantIndex();
+			UpdatePackageCompiledState(modifiedShader);
+		}
+
+		bool CompileModifiedShaderPackage(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader)
+		{
+			if (modifiedShader.compiledVariants.empty())
+				LoadPackageVariants(modifiedShader);
+
+			bool compiled = true;
+
+			for (ModifiedShader::ModifiedShaderCompiledVariant& variant : modifiedShader.compiledVariants)
+				compiled = CompileVariantToDisk(modifiedShader, variant) && compiled;
+
+			UpdatePackageCompiledState(modifiedShader);
+
+			if (!compiled)
+				return false;
 
 			if (!ModifiedShader::WriteJson(modifiedShader))
 			{

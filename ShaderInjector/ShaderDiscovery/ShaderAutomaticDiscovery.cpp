@@ -1158,7 +1158,13 @@ namespace ShaderAutomaticDiscovery
 		auto analysisSnapshot = std::make_shared<std::vector<ModifiedShader::ModifiedShaderPackageDisk>>(modifiedShaders);
 
 		for (ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : *analysisSnapshot)
+		{
+			//a discovery worker only reads package and target metadata. clearing the runtime blobs here
+			//keeps them out of the snapshot's retained size, which is paid once per refresh.
 			modifiedShader.compiledBlob.clear();
+			modifiedShader.compiledVariants.clear();
+			modifiedShader.variantIndexByShaderHash.clear();
+		}
 
 		std::lock_guard<std::mutex> lock(gQueueMutex);
 		gModifiedShaderAnalysisSnapshot = std::move(analysisSnapshot);

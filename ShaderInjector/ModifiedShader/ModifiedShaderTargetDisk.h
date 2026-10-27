@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "JsonHelper.h"
+#include "ModifiedShader/ShaderDefineDisk.h"
 #include "ShaderAnalysis/ShaderAnalysis.h"
 
 namespace ModifiedShader
@@ -17,6 +18,8 @@ namespace ModifiedShader
 		std::vector<std::string> knownShaderBytecodeHashes;
 		std::string originalShaderBytecodeLength;
 		ShaderAnalysis::ShaderAnalysisDisk shaderAnalysis;
+		//an empty list uses the package's shared blob; otherwise this target gets its own compiled blob.
+		std::vector<ShaderDefine> defines;
 
 		bool MatchesShader(uint64_t shaderHash, const ShaderAnalysis::ShaderAnalysisDisk& analysis) const;
 		double CalculateSimilarityScore(const ModifiedShaderTargetDisk& other) const;
@@ -29,6 +32,7 @@ namespace ModifiedShader
 			gameVersion,
 			knownShaderBytecodeHashes,
 			originalShaderBytecodeLength,
-			shaderAnalysis)
+			shaderAnalysis,
+			defines)
 	};
 } //namespace ModifiedShader
