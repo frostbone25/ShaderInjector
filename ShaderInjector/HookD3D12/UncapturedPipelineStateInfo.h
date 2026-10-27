@@ -32,6 +32,8 @@ namespace HookD3D12
 		std::string activeShaderTargetName;
 		ShaderTarget::ShaderType activeShaderTargetType = ShaderTarget::Unknown;
 		uint64_t activeShaderTargetHash = 0;
+		//previous replacement kept bound while the PSO for a newer blob is rebuilt.
+		ID3D12PipelineState* pendingSwapPipelineState = nullptr;
 		uint8_t shaderTargetApplyFailureCount = 0;
 		bool shaderTargetApplyRetryQueued = false;
 	};

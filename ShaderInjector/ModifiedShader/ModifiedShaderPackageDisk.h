@@ -53,6 +53,7 @@ namespace ModifiedShader
 		//original shader hash -> compiledVariants index; rebuilt by RebuildVariantIndex.
 		std::unordered_map<uint64_t, size_t> variantIndexByShaderHash;
 		size_t defaultVariantIndex = SIZE_MAX;
+		bool variantsUsePerTargetDefines = false;
 
 		bool MatchesShader(uint64_t shaderHash, const ShaderAnalysis::ShaderAnalysisDisk& analysis) const;
 

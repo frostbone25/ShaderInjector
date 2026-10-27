@@ -1,6 +1,7 @@
 
 #include "HookD3D12RuntimeState.h"
 #include "../HookD3D12.h"
+#include "../HookD3D12RetiredPSOTracker.h"
 #include "Globals.h"
 #include "Performance/PerformanceMetrics.h"
 #include "RenderPass/RenderPassRuntime.h"
@@ -22,7 +23,9 @@ namespace HookD3D12
 
 		if (!IsInjectorEnabledForCommandList(commandList))
 		{
-			GetCommandListPipelineState(commandList).pipelineState.store(pipelineState, std::memory_order_release);
+			CommandListPipelineState& commandListState = GetCommandListPipelineState(commandList);
+			commandListState.pipelineState.store(pipelineState, std::memory_order_release);
+			commandListState.boundPipelineState.store(pipelineState, std::memory_order_release);
 			Original_SetPipelineState(commandList, pipelineState);
 			return;
 		}
@@ -36,6 +39,12 @@ namespace HookD3D12
 		if (TryResolvePublishedPipelineState(pipelineState, boundPipelineState))
 		{
 			RenderPassRuntime::TrackBoundPipelineState(commandList, boundPipelineState);
+			commandListState.boundPipelineState.store(boundPipelineState, std::memory_order_release);
+
+			//only an override substitution yields an injector-owned PSO, and only those are retired.
+			if (boundPipelineState != pipelineState)
+				RecordReplacementBinding(boundPipelineState, commandList);
+
 			Original_SetPipelineState(commandList, boundPipelineState);
 			return;
 		}
@@ -74,6 +83,12 @@ namespace HookD3D12
 		}
 
 		RenderPassRuntime::TrackBoundPipelineState(commandList, boundPipelineState);
+		commandListState.boundPipelineState.store(boundPipelineState, std::memory_order_release);
+
+		//only an override substitution yields an injector-owned PSO, and only those are retired.
+		if (boundPipelineState != pipelineState)
+			RecordReplacementBinding(boundPipelineState, commandList);
+
 		Original_SetPipelineState(commandList, boundPipelineState);
 	}
 } //namespace HookD3D12

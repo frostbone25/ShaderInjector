@@ -15,6 +15,7 @@
 
 //custom
 #include "HookD3D12.h"
+#include "HookD3D12/HookD3D12RetiredPSOTracker.h"
 #include "IO/ShaderInjectorIO.h"
 #include "Hash/Hash.h"
 #include "Globals.h"
@@ -280,6 +281,31 @@ namespace ShaderInjectorGUI
 		}
 	}
 
+	//retire tracker diagnostics; verifies that hot-swapped replacement PSOs eventually release.
+	//tracker counters are read without gPipelineMutex: the snapshot is display-only and the tracker uses
+	//its own synchronization, so a single inconsistent frame in the overlay is acceptable.
+	static void DrawRetiredPSODiagnostics()
+	{
+		const HookD3D12::RetiredPSODiagnostics diagnostics = HookD3D12::GetRetiredPSODiagnostics();
+
+		if (!ImGui::TreeNodeEx("Retired PSO Tracker", ImGuiTreeNodeFlags_DefaultOpen))
+			return;
+
+		ImGui::Text("Pending: %zu", diagnostics.pendingCount);
+		ImGui::Text("Retired total: %llu", static_cast<unsigned long long>(diagnostics.retiredTotal));
+		ImGui::Text("Released total: %llu", static_cast<unsigned long long>(diagnostics.releasedTotal));
+		ImGui::Text("Oldest pending age: %llu ms", static_cast<unsigned long long>(diagnostics.oldestPendingAgeMilliseconds));
+
+		if (diagnostics.pendingCount == 0)
+			ImGui::TextDisabled("No pending references; every retired PSO has released.");
+		else if (diagnostics.oldestPendingAgeMilliseconds > 60000)
+			ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Oldest pending older than 60s; a submit never re-fenced after its last observation.");
+		else
+			ImGui::TextDisabled("Pending references wait for fence-proof of the next submit.");
+
+		ImGui::TreePop();
+	}
+
 	void DrawDeveloperSettings()
 	{
 		if (ImGui::CollapsingHeader("Developer Settings"))
@@ -339,6 +365,7 @@ namespace ShaderInjectorGUI
 
 					ImGui::Spacing();
 
+					DrawRetiredPSODiagnostics();
 					DrawGraphicsPipelines();
 					DrawStreamPipelines();
 					ImGui::EndTabItem();

@@ -1,5 +1,6 @@
 
 #include "HookD3D12RuntimeState.h"
+#include "../HookD3D12RetiredPSOTracker.h"
 #include "../HookD3D12.h"
 #include "../DeviceRuntimeState.h"
 #include "Globals.h"
@@ -37,10 +38,16 @@ namespace HookD3D12
 
 		commandListState.graphicsRootSignature.store(nullptr, std::memory_order_release);
 		commandListState.computeRootSignature.store(nullptr, std::memory_order_release);
+		commandListState.boundPipelineState.store(nullptr, std::memory_order_release);
+
+		//the recorded stream starts over, so every retired PSO this list recorded is no longer
+		//referenced by it. one increment retires all of them without walking any index.
+		commandListState.recordingGeneration.fetch_add(1, std::memory_order_acq_rel);
 
 		if (!injectorEnabledForRecording)
 		{
 			commandListState.pipelineState.store(initialState, std::memory_order_release);
+			commandListState.boundPipelineState.store(initialState, std::memory_order_release);
 			return resetCommandList(initialState);
 		}
 
@@ -50,6 +57,11 @@ namespace HookD3D12
 		if (TryResolvePublishedPipelineState(initialState, boundState))
 		{
 			RenderPassRuntime::TrackBoundPipelineState(commandList, boundState);
+			commandListState.boundPipelineState.store(boundState, std::memory_order_release);
+
+			if (boundState != initialState)
+				RecordReplacementBinding(boundState, commandList);
+
 			return resetCommandList(boundState);
 		}
 
@@ -79,6 +91,12 @@ namespace HookD3D12
 		}
 
 		RenderPassRuntime::TrackBoundPipelineState(commandList, boundState);
+		commandListState.boundPipelineState.store(boundState, std::memory_order_release);
+
+		//the initial state is recorded like a SetPipelineState bind; it can be a replacement or a patched PSO.
+		if (boundState != initialState)
+			RecordReplacementBinding(boundState, commandList);
+
 		return resetCommandList(boundState);
 	}
 } //namespace HookD3D12

@@ -21,6 +21,7 @@
 #include <wrl/client.h>
 
 #include "HookD3D12.h"
+#include "HookD3D12/HookD3D12RetiredPSOTracker.h"
 #include "GUI/ShaderInjectorGUI.h"
 #include "Globals.h"
 #include "Performance/PerformanceMetrics.h"
@@ -2330,6 +2331,12 @@ namespace RenderPassRuntime
 			commandList->SetGraphicsRootDescriptorTable(binding.appendedTableIndex, addedTable);
 		}
 		commandList->SetPipelineState(binding.pipelineState);
+
+		//this bind happens inside the injection scope, so the SetPipelineState hook returns before it
+		//records anything. record it here, otherwise a patched PSO looks unreferenced the moment a
+		//reload replaces it and the tracker would free a pipeline this list is still going to execute.
+		HookD3D12::RecordReplacementBinding(binding.pipelineState, commandList);
+
 		state.replacementPassActive = true;
 		state.shaderPatchActive = true;
 	}

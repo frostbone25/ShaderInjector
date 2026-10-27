@@ -265,6 +265,8 @@ namespace HookD3D12
 	//a new shader target can match pipelines the apply pass already visited; revisit every captured pipeline.
 	void RestartShaderTargetApplyScan();
 	void InvalidateAllReplacementPSOs();
+	//rebuild one shader target's replacement PSOs from its new blob; the current replacements stay bound until each rebuild succeeds.
+	void SwapReplacementPSOsForShaderTargetLocked(const std::string& shaderTargetName);
 	void ResetUncapturedReplacementAttempts();
 	void ClearShaderMarkers();
 	void InvalidateShaderMarkerPSOs();
@@ -286,7 +288,8 @@ namespace HookD3D12
 	bool SaveShaderTarget(int index);
 	bool QueueShaderTargetCompile(int index);
 	bool ReloadShaderTarget(int index);
-	//install a freshly compiled blob for a loaded target; ProcessCompletedCompiles holds gPipelineMutex while applying results.
+	//install a freshly compiled blob for a loaded target without dropping its current replacement PSOs.
+	//the _Locked form requires gPipelineMutex; ProcessCompletedCompiles holds it while applying results.
 	void UpdateShaderTargetBlobLocked(int index, const std::vector<uint8_t>& blob);
 	bool DeleteShaderTarget(int index);
 	bool IsShaderTargetEffectivelyEnabled(const ShaderTarget::ShaderTargetDisk& replacement);

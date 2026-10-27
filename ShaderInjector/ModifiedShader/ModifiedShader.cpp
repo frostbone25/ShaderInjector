@@ -77,6 +77,7 @@ namespace ModifiedShader
 	{
 		variantIndexByShaderHash.clear();
 		defaultVariantIndex = SIZE_MAX;
+		variantsUsePerTargetDefines = HasPerTargetDefines();
 
 		for (size_t variantIndex = 0; variantIndex < compiledVariants.size(); ++variantIndex)
 		{
@@ -123,7 +124,7 @@ namespace ModifiedShader
 
 		//in a package with per-target defines every variant targets one permutation, so a fingerprint match
 		//would get an arbitrary permutation; only define-free packages fall back to the default variant.
-		if (found == variantIndexByShaderHash.end() && (defaultVariantIndex >= compiledVariants.size() || HasPerTargetDefines()))
+		if (found == variantIndexByShaderHash.end() && (defaultVariantIndex >= compiledVariants.size() || variantsUsePerTargetDefines))
 			return nullptr;
 
 		const size_t variantIndex = found != variantIndexByShaderHash.end() ? found->second : defaultVariantIndex;

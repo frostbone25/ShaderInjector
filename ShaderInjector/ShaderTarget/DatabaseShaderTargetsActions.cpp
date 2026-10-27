@@ -100,8 +100,8 @@ namespace HookD3D12
 		return !gLoadedShaderTargetBlobs[replacementIndex].empty();
 	}
 
-	//install a freshly compiled blob (background recompile). called on the render thread with gPipelineMutex held;
-	//readers of gLoadedShaderTargetBlobs take the same lock.
+	//install a freshly compiled blob (background recompile) without invalidating every replacement PSO like ReloadShaderTarget does.
+	//called on the render thread with gPipelineMutex held; readers of gLoadedShaderTargetBlobs take the same lock.
 	void UpdateShaderTargetBlobLocked(int replacementIndex, const std::vector<uint8_t>& blob)
 	{
 		if (replacementIndex < 0 || replacementIndex >= (int)gLoadedShaderTargets.size())
@@ -110,8 +110,13 @@ namespace HookD3D12
 		if (replacementIndex >= (int)gLoadedShaderTargetBlobs.size())
 			gLoadedShaderTargetBlobs.resize(gLoadedShaderTargets.size());
 
+		ShaderTarget::ShaderTargetDisk& replacement = gLoadedShaderTargets[replacementIndex];
 		gLoadedShaderTargetBlobs[replacementIndex] = blob;
-		InvalidateAllReplacementPSOs();
+		//a PSO built from the previous blob rebuilds on its next apply-pass visit.
+		++replacement.modifiedShaderBlobGeneration;
+
+		//the caller reports the batch once, so one install does not add a runtime-log line per target.
+		SwapReplacementPSOsForShaderTargetLocked(replacement.name);
 	}
 
 	//using the selected index of currently selected shader replacement...

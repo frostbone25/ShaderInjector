@@ -217,6 +217,9 @@
     <ClInclude Include="HookD3D12\PSOPendingRebuild.h">
       <Filter>HookD3D12</Filter>
     </ClInclude>
+    <ClInclude Include="HookD3D12\HookD3D12RetiredPSOTracker.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
     <ClInclude Include="HookD3D12\RootSignatureInfo.h">
       <Filter>HookD3D12</Filter>
     </ClInclude>
@@ -930,6 +933,9 @@
       <Filter>Database</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\HookD3D12.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\HookD3D12RetiredPSOTracker.cpp">
       <Filter>HookD3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_CopyDescriptors.cpp">

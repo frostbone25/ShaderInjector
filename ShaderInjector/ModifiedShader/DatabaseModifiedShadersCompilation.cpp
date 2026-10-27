@@ -450,6 +450,7 @@ namespace DatabaseModifiedShaders
 						variant.compiledShaderInterfaceCompatible = loadedVariant->compiledBlob.empty() ||
 							ShaderInterfaceMatchesAnyPackageTarget(modifiedShader, loadedVariant->compiledShaderAnalysis, &variant.defines);
 						variant.compileFailed = loadedVariant->compileFailed;
+						variant.pendingCompileSerial = loadedVariant->pendingCompileSerial;
 					}
 				}
 
@@ -486,6 +487,8 @@ namespace DatabaseModifiedShaders
 				}
 			}
 
+			//lookups from other threads read the variant list under gCompileMutex.
+			std::lock_guard<std::mutex> lock(gCompileMutex);
 			modifiedShader.compiledVariants = std::move(variants);
 			modifiedShader.RebuildVariantIndex();
 			UpdatePackageCompiledState(modifiedShader);

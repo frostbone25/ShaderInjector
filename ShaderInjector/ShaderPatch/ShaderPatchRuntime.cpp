@@ -16,6 +16,7 @@
 #include "Hash/Hash.h"
 #include "HookD3D12/HookD3D12.h"
 #include "HookD3D12/D3D12/HookD3D12RuntimeState.h"
+#include "HookD3D12/HookD3D12RetiredPSOTracker.h"
 #include "IO/ShaderInjectorIO.h"
 #include "RenderPass/RenderPassExpandedRootSignature.h"
 #include "RenderPass/RenderPassReplacement.h"
@@ -75,8 +76,15 @@ namespace ShaderPatchRuntime
 		constexpr size_t boundFilterSize = 1u << 16;
 		std::array<std::atomic<ID3D12PipelineState*>, boundFilterSize> gBoundFilter{};
 		std::unordered_map<ID3D12PipelineState*, std::shared_ptr<const Result>> gResults;
-		//recorded command lists may still reference pipelines replaced by a reload.
-		std::vector<std::shared_ptr<const Result>> gRetiredResults;
+		//a replaced or dropped result whose pipeline recorded command lists may still use. the PSO goes
+		//to the retired-PSO tracker for the release proof; the root signature and binding wait with it.
+		struct RetiredResult
+		{
+			std::shared_ptr<const Result> result;
+			ID3D12PipelineState* trackedPipelineState = nullptr;
+		};
+
+		std::vector<RetiredResult> gRetiredResults;
 		std::unordered_map<std::string, PatchedShaderInfo> gReports;
 		std::deque<std::string> gReportOrder;
 		std::string gLastError;
@@ -329,6 +337,25 @@ namespace ShaderPatchRuntime
 			return binding;
 		}
 
+		//queue a result whose pipeline recorded command lists may still use.
+		void RetireResultLocked(std::shared_ptr<const Result> result)
+		{
+			if (!result)
+				return;
+
+			RetiredResult retired{};
+			retired.trackedPipelineState = result->pipeline.Get();
+
+			if (retired.trackedPipelineState)
+			{
+				//the tracker takes its own reference; the result keeps the ComPtr until the proof ends.
+				HookD3D12::TrackRetiredPipelineStateReference(retired.trackedPipelineState);
+			}
+
+			retired.result = std::move(result);
+			gRetiredResults.push_back(std::move(retired));
+		}
+
 		//a pipeline the current recipes no longer patch stops using the previous generation's result.
 		void DropResult(ID3D12PipelineState* original, const Recipes& recipes)
 		{
@@ -340,7 +367,7 @@ namespace ShaderPatchRuntime
 			if (existing == gResults.end())
 				return;
 
-			gRetiredResults.push_back(std::move(existing->second));
+			RetireResultLocked(std::move(existing->second));
 			gResults.erase(existing);
 			gPublishPending = true;
 		}
@@ -484,12 +511,39 @@ namespace ShaderPatchRuntime
 				//recorded command lists may still use the result this one replaces.
 				std::shared_ptr<const Result>& current = gResults[original];
 				if (current)
-					gRetiredResults.push_back(std::move(current));
+					RetireResultLocked(std::move(current));
 				current = std::move(patched);
 				gPublishPending = true;
 				for (auto& report : reports)
 					ReportShaderLocked(report.first, std::move(report.second));
 			}
+		}
+
+		//release retired results once the tracker finished proving their pipeline.
+		void DrainRetiredResults()
+		{
+			std::vector<RetiredResult> stillPending;
+			std::vector<RetiredResult> released;
+			{
+				std::lock_guard<std::mutex> lock(gMutex);
+
+				if (gRetiredResults.empty())
+					return;
+
+				for (RetiredResult& retired : gRetiredResults)
+				{
+					if (HookD3D12::IsRetirePending(retired.trackedPipelineState))
+						stillPending.push_back(std::move(retired));
+					else
+						released.push_back(std::move(retired));
+				}
+
+				gRetiredResults = std::move(stillPending);
+			}
+
+			//released outside gMutex: destroying a Result drops a PSO ComPtr and possibly the last
+			//reference to an expanded root signature, which must not happen under the runtime lock.
+			released.clear();
 		}
 
 		void PublishPendingResults()
@@ -548,7 +602,7 @@ namespace ShaderPatchRuntime
 			if (snapshot->entries.empty())
 			{
 				for (auto& result : gResults)
-					gRetiredResults.push_back(std::move(result.second));
+					RetireResultLocked(std::move(result.second));
 				gResults.clear();
 			}
 
@@ -599,6 +653,7 @@ namespace ShaderPatchRuntime
 						ApplyReload();
 					else if (recipes)
 						Process(job, recipes);
+					DrainRetiredResults();
 					PublishPendingResults();
 				}
 				catch (const std::exception& exception)
@@ -637,6 +692,11 @@ namespace ShaderPatchRuntime
 			} });
 	}
 
+	void ReleaseRetiredResults()
+	{
+		DrainRetiredResults();
+	}
+
 	void Shutdown()
 	{
 		{
@@ -651,7 +711,7 @@ namespace ShaderPatchRuntime
 
 		//unpublish patched pipelines and texture bindings before releasing the objects they point to.
 		std::unordered_map<ID3D12PipelineState*, std::shared_ptr<const Result>> results;
-		std::vector<std::shared_ptr<const Result>> retiredResults;
+		std::vector<RetiredResult> retiredResults;
 		{
 			std::lock_guard<std::mutex> lock(gMutex);
 			results.swap(gResults);
