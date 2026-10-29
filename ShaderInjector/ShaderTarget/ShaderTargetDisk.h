@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,7 @@ namespace ShaderTarget
 		//runtime-only cache resolved from modifiedShaderId.
 		//this path is never serialized and always points into the ModifiedShader package directory.
 		std::string modifiedShaderBlobPath;
+		uint64_t modifiedShaderBlobGeneration = 0;
 
 		std::string sourceList;
 		std::string pipelineIndex;

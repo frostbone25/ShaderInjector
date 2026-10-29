@@ -17,6 +17,7 @@ namespace DatabaseRenderPasses
 	};
 
 	void RefreshRenderPasses();
+	void PublishRuntimeConfiguration();
 	void EnsureRenderPassesLoaded();
 	const std::vector<RenderPass::RenderPassDisk>& GetRenderPasses();
 	RenderPass::RenderPassDisk* FindRenderPassById(const std::string& renderPassId);

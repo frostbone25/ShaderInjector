@@ -62,6 +62,7 @@ namespace ShaderPatchRuntime
 	void NotifyPipelineBound(ID3D12PipelineState* pipelineState);
 	//add patched pipelines without a Shader Target override; called while the override map is rebuilt.
 	void AppendPipelineOverrides(std::unordered_map<ID3D12PipelineState*, ID3D12PipelineState*>& overrides);
+	void ReleaseRetiredResults();
 	//true when a loaded recipe adds textures, so new shader-visible heaps reserve room for their tables.
 	bool HasResourceRecipes();
 

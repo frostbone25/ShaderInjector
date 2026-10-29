@@ -12,6 +12,7 @@
 
 #include "Hash/Hash.h"
 #include "HookD3D12/HookD3D12.h"
+#include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "StringHelper.h"
 
 namespace RenderPassReplacement
@@ -87,10 +88,10 @@ namespace RenderPassReplacement
 				error};
 		}
 
-		std::string CacheKey(const RenderPass::RenderPassDisk& renderPass, ID3D12PipelineState* original)
+		std::string CacheKey(const RenderPass::RenderPassDisk& renderPass, ID3D12PipelineState* original, uint64_t fragmentShaderBlobHash)
 		{
 			return StringHelper::PointerToString(original) + ':' + std::to_string(static_cast<int>(renderPass.type)) +
-				   ':' + std::to_string(renderPass.fragmentShaderBlobHash);
+				   ':' + std::to_string(fragmentShaderBlobHash);
 		}
 
 		//use the override for a stage when there is one, otherwise the captured bytecode.
@@ -399,6 +400,7 @@ namespace RenderPassReplacement
 	ID3D12PipelineState* GetOrCreatePipeline(
 		const RenderPass::RenderPassDisk& renderPass,
 		ID3D12PipelineState* originalPipelineState,
+		const RenderPassRuntime::ShaderTargetBinding& shaderTarget,
 		std::string& outError)
 	{
 		outError.clear();
@@ -415,7 +417,39 @@ namespace RenderPassReplacement
 			return cachedPipeline->replacementPipelineState;
 		}
 
-		const std::string key = CacheKey(renderPass, originalPipelineState);
+		const std::vector<uint8_t>* fragmentShaderBlob = &renderPass.fragmentShaderBlob;
+		uint64_t fragmentShaderBlobHash = renderPass.fragmentShaderBlobHash;
+
+		if (!renderPass.fragmentShaderVariants.empty())
+		{
+			const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(shaderTarget.modifiedShaderId);
+			std::vector<ModifiedShader::ShaderDefine> defines;
+
+			if (!modifiedShader || !DatabaseModifiedShaders::TryGetVariantDefinesForShader(*modifiedShader, Hash::FormatHash(shaderTarget.hash), {}, defines))
+			{
+				outError = "Render Pass has no Modified Shader variant for " + shaderTarget.name + ".";
+				return nullptr;
+			}
+
+			const auto variant = std::find_if(renderPass.fragmentShaderVariants.begin(), renderPass.fragmentShaderVariants.end(), [&](const ModifiedShader::ModifiedShaderCompiledVariant& candidate)
+			{
+				return candidate.defines == defines;
+			});
+
+			if (variant == renderPass.fragmentShaderVariants.end() || variant->compiledBlob.empty())
+			{
+				if (variant != renderPass.fragmentShaderVariants.end())
+					DatabaseModifiedShaders::RequestVariantCompile(renderPass.id, defines);
+
+				outError = "Render Pass shader is not compiled for " + shaderTarget.name + ".";
+				return nullptr;
+			}
+
+			fragmentShaderBlob = &variant->compiledBlob;
+			fragmentShaderBlobHash = Hash::HashMemory(fragmentShaderBlob->data(), fragmentShaderBlob->size());
+		}
+
+		const std::string key = CacheKey(renderPass, originalPipelineState, fragmentShaderBlobHash);
 		std::lock_guard<std::mutex> cacheLock(gCacheMutex);
 		const uint64_t generation = gPipelineAvailabilityGeneration.load(std::memory_order_acquire);
 		const auto cachedIt = gPipelineCache.find(key);
@@ -437,7 +471,7 @@ namespace RenderPassReplacement
 
 		const bool computePipeline = RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute;
 		StageOverrides overrides;
-		overrides.stages[computePipeline ? ShaderTarget::ComputeShader : ShaderTarget::PixelShader] = &renderPass.fragmentShaderBlob;
+		overrides.stages[computePipeline ? ShaderTarget::ComputeShader : ShaderTarget::PixelShader] = fragmentShaderBlob;
 		std::lock_guard<std::mutex> pipelineLock(HookD3D12::gPipelineMutex);
 		ID3D12PipelineState* pipeline = BuildPipelineLocked(overrides, nullptr, computePipeline, originalPipelineState, outError);
 

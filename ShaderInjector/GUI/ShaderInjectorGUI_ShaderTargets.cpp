@@ -59,7 +59,7 @@ namespace ShaderInjectorGUI
 		return result;
 	}
 
-	bool EnsureModifiedShaderCompiledForShaderTarget(const std::string& modifiedShaderId)
+	bool EnsureModifiedShaderCompileQueuedForShaderTarget(const std::string& modifiedShaderId)
 	{
 		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
 
@@ -69,25 +69,28 @@ namespace ShaderInjectorGUI
 			return false;
 		}
 
-		if (!modifiedShader->compiledBlob.empty())
+		if (DatabaseModifiedShaders::HasCompiledVariant(*modifiedShader))
 			return true;
 
-		if (!modifiedShader->compiledBlobPath.empty() && ShaderInjectorIO::FileExists(modifiedShader->compiledBlobPath))
+		//a package with per-target defines has no single blob file to re-read.
+		if (!modifiedShader->HasPerTargetDefines() &&
+			!modifiedShader->compiledBlobPath.empty() &&
+			ShaderInjectorIO::FileExists(modifiedShader->compiledBlobPath))
 		{
 			DatabaseModifiedShaders::RefreshModifiedShaders();
 			modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
 
-			if (modifiedShader && !modifiedShader->compiledBlob.empty())
+			if (modifiedShader && DatabaseModifiedShaders::HasCompiledVariant(*modifiedShader))
 				return true;
 		}
 
 		if (!DatabaseModifiedShaders::CompileModifiedShader(modifiedShaderId))
 		{
-			WriteToRuntimeLogError("Failed to compile Modified Shader package: " + modifiedShaderId);
+			WriteToRuntimeLogError("Failed to queue Modified Shader package compile: " + modifiedShaderId);
 			return false;
 		}
 
-		WriteToRuntimeLogSuccess("Compiled Modified Shader package: " + modifiedShaderId);
+		WriteToRuntimeLogSuccess("Queued Modified Shader package compile: " + modifiedShaderId);
 		return true;
 	}
 
@@ -98,7 +101,7 @@ namespace ShaderInjectorGUI
 
 		ShaderTarget::ShaderTargetDisk& shaderTarget = HookD3D12::gLoadedShaderTargets[shaderTargetIndex];
 
-		if (!EnsureModifiedShaderCompiledForShaderTarget(shaderTarget.modifiedShaderId))
+		if (!EnsureModifiedShaderCompileQueuedForShaderTarget(shaderTarget.modifiedShaderId))
 			return false;
 
 		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(shaderTarget.modifiedShaderId);

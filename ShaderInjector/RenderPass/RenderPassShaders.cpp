@@ -8,6 +8,8 @@
 #include <d3d12shader.h>
 
 #include "IO/ShaderInjectorIO.h"
+#include "ModifiedShader/DatabaseModifiedShaders.h"
+#include "RenderPass/DatabaseRenderPasses.h"
 #include "ShaderResource/DatabaseShaderResources.h"
 #include "ShaderResource/ShaderResourceCatalog.h"
 #include "StringHelper.h"
@@ -931,12 +933,19 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			return false;
 		}
 
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = nullptr;
+		if (RenderPass::IsReplacementPass(renderPass.type))
+			modifiedShader = DatabaseRenderPasses::ResolveModifiedShader(renderPass);
+
 		std::string fragmentBlobPath = renderPass.fragmentShaderCompiledBlobPath;
 		if (!ShaderInjectorIO::CompileSourceToDXILBlob(
 				renderPass.fragmentShaderSourcePath,
 				renderPass.fragmentShaderProfile,
 				renderPass.fragmentShaderEntryPoint,
-				fragmentBlobPath))
+				fragmentBlobPath,
+				ShaderInjectorIO::ShaderSignaturePacking::PrefixStable,
+				{},
+				modifiedShader ? modifiedShader->compilerArguments : std::vector<std::string>{}))
 		{
 			outError = "Render Pass shader compilation failed.";
 			return false;
@@ -947,6 +956,21 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			outError = "Compiled Render Pass shaders could not be loaded.";
 			return false;
 		}
+
+		LoadShaderVariants(renderPass);
+		if (!renderPass.fragmentShaderVariants.empty())
+			DatabaseModifiedShaders::QueueSourceCompiles(*modifiedShader, renderPass.id, renderPass.fragmentShaderSourcePath, renderPass.fragmentShaderVariants);
 		return true;
+	}
+
+	void LoadShaderVariants(RenderPass::RenderPassDisk& renderPass)
+	{
+		renderPass.fragmentShaderVariants.clear();
+		if (!RenderPass::IsReplacementPass(renderPass.type))
+			return;
+
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseRenderPasses::ResolveModifiedShader(renderPass);
+		if (modifiedShader && modifiedShader->HasPerTargetDefines())
+			DatabaseModifiedShaders::LoadSourceVariants(*modifiedShader, renderPass.fragmentShaderSourcePath, renderPass.fragmentShaderCompiledBlobPath, renderPass.fragmentShaderVariants);
 	}
 } //namespace RenderPassShaders

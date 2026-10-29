@@ -47,6 +47,8 @@ namespace HookD3D12
 	extern std::atomic<ID3D12PipelineState*> gHiddenMeshPipelineState;
 
 	CommandListPipelineState& GetCommandListPipelineState(ID3D12GraphicsCommandList* commandList);
+	CommandListPipelineState* FindCommandListPipelineState(ID3D12GraphicsCommandList* commandList);
+	void EraseCommandListPipelineState(ID3D12GraphicsCommandList* commandList);
 	void UpdateUncapturedPipelineRootSignatureLocked(ID3D12PipelineState* pipelineState, ID3D12RootSignature* rootSignature, bool computeRootSignature);
 	void RecordUncapturedPipelineStateLocked(ID3D12PipelineState* pipelineState, ID3D12RootSignature* observedGraphicsRootSignature, ID3D12RootSignature* observedComputeRootSignature, const char* reason);
 	bool TryResolvePublishedPipelineState(ID3D12PipelineState* requestedPipelineState, ID3D12PipelineState*& resolvedPipelineState);

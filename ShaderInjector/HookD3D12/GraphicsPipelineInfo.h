@@ -46,6 +46,7 @@ namespace HookD3D12
 		ShaderTarget::ShaderType activeShaderTargetType = ShaderTarget::Unknown;
 		uint64_t activeShaderTargetHash = 0;
 		bool activeShaderTargetUsesFallback = false;
+		uint64_t activeBlobGeneration = 0;
 		uint8_t shaderTargetApplyFailureCount = 0;
 		bool shaderTargetApplyRetryQueued = false;
 

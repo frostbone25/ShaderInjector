@@ -6,6 +6,7 @@
 #include <vector>
 #include <d3d12.h>
 #include "JsonHelper.h"
+#include "ModifiedShader/ModifiedShaderPackageDisk.h"
 #include "ShaderResource/ShaderResource.h"
 #include "Enum/RenderPassRenderPassType.h"
 #include "Enum/RenderPassExecutionMode.h"
@@ -71,6 +72,7 @@ namespace RenderPass
 		std::vector<uint8_t> fragmentShaderBlob;
 		uint64_t vertexShaderBlobHash = 0;
 		uint64_t fragmentShaderBlobHash = 0;
+		std::vector<ModifiedShader::ModifiedShaderCompiledVariant> fragmentShaderVariants;
 
 		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
 			RenderPassDisk,

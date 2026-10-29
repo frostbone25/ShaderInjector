@@ -318,10 +318,11 @@ namespace HookD3D12
 				std::vector<uint8_t> compiledReplacementBlob;
 
 				if (modifiedShader && modifiedShader->enabled && modifiedShader->shaderType == replacement.shaderType)
-					compiledReplacementBlob = modifiedShader->compiledBlob;
+					DatabaseModifiedShaders::TryGetCompiledBlobForShader(*modifiedShader, replacement.originalShaderBytecodeHash, replacement.shaderBytecodeHashAliases, compiledReplacementBlob);
 
 				gLoadedShaderTargets.push_back(replacement);
 				gLoadedShaderTargetBlobs.push_back(std::move(compiledReplacementBlob));
+				RestartShaderTargetApplyScan();
 			}
 		}
 

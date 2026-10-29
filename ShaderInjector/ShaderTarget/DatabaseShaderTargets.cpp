@@ -35,7 +35,7 @@ namespace HookD3D12
 
 		return modifiedShader && modifiedShader->enabled &&
 			   modifiedShader->shaderType == replacement.shaderType &&
-			   DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(*modifiedShader, replacement.originalShaderAnalysis);
+			   DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(*modifiedShader, replacement.originalShaderAnalysis, replacement.originalShaderBytecodeHash, replacement.shaderBytecodeHashAliases);
 	}
 
 	void RefreshShaderTargetsForModifiedShaderStateChange()
@@ -91,11 +91,21 @@ namespace HookD3D12
 					replacement.modifiedShaderBlobPath = modifiedShader->compiledBlobPath;
 
 				if (modifiedShader && IsShaderTargetEffectivelyEnabled(replacement))
-					compiledReplacementBlob = modifiedShader->compiledBlob;
-				else if (modifiedShader && modifiedShader->enabled && !modifiedShader->compiledBlob.empty() &&
-						 !DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(*modifiedShader, replacement.originalShaderAnalysis))
 				{
-					ShaderInjectorIO::WriteToLogFileError("DatabaseShaderTargets->RefreshLoadedShaderTargets: refusing incompatible compiled shader interface for " + replacement.name + " from " + modifiedShader->id);
+					std::vector<uint8_t> variantBlob;
+
+					if (DatabaseModifiedShaders::TryGetCompiledBlobForShader(*modifiedShader, replacement.originalShaderBytecodeHash, replacement.shaderBytecodeHashAliases, variantBlob))
+						compiledReplacementBlob = std::move(variantBlob);
+				}
+				else if (modifiedShader && modifiedShader->enabled &&
+						 DatabaseModifiedShaders::HasCompiledVariant(*modifiedShader) &&
+						 !DatabaseModifiedShaders::CompiledShaderMatchesTargetInterface(*modifiedShader, replacement.originalShaderAnalysis, replacement.originalShaderBytecodeHash, replacement.shaderBytecodeHashAliases))
+				{
+					//a variant that is still compiling also reports no match.
+					std::vector<uint8_t> rejectedBlob;
+
+					if (DatabaseModifiedShaders::TryGetCompiledBlobForShader(*modifiedShader, replacement.originalShaderBytecodeHash, replacement.shaderBytecodeHashAliases, rejectedBlob))
+						ShaderInjectorIO::WriteToLogFileError("DatabaseShaderTargets->RefreshLoadedShaderTargets: refusing incompatible compiled shader interface for " + replacement.name + " from " + modifiedShader->id);
 				}
 
 				loadedTargets.push_back(std::move(replacement));

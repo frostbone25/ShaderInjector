@@ -2,12 +2,12 @@
 
 namespace ShaderInjectorGUI
 {
-	//report how much of a modified shader's linked target set was refreshed.
+	//report how much of a modified shader's linked target set was queued for a background refresh.
 	struct ModifiedShaderRecompileResult
 	{
-		bool compiled = false;
+		bool compileQueued = false;
 		int linkedShaderTargetCount = 0;
-		int reloadedShaderTargetCount = 0;
+		int pendingReloadShaderTargetCount = 0;
 		int skippedInactiveShaderTargetCount = 0;
 	};
 } //namespace ShaderInjectorGUI

@@ -45,7 +45,9 @@
 #include "dsound_proxy.h"
 #include "HookD3D12.h"
 #include "HookD3D12DeviceLifecycle.h"
+#include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "ShaderTarget/DatabaseShaderTargets.h"
+#include "HookD3D12RetiredPSOTracker.h"
 #include "Input/HookInput.h"
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderTarget/ShaderTarget.h"
@@ -193,6 +195,8 @@ namespace HookD3D12
 	static std::unordered_map<ID3D12GraphicsCommandList*, std::unique_ptr<CommandListPipelineState>> gCommandListStates;
 	static thread_local ID3D12GraphicsCommandList* gCachedCommandList = nullptr;
 	static thread_local CommandListPipelineState* gCachedCommandListState = nullptr;
+	static std::atomic<uint64_t> gCommandListStateRegistryEpoch{0};
+	static thread_local uint64_t gCachedCommandListStateEpoch = 0;
 
 	std::vector<PSOPendingRebuild> gPendingRebuilds;
 
@@ -211,8 +215,6 @@ namespace HookD3D12
 	//games rotate through hundreds of PSOs while recording a frame. A larger direct
 	//cache prevents ordinary binds from repeatedly reaching the shared PSO registry.
 	static thread_local std::array<PipelineBindingCacheEntry, 256> gPipelineBindingCache;
-	static std::vector<ID3D12PipelineState*> gRetiredPipelineStates;
-	static std::unordered_set<ID3D12PipelineState*> gRetiredPipelineStateSet;
 
 	static std::atomic<bool> gShaderTargetApplyDirty = true;
 	std::atomic<bool> gPipelineStateOverridesDirty = true;
@@ -246,6 +248,26 @@ namespace HookD3D12
 		gShaderTargetApplyDirty = true;
 	}
 
+	static std::atomic<bool> gRestartShaderTargetApplyScan = false;
+
+	void RestartShaderTargetApplyScan()
+	{
+		gRestartShaderTargetApplyScan = true;
+		gShaderTargetApplyDirty = true;
+	}
+
+	static void RetirePipelineState(ID3D12PipelineState*& pipelineState);
+
+	static void ShareReplacementWithUncaptured(UncapturedPipelineStateInfo& uncaptured, ID3D12PipelineState* pipelineState)
+	{
+		if (uncaptured.replacementPipelineState == pipelineState)
+			return;
+
+		pipelineState->AddRef();
+		RetirePipelineState(uncaptured.replacementPipelineState);
+		uncaptured.replacementPipelineState = pipelineState;
+	}
+
 	template <typename PipelineInfo>
 	static void ResetShaderTargetRetryState(PipelineInfo& pipeline)
 	{
@@ -274,19 +296,128 @@ namespace HookD3D12
 		QueueShaderTargetApplyWork();
 	}
 
+	CommandListPipelineState* FindCommandListPipelineState(ID3D12GraphicsCommandList* commandList)
+	{
+		std::lock_guard<std::mutex> lock(gCommandListStateRegistryMutex);
+		const auto found = gCommandListStates.find(commandList);
+
+		if (found == gCommandListStates.end())
+			return nullptr;
+
+		return found->second.get();
+	}
+
+	void EraseCommandListPipelineState(ID3D12GraphicsCommandList* commandList)
+	{
+		std::lock_guard<std::mutex> lock(gCommandListStateRegistryMutex);
+		gCommandListStates.erase(commandList);
+
+		//other threads' caches may still point at the erased entry, and a new list can reuse its address.
+		gCommandListStateRegistryEpoch.fetch_add(1, std::memory_order_release);
+	}
+
+	namespace
+	{
+		//erases the list's registry entry when D3D12 destroys the list.
+		class CommandListStateFinalizer final : public IUnknown
+		{
+		public:
+			explicit CommandListStateFinalizer(ID3D12GraphicsCommandList* commandList) : m_commandList(commandList) {}
+
+			HRESULT STDMETHODCALLTYPE QueryInterface(REFIID interfaceId, void** interfaceOut) override
+			{
+				if (!interfaceOut)
+					return E_POINTER;
+
+				if (interfaceId == __uuidof(IUnknown))
+				{
+					*interfaceOut = static_cast<IUnknown*>(this);
+					AddRef();
+					return S_OK;
+				}
+
+				*interfaceOut = nullptr;
+				return E_NOINTERFACE;
+			}
+
+			ULONG STDMETHODCALLTYPE AddRef() override
+			{
+				return ++m_referenceCount;
+			}
+
+			ULONG STDMETHODCALLTYPE Release() override
+			{
+				const ULONG remaining = --m_referenceCount;
+
+				if (remaining == 0)
+				{
+					if (m_commandList)
+						EraseCommandListPipelineState(m_commandList);
+
+					delete this;
+				}
+
+				return remaining;
+			}
+
+			void Disarm()
+			{
+				m_commandList = nullptr;
+			}
+
+		private:
+			~CommandListStateFinalizer() = default;
+
+			std::atomic<ULONG> m_referenceCount{1};
+			ID3D12GraphicsCommandList* m_commandList = nullptr;
+		};
+
+		bool AttachCommandListStateFinalizer(ID3D12GraphicsCommandList* commandList)
+		{
+			CommandListStateFinalizer* finalizer = new (std::nothrow) CommandListStateFinalizer(commandList);
+
+			if (!finalizer)
+				return false;
+
+			static const GUID finalizerGuid = {0x7f3b2c41, 0x9d84, 0x4e57, {0x8a, 0x16, 0x2c, 0x9b, 0x51, 0x0d, 0x74, 0x38}};
+			const HRESULT result = commandList->SetPrivateDataInterface(finalizerGuid, finalizer);
+
+			if (FAILED(result))
+				finalizer->Disarm();
+
+			//SetPrivateDataInterface takes its own reference; drop ours so the list's release frees it.
+			finalizer->Release();
+
+			return SUCCEEDED(result);
+		}
+	} //namespace
+
 	CommandListPipelineState& GetCommandListPipelineState(ID3D12GraphicsCommandList* commandList)
 	{
-		if (commandList == gCachedCommandList && gCachedCommandListState)
+		if (commandList == gCachedCommandList && gCachedCommandListState &&
+			gCachedCommandListStateEpoch == gCommandListStateRegistryEpoch.load(std::memory_order_acquire))
 			return *gCachedCommandListState;
 
-		std::lock_guard<std::mutex> lock(gCommandListStateRegistryMutex);
-		auto& state = gCommandListStates[commandList];
+		bool createdState = false;
 
-		if (!state)
-			state = std::make_unique<CommandListPipelineState>();
+		{
+			std::lock_guard<std::mutex> lock(gCommandListStateRegistryMutex);
+			auto& state = gCommandListStates[commandList];
 
-		gCachedCommandList = commandList;
-		gCachedCommandListState = state.get();
+			if (!state)
+			{
+				state = std::make_unique<CommandListPipelineState>();
+				createdState = true;
+			}
+
+			gCachedCommandList = commandList;
+			gCachedCommandListState = state.get();
+			gCachedCommandListStateEpoch = gCommandListStateRegistryEpoch.load(std::memory_order_relaxed);
+		}
+
+		//outside the registry lock: a finalizer release erases under it.
+		if (createdState && !AttachCommandListStateFinalizer(commandList))
+			ShaderInjectorGUI::WriteToRuntimeLogError("HookD3D12->GetCommandListPipelineState: could not attach the lifetime finalizer; this list's state will never be erased");
 
 		return *gCachedCommandListState;
 	}
@@ -377,6 +508,7 @@ namespace HookD3D12
 		{
 			auto& uncaptured = gUncapturedPipelineStates[pipelineIndex];
 			UnregisterKnownPipelineStateLocked(uncaptured.pipelineState);
+			RetirePipelineState(uncaptured.pendingSwapPipelineState);
 			uncaptured.attemptedReplacement = false;
 			uncaptured.retryReplacementOnRootSignatureChange = false;
 			uncaptured.rootSignatureAttempts.Clear();
@@ -474,18 +606,15 @@ namespace HookD3D12
 			MarkShaderTargetApplyDirty();
 	}
 
-	void RetirePipelineState(ID3D12PipelineState*& pipelineState)
+	static void RetirePipelineState(ID3D12PipelineState*& pipelineState)
 	{
 		if (!pipelineState)
 			return;
 
 		UnregisterKnownPipelineStateLocked(pipelineState);
 
-		//command lists recorded by other game threads may still reference this PSO.
-		//keep our owning reference alive for the remaining process lifetime rather than risking
-		//an asynchronous device removal after a replacement reload.
-		if (gRetiredPipelineStateSet.insert(pipelineState).second)
-			gRetiredPipelineStates.push_back(pipelineState);
+		//recorded command lists may still reference this PSO; the tracker releases it once fenced.
+		TrackRetiredPipelineState(pipelineState);
 
 		pipelineState = nullptr;
 	}
@@ -545,19 +674,6 @@ namespace HookD3D12
 	void InvalidateAllReplacementPSOs()
 	{
 		gPipelineStateOverridesDirty.store(true, std::memory_order_release);
-		std::unordered_set<ID3D12PipelineState*> trackedReplacementPSOs;
-
-		for (const auto& pipeline : gGraphicsPipelines)
-		{
-			if (pipeline.pipelineStateWithReplacement)
-				trackedReplacementPSOs.insert(pipeline.pipelineStateWithReplacement);
-		}
-
-		for (const auto& pipeline : gPipelineStates)
-		{
-			if (pipeline.pipelineStateWithReplacement)
-				trackedReplacementPSOs.insert(pipeline.pipelineStateWithReplacement);
-		}
 
 		for (auto& pipeline : gGraphicsPipelines)
 			ClearReplacementPSO(pipeline);
@@ -569,10 +685,8 @@ namespace HookD3D12
 		{
 			UnregisterKnownPipelineStateLocked(uncaptured.pipelineState);
 
-			if (uncaptured.replacementPipelineState && trackedReplacementPSOs.find(uncaptured.replacementPipelineState) == trackedReplacementPSOs.end())
-				RetirePipelineState(uncaptured.replacementPipelineState);
-			else
-				uncaptured.replacementPipelineState = nullptr;
+			RetirePipelineState(uncaptured.pendingSwapPipelineState);
+			RetirePipelineState(uncaptured.replacementPipelineState);
 
 			uncaptured.activeShaderTargetName.clear();
 			uncaptured.activeShaderTargetType = ShaderTarget::Unknown;
@@ -714,14 +828,19 @@ namespace HookD3D12
 
 		for (auto& uncaptured : gUncapturedPipelineStates)
 		{
-			if (!uncaptured.pipelineState || !uncaptured.replacementPipelineState)
+			ID3D12PipelineState* boundReplacement = uncaptured.replacementPipelineState;
+
+			if (!boundReplacement)
+				boundReplacement = uncaptured.pendingSwapPipelineState;
+
+			if (!uncaptured.pipelineState || !boundReplacement)
 				continue;
 
 			const ShaderTarget::ShaderTargetDisk* activeShaderTarget = FindActiveShaderTarget(uncaptured.activeShaderTargetName, uncaptured.activeShaderTargetHash, uncaptured.activeShaderTargetType);
 
 			if (activeShaderTarget)
 			{
-				gPipelineStateOverrides[uncaptured.pipelineState] = uncaptured.replacementPipelineState;
+				gPipelineStateOverrides[uncaptured.pipelineState] = boundReplacement;
 
 				RenderPassRuntime::PipelineOutputState outputState{};
 
@@ -1268,7 +1387,8 @@ namespace HookD3D12
 		const bool compiledBlobAvailable = replacementIndex < (int)gLoadedShaderTargetBlobs.size() && !gLoadedShaderTargetBlobs[replacementIndex].empty();
 		const bool compiledBlobOnDisk = !replacement.modifiedShaderBlobPath.empty() && ShaderInjectorIO::FileExists(replacement.modifiedShaderBlobPath);
 
-		if (pipeline.pipelineStateWithReplacement && pipeline.activeShaderTargetName == replacement.name && pipeline.activeShaderTargetHash == shaderHash && pipeline.activeShaderTargetType == shaderType)
+		if (pipeline.pipelineStateWithReplacement && pipeline.activeShaderTargetName == replacement.name && pipeline.activeShaderTargetHash == shaderHash && pipeline.activeShaderTargetType == shaderType &&
+			pipeline.activeBlobGeneration == replacement.modifiedShaderBlobGeneration)
 		{
 			if (!pipeline.activeShaderTargetUsesFallback || (!compiledBlobAvailable && !compiledBlobOnDisk))
 				return true;
@@ -1398,6 +1518,7 @@ namespace HookD3D12
 		pipeline.activeShaderTargetType = shaderType;
 		pipeline.activeShaderTargetHash = shaderHash;
 		pipeline.activeShaderTargetUsesFallback = usedFallback;
+		pipeline.activeBlobGeneration = replacement.modifiedShaderBlobGeneration;
 
 		RegisterKnownPipelineStateLocked(pipeline.pipelineStateWithReplacement);
 
@@ -1423,7 +1544,8 @@ namespace HookD3D12
 		const bool compiledBlobAvailable = replacementIndex < (int)gLoadedShaderTargetBlobs.size() && !gLoadedShaderTargetBlobs[replacementIndex].empty();
 		const bool compiledBlobOnDisk = !replacement.modifiedShaderBlobPath.empty() && ShaderInjectorIO::FileExists(replacement.modifiedShaderBlobPath);
 
-		if (pipeline.pipelineStateWithReplacement && pipeline.activeShaderTargetName == replacement.name && pipeline.activeShaderTargetHash == shaderHash && pipeline.activeShaderTargetType == shaderType)
+		if (pipeline.pipelineStateWithReplacement && pipeline.activeShaderTargetName == replacement.name && pipeline.activeShaderTargetHash == shaderHash && pipeline.activeShaderTargetType == shaderType &&
+			pipeline.activeBlobGeneration == replacement.modifiedShaderBlobGeneration)
 		{
 			if (!pipeline.activeShaderTargetUsesFallback || (!compiledBlobAvailable && !compiledBlobOnDisk))
 				return true;
@@ -1704,6 +1826,7 @@ namespace HookD3D12
 		pipeline.activeShaderTargetType = shaderType;
 		pipeline.activeShaderTargetHash = shaderHash;
 		pipeline.activeShaderTargetUsesFallback = usedFallback;
+		pipeline.activeBlobGeneration = replacement.modifiedShaderBlobGeneration;
 
 		RegisterKnownPipelineStateLocked(pipeline.pipelineStateWithReplacement);
 
@@ -2053,7 +2176,7 @@ namespace HookD3D12
 
 				if (GraphicsPipelineMatchesReplacementTemplate(pipeline, replacement) && RebuildGraphicsPSOWithReplacement(pipeline, replacementIndex, shaderHash, replacement.shaderType))
 				{
-					uncaptured.replacementPipelineState = pipeline.pipelineStateWithReplacement;
+					ShareReplacementWithUncaptured(uncaptured, pipeline.pipelineStateWithReplacement);
 					uncaptured.activeShaderTargetName = replacement.name;
 					uncaptured.activeShaderTargetType = replacement.shaderType;
 					uncaptured.activeShaderTargetHash = shaderHash;
@@ -2076,7 +2199,7 @@ namespace HookD3D12
 
 				if (StreamPipelineMatchesReplacementTemplate(pipeline, replacement) && RebuildStreamPSOWithReplacement(pipeline, replacementIndex, shaderHash, replacement.shaderType))
 				{
-					uncaptured.replacementPipelineState = pipeline.pipelineStateWithReplacement;
+					ShareReplacementWithUncaptured(uncaptured, pipeline.pipelineStateWithReplacement);
 					uncaptured.activeShaderTargetName = replacement.name;
 					uncaptured.activeShaderTargetType = replacement.shaderType;
 					uncaptured.activeShaderTargetHash = shaderHash;
@@ -2095,7 +2218,7 @@ namespace HookD3D12
 			{
 				if (GraphicsPipelineMatchesReplacementTemplate(pipeline, replacement) && RebuildGraphicsPSOWithReplacement(pipeline, replacementIndex, shaderHash, replacement.shaderType))
 				{
-					uncaptured.replacementPipelineState = pipeline.pipelineStateWithReplacement;
+					ShareReplacementWithUncaptured(uncaptured, pipeline.pipelineStateWithReplacement);
 					uncaptured.activeShaderTargetName = replacement.name;
 					uncaptured.activeShaderTargetType = replacement.shaderType;
 					uncaptured.activeShaderTargetHash = shaderHash;
@@ -2114,7 +2237,7 @@ namespace HookD3D12
 			{
 				if (StreamPipelineMatchesReplacementTemplate(pipeline, replacement) && RebuildStreamPSOWithReplacement(pipeline, replacementIndex, shaderHash, replacement.shaderType))
 				{
-					uncaptured.replacementPipelineState = pipeline.pipelineStateWithReplacement;
+					ShareReplacementWithUncaptured(uncaptured, pipeline.pipelineStateWithReplacement);
 					uncaptured.activeShaderTargetName = replacement.name;
 					uncaptured.activeShaderTargetType = replacement.shaderType;
 					uncaptured.activeShaderTargetHash = shaderHash;
@@ -2134,8 +2257,49 @@ namespace HookD3D12
 		return false;
 	}
 
+	static void FinishUncapturedSwap(UncapturedPipelineStateInfo& uncaptured)
+	{
+		if (!uncaptured.pendingSwapPipelineState)
+			return;
+
+		if (uncaptured.replacementPipelineState)
+		{
+			RetirePipelineState(uncaptured.pendingSwapPipelineState);
+			return;
+		}
+
+		if (!uncaptured.retryReplacementOnRootSignatureChange)
+		{
+			uncaptured.replacementPipelineState = uncaptured.pendingSwapPipelineState;
+			uncaptured.pendingSwapPipelineState = nullptr;
+		}
+	}
+
+	void SwapReplacementPSOsForShaderTargetLocked(const std::string& shaderTargetName)
+	{
+		for (size_t pipelineIndex = 0; pipelineIndex < gUncapturedPipelineStates.size(); ++pipelineIndex)
+		{
+			UncapturedPipelineStateInfo& uncaptured = gUncapturedPipelineStates[pipelineIndex];
+
+			if (uncaptured.activeShaderTargetName != shaderTargetName || !uncaptured.replacementPipelineState || uncaptured.shaderTargetApplyRetryQueued)
+				continue;
+
+			uncaptured.pendingSwapPipelineState = uncaptured.replacementPipelineState;
+			uncaptured.replacementPipelineState = nullptr;
+			uncaptured.attemptedReplacement = false;
+			ResetShaderTargetRetryState(uncaptured);
+			uncaptured.shaderTargetApplyRetryQueued = true;
+			gUncapturedShaderTargetRetryQueue.push_back(pipelineIndex);
+		}
+
+		gPipelineStateOverridesDirty = true;
+		MarkShaderTargetApplyDirty();
+	}
+
 	void ApplyShaderTargetPSOs()
 	{
+		DatabaseModifiedShaders::ProcessCompletedCompiles();
+
 		if (!IsPipelineCreationIdle())
 			return;
 
@@ -2152,6 +2316,12 @@ namespace HookD3D12
 			RefreshLoadedShaderTargets();
 
 		std::lock_guard<std::mutex> lock(gPipelineMutex);
+
+		if (gRestartShaderTargetApplyScan.exchange(false))
+		{
+			gGraphicsShaderTargetApplyCursor = 0;
+			gStreamShaderTargetApplyCursor = 0;
+		}
 
 		bool capturedReplacementAttempted = false;
 		const uint64_t initialCreateAttemptCount = gReplacementPSOCreateAttemptCount;
@@ -2266,6 +2436,7 @@ namespace HookD3D12
 			uncaptured.attemptedReplacement = false;
 			uncaptured.retryReplacementOnRootSignatureChange = false;
 			const bool applied = TryApplyUncapturedReplacement(uncaptured);
+			FinishUncapturedSwap(uncaptured);
 			++uncapturedCandidatesThisFrame;
 			++gUncapturedCandidateAttemptCount;
 
@@ -2320,6 +2491,7 @@ namespace HookD3D12
 			}
 
 			const bool applied = TryApplyUncapturedReplacement(uncaptured);
+			FinishUncapturedSwap(uncaptured);
 			capturedReplacementAttempted = gReplacementPSOCreateAttemptCount != initialCreateAttemptCount;
 
 			if (uncaptured.replacementPipelineState)
@@ -2699,6 +2871,9 @@ namespace HookD3D12
 
 	void ProcessPendingRebuilds()
 	{
+		ProcessRetiredPSOReleases();
+		ShaderPatchRuntime::ReleaseRetiredResults();
+
 		if (gPendingRebuilds.empty())
 			return;
 
@@ -2933,6 +3108,8 @@ namespace HookD3D12
 		ShaderAutomaticDiscovery::Shutdown();
 		//join the patch worker before the pipelines and devices it uses are released.
 		ShaderPatchRuntime::Shutdown();
+		//join compile workers before the package blobs and shader targets they write are released.
+		DatabaseModifiedShaders::Shutdown();
 		ResetOverlayStartupGate();
 
 		{
@@ -2942,6 +3119,11 @@ namespace HookD3D12
 
 		WaitForOverlayGPUIdle();
 		ReleaseOverlaySwapChainResources(true);
+
+		{
+			std::lock_guard<std::mutex> pipelineLock(gPipelineMutex);
+			ShutdownRetiredPSOTracker();
+		}
 
 		if (gOverlayFence)
 		{

@@ -122,6 +122,7 @@ namespace ShaderInjectorIO
 			const std::string& shaderProfile,
 			const std::string& entryPoint,
 			const std::string& compiledBlobFilePath,
+			const std::vector<std::string>& defines,
 			std::string& compilerDiagnosticsOutput,
 			std::string& compilerErrorOutput)
 		{
@@ -167,13 +168,43 @@ namespace ShaderInjectorIO
 				PathFromUTF8(DirectoryFromPath(shaderSourceFilePath)),
 				PathFromUTF8(GetModifiedShadersIncludesDirectory()));
 
+			//each entry is "NAME=VALUE"; the macro array points into these strings, which outlive the call.
+			std::vector<std::string> macroNames;
+			std::vector<std::string> macroValues;
+			macroNames.reserve(defines.size());
+			macroValues.reserve(defines.size());
+
+			for (const std::string& define : defines)
+			{
+				const size_t separator = define.find('=');
+
+				if (separator == std::string::npos)
+				{
+					macroNames.push_back(define);
+					macroValues.emplace_back();
+					continue;
+				}
+
+				macroNames.push_back(define.substr(0, separator));
+				macroValues.push_back(define.substr(separator + 1));
+			}
+
+			//the macro array must end with a null entry.
+			std::vector<D3D_SHADER_MACRO> macros;
+			macros.reserve(defines.size() + 1);
+
+			for (size_t defineIndex = 0; defineIndex < defines.size(); ++defineIndex)
+				macros.push_back({ macroNames[defineIndex].c_str(), macroValues[defineIndex].c_str() });
+
+			macros.push_back({ nullptr, nullptr });
+
 			ID3DBlob* shaderBlob = nullptr;
 			ID3DBlob* errorBlob = nullptr;
 			const std::wstring shaderSourcePath = PathFromUTF8(shaderSourceFilePath).wstring();
 			//the include handler lets this compile find local files and the injector's shared include folder.
 			const HRESULT compilationResult = compileShaderFromFile(
 				shaderSourcePath.c_str(),
-				nullptr,
+				macros.data(),
 				&includeHandler,
 				entryPoint.c_str(),
 				shaderProfile.c_str(),
@@ -228,7 +259,9 @@ namespace ShaderInjectorIO
 		const std::string& shaderProfile,
 		const std::string& entryPoint,
 		std::string& compiledBlobFilePath,
-		ShaderSignaturePacking signaturePacking)
+		ShaderSignaturePacking signaturePacking,
+		const std::vector<std::string>& defines,
+		const std::vector<std::string>& extraCompilerArguments)
 	{
 		if (!FileExists(shaderSourceFilePath))
 		{
@@ -261,6 +294,7 @@ namespace ShaderInjectorIO
 					shaderProfile,
 					entryPoint,
 					temporaryBlobFilePath,
+					defines,
 					compilerDiagnostics,
 					compilerError))
 				{
@@ -304,6 +338,15 @@ namespace ShaderInjectorIO
 				shaderSourceFilePath,
 				"-Fo", temporaryBlobFilePath
 			};
+
+			for (const std::string& define : defines)
+			{
+				shaderCompilerArguments.push_back("-D");
+				shaderCompilerArguments.push_back(define);
+			}
+
+			//package-specific DXC switches, e.g. -enable-16bit-types for sources that use native 16-bit types.
+			shaderCompilerArguments.insert(shaderCompilerArguments.end(), extraCompilerArguments.begin(), extraCompilerArguments.end());
 
 			const ProcessResult processResult = RunProcess(shaderCompilerExecutablePath, shaderCompilerArguments, compilerOutputFilePath);
 			compilerDiagnostics = ReadCompilerDiagnostics(compilerOutputFilePath);

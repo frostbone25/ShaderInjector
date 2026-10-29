@@ -8,6 +8,7 @@
 
 #include "Enum/ShaderType.h"
 #include "RenderPass/RenderPass.h"
+#include "RenderPass/Runtime/ShaderTargetBinding.h"
 
 namespace RenderPassReplacement
 {
@@ -20,6 +21,7 @@ namespace RenderPassReplacement
 	ID3D12PipelineState* GetOrCreatePipeline(
 		const RenderPass::RenderPassDisk& renderPass,
 		ID3D12PipelineState* originalPipelineState,
+		const RenderPassRuntime::ShaderTargetBinding& shaderTarget,
 		std::string& outError);
 	//rebuild a captured PSO with replaced stages, optionally against another root signature.
 	//the caller owns the returned reference.

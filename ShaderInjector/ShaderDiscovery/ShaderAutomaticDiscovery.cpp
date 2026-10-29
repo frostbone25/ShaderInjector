@@ -422,6 +422,10 @@ namespace ShaderAutomaticDiscovery
 
 				++enabledModifiedShaderCount;
 
+				//a package with per-target defines needs one target per permutation, so one target is not done.
+				if (modifiedShader.HasPerTargetDefines())
+					return false;
+
 				if (!ModifiedShaderHasTargetLocked(modifiedShader.id))
 					return false;
 			}
@@ -905,14 +909,6 @@ namespace ShaderAutomaticDiscovery
 				if (!existingTarget.enabled)
 					return;
 
-				const ModifiedShader::ModifiedShaderPackageDisk* existingPackage = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
-
-				if (existingPackage && existingPackage->compiledBlob.empty())
-				{
-					if (!DatabaseModifiedShaders::CompileModifiedShader(modifiedShaderId) || !HookD3D12::ReloadShaderTarget(targetIndex))
-						return;
-				}
-
 				HookD3D12::QueueShaderTargetApplyWork();
 				return;
 			}
@@ -922,15 +918,9 @@ namespace ShaderAutomaticDiscovery
 			if (!selectedPackage)
 				return;
 
-			if (ModifiedShaderAlreadyHasGeneratedTarget(modifiedShaderId))
+			if (!selectedPackage->HasPerTargetDefines() && ModifiedShaderAlreadyHasGeneratedTarget(modifiedShaderId))
 			{
 				ShaderInjectorGUI::WriteToRuntimeLogWarning("ShaderAutomaticDiscovery: skipped duplicate ShaderTarget candidate " + Hash::FormatHash(queued.shaderKey.shaderHash) + " for " + modifiedShaderId);
-				return;
-			}
-
-			if (selectedPackage->compiledBlob.empty() && !DatabaseModifiedShaders::CompileModifiedShader(modifiedShaderId))
-			{
-				ShaderInjectorGUI::WriteToRuntimeLogError("ShaderAutomaticDiscovery: failed to compile " + modifiedShaderId);
 				return;
 			}
 
@@ -1158,7 +1148,13 @@ namespace ShaderAutomaticDiscovery
 		auto analysisSnapshot = std::make_shared<std::vector<ModifiedShader::ModifiedShaderPackageDisk>>(modifiedShaders);
 
 		for (ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : *analysisSnapshot)
+		{
+			//a discovery worker only reads package and target metadata. clearing the runtime blobs here
+			//keeps them out of the snapshot's retained size, which is paid once per refresh.
 			modifiedShader.compiledBlob.clear();
+			modifiedShader.compiledVariants.clear();
+			modifiedShader.variantIndexByShaderHash.clear();
+		}
 
 		std::lock_guard<std::mutex> lock(gQueueMutex);
 		gModifiedShaderAnalysisSnapshot = std::move(analysisSnapshot);

@@ -186,6 +186,9 @@ namespace DatabaseRenderPasses
 		std::sort(gRenderPasses.begin(), gRenderPasses.end(), [](const auto& left, const auto& right)
 				  { return left.name < right.name; });
 
+		for (RenderPass::RenderPassDisk& renderPass : gRenderPasses)
+			RenderPassShaders::LoadShaderVariants(renderPass);
+
 		PublishRuntimeConfiguration();
 
 		ShaderInjectorIO::WriteToLogFile("DatabaseRenderPasses->RefreshRenderPasses: loaded render passes=" + std::to_string(gRenderPasses.size()));
