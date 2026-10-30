@@ -277,6 +277,8 @@
     <ClInclude Include="Performance\TimingSnapshot.h" />
     <ClInclude Include="RenderDoc\RenderDocIntegration.h" />
     <ClInclude Include="RenderPass\DatabaseRenderPasses.h" />
+    <ClInclude Include="GUI\PropertyWidgets.h" />
+    <ClInclude Include="RenderPass\RenderPassShaderCompileQueue.h" />
     <ClInclude Include="RenderPass\RenderPass.h" />
     <ClInclude Include="RenderPass\RenderPassExecutor.h" />
     <ClInclude Include="RenderPass\ExecutorEventNameLookup.h" />
@@ -580,6 +582,8 @@
     <ClCompile Include="Performance\RenderPassGPUProfiler.cpp" />
     <ClCompile Include="RenderDoc\RenderDocIntegration.cpp" />
     <ClCompile Include="RenderPass\DatabaseRenderPasses.cpp" />
+    <ClCompile Include="GUI\PropertyWidgets.cpp" />
+    <ClCompile Include="RenderPass\RenderPassShaderCompileQueue.cpp" />
     <ClCompile Include="RenderPass\RenderPass.cpp" />
     <ClCompile Include="RenderPass\RenderPassExecutor.cpp" />
     <ClCompile Include="RenderPass\RenderPassGraph.cpp" />

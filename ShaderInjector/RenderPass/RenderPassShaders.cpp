@@ -765,7 +765,8 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 	bool CreateShaderTemplate(
 		RenderPass::RenderPassDisk& renderPass,
 		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
-		std::string& outError)
+		std::string& outError,
+		bool compileShaders)
 	{
 		outError.clear();
 		const bool computeReplacement = renderPass.type == RenderPass::RenderPassType::ReplacementComputeShader;
@@ -903,6 +904,9 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			return false;
 		}
 
+		if (!compileShaders)
+			return true;
+
 		return CompileShaders(renderPass, outError);
 	}
 
@@ -922,6 +926,35 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::ComputeShader);
 		renderPass.vertexShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::VertexShader);
 
+		std::vector<std::string> compilerArguments;
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = nullptr;
+		if (RenderPass::IsReplacementPass(renderPass.type))
+			modifiedShader = DatabaseRenderPasses::ResolveModifiedShader(renderPass);
+
+		if (modifiedShader)
+			compilerArguments = modifiedShader->compilerArguments;
+
+		if (!CompilePreparedShaders(renderPass, compilerArguments, outError))
+			return false;
+
+		LoadShaderVariants(renderPass);
+		if (!renderPass.fragmentShaderVariants.empty() && modifiedShader)
+			DatabaseModifiedShaders::QueueSourceCompiles(*modifiedShader, renderPass.id, renderPass.fragmentShaderSourcePath, renderPass.fragmentShaderVariants);
+		return true;
+	}
+
+	bool CompilePreparedShaders(
+		RenderPass::RenderPassDisk& renderPass,
+		const std::vector<std::string>& compilerArguments,
+		std::string& outError)
+	{
+		outError.clear();
+		if (!RenderPass::HasShaderTemplate(renderPass))
+		{
+			outError = "Render Pass shader source files are missing.";
+			return false;
+		}
+
 		std::string vertexBlobPath = renderPass.vertexShaderCompiledBlobPath;
 		if (!vertexBlobPath.empty() && !ShaderInjectorIO::CompileSourceToDXILBlob(
 										   renderPass.vertexShaderSourcePath,
@@ -933,10 +966,6 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			return false;
 		}
 
-		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = nullptr;
-		if (RenderPass::IsReplacementPass(renderPass.type))
-			modifiedShader = DatabaseRenderPasses::ResolveModifiedShader(renderPass);
-
 		std::string fragmentBlobPath = renderPass.fragmentShaderCompiledBlobPath;
 		if (!ShaderInjectorIO::CompileSourceToDXILBlob(
 				renderPass.fragmentShaderSourcePath,
@@ -945,7 +974,7 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 				fragmentBlobPath,
 				ShaderInjectorIO::ShaderSignaturePacking::PrefixStable,
 				{},
-				modifiedShader ? modifiedShader->compilerArguments : std::vector<std::string>{}))
+				compilerArguments))
 		{
 			outError = "Render Pass shader compilation failed.";
 			return false;
@@ -957,9 +986,6 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			return false;
 		}
 
-		LoadShaderVariants(renderPass);
-		if (!renderPass.fragmentShaderVariants.empty())
-			DatabaseModifiedShaders::QueueSourceCompiles(*modifiedShader, renderPass.id, renderPass.fragmentShaderSourcePath, renderPass.fragmentShaderVariants);
 		return true;
 	}
 

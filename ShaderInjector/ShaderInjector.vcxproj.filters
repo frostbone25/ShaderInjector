@@ -235,6 +235,9 @@
     <ClInclude Include="GUI\ShaderInjectorGUI.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="GUI\PropertyWidgets.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
     <ClInclude Include="GUI\ShaderModelOption.h">
       <Filter>GUI</Filter>
     </ClInclude>
@@ -676,6 +679,9 @@
       <Filter>ShaderConfiguration</Filter>
     </ClInclude>
     <ClInclude Include="RenderPass\DatabaseRenderPasses.h">
+      <Filter>RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderPass\RenderPassShaderCompileQueue.h">
       <Filter>RenderPass</Filter>
     </ClInclude>
     <ClInclude Include="ModifiedShader\DatabaseModifiedShaders.h">
@@ -1144,6 +1150,9 @@
     <ClCompile Include="GUI\ShaderInjectorGUI.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
+    <ClCompile Include="GUI\PropertyWidgets.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
     <ClCompile Include="RenderDoc\RenderDocIntegration.cpp">
       <Filter>RenderDoc</Filter>
     </ClCompile>
@@ -1277,6 +1286,9 @@
       <Filter>ShaderConfiguration</Filter>
     </ClCompile>
     <ClCompile Include="RenderPass\DatabaseRenderPasses.cpp">
+      <Filter>RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderPass\RenderPassShaderCompileQueue.cpp">
       <Filter>RenderPass</Filter>
     </ClCompile>
     <ClCompile Include="ModifiedShader\DatabaseModifiedShaders.cpp">

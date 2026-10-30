@@ -64,38 +64,23 @@ namespace ShaderInjectorGUI
 	{
 		bool changed = false;
 		ImGui::PushID(property.id.c_str());
+		std::string helpText = property.comment;
 
-		ImGui::TextUnformatted(property.name.c_str());
-		ImGui::SameLine();
-		ImGui::SmallButton("?");
+		if (helpText.empty())
+			helpText = "No description was provided.";
 
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-		{
-			ImGui::BeginTooltip();
-			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 32.0f);
+		helpText += "\nType: " + property.type;
+		helpText += "\nDefault: " + property.defaultValue;
 
-			if (property.comment.empty())
-				ImGui::TextUnformatted("No description was provided.");
-			else
-				ImGui::TextUnformatted(property.comment.c_str());
+		if (!property.range.empty())
+			helpText += "\nRange: " + property.range;
 
-			ImGui::Separator();
-			ImGui::Text("Type: %s", property.type.c_str());
-			ImGui::Text("Default: %s", property.defaultValue.c_str());
+		helpText += "\nShader: " + property.sourceFile;
 
-			if (!property.range.empty())
-				ImGui::Text("Range: %s", property.range.c_str());
+		if (property.sourcePath != property.sourceFile)
+			helpText += "\nPath: " + property.sourcePath;
 
-			ImGui::PopTextWrapPos();
-			ImGui::EndTooltip();
-		}
-
-		ImGui::TextDisabled("Shader: %s", property.sourceFile.c_str());
-
-		if (ImGui::IsItemHovered() && property.sourcePath != property.sourceFile)
-			ImGui::SetTooltip("%s", property.sourcePath.c_str());
-
-		ImGui::SetNextItemWidth(-FLT_MIN);
+		PropertyWidgets::PrepareRow(property.name.c_str(), helpText.c_str());
 
 		if (property.type == "bool")
 		{

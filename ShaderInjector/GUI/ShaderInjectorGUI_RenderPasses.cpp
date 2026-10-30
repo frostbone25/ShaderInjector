@@ -25,6 +25,7 @@
 #include "Globals.h"
 #include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "RenderPass/DatabaseRenderPasses.h"
+#include "RenderPass/RenderPassShaderCompileQueue.h"
 #include "RenderPass/RenderPassGraph.h"
 #include "ShaderConfiguration/DatabaseShaderConfigurations.h"
 #include "ModifiedShader/ModifiedShaderCreation.h"
@@ -81,7 +82,7 @@ namespace ShaderInjectorGUI
 
 	template <size_t OptionCount>
 	//find the current numeric setting, then let the user choose its readable name.
-	bool DrawNamedUnsignedCombo(const char* comboID, uint32_t& selectedValue, const NamedUnsignedValue (&options)[OptionCount])
+	bool DrawNamedUnsignedCombo(const char* visibleLabel, const char* comboID, uint32_t& selectedValue, const NamedUnsignedValue (&options)[OptionCount])
 	{
 		const auto selectedOptionIterator = std::find_if(std::begin(options), std::end(options), [&](const NamedUnsignedValue& option)
 														 { return option.value == selectedValue; });
@@ -93,7 +94,7 @@ namespace ShaderInjectorGUI
 
 		bool selectionChanged = false;
 
-		if (ImGui::BeginCombo(comboID, previewLabel))
+		if (PropertyWidgets::BeginCombo(visibleLabel, comboID, previewLabel))
 		{
 			for (const NamedUnsignedValue& option : options)
 			{
@@ -454,10 +455,7 @@ namespace ShaderInjectorGUI
 	void DrawResolutionPolicy(const char* id, ShaderResource::ResolutionPolicyDisk& resolution)
 	{
 		ImGui::PushID(id);
-		ImGui::TextUnformatted("Resolution");
-		ImGui::SameLine();
-
-		if (ImGui::BeginCombo("##Mode", ResolutionModeName(resolution.mode)))
+		if (PropertyWidgets::BeginCombo("Resolution", "##Mode", ResolutionModeName(resolution.mode)))
 		{
 			const ShaderResource::ResolutionMode modes[] = {
 				ShaderResource::ResolutionMode::Inherit,
@@ -476,12 +474,10 @@ namespace ShaderInjectorGUI
 
 		if (resolution.mode == ShaderResource::ResolutionMode::DownscalePowerOfTwo)
 		{
-			ImGui::TextUnformatted("Downscale");
-			ImGui::SameLine();
 			const uint32_t factors[] = {1, 2, 4, 8, 16};
 			const std::string preview = std::to_string(resolution.downscaleFactor) + "x";
 
-			if (ImGui::BeginCombo("##Factor", preview.c_str()))
+			if (PropertyWidgets::BeginCombo("Downscale", "##Factor", preview.c_str()))
 			{
 				for (uint32_t factor : factors)
 				{
@@ -497,16 +493,10 @@ namespace ShaderInjectorGUI
 		{
 			int width = static_cast<int>(resolution.width);
 			int height = static_cast<int>(resolution.height);
-			ImGui::TextUnformatted("Width");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##Width", &width, 1.0f, 1, 16384))
+			if (PropertyWidgets::DragInt("Width", "##Width", &width, 1.0f, 1, 16384))
 				resolution.width = static_cast<uint32_t>((std::max)(1, width));
 
-			ImGui::TextUnformatted("Height");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##Height", &height, 1.0f, 1, 16384))
+			if (PropertyWidgets::DragInt("Height", "##Height", &height, 1.0f, 1, 16384))
 				resolution.height = static_cast<uint32_t>((std::max)(1, height));
 		}
 		ImGui::PopID();
@@ -647,21 +637,16 @@ namespace ShaderInjectorGUI
 		char name[128]{};
 		strncpy_s(name, resource.name.c_str(), _TRUNCATE);
 		ImGui::PushID("RuntimeTextureProperties");
-		ImGui::TextUnformatted("Name");
-		ImGui::SameLine();
-
-		if (ImGui::InputText("##Name", name, sizeof(name)))
+		if (PropertyWidgets::InputText("Name", "##Name", name, sizeof(name)))
 			resource.name = name;
 
 		ImGui::Text("ID: %s", resource.id.c_str());
-		ImGui::TextUnformatted("Reuse Texture");
-		ImGui::SameLine();
 		const char* reusePreview = "New allocation";
 
 		if (!resource.reuseFromResourceId.empty())
 			reusePreview = resource.reuseFromResourceId.c_str();
 
-		if (ImGui::BeginCombo("##ReuseTexture", reusePreview))
+		if (PropertyWidgets::BeginCombo("Reuse Texture", "##ReuseTexture", reusePreview))
 		{
 			if (ImGui::Selectable("New allocation", resource.reuseFromResourceId.empty()))
 				resource.reuseFromResourceId.clear();
@@ -691,10 +676,7 @@ namespace ShaderInjectorGUI
 
 		ImGui::BeginDisabled(!resource.reuseFromResourceId.empty());
 
-		ImGui::TextUnformatted("Dimension");
-		ImGui::SameLine();
-
-		if (ImGui::BeginCombo("##Dimension", ShaderResource::TextureDimensionName(resource.texture.dimension)))
+		if (PropertyWidgets::BeginCombo("Dimension", "##Dimension", ShaderResource::TextureDimensionName(resource.texture.dimension)))
 		{
 			const ShaderResource::TextureDimension dimensions[] = {
 				ShaderResource::TextureDimension::Texture2D,
@@ -710,11 +692,7 @@ namespace ShaderInjectorGUI
 			ImGui::EndCombo();
 		}
 		const std::string formatPreview = ShaderResource::TextureFormatDisplayName(resource.texture.format);
-		ImGui::TextUnformatted("DXGI Format");
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-
-		if (ImGui::BeginCombo("##Format", formatPreview.c_str()))
+		if (PropertyWidgets::BeginCombo("DXGI Format", "##Format", formatPreview.c_str()))
 		{
 			for (const ShaderResource::TextureFormatOption& formatOption : ShaderResource::TextureFormatOptions())
 			{
@@ -733,35 +711,23 @@ namespace ShaderInjectorGUI
 		DrawResolutionPolicy("TextureResolution", resource.texture.resolution);
 
 		int mipLevels = static_cast<int>(resource.texture.mipLevels);
-		ImGui::TextUnformatted("Mip Levels (0 = full chain)");
-		ImGui::SameLine();
-
-		if (ImGui::DragInt("##MipLevels", &mipLevels, 1.0f, 0, 16))
+		if (PropertyWidgets::DragInt("Mip Levels (0 = full chain)", "##MipLevels", &mipLevels, 1.0f, 0, 16))
 			resource.texture.mipLevels = static_cast<uint32_t>((std::max)(0, mipLevels));
 
 		if (resource.texture.dimension == ShaderResource::TextureDimension::Texture2DArray)
 		{
 			int arraySize = static_cast<int>(resource.texture.arraySize);
-			ImGui::TextUnformatted("Array Size");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##ArraySize", &arraySize, 1.0f, 1, 2048))
+			if (PropertyWidgets::DragInt("Array Size", "##ArraySize", &arraySize, 1.0f, 1, 2048))
 				resource.texture.arraySize = static_cast<uint32_t>((std::max)(1, arraySize));
 		}
 		else if (resource.texture.dimension == ShaderResource::TextureDimension::Texture3D)
 		{
 			int depth = static_cast<int>(resource.texture.depth);
-			ImGui::TextUnformatted("Depth");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##Depth", &depth, 1.0f, 1, 2048))
+			if (PropertyWidgets::DragInt("Depth", "##Depth", &depth, 1.0f, 1, 2048))
 				resource.texture.depth = static_cast<uint32_t>((std::max)(1, depth));
 		}
 
-		ImGui::TextUnformatted("Lifetime");
-		ImGui::SameLine();
-
-		if (ImGui::BeginCombo("##Lifetime", ShaderResource::ResourceLifetimeName(resource.texture.lifetime)))
+		if (PropertyWidgets::BeginCombo("Lifetime", "##Lifetime", ShaderResource::ResourceLifetimeName(resource.texture.lifetime)))
 		{
 			const ShaderResource::ResourceLifetime lifetimes[] = {
 				ShaderResource::ResourceLifetime::Transient,
@@ -818,14 +784,13 @@ namespace ShaderInjectorGUI
 		}
 
 		ImGui::BeginDisabled(requiresCopySourceMatch);
-		ImGui::Checkbox("Match Copy Source", &resource.texture.matchReferenceTexture);
+		PropertyWidgets::Checkbox("Match Copy Source", "Match Copy Source", &resource.texture.matchReferenceTexture);
 		ImGui::EndDisabled();
 		ImGui::BeginDisabled(requiresRenderTarget);
-		ImGui::Checkbox("Render Target", &resource.texture.allowRenderTarget);
+		PropertyWidgets::Checkbox("Render Target", "Render Target", &resource.texture.allowRenderTarget);
 		ImGui::EndDisabled();
-		ImGui::SameLine();
 		ImGui::BeginDisabled(requiresUnorderedAccess);
-		ImGui::Checkbox("Unordered Access", &resource.texture.allowUnorderedAccess);
+		PropertyWidgets::Checkbox("Unordered Access", "Unordered Access", &resource.texture.allowUnorderedAccess);
 		ImGui::EndDisabled();
 
 		if (requiresRenderTarget || requiresUnorderedAccess || requiresCopySourceMatch)
@@ -973,10 +938,7 @@ namespace ShaderInjectorGUI
 
 		if (!outputs)
 		{
-			ImGui::TextUnformatted("Origin");
-			ImGui::SameLine();
-
-			if (ImGui::BeginCombo("##Origin", ShaderResource::ResourceOriginName(binding.origin)))
+			if (PropertyWidgets::BeginCombo("Origin", "##Origin", ShaderResource::ResourceOriginName(binding.origin)))
 			{
 				const ShaderResource::ResourceOrigin origins[] = {
 					ShaderResource::ResourceOrigin::Game,
@@ -1027,11 +989,9 @@ namespace ShaderInjectorGUI
 
 		if (binding.origin == ShaderResource::ResourceOrigin::Runtime)
 		{
-			ImGui::TextUnformatted("Runtime Texture");
-			ImGui::SameLine();
 			const std::string preview = DisplayNameOrFallback(binding.resourceId, "(none)");
 
-			if (ImGui::BeginCombo("##Resource", preview.c_str()))
+			if (PropertyWidgets::BeginCombo("Runtime Texture", "##Resource", preview.c_str()))
 			{
 				std::unordered_set<std::string> shownIds;
 
@@ -1073,9 +1033,7 @@ namespace ShaderInjectorGUI
 			std::string preview = DisplayNameOrFallback(binding.resourceId, "(none)");
 			if (selected)
 				preview = selected->id + " [" + ShaderResource::TextureDimensionName(selected->dimension) + "]";
-			ImGui::TextUnformatted("DDS Texture");
-			ImGui::SameLine();
-			if (ImGui::BeginCombo("##DDSResource", preview.c_str()))
+			if (PropertyWidgets::BeginCombo("DDS Texture", "##DDSResource", preview.c_str()))
 			{
 				for (const ShaderResource::TextureDisk& resource : imported)
 				{
@@ -1101,10 +1059,7 @@ namespace ShaderInjectorGUI
 			const std::vector<GameTextureBindingOption> gameBindings = CollectGameTextureBindingOptions(DatabaseRenderPasses::ResolveModifiedShader(renderPass));
 			const char registerPrefix = GameRegisterPrefix(binding.gameResourceViewType);
 			const std::string preview = std::string(1, registerPrefix) + std::to_string(binding.shaderRegister) + ", space" + std::to_string(binding.registerSpace);
-			ImGui::TextUnformatted("Game Texture Binding");
-			ImGui::SameLine();
-
-			if (ImGui::BeginCombo("##GameTextureBinding", preview.c_str()))
+			if (PropertyWidgets::BeginCombo("Game Texture Binding", "##GameTextureBinding", preview.c_str()))
 			{
 				for (size_t optionIndex = 0; optionIndex < gameBindings.size(); ++optionIndex)
 				{
@@ -1131,10 +1086,7 @@ namespace ShaderInjectorGUI
 				ImGui::EndCombo();
 			}
 
-			ImGui::TextUnformatted("Game View Type");
-			ImGui::SameLine();
-
-			if (ImGui::BeginCombo("##GameViewType", GameResourceViewTypeName(binding.gameResourceViewType)))
+			if (PropertyWidgets::BeginCombo("Game View Type", "##GameViewType", GameResourceViewTypeName(binding.gameResourceViewType)))
 			{
 				const RenderPass::GameResourceViewType viewTypes[] = {
 					RenderPass::GameResourceViewType::UnorderedAccess,
@@ -1157,26 +1109,17 @@ namespace ShaderInjectorGUI
 			if (binding.gameResourceViewType == RenderPass::GameResourceViewType::UnorderedAccess)
 				registerLabel = "UAV Register";
 
-			ImGui::TextUnformatted(registerLabel);
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##GameRegister", &shaderRegister, 1.0f, 0, 4095))
+			if (PropertyWidgets::DragInt(registerLabel, "##GameRegister", &shaderRegister, 1.0f, 0, 4095))
 				binding.shaderRegister = static_cast<uint32_t>((std::max)(0, shaderRegister));
 
-			ImGui::TextUnformatted("Register Space");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##GameSpace", &registerSpace, 1.0f, 0, 4095))
+			if (PropertyWidgets::DragInt("Register Space", "##GameSpace", &registerSpace, 1.0f, 0, 4095))
 				binding.registerSpace = static_cast<uint32_t>((std::max)(0, registerSpace));
 
 			if (gameBindings.empty())
 				ImGui::TextUnformatted("No reflected texture bindings are available; configure the register manually.");
 		}
 
-		ImGui::TextUnformatted("Access");
-		ImGui::SameLine();
-
-		if (ImGui::BeginCombo("##Access", ResourceAccessName(binding.access)))
+		if (PropertyWidgets::BeginCombo("Access", "##Access", ResourceAccessName(binding.access)))
 		{
 			const RenderPass::ResourceAccess inputAccesses[] = {
 				RenderPass::ResourceAccess::ShaderResource,
@@ -1265,10 +1208,7 @@ namespace ShaderInjectorGUI
 		{
 			char hlslName[128]{};
 			strncpy_s(hlslName, binding.hlslName.c_str(), _TRUNCATE);
-			ImGui::TextUnformatted("HLSL Name");
-			ImGui::SameLine();
-
-			if (ImGui::InputText("##HlslName", hlslName, sizeof(hlslName)))
+			if (PropertyWidgets::InputText("HLSL Name", "##HlslName", hlslName, sizeof(hlslName)))
 				binding.hlslName = hlslName;
 
 			int shaderRegister = static_cast<int>(binding.shaderRegister);
@@ -1278,28 +1218,20 @@ namespace ShaderInjectorGUI
 			if (outputs)
 				registerLabel = "UAV Register";
 
-			ImGui::TextUnformatted(registerLabel);
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##Register", &shaderRegister, 1.0f, 0, 4095))
+			if (PropertyWidgets::DragInt(registerLabel, "##Register", &shaderRegister, 1.0f, 0, 4095))
 				binding.shaderRegister = static_cast<uint32_t>((std::max)(0, shaderRegister));
 
-			ImGui::TextUnformatted("Register Space");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##Space", &registerSpace, 1.0f, 0, 4095))
+			if (PropertyWidgets::DragInt("Register Space", "##Space", &registerSpace, 1.0f, 0, 4095))
 				binding.registerSpace = static_cast<uint32_t>((std::max)(0, registerSpace));
 
 			if (!outputs && binding.origin == ShaderResource::ResourceOrigin::Runtime)
 			{
-				ImGui::TextUnformatted("Temporal View");
-				ImGui::SameLine();
 				const char* temporalName = "Current";
 
 				if (binding.temporalView == ShaderResource::TemporalView::Previous)
 					temporalName = "Previous";
 
-				if (ImGui::BeginCombo("##Temporal", temporalName))
+				if (PropertyWidgets::BeginCombo("Temporal View", "##Temporal", temporalName))
 				{
 					if (ImGui::Selectable("Current", binding.temporalView == ShaderResource::TemporalView::Current))
 						binding.temporalView = ShaderResource::TemporalView::Current;
@@ -1311,7 +1243,7 @@ namespace ShaderInjectorGUI
 				}
 			}
 
-			ImGui::Checkbox("Optional", &binding.optional);
+			PropertyWidgets::Checkbox("Optional", "Optional", &binding.optional);
 		}
 
 		ImGui::PopID();
@@ -1384,25 +1316,16 @@ namespace ShaderInjectorGUI
 
 			char hlslName[128]{};
 			strncpy_s(hlslName, sampler.hlslName.c_str(), _TRUNCATE);
-			ImGui::TextUnformatted("HLSL Sampler Name");
-			ImGui::SameLine();
-
-			if (ImGui::InputText("##HlslSamplerName", hlslName, sizeof(hlslName)))
+			if (PropertyWidgets::InputText("HLSL Sampler Name", "##HlslSamplerName", hlslName, sizeof(hlslName)))
 				sampler.hlslName = hlslName;
 
 			int shaderRegister = static_cast<int>(sampler.shaderRegister);
 			int registerSpace = static_cast<int>(sampler.registerSpace);
 
-			ImGui::TextUnformatted("Sampler Register");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##SamplerRegister", &shaderRegister, 1.0f, 0, 2047))
+			if (PropertyWidgets::DragInt("Sampler Register", "##SamplerRegister", &shaderRegister, 1.0f, 0, 2047))
 				sampler.shaderRegister = static_cast<uint32_t>((std::max)(0, shaderRegister));
 
-			ImGui::TextUnformatted("Register Space");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##SamplerRegisterSpace", &registerSpace, 1.0f, 0, 4095))
+			if (PropertyWidgets::DragInt("Register Space", "##SamplerRegisterSpace", &registerSpace, 1.0f, 0, 4095))
 				sampler.registerSpace = static_cast<uint32_t>((std::max)(0, registerSpace));
 
 			constexpr NamedUnsignedValue filterOptions[] = {
@@ -1422,10 +1345,8 @@ namespace ShaderInjectorGUI
 				{D3D12_FILTER_MAXIMUM_MIN_MAG_MIP_LINEAR, "Maximum Linear"},
 			};
 
-			ImGui::TextUnformatted("Filter");
-			ImGui::SameLine();
 
-			DrawNamedUnsignedCombo("##SamplerFilter", sampler.filter, filterOptions);
+			DrawNamedUnsignedCombo("Filter", "##SamplerFilter", sampler.filter, filterOptions);
 
 			constexpr NamedUnsignedValue addressOptions[] = {
 				{D3D12_TEXTURE_ADDRESS_MODE_WRAP, "Wrap"},
@@ -1435,32 +1356,21 @@ namespace ShaderInjectorGUI
 				{D3D12_TEXTURE_ADDRESS_MODE_MIRROR_ONCE, "Mirror Once"},
 			};
 
-			ImGui::TextUnformatted("Address U");
-			ImGui::SameLine();
 
-			DrawNamedUnsignedCombo("##SamplerAddressU", sampler.addressU, addressOptions);
+			DrawNamedUnsignedCombo("Address U", "##SamplerAddressU", sampler.addressU, addressOptions);
 
-			ImGui::TextUnformatted("Address V");
-			ImGui::SameLine();
 
-			DrawNamedUnsignedCombo("##SamplerAddressV", sampler.addressV, addressOptions);
+			DrawNamedUnsignedCombo("Address V", "##SamplerAddressV", sampler.addressV, addressOptions);
 
-			ImGui::TextUnformatted("Address W");
-			ImGui::SameLine();
 
-			DrawNamedUnsignedCombo("##SamplerAddressW", sampler.addressW, addressOptions);
+			DrawNamedUnsignedCombo("Address W", "##SamplerAddressW", sampler.addressW, addressOptions);
 
-			ImGui::TextUnformatted("Mip LOD Bias");
-			ImGui::SameLine();
-			ImGui::DragFloat("##SamplerMipLodBias", &sampler.mipLodBias, 0.05f, -16.0f, 16.0f);
+			PropertyWidgets::DragFloat("Mip LOD Bias", "##SamplerMipLodBias", &sampler.mipLodBias, 0.05f, -16.0f, 16.0f);
 			int maximumAnisotropy = static_cast<int>(sampler.maximumAnisotropy);
-			ImGui::TextUnformatted("Maximum Anisotropy");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##SamplerMaximumAnisotropy", &maximumAnisotropy, 1.0f, 1, 16))
+			if (PropertyWidgets::DragInt("Maximum Anisotropy", "##SamplerMaximumAnisotropy", &maximumAnisotropy, 1.0f, 1, 16))
 				sampler.maximumAnisotropy = static_cast<uint32_t>((std::clamp)(maximumAnisotropy, 1, 16));
 
-			if (ImGui::Checkbox("Comparison Sampler", &sampler.comparisonSampler))
+			if (PropertyWidgets::Checkbox("Comparison Sampler", "Comparison Sampler", &sampler.comparisonSampler))
 			{
 				sampler.filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 
@@ -1481,21 +1391,15 @@ namespace ShaderInjectorGUI
 					{D3D12_COMPARISON_FUNC_ALWAYS, "Always"},
 				};
 
-				ImGui::TextUnformatted("Comparison Function");
-				ImGui::SameLine();
-				DrawNamedUnsignedCombo("##SamplerComparisonFunction", sampler.comparisonFunction, comparisonOptions);
+				DrawNamedUnsignedCombo("Comparison Function", "##SamplerComparisonFunction", sampler.comparisonFunction, comparisonOptions);
 			}
 
-			ImGui::TextUnformatted("Border Color");
-			ImGui::SameLine();
-			ImGui::ColorEdit4("##SamplerBorderColor", sampler.borderColor.data());
-			ImGui::TextUnformatted("Minimum LOD");
-			ImGui::SameLine();
-			ImGui::DragFloat("##SamplerMinimumLod", &sampler.minimumLod, 0.1f, 0.0f, 32.0f);
+			PropertyWidgets::ColorEdit4("Border Color", "##SamplerBorderColor", sampler.borderColor.data());
+			PropertyWidgets::DragFloat("Minimum LOD", "##SamplerMinimumLod", &sampler.minimumLod, 0.1f, 0.0f, 32.0f);
 
 			bool unboundedMaximumLod = sampler.maximumLod >= D3D12_FLOAT32_MAX * 0.5f;
 
-			if (ImGui::Checkbox("Unbounded Maximum LOD", &unboundedMaximumLod))
+			if (PropertyWidgets::Checkbox("Unbounded Maximum LOD", "Unbounded Maximum LOD", &unboundedMaximumLod))
 			{
 				sampler.maximumLod = (std::max)(sampler.minimumLod, 16.0f);
 
@@ -1505,10 +1409,7 @@ namespace ShaderInjectorGUI
 
 			if (!unboundedMaximumLod)
 			{
-				ImGui::TextUnformatted("Maximum LOD");
-				ImGui::SameLine();
-
-				if (ImGui::DragFloat("##SamplerMaximumLod", &sampler.maximumLod, 0.1f, 0.0f, 32.0f))
+				if (PropertyWidgets::DragFloat("Maximum LOD", "##SamplerMaximumLod", &sampler.maximumLod, 0.1f, 0.0f, 32.0f))
 					sampler.maximumLod = (std::max)(sampler.minimumLod, sampler.maximumLod);
 			}
 
@@ -1517,6 +1418,24 @@ namespace ShaderInjectorGUI
 		}
 
 		ImGui::TreePop();
+	}
+
+	static void DrawRenderPassCompileProgress()
+	{
+		const DatabaseRenderPasses::RenderPassCompileProgress progress = DatabaseRenderPasses::GetRenderPassCompileProgress();
+
+		if (progress.total == 0 || progress.completed >= progress.total)
+			return;
+
+		std::string overlay = "Compiling Render Pass shaders " + std::to_string(progress.completed) + "/" + std::to_string(progress.total);
+
+		if (progress.failed > 0)
+			overlay += " (" + std::to_string(progress.failed) + " failed)";
+
+		ImGui::ProgressBar(static_cast<float>(progress.completed) / static_cast<float>(progress.total), ImVec2(-FLT_MIN, 0), overlay.c_str());
+
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Current Render Pass shaders stay active until a successful compile is applied.\nIncludes per-target shader variants. Base compiles running=%d queued/pending jobs=%d", progress.running, progress.queued);
 	}
 
 	void DrawRenderPasses()
@@ -1537,6 +1456,8 @@ namespace ShaderInjectorGUI
 		ImGui::Indent(indentSpace);
 		ImGui::Spacing();
 
+		DrawRenderPassCompileProgress();
+
 		if (ImGui::Button("Refresh##RenderPasses"))
 		{
 			DatabaseModifiedShaders::RefreshModifiedShaders();
@@ -1556,6 +1477,42 @@ namespace ShaderInjectorGUI
 
 		ImGui::SameLine();
 
+		const bool hasRenderPassShaderTemplates = std::any_of(
+			renderPasses.begin(),
+			renderPasses.end(),
+			[](const RenderPass::RenderPassDisk& renderPass)
+			{
+				return RenderPass::HasShaderTemplate(renderPass);
+			});
+
+		const DatabaseRenderPasses::RenderPassCompileProgress compileProgress = DatabaseRenderPasses::GetRenderPassCompileProgress();
+		const bool renderPassCompileActive = compileProgress.total > compileProgress.completed;
+
+		ImGui::BeginDisabled(!hasRenderPassShaderTemplates || renderPassCompileActive);
+
+		if (ImGui::Button("Recompile All##RenderPasses"))
+		{
+			const DatabaseRenderPasses::RenderPassShaderBatchCompileResult result = DatabaseRenderPasses::QueueAllRenderPassShaderCompiles();
+
+			const std::string summary =
+				"Recompile All Render Pass Shaders: queued=" +
+				std::to_string(result.compiledRenderPassCount) +
+				" failed=" + std::to_string(result.failedRenderPassCount) +
+				" skipped=" + std::to_string(result.skippedRenderPassCount);
+
+			for (const std::string& error : result.errors)
+				WriteToRuntimeLogError("Could not compile Render Pass shaders: " + error);
+
+			if (result.failedRenderPassCount == 0)
+				WriteToRuntimeLogSuccess(summary);
+			else
+				WriteToRuntimeLogError(summary);
+		}
+
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+
 		if (ImGui::Button("Create Render Pass"))
 		{
 			std::string newRenderPassId;
@@ -1572,37 +1529,6 @@ namespace ShaderInjectorGUI
 			}
 		}
 
-		const bool hasRenderPassShaderTemplates = std::any_of(
-			renderPasses.begin(),
-			renderPasses.end(),
-			[](const RenderPass::RenderPassDisk& renderPass)
-			{
-				return RenderPass::HasShaderTemplate(renderPass);
-			});
-
-		ImGui::BeginDisabled(!hasRenderPassShaderTemplates);
-
-		if (ImGui::Button("Recompile All##RenderPasses"))
-		{
-			const DatabaseRenderPasses::RenderPassShaderBatchCompileResult result = DatabaseRenderPasses::CompileAllRenderPassShaders();
-
-			const std::string summary =
-				"Recompile All Render Pass Shaders: compiled=" +
-				std::to_string(result.compiledRenderPassCount) +
-				" failed=" + std::to_string(result.failedRenderPassCount) +
-				" skippedWithoutTemplate=" + std::to_string(result.skippedRenderPassCount);
-
-			for (const std::string& error : result.errors)
-				WriteToRuntimeLogError("Could not compile Render Pass shaders: " + error);
-
-			if (result.failedRenderPassCount == 0)
-				WriteToRuntimeLogSuccess(summary);
-			else
-				WriteToRuntimeLogError(summary);
-		}
-
-		ImGui::EndDisabled();
-
 		const std::vector<RenderPass::RenderPassDisk>& refreshedRenderPasses = DatabaseRenderPasses::GetRenderPasses();
 		RenderPassGraph::Compilation renderPassGraph;
 		const std::vector<const RenderPass::RenderPassDisk*> executionOrderedRenderPasses = BuildExecutionOrderedRenderPasses(refreshedRenderPasses, renderPassGraph);
@@ -1618,12 +1544,64 @@ namespace ShaderInjectorGUI
 		if (gSelectedRenderPassId.empty() || !DatabaseRenderPasses::FindRenderPassById(gSelectedRenderPassId))
 			gSelectedRenderPassId = executionOrderedRenderPasses.front()->id;
 
-		if (ImGui::BeginChild("RenderPassList##RenderPasses", ImVec2(0, 180), ImGuiChildFlags_Borders))
+		//sorting changes the display only; graph execution order remains unchanged.
+		const ImGuiTableFlags tableFlags = ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Sortable | ImGuiTableFlags_SortMulti | ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_ScrollY;
+
+		if (ImGui::BeginTable("RenderPassList##RenderPasses", 4, tableFlags, ImVec2(0, 15 * ImGui::GetFontSize())))
 		{
+			ImGui::TableSetupColumn("Order", ImGuiTableColumnFlags_DefaultSort, 0.7f);
+			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_None, 2.5f);
+			ImGui::TableSetupColumn("Operation", ImGuiTableColumnFlags_None, 1.5f);
+			ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_NoSort, 1.5f);
+			ImGui::TableSetupScrollFreeze(0, 1);
+			ImGui::TableHeadersRow();
+
+			std::vector<size_t> displayedIndices;
+
 			for (size_t executionIndex = 0; executionIndex < executionOrderedRenderPasses.size(); ++executionIndex)
+				displayedIndices.push_back(executionIndex);
+
+			const ImGuiTableSortSpecs* sortSpecifications = ImGui::TableGetSortSpecs();
+
+			std::stable_sort(displayedIndices.begin(), displayedIndices.end(), [&](size_t leftIndex, size_t rightIndex)
+			{
+				if (sortSpecifications)
+				{
+					for (int sortIndex = 0; sortIndex < sortSpecifications->SpecsCount; ++sortIndex)
+					{
+						const ImGuiTableColumnSortSpecs& specification = sortSpecifications->Specs[sortIndex];
+						int order = 0;
+
+						if (specification.ColumnIndex == 0)
+						{
+							if (leftIndex < rightIndex)
+								order = -1;
+							else if (leftIndex > rightIndex)
+								order = 1;
+						}
+						else if (specification.ColumnIndex == 1)
+							order = DisplayNameOrFallback(executionOrderedRenderPasses[leftIndex]->name, executionOrderedRenderPasses[leftIndex]->id).compare(DisplayNameOrFallback(executionOrderedRenderPasses[rightIndex]->name, executionOrderedRenderPasses[rightIndex]->id));
+						else if (specification.ColumnIndex == 2)
+							order = std::string(RenderPass::PassOperationName(RenderPass::ResolvePassOperation(*executionOrderedRenderPasses[leftIndex]))).compare(RenderPass::PassOperationName(RenderPass::ResolvePassOperation(*executionOrderedRenderPasses[rightIndex])));
+
+						if (order == 0)
+							continue;
+
+						if (specification.SortDirection == ImGuiSortDirection_Descending)
+							return order > 0;
+
+						return order < 0;
+					}
+				}
+
+				return leftIndex < rightIndex;
+			});
+
+			for (size_t executionIndex : displayedIndices)
 			{
 				const RenderPass::RenderPassDisk& renderPass = *executionOrderedRenderPasses[executionIndex];
 				std::string label = DisplayNameOrFallback(renderPass.name, renderPass.id);
+				std::string status = "Active";
 				const RenderPassGraph::CompiledNode* graphNode = FindCompiledRenderPassNode(renderPassGraph, renderPass.id);
 				const bool graphValid = graphNode && graphNode->valid;
 
@@ -1644,47 +1622,63 @@ namespace ShaderInjectorGUI
 				}
 
 				if (!renderPass.enabled)
-					label += " (disabled)";
+					status = "Disabled";
 				else if (renderPass.event.id.empty())
-					label += " (event not set)";
+					status = "Event not set";
 				else if (!graphValid)
-					label += " (invalid graph)";
+					status = "Invalid graph";
 				else if (!eventChainActive)
-					label += " (event unavailable)";
+					status = "Event unavailable";
 				else if (!modifiedShader)
-					label += " (shader missing)";
+					status = "Shader missing";
 				else if (!modifiedShader->enabled)
-					label += " (shader disabled)";
+					status = "Shader disabled";
 				else if (!hasResolvedShaderTarget)
-					label += " (waiting for target)";
+					status = "Waiting for target";
 
-				label = std::to_string(executionIndex + 1) + ". " + label;
-				label += " [" + std::string(RenderPass::PassOperationName(RenderPass::ResolvePassOperation(renderPass))) + "]";
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
+				ImGui::Text("%zu", executionIndex + 1);
+				ImGui::TableSetColumnIndex(1);
 				label += "##RenderPass_" + renderPass.id;
 
 				const bool selected = renderPass.id == gSelectedRenderPassId;
 				const bool active = renderPass.enabled && graphValid && eventChainActive && modifiedShader &&
 									modifiedShader->enabled && hasResolvedShaderTarget;
+				const bool invalidGraph = status == "Invalid graph";
 
-				if (active)
+				//invalid graph rows remain visible in yellow even when they are not selected.
+				if (invalidGraph)
+				{
+					ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.42f, 0.34f, 0.08f, 1.0f));
+					ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.55f, 0.45f, 0.12f, 1.0f));
+					ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.65f, 0.54f, 0.16f, 1.0f));
+				}
+
+				else if (active)
 				{
 					ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.12f, 0.38f, 0.16f, 1.0f));
 					ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.16f, 0.50f, 0.22f, 1.0f));
 					ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.20f, 0.62f, 0.28f, 1.0f));
 				}
 
-				if (ImGui::Selectable(label.c_str(), selected || active))
+				if (ImGui::Selectable(label.c_str(), selected || active || invalidGraph, ImGuiSelectableFlags_SpanAllColumns))
 				{
 					gSelectedRenderPassId = renderPass.id;
 					gRenderPassNameBufferId.clear();
 				}
 
-				if (active)
+				if (active || invalidGraph)
 					ImGui::PopStyleColor(3);
-			}
-		}
 
-		ImGui::EndChild();
+				ImGui::TableSetColumnIndex(2);
+				ImGui::TextUnformatted(RenderPass::PassOperationName(RenderPass::ResolvePassOperation(renderPass)));
+				ImGui::TableSetColumnIndex(3);
+				ImGui::TextUnformatted(status.c_str());
+			}
+
+			ImGui::EndTable();
+		}
 
 		RenderPass::RenderPassDisk* renderPass = DatabaseRenderPasses::FindRenderPassById(gSelectedRenderPassId);
 
@@ -1713,16 +1707,12 @@ namespace ShaderInjectorGUI
 
 		bool renderPassEnabled = renderPass->enabled;
 
-		if (ImGui::Checkbox("##RenderPassEnabled", &renderPassEnabled) && !DatabaseRenderPasses::SetRenderPassEnabled(renderPass->id, renderPassEnabled))
+		if (PropertyWidgets::Checkbox("Enabled", "##RenderPassEnabled", &renderPassEnabled) && !DatabaseRenderPasses::SetRenderPassEnabled(renderPass->id, renderPassEnabled))
 			WriteToRuntimeLogError("Could not update Render Pass enabled state: " + renderPass->name);
 
-		ImGui::SameLine();
-		ImGui::InputText("##RenderPassName", gRenderPassNameBuffer, sizeof(gRenderPassNameBuffer));
+		PropertyWidgets::InputText("Name", "##RenderPassName", gRenderPassNameBuffer, sizeof(gRenderPassNameBuffer));
 
-		ImGui::TextUnformatted("Type");
-		ImGui::SameLine();
-
-		if (ImGui::BeginCombo("##RenderPassType", RenderPass::TypeName(renderPass->type)))
+		if (PropertyWidgets::BeginCombo("Type", "##RenderPassType", RenderPass::TypeName(renderPass->type)))
 		{
 			const RenderPass::RenderPassType typeOptions[] = {
 				RenderPass::RenderPassType::Custom,
@@ -1773,11 +1763,9 @@ namespace ShaderInjectorGUI
 		if (!customPassType)
 			renderPass->operation = RenderPass::PassOperation::Automatic;
 
-		ImGui::TextUnformatted("Operation");
-		ImGui::SameLine();
 		ImGui::BeginDisabled(!customPassType);
 
-		if (ImGui::BeginCombo("##RenderPassOperation", RenderPass::PassOperationName(renderPass->operation)))
+		if (PropertyWidgets::BeginCombo("Operation", "##RenderPassOperation", RenderPass::PassOperationName(renderPass->operation)))
 		{
 			const RenderPass::PassOperation operations[] = {
 				RenderPass::PassOperation::Automatic,
@@ -1819,11 +1807,9 @@ namespace ShaderInjectorGUI
 			  configuredOperation == RenderPass::PassOperation::Downsample ||
 			  configuredOperation == RenderPass::PassOperation::UpsampleChain));
 
-		ImGui::TextUnformatted("Execution Mode");
-		ImGui::SameLine();
 		ImGui::BeginDisabled(!configurableExecutionMode);
 
-		if (ImGui::BeginCombo("##RenderPassExecutionMode", RenderPass::ExecutionModeName(RenderPass::ResolveExecutionMode(*renderPass))))
+		if (PropertyWidgets::BeginCombo("Execution Mode", "##RenderPassExecutionMode", RenderPass::ExecutionModeName(RenderPass::ResolveExecutionMode(*renderPass))))
 		{
 			const RenderPass::ExecutionMode modes[] = {
 				RenderPass::ExecutionMode::FullscreenPixel,
@@ -1847,10 +1833,7 @@ namespace ShaderInjectorGUI
 
 		if (RenderPass::ResolveExecutionMode(*renderPass) == RenderPass::ExecutionMode::Compute)
 		{
-			ImGui::TextUnformatted("Dispatch Mode");
-			ImGui::SameLine();
-
-			if (ImGui::BeginCombo("##RenderPassDispatchMode", DispatchModeName(renderPass->dispatch.mode)))
+			if (PropertyWidgets::BeginCombo("Dispatch Mode", "##RenderPassDispatchMode", DispatchModeName(renderPass->dispatch.mode)))
 			{
 				const RenderPass::DispatchMode modes[] = {
 					RenderPass::DispatchMode::InheritOriginal,
@@ -1872,10 +1855,7 @@ namespace ShaderInjectorGUI
 				static_cast<int>(renderPass->dispatch.threadGroupSizeY),
 				static_cast<int>(renderPass->dispatch.threadGroupSizeZ)};
 
-			ImGui::TextUnformatted("Thread Group Size");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt3("##RenderPassThreadGroupSize", groupSize, 1.0f, 1, 1024))
+			if (PropertyWidgets::DragInt3("Thread Group Size", "##RenderPassThreadGroupSize", groupSize, 1.0f, 1, 1024))
 			{
 				renderPass->dispatch.threadGroupSizeX = static_cast<uint32_t>((std::max)(1, groupSize[0]));
 				renderPass->dispatch.threadGroupSizeY = static_cast<uint32_t>((std::max)(1, groupSize[1]));
@@ -1889,10 +1869,7 @@ namespace ShaderInjectorGUI
 					static_cast<int>(renderPass->dispatch.explicitGroupCountY),
 					static_cast<int>(renderPass->dispatch.explicitGroupCountZ)};
 
-				ImGui::TextUnformatted("Thread Group Count");
-				ImGui::SameLine();
-
-				if (ImGui::DragInt3("##RenderPassThreadGroupCount", groupCount, 1.0f, 1, 65535))
+				if (PropertyWidgets::DragInt3("Thread Group Count", "##RenderPassThreadGroupCount", groupCount, 1.0f, 1, 65535))
 				{
 					renderPass->dispatch.explicitGroupCountX = static_cast<uint32_t>((std::max)(1, groupCount[0]));
 					renderPass->dispatch.explicitGroupCountY = static_cast<uint32_t>((std::max)(1, groupCount[1]));
@@ -1909,49 +1886,19 @@ namespace ShaderInjectorGUI
 				resource.texture.resolution = renderPass->resolution;
 		}
 
-		DrawRuntimeResources(*renderPass);
-		DrawLogicalBindings(
-			*renderPass,
-			false,
-			renderPass->inputs,
-			gSelectedLogicalInputOwnerId,
-			gSelectedLogicalInputIndex);
-		DrawLogicalBindings(
-			*renderPass,
-			true,
-			renderPass->outputs,
-			gSelectedLogicalOutputOwnerId,
-			gSelectedLogicalOutputIndex);
-
-		const RenderPass::PassOperation resourceOperation = RenderPass::ResolvePassOperation(*renderPass);
-
-		if (resourceOperation != RenderPass::PassOperation::Copy &&
-			resourceOperation != RenderPass::PassOperation::TemporalHistory)
-		{
-			DrawRenderPassSamplers(*renderPass);
-		}
-
-		ImGui::TextUnformatted("Track Resource Bindings");
-		ImGui::SameLine();
-		ImGui::Checkbox("##RenderPassTrackResourceBindings", &renderPass->trackResourceBindings);
+		PropertyWidgets::Checkbox("Track Resource Bindings", "##RenderPassTrackResourceBindings", &renderPass->trackResourceBindings);
 
 		if (renderPass->trackResourceBindings)
 		{
 			int maximumTrackedDescriptors = static_cast<int>(renderPass->maximumTrackedDescriptors);
 
-			ImGui::TextUnformatted("Maximum Table Descriptors");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##RenderPassMaximumTableDescriptors", &maximumTrackedDescriptors, 1.0f, 1, 1024))
+			if (PropertyWidgets::DragInt("Maximum Table Descriptors", "##RenderPassMaximumTableDescriptors", &maximumTrackedDescriptors, 1.0f, 1, 1024))
 			{
 				renderPass->maximumTrackedDescriptors = static_cast<uint32_t>((std::max)(1, maximumTrackedDescriptors));
 			}
 		}
 
-		ImGui::TextUnformatted("Event Type");
-		ImGui::SameLine();
-
-		if (ImGui::BeginCombo("##RenderPassEventType", RenderPass::EventTypeName(renderPass->event.type)))
+		if (PropertyWidgets::BeginCombo("Event Type", "##RenderPassEventType", RenderPass::EventTypeName(renderPass->event.type)))
 		{
 			const RenderPass::EventType eventTypes[] = {
 				RenderPass::EventType::ModifiedShader,
@@ -1996,10 +1943,7 @@ namespace ShaderInjectorGUI
 			}
 		}
 
-		ImGui::TextUnformatted("Event");
-		ImGui::SameLine();
-
-		if (ImGui::BeginCombo("##RenderPassEvent", eventPreview.c_str()))
+		if (PropertyWidgets::BeginCombo("Event", "##RenderPassEvent", eventPreview.c_str()))
 		{
 			if (ImGui::Selectable("(none)", renderPass->event.id.empty()))
 				renderPass->event.id.clear();
@@ -2072,37 +2016,6 @@ namespace ShaderInjectorGUI
 		if (renderPass->executionMode == RenderPass::ExecutionMode::Automatic)
 			ApplyAutomaticExecutionMode(*renderPass, selectedModifiedShader);
 
-		if (ImGui::TreeNodeEx(
-				"Inherited Game Bindings##RenderPassInheritedGameBindings",
-				ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Framed))
-		{
-			if (selectedModifiedShader)
-			{
-				ImGui::TextWrapped("Source: %s", DatabaseModifiedShaders::DisplayName(*selectedModifiedShader).c_str());
-
-				const InheritedBindingSummary inheritedSummary = SummarizeInheritedBindings(selectedModifiedShader);
-
-				ImGui::Text(
-					"Reflected: %llu shader resources, %llu constant buffers",
-					static_cast<unsigned long long>(inheritedSummary.shaderResourceCount),
-					static_cast<unsigned long long>(inheritedSummary.constantBufferCount));
-			}
-			else
-			{
-				ImGui::TextWrapped("Select an event that resolves to a Modified Shader to inherit its game bindings.");
-			}
-
-			ImGui::TextUnformatted("Shader Textures / Resources");
-			ImGui::SameLine();
-			ImGui::Checkbox("##RenderPassInheritShaderResources", &renderPass->inheritedGameBindings.shaderResources);
-
-			ImGui::TextUnformatted("Constant Buffers / Root Constants");
-			ImGui::SameLine();
-			ImGui::Checkbox("##RenderPassInheritConstantBuffers", &renderPass->inheritedGameBindings.constantBuffers);
-			ImGui::TextWrapped("Inherited bindings use the values active on the linked game draw or dispatch. Save the Render Pass after changing these options.");
-			ImGui::TreePop();
-		}
-
 		const bool mipChainPass = renderPass->type == RenderPass::RenderPassType::MipChain;
 		const bool temporalHistoryPass = renderPass->type == RenderPass::RenderPassType::TemporalHistory;
 		const RenderPass::LogicalResourceBindingDisk* mipRuntimeSource = RenderPass::FindMipChainRuntimeSource(*renderPass);
@@ -2113,11 +2026,9 @@ namespace ShaderInjectorGUI
 		if (directMipChainEvent || replacementPass)
 			renderPass->timing = RenderPass::timingBefore;
 
-		ImGui::TextUnformatted("Timing");
-		ImGui::SameLine();
 		ImGui::BeginDisabled(directMipChainEvent || replacementPass);
 
-		if (ImGui::BeginCombo("##RenderPassTiming", renderPass->timing.c_str()))
+		if (PropertyWidgets::BeginCombo("Timing", "##RenderPassTiming", renderPass->timing.c_str()))
 		{
 			const char* timingOptions[] = {RenderPass::timingBefore, RenderPass::timingAfter};
 
@@ -2167,10 +2078,7 @@ namespace ShaderInjectorGUI
 			if (selectedSourceIt != sourceOptions.end())
 				sourcePreview = selectedSourceIt->name + " (t" + std::to_string(selectedSourceIt->shaderRegister) + ", space" + std::to_string(selectedSourceIt->registerSpace) + ")";
 
-			ImGui::TextUnformatted("Source Texture");
-			ImGui::SameLine();
-
-			if (ImGui::BeginCombo("##RenderPassMipSourceTexture", sourcePreview.c_str()))
+			if (PropertyWidgets::BeginCombo("Source Texture", "##RenderPassMipSourceTexture", sourcePreview.c_str()))
 			{
 				for (size_t optionIndex = 0; optionIndex < sourceOptions.size(); ++optionIndex)
 				{
@@ -2216,17 +2124,61 @@ namespace ShaderInjectorGUI
 			int shaderRegister = static_cast<int>(renderPass->sourceTextureShaderRegister);
 			int registerSpace = static_cast<int>(renderPass->sourceTextureRegisterSpace);
 
-			ImGui::TextUnformatted("Source Texture Register (t)");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##RenderPassSourceTextureRegister", &shaderRegister, 1.0f, 0, 4095))
+			if (PropertyWidgets::DragInt("Source Texture Register (t)", "##RenderPassSourceTextureRegister", &shaderRegister, 1.0f, 0, 4095))
 				renderPass->sourceTextureShaderRegister = static_cast<uint32_t>((std::max)(0, shaderRegister));
 
-			ImGui::TextUnformatted("Register Space");
-			ImGui::SameLine();
-
-			if (ImGui::DragInt("##RenderPassSourceTextureRegisterSpace", &registerSpace, 1.0f, 0, 4095))
+			if (PropertyWidgets::DragInt("Register Space", "##RenderPassSourceTextureRegisterSpace", &registerSpace, 1.0f, 0, 4095))
 				renderPass->sourceTextureRegisterSpace = static_cast<uint32_t>((std::max)(0, registerSpace));
+		}
+
+		//keep resource editors below the execution, event, and timing properties.
+		DrawRuntimeResources(*renderPass);
+		DrawLogicalBindings(
+			*renderPass,
+			false,
+			renderPass->inputs,
+			gSelectedLogicalInputOwnerId,
+			gSelectedLogicalInputIndex);
+		DrawLogicalBindings(
+			*renderPass,
+			true,
+			renderPass->outputs,
+			gSelectedLogicalOutputOwnerId,
+			gSelectedLogicalOutputIndex);
+
+		const RenderPass::PassOperation resourceOperation = RenderPass::ResolvePassOperation(*renderPass);
+
+		if (resourceOperation != RenderPass::PassOperation::Copy &&
+			resourceOperation != RenderPass::PassOperation::TemporalHistory)
+		{
+			DrawRenderPassSamplers(*renderPass);
+		}
+
+		if (ImGui::TreeNodeEx(
+				"Inherited Game Bindings##RenderPassInheritedGameBindings",
+				ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Framed))
+		{
+			if (selectedModifiedShader)
+			{
+				ImGui::TextWrapped("Source: %s", DatabaseModifiedShaders::DisplayName(*selectedModifiedShader).c_str());
+
+				const InheritedBindingSummary inheritedSummary = SummarizeInheritedBindings(selectedModifiedShader);
+
+				ImGui::Text(
+					"Reflected: %llu shader resources, %llu constant buffers",
+					static_cast<unsigned long long>(inheritedSummary.shaderResourceCount),
+					static_cast<unsigned long long>(inheritedSummary.constantBufferCount));
+			}
+			else
+			{
+				ImGui::TextWrapped("Select an event that resolves to a Modified Shader to inherit its game bindings.");
+			}
+
+			PropertyWidgets::Checkbox("Shader Textures / Resources", "##RenderPassInheritShaderResources", &renderPass->inheritedGameBindings.shaderResources);
+
+			PropertyWidgets::Checkbox("Constant Buffers / Root Constants", "##RenderPassInheritConstantBuffers", &renderPass->inheritedGameBindings.constantBuffers);
+			ImGui::TextWrapped("Inherited bindings use the values active on the linked game draw or dispatch. Save the Render Pass after changing these options.");
+			ImGui::TreePop();
 		}
 
 		const bool replacementPixelPass = renderPass->type == RenderPass::RenderPassType::ReplacementPixelShader;
@@ -2288,7 +2240,7 @@ namespace ShaderInjectorGUI
 
 			if (!hasShaderTemplate)
 			{
-				ImGui::BeginDisabled(!canCreateShaderTemplate);
+				ImGui::BeginDisabled(!canCreateShaderTemplate || renderPassCompileActive);
 
 				//the pass type determines which shader the template will create.
 				const char* createTemplateLabel = "Create Render Pass Fragment Shader Template";
@@ -2317,7 +2269,7 @@ namespace ShaderInjectorGUI
 					std::string error;
 
 					if (DatabaseRenderPasses::CreateShaderTemplate(renderPass->id, error))
-						WriteToRuntimeLogSuccess("Created and compiled Render Pass shader template: " + renderPass->name);
+						WriteToRuntimeLogSuccess("Created Render Pass shader template and queued compilation: " + renderPass->name);
 					else
 						WriteToRuntimeLogError("Could not create Render Pass shader template: " + error);
 				}
@@ -2326,28 +2278,37 @@ namespace ShaderInjectorGUI
 			}
 			else
 			{
+				ImGui::BeginDisabled(renderPassCompileActive);
+
 				if (ImGui::Button("Recompile Render Pass Shaders"))
 				{
 					std::string error;
 
-					if (DatabaseRenderPasses::CompileRenderPassShaders(renderPass->id, error))
-						WriteToRuntimeLogSuccess("Recompiled Render Pass shaders: " + renderPass->name);
+					if (DatabaseRenderPasses::QueueRenderPassShaderCompile(renderPass->id, error))
+						WriteToRuntimeLogSuccess("Queued Render Pass shader compilation: " + renderPass->name);
 					else
 						WriteToRuntimeLogError("Could not compile Render Pass shaders: " + error);
 				}
 
-				ImGui::SameLine();
+				ImGui::EndDisabled();
 
-				const char* openShaderLabel = "Open Fragment Shader";
+				const char* openShaderLabel = "Open Render Pass Fragment Shader";
 
 				if (computeShaderPass)
-					openShaderLabel = "Open Compute Shader";
+					openShaderLabel = "Open Render Pass Compute Shader";
 
 				if (ImGui::Button(openShaderLabel) &&
 					!ShaderInjectorIO::OpenFile(renderPass->fragmentShaderSourcePath))
 				{
 					WriteToRuntimeLogError("Could not open Render Pass shader: " + renderPass->fragmentShaderSourcePath);
 				}
+			}
+
+			//expose the vertex source independently, including when the other stage has not been created yet.
+			if (!renderPass->vertexShaderSourcePath.empty() && ShaderInjectorIO::FileExists(renderPass->vertexShaderSourcePath))
+			{
+				if (ImGui::Button("Open Render Pass Vertex Shader") && !ShaderInjectorIO::OpenFile(renderPass->vertexShaderSourcePath))
+					WriteToRuntimeLogError("Could not open Render Pass vertex shader: " + renderPass->vertexShaderSourcePath);
 			}
 
 			if (!canCreateShaderTemplate && !hasShaderTemplate)
@@ -2361,7 +2322,7 @@ namespace ShaderInjectorGUI
 			}
 		}
 
-		if (ImGui::Button("Save##RenderPass"))
+		if (ImGui::Button("Save Render Pass##RenderPass"))
 		{
 			renderPass->name = StringHelper::TrimWhitespace(gRenderPassNameBuffer);
 
@@ -2381,7 +2342,7 @@ namespace ShaderInjectorGUI
 
 		ImGui::SameLine();
 
-		if (ImGui::Button("Delete##RenderPass"))
+		if (ImGui::Button("Delete Render Pass##RenderPass"))
 		{
 			gRenderPassPendingDeletionId = renderPass->id;
 			ImGui::OpenPopup("Delete Render Pass?");
@@ -2389,7 +2350,7 @@ namespace ShaderInjectorGUI
 
 		ImGui::SameLine();
 
-		if (ImGui::Button("Open Folder##SelectedRenderPass") && !ShaderInjectorIO::OpenDirectory(renderPass->packageDirectory))
+		if (ImGui::Button("Open Render Pass Folder##SelectedRenderPass") && !ShaderInjectorIO::OpenDirectory(renderPass->packageDirectory))
 		{
 			WriteToRuntimeLogError("Could not open Render Pass package folder: " + renderPass->packageDirectory);
 		}
@@ -2470,28 +2431,28 @@ namespace ShaderInjectorGUI
 		{
 			const std::string resolvedModifiedShaderId = DatabaseRenderPasses::ResolveModifiedShaderId(*renderPass);
 
-			ImGui::Text("ID: %s", renderPass->id.c_str());
-			ImGui::Text("Type: %s", RenderPass::TypeName(renderPass->type));
-			ImGui::Text("Package: %s", renderPass->packageDirectory.c_str());
-			ImGui::Text("JSON: %s", renderPass->jsonPath.c_str());
-			ImGui::Text("Event Type: %s", RenderPass::EventTypeName(renderPass->event.type));
-			ImGui::Text("Event ID: %s", TextOrNone(renderPass->event.id));
-			ImGui::Text("Resolved Modified Shader ID: %s", TextOrNone(resolvedModifiedShaderId));
-			ImGui::Text("Resolved Root Boundary: %s", TextOrNone(resolvedRootTiming));
-			ImGui::Text("Maximum Table Descriptors: %u", renderPass->maximumTrackedDescriptors);
+			PropertyWidgets::ReadOnlyText("ID", "##InfoID", renderPass->id);
+			PropertyWidgets::ReadOnlyText("Type", "##InfoType", RenderPass::TypeName(renderPass->type));
+			PropertyWidgets::ReadOnlyText("Package", "##InfoPackage", renderPass->packageDirectory);
+			PropertyWidgets::ReadOnlyText("JSON", "##InfoJSON", renderPass->jsonPath);
+			PropertyWidgets::ReadOnlyText("Event Type", "##InfoEventType", RenderPass::EventTypeName(renderPass->event.type));
+			PropertyWidgets::ReadOnlyText("Event ID", "##InfoEventID", TextOrNone(renderPass->event.id));
+			PropertyWidgets::ReadOnlyText("Resolved Modified Shader ID", "##InfoResolvedModifiedShaderID", TextOrNone(resolvedModifiedShaderId));
+			PropertyWidgets::ReadOnlyText("Resolved Root Boundary", "##InfoResolvedRootBoundary", TextOrNone(resolvedRootTiming));
+			PropertyWidgets::ReadOnlyText("Maximum Table Descriptors", "##InfoMaximumTableDescriptors", std::to_string(renderPass->maximumTrackedDescriptors));
 
 			if (mipChainPass)
 			{
-				ImGui::Text("Mip Source: t%u, space%u", renderPass->sourceTextureShaderRegister, renderPass->sourceTextureRegisterSpace);
+				PropertyWidgets::ReadOnlyText("Mip Source", "##InfoMipSource", StringHelper::Format("t%u, space%u", renderPass->sourceTextureShaderRegister, renderPass->sourceTextureRegisterSpace));
 			}
 
-			ImGui::Text("Vertex Source: %s", TextOrNone(renderPass->vertexShaderSourcePath));
-			ImGui::Text("Fragment Source: %s", TextOrNone(renderPass->fragmentShaderSourcePath));
-			ImGui::Text("Vertex Blob: %s", TextOrNone(renderPass->vertexShaderCompiledBlobPath));
-			ImGui::Text("Fragment Blob: %s", TextOrNone(renderPass->fragmentShaderCompiledBlobPath));
+			PropertyWidgets::ReadOnlyText("Vertex Source", "##InfoVertexSource", TextOrNone(renderPass->vertexShaderSourcePath));
+			PropertyWidgets::ReadOnlyText("Fragment Source", "##InfoFragmentSource", TextOrNone(renderPass->fragmentShaderSourcePath));
+			PropertyWidgets::ReadOnlyText("Vertex Blob", "##InfoVertexBlob", TextOrNone(renderPass->vertexShaderCompiledBlobPath));
+			PropertyWidgets::ReadOnlyText("Fragment Blob", "##InfoFragmentBlob", TextOrNone(renderPass->fragmentShaderCompiledBlobPath));
 
 			if (selectedModifiedShader)
-				ImGui::Text("Shader Type: %s", StringHelper::ShaderTypeToString(selectedModifiedShader->shaderType).c_str());
+				PropertyWidgets::ReadOnlyText("Shader Type", "##InfoShaderType", StringHelper::ShaderTypeToString(selectedModifiedShader->shaderType));
 
 			int linkedShaderTargetCount = 0;
 
@@ -2504,7 +2465,7 @@ namespace ShaderInjectorGUI
 				}
 			}
 
-			ImGui::Text("Resolved Shader Targets: %d", linkedShaderTargetCount);
+			PropertyWidgets::ReadOnlyText("Resolved Shader Targets", "##InfoResolvedShaderTargets", std::to_string(linkedShaderTargetCount));
 
 			if (!resolvedModifiedShaderId.empty())
 			{
@@ -2513,7 +2474,9 @@ namespace ShaderInjectorGUI
 					if (shaderTarget.modifiedShaderId != resolvedModifiedShaderId)
 						continue;
 
-					ImGui::BulletText("%s [%s]", shaderTarget.name.c_str(), shaderTarget.originalShaderBytecodeHash.c_str());
+					ImGui::PushID(shaderTarget.jsonPath.c_str());
+					PropertyWidgets::ReadOnlyText("Shader Target", "##InfoLinkedTarget", StringHelper::Format("%s [%s]", shaderTarget.name.c_str(), shaderTarget.originalShaderBytecodeHash.c_str()));
+					ImGui::PopID();
 				}
 			}
 
@@ -2523,19 +2486,19 @@ namespace ShaderInjectorGUI
 		if (ImGui::TreeNodeEx("Runtime Diagnostics##RenderPassDiagnostics"))
 		{
 			const RenderPass::RuntimeDiagnostics diagnostics = RenderPassRuntime::GetDiagnostics(renderPass->id);
-			ImGui::Text("Triggers: %llu", static_cast<unsigned long long>(diagnostics.triggerCount));
-			ImGui::Text("Executions: %llu", static_cast<unsigned long long>(diagnostics.executionCount));
-			ImGui::Text("Execution Failures: %llu", static_cast<unsigned long long>(diagnostics.executionFailureCount));
-			ImGui::Text("Blocked Inputs: %llu", static_cast<unsigned long long>(diagnostics.blockedInputCount));
-			ImGui::Text("Last Event: %s:%s", TextOrNone(diagnostics.lastEventType), TextOrNone(diagnostics.lastEventId));
-			ImGui::Text("Last Event Timing: %s", TextOrNone(diagnostics.lastTiming));
-			ImGui::Text("Last Command: %s", TextOrNone(diagnostics.lastOperation));
-			ImGui::Text("Modified Shader: %s", TextOrNone(diagnostics.lastModifiedShaderId));
-			ImGui::Text("Last Target: %s", TextOrNone(diagnostics.lastShaderTargetName));
-			ImGui::Text("Last Hash: %s", TextOrNone(diagnostics.lastShaderTargetHash));
+			PropertyWidgets::ReadOnlyText("Triggers", "##DiagnosticsTriggers", std::to_string(diagnostics.triggerCount));
+			PropertyWidgets::ReadOnlyText("Executions", "##DiagnosticsExecutions", std::to_string(diagnostics.executionCount));
+			PropertyWidgets::ReadOnlyText("Execution Failures", "##DiagnosticsExecutionFailures", std::to_string(diagnostics.executionFailureCount));
+			PropertyWidgets::ReadOnlyText("Blocked Inputs", "##DiagnosticsBlockedInputs", std::to_string(diagnostics.blockedInputCount));
+			PropertyWidgets::ReadOnlyText("Last Event", "##DiagnosticsLastEvent", StringHelper::Format("%s:%s", TextOrNone(diagnostics.lastEventType), TextOrNone(diagnostics.lastEventId)));
+			PropertyWidgets::ReadOnlyText("Last Event Timing", "##DiagnosticsLastEventTiming", TextOrNone(diagnostics.lastTiming));
+			PropertyWidgets::ReadOnlyText("Last Command", "##DiagnosticsLastCommand", TextOrNone(diagnostics.lastOperation));
+			PropertyWidgets::ReadOnlyText("Modified Shader", "##DiagnosticsModifiedShader", TextOrNone(diagnostics.lastModifiedShaderId));
+			PropertyWidgets::ReadOnlyText("Last Target", "##DiagnosticsLastTarget", TextOrNone(diagnostics.lastShaderTargetName));
+			PropertyWidgets::ReadOnlyText("Last Hash", "##DiagnosticsLastHash", TextOrNone(diagnostics.lastShaderTargetHash));
 
 			if (!diagnostics.lastExecutionError.empty())
-				ImGui::TextWrapped("Execution Error: %s", diagnostics.lastExecutionError.c_str());
+				PropertyWidgets::ReadOnlyText("Execution Error", "##DiagnosticsExecutionError", diagnostics.lastExecutionError);
 
 			if (ImGui::Button("Clear##RenderPassDiagnostics"))
 				RenderPassRuntime::ClearDiagnostics(renderPass->id);
@@ -2556,25 +2519,25 @@ namespace ShaderInjectorGUI
 						if (ImGui::TreeNodeEx("Binding", ImGuiTreeNodeFlags_SpanAvailWidth, "%s: %s", binding.pipeline.c_str(), binding.bindingType.c_str()))
 						{
 							if (binding.rootParameterIndex != UINT32_MAX)
-								ImGui::Text("Root Parameter: %u", binding.rootParameterIndex);
+								PropertyWidgets::ReadOnlyText("Root Parameter", "##BindingRootParameter", std::to_string(binding.rootParameterIndex));
 
 							if (binding.gpuAddress)
-								ImGui::Text("GPU Address: 0x%016llX", static_cast<unsigned long long>(binding.gpuAddress));
+								PropertyWidgets::ReadOnlyText("GPU Address", "##BindingGPUAddress", StringHelper::Format("0x%016llX", static_cast<unsigned long long>(binding.gpuAddress)));
 
 							if (binding.gpuDescriptorHandle)
-								ImGui::Text("GPU Descriptor: 0x%016llX", static_cast<unsigned long long>(binding.gpuDescriptorHandle));
+								PropertyWidgets::ReadOnlyText("GPU Descriptor", "##BindingGPUDescriptor", StringHelper::Format("0x%016llX", static_cast<unsigned long long>(binding.gpuDescriptorHandle)));
 
 							if (binding.cpuDescriptorHandle)
-								ImGui::Text("CPU Descriptor: 0x%016llX", static_cast<unsigned long long>(binding.cpuDescriptorHandle));
+								PropertyWidgets::ReadOnlyText("CPU Descriptor", "##BindingCPUDescriptor", StringHelper::Format("0x%016llX", static_cast<unsigned long long>(binding.cpuDescriptorHandle)));
 
 							if (binding.descriptorHeapType != UINT32_MAX)
-								ImGui::Text("Heap Type: %u", binding.descriptorHeapType);
+								PropertyWidgets::ReadOnlyText("Heap Type", "##BindingHeapType", std::to_string(binding.descriptorHeapType));
 
 							if (binding.descriptorIndex != UINT32_MAX)
-								ImGui::Text("Descriptor Index: %u", binding.descriptorIndex);
+								PropertyWidgets::ReadOnlyText("Descriptor Index", "##BindingDescriptorIndex", std::to_string(binding.descriptorIndex));
 
 							if (binding.descriptorCount)
-								ImGui::Text("Descriptor Count: %u", binding.descriptorCount);
+								PropertyWidgets::ReadOnlyText("Descriptor Count", "##BindingDescriptorCount", std::to_string(binding.descriptorCount));
 
 							if (binding.shaderRegister != UINT32_MAX)
 							{
@@ -2583,54 +2546,54 @@ namespace ShaderInjectorGUI
 								if (registerSpace == UINT32_MAX)
 									registerSpace = 0;
 
-								ImGui::Text("Shader Register: %u, Space: %u", binding.shaderRegister, registerSpace);
+								PropertyWidgets::ReadOnlyText("Shader Register", "##BindingShaderRegister", StringHelper::Format("%u, Space: %u", binding.shaderRegister, registerSpace));
 							}
 
 							if (binding.resourcePointer)
-								ImGui::Text("Resource: 0x%016llX", static_cast<unsigned long long>(binding.resourcePointer));
+								PropertyWidgets::ReadOnlyText("Resource", "##BindingResource", StringHelper::Format("0x%016llX", static_cast<unsigned long long>(binding.resourcePointer)));
 
 							if (!binding.resourceName.empty())
-								ImGui::Text("Resource Name: %s", binding.resourceName.c_str());
+								PropertyWidgets::ReadOnlyText("Resource Name", "##BindingResourceName", binding.resourceName);
 
 							if (binding.resourceDimension != UINT32_MAX)
 							{
-								ImGui::Text("Dimension: %s", ResourceDimensionName(binding.resourceDimension));
+								PropertyWidgets::ReadOnlyText("Dimension", "##BindingDimension", ResourceDimensionName(binding.resourceDimension));
 
 								if (binding.resourceDimension == D3D12_RESOURCE_DIMENSION_BUFFER)
 								{
-									ImGui::Text("Buffer Offset: %llu", static_cast<unsigned long long>(binding.bufferOffset));
-									ImGui::Text("Buffer Size: %llu", static_cast<unsigned long long>(binding.bufferSize));
+									PropertyWidgets::ReadOnlyText("Buffer Offset", "##BindingBufferOffset", std::to_string(binding.bufferOffset));
+									PropertyWidgets::ReadOnlyText("Buffer Size", "##BindingBufferSize", std::to_string(binding.bufferSize));
 								}
 								else
 								{
-									ImGui::Text(
-										"Extent: %llux%ux%u",
-										static_cast<unsigned long long>(binding.resourceWidth),
-										binding.resourceHeight,
-										binding.resourceDepthOrArraySize);
-
-									ImGui::Text("Mip Levels: %u", binding.resourceMipLevels);
-									ImGui::Text("Sample Count: %u", binding.resourceSampleCount);
+									PropertyWidgets::ReadOnlyText("Extent", "##BindingExtent", StringHelper::Format("%llux%ux%u", static_cast<unsigned long long>(binding.resourceWidth), binding.resourceHeight, binding.resourceDepthOrArraySize));
+									PropertyWidgets::ReadOnlyText("Mip Levels", "##BindingMipLevels", std::to_string(binding.resourceMipLevels));
+									PropertyWidgets::ReadOnlyText("Sample Count", "##BindingSampleCount", std::to_string(binding.resourceSampleCount));
 								}
-								ImGui::Text("DXGI Format: %u", binding.resourceFormat);
+								PropertyWidgets::ReadOnlyText("DXGI Format", "##BindingDXGIFormat", std::to_string(binding.resourceFormat));
 							}
 
 							if (binding.elementCount)
 							{
-								ImGui::Text("First Element: %llu", static_cast<unsigned long long>(binding.firstElement));
-								ImGui::Text("Element Count: %u", binding.elementCount);
-								ImGui::Text("Structure Stride: %u", binding.structureByteStride);
+								PropertyWidgets::ReadOnlyText("First Element", "##BindingFirstElement", std::to_string(binding.firstElement));
+								PropertyWidgets::ReadOnlyText("Element Count", "##BindingElementCount", std::to_string(binding.elementCount));
+								PropertyWidgets::ReadOnlyText("Structure Stride", "##BindingStructureStride", std::to_string(binding.structureByteStride));
 							}
 
 							if (!binding.rootConstants.empty())
 							{
-								std::string constantText = "Values:";
+								std::string constantText;
 
 								for (uint32_t value : binding.rootConstants)
-									constantText += StringHelper::Format(" 0x%08X", value);
+								{
+									if (!constantText.empty())
+										constantText += " ";
 
-								ImGui::TextWrapped("%s", constantText.c_str());
-								ImGui::Text("Destination Offset: %u", binding.destinationOffset);
+									constantText += StringHelper::Format("0x%08X", value);
+								}
+
+								PropertyWidgets::ReadOnlyText("Values", "##BindingRootConstants", constantText);
+								PropertyWidgets::ReadOnlyText("Destination Offset", "##BindingDestinationOffset", std::to_string(binding.destinationOffset));
 							}
 
 							ImGui::TreePop();

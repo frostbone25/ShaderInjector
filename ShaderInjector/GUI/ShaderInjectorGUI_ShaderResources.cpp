@@ -55,26 +55,82 @@ namespace ShaderInjectorGUI
 				selectedResourceKey = catalogKey(resources.front());
 		}
 
-		if (ImGui::BeginChild("ShaderResourceList", ImVec2(0, 180), ImGuiChildFlags_Borders))
+		//the column weights below require an explicit stretch sizing policy.
+		const ImGuiTableFlags tableFlags = ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Sortable | ImGuiTableFlags_SortMulti | ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_ScrollY;
+
+		if (ImGui::BeginTable("ShaderResourceList", 3, tableFlags, ImVec2(0, 15 * ImGui::GetFontSize())))
 		{
+			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_DefaultSort, 2.0f);
+			ImGui::TableSetupColumn("Texture Type", ImGuiTableColumnFlags_None, 1.0f);
+			ImGui::TableSetupColumn("Origin Type", ImGuiTableColumnFlags_None, 1.0f);
+			ImGui::TableSetupScrollFreeze(0, 1);
+			ImGui::TableHeadersRow();
+
+			//the catalog is a fresh snapshot each frame, so apply the active column ordering every time.
+			const ImGuiTableSortSpecs* sortSpecifications = ImGui::TableGetSortSpecs();
+
+			std::stable_sort(resources.begin(), resources.end(), [&](const ShaderResource::CatalogEntry& left, const ShaderResource::CatalogEntry& right)
+			{
+				if (sortSpecifications)
+				{
+					for (int sortIndex = 0; sortIndex < sortSpecifications->SpecsCount; ++sortIndex)
+					{
+						const ImGuiTableColumnSortSpecs& specification = sortSpecifications->Specs[sortIndex];
+						std::string leftValue = left.name;
+						std::string rightValue = right.name;
+
+						if (specification.ColumnIndex == 1)
+						{
+							leftValue = ShaderResource::TextureDimensionName(left.dimension);
+							rightValue = ShaderResource::TextureDimensionName(right.dimension);
+						}
+						else if (specification.ColumnIndex == 2)
+						{
+							leftValue = ShaderResource::ResourceOriginName(left.origin);
+							rightValue = ShaderResource::ResourceOriginName(right.origin);
+						}
+
+						const int order = leftValue.compare(rightValue);
+
+						if (order == 0)
+							continue;
+
+						if (specification.SortDirection == ImGuiSortDirection_Descending)
+							return order > 0;
+
+						return order < 0;
+					}
+				}
+
+				//stable identities keep equal-valued rows from jumping around during catalog updates.
+				return catalogKey(left) < catalogKey(right);
+			});
+
 			for (const auto& resource : resources)
 			{
-				std::string label = resource.name + " [" +
-									ShaderResource::TextureDimensionName(resource.dimension) + "] - " +
-									ShaderResource::ResourceOriginName(resource.origin);
+				std::string label = resource.name;
 
 				if (resource.resident)
 					label += " (resident)";
 
 				const std::string resourceKey = catalogKey(resource);
-				label += "##ShaderResource_" + resourceKey;
+				ImGui::PushID(resourceKey.c_str());
+				label += "###ShaderResource";
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
 
-				if (ImGui::Selectable(label.c_str(), selectedResourceKey == resourceKey))
+				if (ImGui::Selectable(label.c_str(), selectedResourceKey == resourceKey, ImGuiSelectableFlags_SpanAllColumns))
 					selectedResourceKey = resourceKey;
-			}
-		}
 
-		ImGui::EndChild();
+				ImGui::TableSetColumnIndex(1);
+				ImGui::TextUnformatted(ShaderResource::TextureDimensionName(resource.dimension));
+				ImGui::TableSetColumnIndex(2);
+				ImGui::TextUnformatted(ShaderResource::ResourceOriginName(resource.origin));
+				ImGui::PopID();
+			}
+
+			ImGui::EndTable();
+		}
 
 		const auto refreshedSelectedIt = std::find_if(resources.begin(), resources.end(), [&](const auto& resource)
 													  { return catalogKey(resource) == selectedResourceKey; });
@@ -84,25 +140,30 @@ namespace ShaderInjectorGUI
 			const ShaderResource::CatalogEntry& resource = *refreshedSelectedIt;
 
 			ImGui::SeparatorText(resource.name.c_str());
-			ImGui::TextWrapped("Resource ID: %s", resource.id.c_str());
-			ImGui::Text("Origin: %s", ShaderResource::ResourceOriginName(resource.origin));
-			ImGui::Text("Lifetime: %s", ShaderResource::ResourceLifetimeName(resource.lifetime));
+			PropertyWidgets::ReadOnlyText("Resource ID", "##ResourceID", resource.id);
+			PropertyWidgets::ReadOnlyText("Origin", "##ResourceOrigin", ShaderResource::ResourceOriginName(resource.origin));
+			PropertyWidgets::ReadOnlyText("Lifetime", "##ResourceLifetime", ShaderResource::ResourceLifetimeName(resource.lifetime));
 
 			if (!resource.ownerRenderPassId.empty())
-				ImGui::TextWrapped("Owner: %s", resource.ownerRenderPassId.c_str());
+				PropertyWidgets::ReadOnlyText("Owner", "##ResourceOwner", resource.ownerRenderPassId);
 
-			ImGui::Text("Dimension: %s", ShaderResource::TextureDimensionName(resource.dimension));
+			PropertyWidgets::ReadOnlyText("Dimension", "##ResourceDimension", ShaderResource::TextureDimensionName(resource.dimension));
+
+			std::string extent = std::to_string(resource.width) + "x" + std::to_string(resource.height);
 
 			if (resource.dimension == ShaderResource::TextureDimension::Texture3D)
-				ImGui::Text("Extent: %ux%ux%u", resource.width, resource.height, resource.depth);
-			else
-				ImGui::Text("Extent: %ux%u, Array Slices: %u", resource.width, resource.height, resource.arraySize);
+				extent += "x" + std::to_string(resource.depth);
 
-			ImGui::Text("Mip Levels: %u", resource.mipLevels);
-			ImGui::Text("DXGI Format: %u", resource.format);
+			PropertyWidgets::ReadOnlyText("Extent", "##ResourceExtent", extent);
+
+			if (resource.dimension != ShaderResource::TextureDimension::Texture3D)
+				PropertyWidgets::ReadOnlyText("Array Slices", "##ResourceArraySlices", std::to_string(resource.arraySize));
+
+			PropertyWidgets::ReadOnlyText("Mip Levels", "##ResourceMipLevels", std::to_string(resource.mipLevels));
+			PropertyWidgets::ReadOnlyText("DXGI Format", "##ResourceFormat", std::to_string(resource.format));
 
 			if (!resource.status.empty())
-				ImGui::TextWrapped("Status: %s", resource.status.c_str());
+				PropertyWidgets::ReadOnlyText("Status", "##ResourceStatus", resource.status);
 		}
 		else if (resources.empty())
 		{

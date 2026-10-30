@@ -8,6 +8,7 @@
 #include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "RenderPass/RenderPassRuntime.h"
 #include "RenderPass/RenderPassShaders.h"
+#include "RenderPass/RenderPassShaderCompileQueue.h"
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 
@@ -124,6 +125,9 @@ namespace DatabaseRenderPasses
 
 	void RefreshRenderPasses()
 	{
+		//results from the old database generation must not replace freshly loaded settings.
+		InvalidateRenderPassCompiles();
+
 		gRenderPasses.clear();
 		gRenderPassesLoaded = true;
 
@@ -497,6 +501,9 @@ namespace DatabaseRenderPasses
 		}
 
 		RenderPassRuntime::ClearDiagnostics(renderPassId);
+		//a new package may reuse this ID; results from the deleted package must never activate on it.
+		InvalidateRenderPassCompiles();
+
 		gRenderPasses.erase(renderPassIt);
 		PublishRuntimeConfiguration();
 		return true;
@@ -520,7 +527,7 @@ namespace DatabaseRenderPasses
 			return false;
 		}
 
-		if (!RenderPassShaders::CreateShaderTemplate(*renderPass, *modifiedShader, outError) ||
+		if (!RenderPassShaders::CreateShaderTemplate(*renderPass, *modifiedShader, outError, false) ||
 			!RenderPass::WriteJson(*renderPass))
 		{
 			if (outError.empty())
@@ -528,8 +535,8 @@ namespace DatabaseRenderPasses
 			return false;
 		}
 
-		PublishRuntimeConfiguration();
-		return true;
+		//source generation is small; let the existing worker pool do the expensive compilation.
+		return QueueRenderPassShaderCompile(renderPassId, outError);
 	}
 
 	bool CompileRenderPassShaders(const std::string& renderPassId, std::string& outError)

@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <condition_variable>
 #include <deque>
+#include <exception>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -48,6 +50,7 @@ namespace DatabaseModifiedShaders
 
 	static std::condition_variable gCompileCondition;
 	static std::deque<CompileJob> gCompileQueue;
+	static std::deque<std::function<void()>> gBackgroundCompileTasks;
 	static std::vector<CompileResult> gCompileResults;
 	static CompileProgress gCompileProgress;
 	static std::unordered_set<std::string> gCompileInFlightKeys;
@@ -70,22 +73,51 @@ namespace DatabaseModifiedShaders
 		for (;;)
 		{
 			CompileJob job;
+			std::function<void()> backgroundTask;
 
 			{
 				std::unique_lock<std::mutex> lock(Detail::gCompileMutex);
 				gCompileCondition.wait(lock, []
 				{
-					return gCompileStopRequested || !gCompileQueue.empty();
+					return gCompileStopRequested || !gCompileQueue.empty() || !gBackgroundCompileTasks.empty();
 				});
 
 				if (gCompileStopRequested)
 					return;
 
-				job = std::move(gCompileQueue.front());
-				gCompileQueue.pop_front();
-				--gCompileProgress.queued;
-				++gCompileProgress.running;
-				gCompileInFlightKeys.insert(job.key);
+				//shader replacements keep priority so an explicit recompile is not delayed by background work.
+				if (!gCompileQueue.empty())
+				{
+					job = std::move(gCompileQueue.front());
+					gCompileQueue.pop_front();
+					--gCompileProgress.queued;
+					++gCompileProgress.running;
+					gCompileInFlightKeys.insert(job.key);
+				}
+				else
+				{
+					backgroundTask = std::move(gBackgroundCompileTasks.front());
+					gBackgroundCompileTasks.pop_front();
+				}
+			}
+
+			if (backgroundTask)
+			{
+				//background tasks own their result handling and stay outside shader compile progress accounting.
+				try
+				{
+					backgroundTask();
+				}
+				catch (const std::exception& exception)
+				{
+					ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseModifiedShaders->CompileWorker: background task threw an exception: " + std::string(exception.what()));
+				}
+				catch (...)
+				{
+					ShaderInjectorGUI::WriteToRuntimeLogError("DatabaseModifiedShaders->CompileWorker: background task threw an unknown exception.");
+				}
+
+				continue;
 			}
 
 			CompileResult result;
@@ -533,6 +565,22 @@ namespace DatabaseModifiedShaders
 		return gCompileProgress;
 	}
 
+	bool QueueBackgroundCompile(std::function<void()> compileTask)
+	{
+		if (!compileTask)
+			return false;
+
+		std::lock_guard<std::mutex> lock(Detail::gCompileMutex);
+
+		if (gCompileStopRequested)
+			return false;
+
+		gBackgroundCompileTasks.push_back(std::move(compileTask));
+		StartCompileWorkersLocked();
+		gCompileCondition.notify_one();
+		return true;
+	}
+
 	void Shutdown()
 	{
 		std::vector<std::thread> workers;
@@ -542,6 +590,7 @@ namespace DatabaseModifiedShaders
 
 			gCompileStopRequested = true;
 			gCompileQueue.clear();
+			gBackgroundCompileTasks.clear();
 			gCompileResults.clear();
 			gCompileInFlightKeys.clear();
 			gDeferredVariantRequests.clear();

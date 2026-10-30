@@ -27,6 +27,7 @@
 #include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
 #include "StringHelper.h"
 #include "GUI/ShaderInjectorGUITooltips.h"
+#include "GUI/PropertyWidgets.h"
 #include "Input/Keycodes.h"
 #include "ShaderInjectorVersion.h"
 
@@ -196,13 +197,73 @@ namespace ShaderInjectorGUI
 			if (HookD3D12::gSelectedShaderTargetIndex < 0 || HookD3D12::gSelectedShaderTargetIndex >= (int)HookD3D12::gLoadedShaderTargets.size())
 				HookD3D12::gSelectedShaderTargetIndex = 0;
 
-			std::string childLabel = "ShaderTargetList##ShaderTargets";
+			const ImGuiTableFlags tableFlags = ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Sortable | ImGuiTableFlags_SortMulti | ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_ScrollY;
 
-			if (ImGui::BeginChild(childLabel.c_str(), ImVec2(0, 180), ImGuiChildFlags_Borders))
+			if (ImGui::BeginTable("ShaderTargetList##ShaderTargets", 3, tableFlags, ImVec2(0, 180)))
 			{
-				for (int i = 0; i < (int)HookD3D12::gLoadedShaderTargets.size(); i++)
+				ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_DefaultSort, 2.2f);
+				ImGui::TableSetupColumn("Shader Type", ImGuiTableColumnFlags_None, 1.0f);
+				ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_NoSort, 0.8f);
+				ImGui::TableSetupScrollFreeze(0, 1);
+				ImGui::TableHeadersRow();
+
+				std::vector<int> displayedIndices;
+
+				for (int index = 0; index < static_cast<int>(HookD3D12::gLoadedShaderTargets.size()); ++index)
+					displayedIndices.push_back(index);
+
+				const ImGuiTableSortSpecs* sortSpecifications = ImGui::TableGetSortSpecs();
+
+				std::stable_sort(displayedIndices.begin(), displayedIndices.end(), [&](int leftIndex, int rightIndex)
 				{
-					const ShaderTarget::ShaderTargetDisk& replacement = HookD3D12::gLoadedShaderTargets[i];
+					const ShaderTarget::ShaderTargetDisk& leftTarget = HookD3D12::gLoadedShaderTargets[leftIndex];
+					const ShaderTarget::ShaderTargetDisk& rightTarget = HookD3D12::gLoadedShaderTargets[rightIndex];
+
+					if (sortSpecifications)
+					{
+						for (int sortIndex = 0; sortIndex < sortSpecifications->SpecsCount; ++sortIndex)
+						{
+							const ImGuiTableColumnSortSpecs& specification = sortSpecifications->Specs[sortIndex];
+							int order = 0;
+
+							if (specification.ColumnIndex == 0)
+							{
+								std::string leftName = leftTarget.jsonPath;
+								std::string rightName = rightTarget.jsonPath;
+
+								if (!leftTarget.name.empty())
+									leftName = leftTarget.name;
+
+								if (!rightTarget.name.empty())
+									rightName = rightTarget.name;
+
+								order = leftName.compare(rightName);
+							}
+							else if (specification.ColumnIndex == 1)
+								order = StringHelper::ShaderTypeToString(leftTarget.shaderType).compare(StringHelper::ShaderTypeToString(rightTarget.shaderType));
+
+							if (order == 0)
+								continue;
+
+							if (specification.SortDirection == ImGuiSortDirection_Descending)
+								return order > 0;
+
+							return order < 0;
+						}
+					}
+
+					if (leftTarget.jsonPath != rightTarget.jsonPath)
+						return leftTarget.jsonPath < rightTarget.jsonPath;
+
+					if (leftTarget.originalShaderBytecodeHash != rightTarget.originalShaderBytecodeHash)
+						return leftTarget.originalShaderBytecodeHash < rightTarget.originalShaderBytecodeHash;
+
+					return leftIndex < rightIndex;
+				});
+
+				for (int targetIndex : displayedIndices)
+				{
+					const ShaderTarget::ShaderTargetDisk& replacement = HookD3D12::gLoadedShaderTargets[targetIndex];
 					std::string label = replacement.jsonPath;
 
 					if (!replacement.name.empty())
@@ -211,12 +272,10 @@ namespace ShaderInjectorGUI
 					if (!replacement.originalShaderBytecodeHash.empty())
 						label += " [" + replacement.originalShaderBytecodeHash + "]";
 
-					if (!replacement.enabled)
-						label += " (disabled)";
-
-					label += "##ShaderTarget" + std::to_string(i);
-
-					const bool isSelected = i == HookD3D12::gSelectedShaderTargetIndex;
+					const bool isSelected = targetIndex == HookD3D12::gSelectedShaderTargetIndex;
+					ImGui::PushID(targetIndex);
+					ImGui::TableNextRow();
+					ImGui::TableSetColumnIndex(0);
 
 					if (replacement.enabled)
 					{
@@ -225,9 +284,9 @@ namespace ShaderInjectorGUI
 						ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.20f, 0.62f, 0.28f, 1.0f));
 					}
 
-					if (ImGui::Selectable(label.c_str(), isSelected || replacement.enabled))
+					if (ImGui::Selectable(label.c_str(), isSelected || replacement.enabled, ImGuiSelectableFlags_SpanAllColumns))
 					{
-						HookD3D12::gSelectedShaderTargetIndex = i;
+						HookD3D12::gSelectedShaderTargetIndex = targetIndex;
 						HookD3D12::gShaderTargetNameBufferIndex = -1;
 					}
 
@@ -236,10 +295,20 @@ namespace ShaderInjectorGUI
 
 					if (isSelected)
 						ImGui::SetItemDefaultFocus();
-				}
-			}
 
-			ImGui::EndChild();
+					ImGui::TableSetColumnIndex(1);
+					ImGui::TextUnformatted(StringHelper::ShaderTypeToString(replacement.shaderType).c_str());
+					ImGui::TableSetColumnIndex(2);
+
+					if (replacement.enabled)
+						ImGui::TextUnformatted("Enabled");
+					else
+						ImGui::TextUnformatted("Disabled");
+					ImGui::PopID();
+				}
+
+				ImGui::EndTable();
+			}
 
 			if (HookD3D12::gSelectedShaderTargetIndex < 0 || HookD3D12::gSelectedShaderTargetIndex >= (int)HookD3D12::gLoadedShaderTargets.size())
 				return;
@@ -256,25 +325,21 @@ namespace ShaderInjectorGUI
 			ImGui::SeparatorText(HookD3D12::gShaderTargetNameBuffer);
 			ImGui::Indent(indentSpace);
 
-			ImGui::Text("Enabled");
-			ImGui::SameLine();
-
-			if (ImGui::Checkbox("##ShaderTargetEnable", &replacement.enabled))
-				HookD3D12::MarkShaderTargetApplyDirty();
+			if (ImGui::Button("Refresh##ShaderTargetSourceSection"))
+				DatabaseModifiedShaders::RefreshModifiedShaders();
 
 			ImGui::SameLine();
 
 			if (ImGui::Button("Delete##ShaderTarget"))
 			{
 				HookD3D12::DeleteShaderTarget(HookD3D12::gSelectedShaderTargetIndex);
+				ImGui::Unindent(indentSpace);
 				return;
 			}
 
-			ImGui::Spacing();
+			if (PropertyWidgets::Checkbox("Enabled", "##ShaderTargetEnable", &replacement.enabled))
+				HookD3D12::MarkShaderTargetApplyDirty();
 
-			ImGui::Text("Shader Type: %s", StringHelper::ShaderTypeToString(replacement.shaderType).c_str());
-
-			ImGui::Spacing();
 			ImGui::Unindent(indentSpace);
 
 			DrawShaderTargetSourceSection(replacement, HookD3D12::gSelectedShaderTargetIndex);
@@ -283,16 +348,16 @@ namespace ShaderInjectorGUI
 
 			if (ImGui::TreeNodeEx("Info##ShaderTargetInfo"))
 			{
-				ImGui::Text("Profile: %s", replacement.shaderProfile.c_str());
-				ImGui::Text("Entry Point: %s", replacement.shaderEntryPoint.c_str());
-				ImGui::Text("Hash: %s", replacement.originalShaderBytecodeHash.c_str());
-				ImGui::Text("Bytecode Length: %s", replacement.originalShaderBytecodeLength.c_str());
-				ImGui::Text("Loaded Modified Blob Bytes: %zu", loadedBlobSize);
-				ImGui::Text("Source List: %s", replacement.sourceList.c_str());
-				ImGui::Text("Pipeline Index: %s", replacement.pipelineIndex.c_str());
-				ImGui::Text("JSON: %s", replacement.jsonPath.c_str());
-				ImGui::Text("Original Blob: %s", replacement.originalShaderBlobPath.c_str());
-				ImGui::Text("Modified Shader: %s", replacement.modifiedShaderId.c_str());
+				PropertyWidgets::ReadOnlyText("Profile", "##ShaderTargetInfoProfile", replacement.shaderProfile);
+				PropertyWidgets::ReadOnlyText("Entry Point", "##ShaderTargetInfoEntryPoint", replacement.shaderEntryPoint);
+				PropertyWidgets::ReadOnlyText("Hash", "##ShaderTargetInfoHash", replacement.originalShaderBytecodeHash);
+				PropertyWidgets::ReadOnlyText("Bytecode Length", "##ShaderTargetInfoBytecodeLength", replacement.originalShaderBytecodeLength);
+				PropertyWidgets::ReadOnlyText("Loaded Modified Blob Bytes", "##ShaderTargetInfoLoadedBytes", std::to_string(loadedBlobSize));
+				PropertyWidgets::ReadOnlyText("Source List", "##ShaderTargetInfoSourceList", replacement.sourceList);
+				PropertyWidgets::ReadOnlyText("Pipeline Index", "##ShaderTargetInfoPipelineIndex", replacement.pipelineIndex);
+				PropertyWidgets::ReadOnlyText("JSON", "##ShaderTargetInfoJSON", replacement.jsonPath);
+				PropertyWidgets::ReadOnlyText("Original Blob", "##ShaderTargetInfoOriginalBlob", replacement.originalShaderBlobPath);
+				PropertyWidgets::ReadOnlyText("Modified Shader", "##ShaderTargetInfoModifiedShader", replacement.modifiedShaderId);
 				ImGui::Separator();
 				ImGui::TreePop();
 			}
@@ -310,20 +375,10 @@ namespace ShaderInjectorGUI
 	void DrawShaderTargetSourceSection(ShaderTarget::ShaderTargetDisk& replacement, int replacementIndex)
 	{
 		DatabaseModifiedShaders::EnsureModifiedShadersLoaded();
-
-		ImGui::SeparatorText("Modified Shader");
 		ImGui::Indent(indentSpace);
 
-		ImGui::Spacing();
-		ImGui::Text("Package Folder: %s", ShaderInjectorIO::GetModifiedShadersDirectory().c_str());
-		ImGui::Text("Package:");
-		ImGui::SameLine();
-
-		const char* btnLabel = "Refresh##ShaderTargetSourceSection";
-		float buttonWidth = ImGui::CalcTextSize(btnLabel).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-		float spacing = ImGui::GetStyle().ItemSpacing.x;
-		float comboWidth = ImGui::GetContentRegionAvail().x - buttonWidth - spacing;
-		ImGui::SetNextItemWidth(comboWidth);
+		PropertyWidgets::ReadOnlyText("Shader Type", "##ShaderTargetSourceShaderType", StringHelper::ShaderTypeToString(replacement.shaderType).c_str());
+		PropertyWidgets::ReadOnlyText("Package Folder", "##ShaderTargetSourcePackageFolder", ShaderInjectorIO::GetModifiedShadersDirectory());
 
 		const ModifiedShader::ModifiedShaderPackageDisk* selectedPackage = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
 		std::string currentPackageName = "(none)";
@@ -331,7 +386,7 @@ namespace ShaderInjectorGUI
 		if (selectedPackage)
 			currentPackageName = DatabaseModifiedShaders::DisplayName(*selectedPackage);
 
-		if (ImGui::BeginCombo("##ShaderTargetModifiedShader", currentPackageName.c_str()))
+		if (PropertyWidgets::BeginCombo("Modified Shader Package", "##ShaderTargetModifiedShader", currentPackageName.c_str()))
 		{
 			for (const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : DatabaseModifiedShaders::GetModifiedShaders())
 			{
@@ -361,14 +416,7 @@ namespace ShaderInjectorGUI
 			ImGui::EndCombo();
 		}
 
-		ImGui::SameLine();
-
-		if (ImGui::Button(btnLabel))
-			DatabaseModifiedShaders::RefreshModifiedShaders();
-
 		selectedPackage = DatabaseModifiedShaders::FindModifiedShaderById(replacement.modifiedShaderId);
-
-		ImGui::Spacing();
 		ImGui::Unindent(indentSpace);
 	}
 
@@ -382,6 +430,8 @@ namespace ShaderInjectorGUI
 			if (replacementCount == 0)
 			{
 				ImGui::Text("No active PSOs are currently using this replacement.");
+				//the empty branch still owns the tree scope opened above.
+				ImGui::TreePop();
 				return;
 			}
 

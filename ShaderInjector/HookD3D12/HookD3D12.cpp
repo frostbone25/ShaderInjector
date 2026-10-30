@@ -56,6 +56,7 @@
 #include "FPSCounter.h"
 #include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
 #include "RenderPass/RenderPassRuntime.h"
+#include "RenderPass/RenderPassShaderCompileQueue.h"
 #include "RenderPass/RenderPassExecutor.h"
 #include "RenderPass/RenderPassResourceRegistry.h"
 #include "Performance/PerformanceMetrics.h"
@@ -2299,6 +2300,7 @@ namespace HookD3D12
 	void ApplyShaderTargetPSOs()
 	{
 		DatabaseModifiedShaders::ProcessCompletedCompiles();
+		DatabaseRenderPasses::ProcessCompletedRenderPassCompiles();
 
 		if (!IsPipelineCreationIdle())
 			return;

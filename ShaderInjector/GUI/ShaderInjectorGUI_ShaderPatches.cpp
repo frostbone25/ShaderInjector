@@ -10,6 +10,7 @@
 #include "IO/ShaderInjectorIO.h"
 #include "StringHelper.h"
 #include "GUI/ShaderInjectorGUITooltips.h"
+#include "GUI/PropertyWidgets.h"
 
 namespace ShaderInjectorGUI
 {
@@ -64,7 +65,7 @@ namespace ShaderInjectorGUI
 								  ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
 
 		bool enabled = Globals::gShaderPatchesEnabled.load();
-		if (ImGui::Checkbox("Enable Shader Patches", &enabled))
+		if (PropertyWidgets::Checkbox("Enable Shader Patches", "Enable Shader Patches", &enabled))
 		{
 			Globals::gShaderPatchesEnabled.store(enabled);
 			ShaderPatchRuntime::NotifyEnabledChanged();

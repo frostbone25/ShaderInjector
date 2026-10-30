@@ -8,6 +8,7 @@
 
 //3RD Party
 #include "imgui.h"
+#include "GUI/PropertyWidgets.h"
 
 //custom
 #include "HookD3D12.h"

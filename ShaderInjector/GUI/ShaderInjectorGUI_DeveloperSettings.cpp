@@ -52,7 +52,7 @@ namespace
 		{Globals::ShaderModel::ShaderModel6_6, "Shader Model 6.6 (DXIL)"},
 	};
 
-	bool DrawShaderModelCombo(const char* label, Globals::ShaderModel& shaderModel, Globals::ShaderModel minimumShaderModel)
+	bool DrawShaderModelCombo(const char* label, const char* controlID, Globals::ShaderModel& shaderModel, Globals::ShaderModel minimumShaderModel)
 	{
 		const char* previewLabel = shaderModelOptions[8].displayLabel;
 
@@ -67,9 +67,7 @@ namespace
 
 		bool changed = false;
 
-		ImGui::SetNextItemWidth(220.0f * Globals::gShaderInjectorGUIScale);
-
-		if (ImGui::BeginCombo(label, previewLabel))
+		if (PropertyWidgets::BeginCombo(label, controlID, previewLabel))
 		{
 			for (const ShaderModelOption& option : shaderModelOptions)
 			{
@@ -110,21 +108,23 @@ namespace
 				displayedShaderModel = minimumShaderModel;
 		}
 
-		ImGui::BeginDisabled(Globals::gAutoDetectShaderModels);
-
-		if (DrawShaderModelCombo(label, displayedShaderModel, minimumShaderModel) && !Globals::gAutoDetectShaderModels)
-			configuredShaderModel = displayedShaderModel;
-
-		ImGui::EndDisabled();
+		std::string propertyLabel = label;
 
 		if (Globals::gAutoDetectShaderModels)
 		{
-			ImGui::SameLine();
 			const char* detectionStatus = "fallback";
 			if (modelDetected)
 				detectionStatus = "detected";
-			ImGui::TextDisabled("(%s)", detectionStatus);
+			propertyLabel += ": " + std::string(detectionStatus);
 		}
+
+		ImGui::BeginDisabled(Globals::gAutoDetectShaderModels);
+
+		//keep the control ID stable when the visible detection status changes.
+		if (DrawShaderModelCombo(propertyLabel.c_str(), label, displayedShaderModel, minimumShaderModel) && !Globals::gAutoDetectShaderModels)
+			configuredShaderModel = displayedShaderModel;
+
+		ImGui::EndDisabled();
 	}
 } //namespace
 
@@ -275,7 +275,7 @@ namespace ShaderInjectorGUI
 		ImGui::Indent(indentSpace);
 		ImGui::Spacing();
 
-		ImGui::Checkbox("Automatically Detect Shader Models", &Globals::gAutoDetectShaderModels);
+		PropertyWidgets::Checkbox("Automatically Detect Shader Models", "Automatically Detect Shader Models", &Globals::gAutoDetectShaderModels);
 		DrawShaderModelSetting("Vertex Shader", ShaderTarget::VertexShader, Globals::gVertexShaderModel);
 		DrawShaderModelSetting("Hull Shader", ShaderTarget::HullShader, Globals::gHullShaderModel);
 		DrawShaderModelSetting("Domain Shader", ShaderTarget::DomainShader, Globals::gDomainShaderModel);
@@ -308,10 +308,10 @@ namespace ShaderInjectorGUI
 		if (!ImGui::TreeNodeEx("Retired PSO Tracker", ImGuiTreeNodeFlags_DefaultOpen))
 			return;
 
-		ImGui::Text("Pending: %zu", diagnostics.pendingCount);
-		ImGui::Text("Retired total: %llu", static_cast<unsigned long long>(diagnostics.retiredTotal));
-		ImGui::Text("Released total: %llu", static_cast<unsigned long long>(diagnostics.releasedTotal));
-		ImGui::Text("Oldest pending age: %llu ms", static_cast<unsigned long long>(diagnostics.oldestPendingAgeMilliseconds));
+		PropertyWidgets::ReadOnlyText("Pending", "##RetiredPSOPending", std::to_string(diagnostics.pendingCount));
+		PropertyWidgets::ReadOnlyText("Retired total", "##RetiredPSORetiredTotal", std::to_string(diagnostics.retiredTotal));
+		PropertyWidgets::ReadOnlyText("Released total", "##RetiredPSOReleasedTotal", std::to_string(diagnostics.releasedTotal));
+		PropertyWidgets::ReadOnlyText("Oldest pending age", "##RetiredPSOOldestPendingAge", StringHelper::Format("%llu ms", static_cast<unsigned long long>(diagnostics.oldestPendingAgeMilliseconds)));
 
 		if (diagnostics.pendingCount == 0)
 			ImGui::TextDisabled("No pending references; every retired PSO has released.");
@@ -344,10 +344,8 @@ namespace ShaderInjectorGUI
 		ImGui::Spacing();
 		DrawAdapterInfo();
 		DrawD3D12PipelineInfo();
+		DrawRetiredPSODiagnostics();
 		ImGui::Spacing();
-
-		ImGui::Text("Selection Style: ");
-		ImGui::SameLine();
 
 		const char* selectionStyles[] =
 		{
@@ -357,10 +355,11 @@ namespace ShaderInjectorGUI
 		};
 
 		const char* btnLabel = "Clear Selections";
-		float buttonWidth = ImGui::CalcTextSize(btnLabel).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-		float spacing = ImGui::GetStyle().ItemSpacing.x;
-		float comboWidth = ImGui::GetContentRegionAvail().x - buttonWidth - spacing;
-		ImGui::SetNextItemWidth(comboWidth);
+		PropertyWidgets::PrepareRow("Selection Style");
+
+		//share the control cell between the dropdown and its clear action.
+		const float clearButtonWidth = ImGui::CalcTextSize(btnLabel).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+		ImGui::SetNextItemWidth((std::max)(1.0f, ImGui::CalcItemWidth() - clearButtonWidth - ImGui::GetStyle().ItemSpacing.x));
 
 		if (ImGui::Combo("##SelectionStyle", &gSelectionStyleIndex, selectionStyles, IM_ARRAYSIZE(selectionStyles)))
 		{
@@ -376,7 +375,6 @@ namespace ShaderInjectorGUI
 
 		ImGui::Spacing();
 
-		DrawRetiredPSODiagnostics();
 		DrawGraphicsPipelines();
 		DrawStreamPipelines();
 
@@ -388,13 +386,13 @@ namespace ShaderInjectorGUI
 		if (ImGui::TreeNodeEx("Adapter Info"))
 		{
 			ImGui::SeparatorText("GPU");
-			ImGui::Text("Adapter: %s", HookD3D12::gPipelineInfo.graphicsProcessorName.c_str());
-			ImGui::Text("Vendor ID: 0x%X", HookD3D12::gPipelineInfo.vendorID);
-			ImGui::Text("Device ID: 0x%X", HookD3D12::gPipelineInfo.deviceID);
+			PropertyWidgets::ReadOnlyText("Adapter", "##AdapterInfoAdapter", HookD3D12::gPipelineInfo.graphicsProcessorName);
+			PropertyWidgets::ReadOnlyText("Vendor ID", "##AdapterInfoVendorID", StringHelper::Format("0x%X", HookD3D12::gPipelineInfo.vendorID));
+			PropertyWidgets::ReadOnlyText("Device ID", "##AdapterInfoDeviceID", StringHelper::Format("0x%X", HookD3D12::gPipelineInfo.deviceID));
 			ImGui::SeparatorText("Memory");
-			ImGui::Text("Dedicated VRAM: %.2f GB", HookD3D12::gPipelineInfo.dedicatedVideoMemory / (1024.0 * 1024.0 * 1024.0));
-			ImGui::Text("Dedicated System: %.2f GB", HookD3D12::gPipelineInfo.dedicatedSystemMemory / (1024.0 * 1024.0 * 1024.0));
-			ImGui::Text("Shared System: %.2f GB", HookD3D12::gPipelineInfo.sharedSystemMemory / (1024.0 * 1024.0 * 1024.0));
+			PropertyWidgets::ReadOnlyText("Dedicated VRAM", "##AdapterInfoDedicatedVRAM", StringHelper::Format("%.2f GB", HookD3D12::gPipelineInfo.dedicatedVideoMemory / (1024.0 * 1024.0 * 1024.0)));
+			PropertyWidgets::ReadOnlyText("Dedicated System", "##AdapterInfoDedicatedSystem", StringHelper::Format("%.2f GB", HookD3D12::gPipelineInfo.dedicatedSystemMemory / (1024.0 * 1024.0 * 1024.0)));
+			PropertyWidgets::ReadOnlyText("Shared System", "##AdapterInfoSharedSystem", StringHelper::Format("%.2f GB", HookD3D12::gPipelineInfo.sharedSystemMemory / (1024.0 * 1024.0 * 1024.0)));
 			ImGui::Separator();
 			ImGui::TreePop();
 		}
@@ -405,16 +403,16 @@ namespace ShaderInjectorGUI
 		if (ImGui::TreeNodeEx("D3D12 Pipeline Info"))
 		{
 			ImGui::SeparatorText("Swap Chain");
-			ImGui::Text("Buffers: %u", HookD3D12::gPipelineInfo.swapChainBufferCount);
-			ImGui::Text("Format: %u", HookD3D12::gPipelineInfo.swapChainFormat);
+			PropertyWidgets::ReadOnlyText("Buffers", "##D3D12InfoBuffers", std::to_string(HookD3D12::gPipelineInfo.swapChainBufferCount));
+			PropertyWidgets::ReadOnlyText("Format", "##D3D12InfoFormat", std::to_string(HookD3D12::gPipelineInfo.swapChainFormat));
 			ImGui::SeparatorText("Feature Support");
-			ImGui::Text("Resource Binding Tier: %u", HookD3D12::gPipelineInfo.resourceBindingTier);
-			ImGui::Text("Tiled Resources Tier: %u", HookD3D12::gPipelineInfo.tiledResourcesTier);
-			ImGui::Text("Conservative Raster Tier: %u", HookD3D12::gPipelineInfo.conservativeRasterTier);
-			ImGui::Text("Raytracing Tier: %u", HookD3D12::gPipelineInfo.raytracingTier);
-			ImGui::Text("Mesh Shader Tier: %u", HookD3D12::gPipelineInfo.meshShaderTier);
+			PropertyWidgets::ReadOnlyText("Resource Binding Tier", "##D3D12InfoResourceBindingTier", std::to_string(HookD3D12::gPipelineInfo.resourceBindingTier));
+			PropertyWidgets::ReadOnlyText("Tiled Resources Tier", "##D3D12InfoTiledResourcesTier", std::to_string(HookD3D12::gPipelineInfo.tiledResourcesTier));
+			PropertyWidgets::ReadOnlyText("Conservative Raster Tier", "##D3D12InfoConservativeRasterTier", std::to_string(HookD3D12::gPipelineInfo.conservativeRasterTier));
+			PropertyWidgets::ReadOnlyText("Raytracing Tier", "##D3D12InfoRaytracingTier", std::to_string(HookD3D12::gPipelineInfo.raytracingTier));
+			PropertyWidgets::ReadOnlyText("Mesh Shader Tier", "##D3D12InfoMeshShaderTier", std::to_string(HookD3D12::gPipelineInfo.meshShaderTier));
 			ImGui::SeparatorText("Command Queue");
-			ImGui::Text("Queue Type: %u", HookD3D12::gPipelineInfo.commandQueueType);
+			PropertyWidgets::ReadOnlyText("Queue Type", "##D3D12InfoQueueType", std::to_string(HookD3D12::gPipelineInfo.commandQueueType));
 			ImGui::Separator();
 			ImGui::TreePop();
 		}
@@ -507,7 +505,6 @@ namespace ShaderInjectorGUI
 		ID3D12PipelineState* PipelineT::*rebuiltPSOMember)
 	{
 		static int selectedIndex = -1;
-		static int sortMode = 0;
 		static std::string recaptureModifiedShaderId;
 
 		const int count = CountShaderStage<PipelineT, HashMember>(pipelines);
@@ -536,67 +533,103 @@ namespace ShaderInjectorGUI
 				sortedIndices.push_back(i);
 		}
 
-		std::sort(sortedIndices.begin(), sortedIndices.end(), [&](int a, int b)
+		const ImGuiTableFlags tableFlags = ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Sortable | ImGuiTableFlags_SortMulti | ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_ScrollY;
+		const std::string tableId = std::string("ShaderList##") + idPrefix;
+
+		if (ImGui::BeginTable(tableId.c_str(), 4, tableFlags, ImVec2(0, 180)))
 		{
-			const PipelineT& left = pipelines[a];
-			const PipelineT& right = pipelines[b];
+			ImGui::TableSetupColumn("Hash", ImGuiTableColumnFlags_DefaultSort, 1.7f);
+			ImGui::TableSetupColumn("Bytecode Size", ImGuiTableColumnFlags_PreferSortDescending, 1.0f);
+			ImGui::TableSetupColumn("Pipeline Index", ImGuiTableColumnFlags_None, 0.8f);
+			ImGui::TableSetupColumn("Replacement / Status", ImGuiTableColumnFlags_NoSort, 1.3f);
+			ImGui::TableSetupScrollFreeze(0, 1);
+			ImGui::TableHeadersRow();
 
-			if (sortMode == 1)
+			//table sorting only changes the displayed indices; pipeline storage stays in capture order.
+			const ImGuiTableSortSpecs* sortSpecifications = ImGui::TableGetSortSpecs();
+
+			std::stable_sort(sortedIndices.begin(), sortedIndices.end(), [&](int leftIndex, int rightIndex)
 			{
-				const SIZE_T leftSize = left.*SizeMember;
-				const SIZE_T rightSize = right.*SizeMember;
+				const PipelineT& leftPipeline = pipelines[leftIndex];
+				const PipelineT& rightPipeline = pipelines[rightIndex];
 
-				if (leftSize != rightSize)
-					return leftSize > rightSize;
-			}
-			else if (sortMode == 2)
-			{
-				// The vector position is the pipeline index used by the capture and
-				// rebuild systems, so preserve its natural ascending order here.
-				if (a != b)
-					return a < b;
-			}
-			else
-			{
-				const uint64_t leftHash = left.*HashMember;
-				const uint64_t rightHash = right.*HashMember;
+				if (sortSpecifications)
+				{
+					for (int sortIndex = 0; sortIndex < sortSpecifications->SpecsCount; ++sortIndex)
+					{
+						const ImGuiTableColumnSortSpecs& specification = sortSpecifications->Specs[sortIndex];
+						int order = 0;
 
-				if (leftHash != rightHash)
-					return leftHash < rightHash;
-			}
+						if (specification.ColumnIndex == 0)
+						{
+							const uint64_t leftHash = leftPipeline.*HashMember;
+							const uint64_t rightHash = rightPipeline.*HashMember;
 
-			return a < b; 
-		});
+							if (leftHash < rightHash)
+								order = -1;
+							else if (leftHash > rightHash)
+								order = 1;
+						}
+						else if (specification.ColumnIndex == 1)
+						{
+							const SIZE_T leftSize = leftPipeline.*SizeMember;
+							const SIZE_T rightSize = rightPipeline.*SizeMember;
 
-		ImGui::Text("Sort By:");
+							if (leftSize < rightSize)
+								order = -1;
+							else if (leftSize > rightSize)
+								order = 1;
+						}
+						else if (specification.ColumnIndex == 2)
+						{
+							if (leftIndex < rightIndex)
+								order = -1;
+							else if (leftIndex > rightIndex)
+								order = 1;
+						}
 
-		ImGui::SameLine();
+						if (order == 0)
+							continue;
 
-		std::string hashSortLabel = std::string("Hash A-Z##") + idPrefix;
-		ImGui::RadioButton(hashSortLabel.c_str(), &sortMode, 0);
+						if (specification.SortDirection == ImGuiSortDirection_Descending)
+							return order > 0;
 
-		ImGui::SameLine();
+						return order < 0;
+					}
+				}
 
-		std::string lengthSortLabel = std::string("Bytecode Length##") + idPrefix;
-		ImGui::RadioButton(lengthSortLabel.c_str(), &sortMode, 1);
+				return leftIndex < rightIndex;
+			});
 
-		ImGui::SameLine();
-
-		std::string pipelineIndexSortLabel = std::string("Pipeline Index##") + idPrefix;
-		ImGui::RadioButton(pipelineIndexSortLabel.c_str(), &sortMode, 2);
-
-		std::string childLabel = std::string("ShaderList##") + idPrefix;
-
-		if (ImGui::BeginChild(childLabel.c_str(), ImVec2(0, 180), ImGuiChildFlags_Borders))
-		{
 			for (int sortedIndex : sortedIndices)
 			{
 				PipelineT& pipeline = pipelines[sortedIndex];
 				const uint64_t hash = pipeline.*HashMember;
 				const int rowReplacementIndex = HookD3D12::FindEnabledShaderTarget(hash, shaderType);
 				const bool hasReplacement = rowReplacementIndex >= 0;
-				std::string label = "#" + std::to_string(sortedIndex) + "  " + Hash::FormatHash(hash) + "  (" + std::to_string((size_t)(pipeline.*SizeMember)) + " bytes)##" + idPrefix + std::to_string(sortedIndex);
 				const bool isSelected = sortedIndex == selectedIndex;
+				std::string status = "None";
+
+				if (hasReplacement)
+				{
+					status = HookD3D12::gLoadedShaderTargets[rowReplacementIndex].name;
+
+					if (status.empty())
+						status = "Replacement enabled";
+				}
+				else if (allowMarkerToggle && disabledMember)
+				{
+					if (pipeline.*disabledMember)
+						status = "Marker active";
+					else
+						status = "Marker inactive";
+				}
+				else if (shaderType == ShaderTarget::MeshShader && HookD3D12::gHiddenMeshPipelineState.load(std::memory_order_acquire) == pipeline.pipelineState)
+					status = "Hidden";
+
+				ImGui::PushID(sortedIndex);
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
 
 				if (hasReplacement)
 				{
@@ -605,7 +638,9 @@ namespace ShaderInjectorGUI
 					ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.20f, 0.62f, 0.28f, 1.0f));
 				}
 
-				if (ImGui::Selectable(label.c_str(), isSelected || hasReplacement))
+				const std::string hashLabel = Hash::FormatHash(hash) + "###ShaderStage" + idPrefix + std::to_string(sortedIndex);
+
+				if (ImGui::Selectable(hashLabel.c_str(), isSelected || hasReplacement, ImGuiSelectableFlags_SpanAllColumns))
 				{
 					selectedIndex = sortedIndex;
 
@@ -644,10 +679,18 @@ namespace ShaderInjectorGUI
 
 				if (isSelected)
 					ImGui::SetItemDefaultFocus();
-			}
-		}
 
-		ImGui::EndChild();
+				ImGui::TableSetColumnIndex(1);
+				ImGui::Text("%zu bytes", (size_t)(pipeline.*SizeMember));
+				ImGui::TableSetColumnIndex(2);
+				ImGui::Text("%d", sortedIndex);
+				ImGui::TableSetColumnIndex(3);
+				ImGui::TextUnformatted(status.c_str());
+				ImGui::PopID();
+			}
+
+			ImGui::EndTable();
+		}
 
 		if (selectedIndex < 0 || selectedIndex >= (int)pipelines.size() || !(pipelines[selectedIndex].*HashMember))
 		{
@@ -755,10 +798,8 @@ namespace ShaderInjectorGUI
 			}
 			if (recapturePackage)
 			{
-				ImGui::TextUnformatted("Recapture Into Modified Shader");
 				const std::string comboId = "##RecaptureModifiedShader" + std::string(idPrefix);
-				ImGui::SetNextItemWidth(-FLT_MIN);
-				if (ImGui::BeginCombo(comboId.c_str(), recapturePackage->name.c_str()))
+				if (PropertyWidgets::BeginCombo("Recapture Into Modified Shader", comboId.c_str(), recapturePackage->name.c_str()))
 				{
 					for (const auto& package : modifiedShaders)
 					{

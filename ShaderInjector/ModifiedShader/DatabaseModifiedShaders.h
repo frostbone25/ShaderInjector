@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,8 @@ namespace DatabaseModifiedShaders
 	CompileProgress GetCompileProgress();
 
 	void ProcessCompletedCompiles();
+
+	bool QueueBackgroundCompile(std::function<void()> compileTask);
 
 	void Shutdown();
 
