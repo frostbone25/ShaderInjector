@@ -55,7 +55,7 @@ namespace ShaderInjectorGUI
 	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderTarget::ShaderTargetDisk& replacement);
 
 	//===================== developer settings =====================
-	void DrawDeveloperSettings();
+	void DrawShaderInspector();
 	void DrawShaderCompilerSettings();
 	void DrawRenderDoc();
 	void DrawAdapterInfo();

@@ -134,11 +134,21 @@ namespace ShaderInjectorGUI
 
 	void DrawRenderDoc()
 	{
+		//keep the header visible but unavailable until RenderDoc is enabled in the INI.
+		ImGui::BeginDisabled(!Globals::gRenderDocIntegrationEnabled);
+		const bool renderDocOpen = ImGui::CollapsingHeader("RenderDoc");
+		ImGui::EndDisabled();
+
+		if (!Globals::gRenderDocIntegrationEnabled || !renderDocOpen)
+			return;
+
+		ImGui::Indent(indentSpace);
+		ImGui::Spacing();
+
 		const bool renderDocAvailable = RenderDocIntegration::IsAvailable();
 		const bool frameCaptureActive = RenderDocIntegration::IsFrameCapturing();
 		const bool targetControlConnected = RenderDocIntegration::IsTargetControlConnected();
 
-		ImGui::SeparatorText("RenderDoc");
 		ImGui::Text("Status: %s", RenderDocIntegration::GetStatusText().c_str());
 		ImGui::Text("API Version: %s", RenderDocIntegration::GetApiVersionText().c_str());
 
@@ -253,10 +263,18 @@ namespace ShaderInjectorGUI
 			RenderDocIntegration::Refresh();
 			WriteToRuntimeLog("RenderDoc status refreshed: " + RenderDocIntegration::GetStatusText());
 		}
+
+		ImGui::Unindent(indentSpace);
 	}
 
 	void DrawShaderCompilerSettings()
 	{
+		if (!ImGui::CollapsingHeader("Shader Compiler"))
+			return;
+
+		ImGui::Indent(indentSpace);
+		ImGui::Spacing();
+
 		ImGui::Checkbox("Automatically Detect Shader Models", &Globals::gAutoDetectShaderModels);
 		DrawShaderModelSetting("Vertex Shader", ShaderTarget::VertexShader, Globals::gVertexShaderModel);
 		DrawShaderModelSetting("Hull Shader", ShaderTarget::HullShader, Globals::gHullShaderModel);
@@ -279,6 +297,8 @@ namespace ShaderInjectorGUI
 				WriteToRuntimeLogError("Could not compile and reload the internal marker shaders.");
 			}
 		}
+
+		ImGui::Unindent(indentSpace);
 	}
 
 	static void DrawRetiredPSODiagnostics()
@@ -303,88 +323,64 @@ namespace ShaderInjectorGUI
 		ImGui::TreePop();
 	}
 
-	void DrawDeveloperSettings()
+	void DrawShaderInspector()
 	{
-		if (ImGui::CollapsingHeader("Developer Settings"))
+		if (!ImGui::CollapsingHeader("Shader Inspector"))
 		{
-			ImGui::Indent(indentSpace);
-			ImGui::Spacing();
-
-			if (ImGui::BeginTabBar("##DeveloperSettingsTabs"))
-			{
-				if (ImGui::BeginTabItem("Shader Compiler"))
-				{
-					HookD3D12::ClearShaderMarkers();
-					DrawShaderCompilerSettings();
-					ImGui::EndTabItem();
-				}
-
-				if (ImGui::BeginTabItem("Shader Inspector"))
-				{
-					ImGui::InputTextMultiline("##DeveloperSettingsNote",
-											  const_cast<char*>(noteDeveloperSettingsText),
-											  strlen(noteDeveloperSettingsText) + 1,
-											  ImVec2(-FLT_MIN, 0), //-FLT_MIN width = stretch to window edge, 0 height = auto
-											  ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
-
-					ImGui::Spacing();
-					DrawAdapterInfo();
-					DrawD3D12PipelineInfo();
-					ImGui::Spacing();
-
-					ImGui::Text("Selection Style: ");
-					ImGui::SameLine();
-
-					const char* selectionStyles[] =
-					{
-						"Blue Pixel Shader",
-						"Hidden",
-						"None",
-					};
-
-					const char* btnLabel = "Clear Selections";
-					float buttonWidth = ImGui::CalcTextSize(btnLabel).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-					float spacing = ImGui::GetStyle().ItemSpacing.x;
-					float comboWidth = ImGui::GetContentRegionAvail().x - buttonWidth - spacing;
-					ImGui::SetNextItemWidth(comboWidth);
-
-					if (ImGui::Combo("##SelectionStyle", &gSelectionStyleIndex, selectionStyles, IM_ARRAYSIZE(selectionStyles)))
-					{
-						HookD3D12::gShaderSelectionStyle = (HookD3D12::PixelShaderSelectionStyle)gSelectionStyleIndex;
-						HookD3D12::ClearShaderMarkers();
-						HookD3D12::InvalidateShaderMarkerPSOs();
-					}
-
-					ImGui::SameLine();
-
-					if (ImGui::Button(btnLabel))
-						HookD3D12::ClearShaderMarkers();
-
-					ImGui::Spacing();
-
-					DrawRetiredPSODiagnostics();
-					DrawGraphicsPipelines();
-					DrawStreamPipelines();
-					ImGui::EndTabItem();
-				}
-
-				if (Globals::gRenderDocIntegrationEnabled && ImGui::BeginTabItem("RenderDoc"))
-				{
-					HookD3D12::ClearShaderMarkers();
-					DrawRenderDoc();
-					ImGui::EndTabItem();
-				}
-
-				ImGui::EndTabBar();
-			}
-
-			ImGui::Spacing();
-			ImGui::Unindent(indentSpace);
-		}
-		else
-		{
+			//clear selection markers when the inspector is no longer visible.
 			HookD3D12::ClearShaderMarkers();
+			return;
 		}
+
+		ImGui::Indent(indentSpace);
+		ImGui::Spacing();
+
+		ImGui::InputTextMultiline("##DeveloperSettingsNote",
+								  const_cast<char*>(noteDeveloperSettingsText),
+								  strlen(noteDeveloperSettingsText) + 1,
+								  ImVec2(-FLT_MIN, 0), //-FLT_MIN width = stretch to window edge, 0 height = auto
+								  ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
+
+		ImGui::Spacing();
+		DrawAdapterInfo();
+		DrawD3D12PipelineInfo();
+		ImGui::Spacing();
+
+		ImGui::Text("Selection Style: ");
+		ImGui::SameLine();
+
+		const char* selectionStyles[] =
+		{
+			"Blue Pixel Shader",
+			"Hidden",
+			"None",
+		};
+
+		const char* btnLabel = "Clear Selections";
+		float buttonWidth = ImGui::CalcTextSize(btnLabel).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+		float spacing = ImGui::GetStyle().ItemSpacing.x;
+		float comboWidth = ImGui::GetContentRegionAvail().x - buttonWidth - spacing;
+		ImGui::SetNextItemWidth(comboWidth);
+
+		if (ImGui::Combo("##SelectionStyle", &gSelectionStyleIndex, selectionStyles, IM_ARRAYSIZE(selectionStyles)))
+		{
+			HookD3D12::gShaderSelectionStyle = (HookD3D12::PixelShaderSelectionStyle)gSelectionStyleIndex;
+			HookD3D12::ClearShaderMarkers();
+			HookD3D12::InvalidateShaderMarkerPSOs();
+		}
+
+		ImGui::SameLine();
+
+		if (ImGui::Button(btnLabel))
+			HookD3D12::ClearShaderMarkers();
+
+		ImGui::Spacing();
+
+		DrawRetiredPSODiagnostics();
+		DrawGraphicsPipelines();
+		DrawStreamPipelines();
+
+		ImGui::Unindent(indentSpace);
 	}
 
 	void DrawAdapterInfo()

@@ -122,6 +122,7 @@ namespace ShaderInjectorIO
 	bool ReadInjectorSettings();
 	void CreateInjectorSettings();
 	bool WriteInjectorSettings();
+	bool WriteInjectorMenuMode(bool advancedMode);
 	bool WriteInjectorMenuScale(float menuScale);
 
 	//prepare the directories and settings the rest of the injector relies on.

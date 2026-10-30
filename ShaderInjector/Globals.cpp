@@ -26,6 +26,8 @@ namespace Globals
 	int keyToggleShaderInjector = VK_DELETE;
 
 	bool gShowShaderInjectorGUI = true;
+	bool gShaderInjectorAdvancedMode = false;
+
 	std::atomic<bool> gShaderInjectorEnabled = true;
 	std::atomic<bool> gShaderPatchesEnabled = true;
 	bool gRenderDocIntegrationEnabled = false;

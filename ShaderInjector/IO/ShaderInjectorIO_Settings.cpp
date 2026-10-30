@@ -23,6 +23,7 @@ namespace ShaderInjectorIO
 	static const char* const settingsNameToggleInjectorKey = "ToggleInjectorKey";
 	static const char* const settingsNameInjectorEnabled = "InjectorEnabled";
 	static const char* const settingsNameMenuOpen = "MenuOpen";
+	static const char* const settingsNameMenuMode = "MenuMode";
 	static const char* const settingsNameMenuScale = "MenuScale";
 	static const char* const settingsNameShaderPatchesEnabled = "ShaderPatchesEnabled";
 
@@ -71,6 +72,28 @@ namespace ShaderInjectorIO
 		}
 	}
 
+	int ReadInjectorMenuMode(ini::IniFile& injectorSettingsINI)
+	{
+		//a missing key keeps the basic default; malformed or unsupported values select advanced.
+		const std::string menuModeText = StringHelper::TrimWhitespace(ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameMenuMode, std::string("0")));
+
+		try
+		{
+			size_t parsedCharacterCount = 0;
+			const int menuModeValue = std::stoi(menuModeText, &parsedCharacterCount);
+
+			if (parsedCharacterCount == menuModeText.size() && menuModeValue == 0)
+				return 0;
+		}
+		catch (...)
+		{
+			//empty text, non-numeric text, and overflowing numbers all use advanced mode.
+			return 1;
+		}
+
+		return 1;
+	}
+
 	void PopulateInjectorSettings(ini::IniFile& injectorSettingsINI)
 	{
 		//copy live values into their existing INI sections so saves use the same keys as reads.
@@ -79,6 +102,10 @@ namespace ShaderInjectorIO
 		injectorSettingsINI[settingsSectionInjector][settingsNameToggleInjectorKey] = Globals::keyToggleShaderInjector;
 		injectorSettingsINI[settingsSectionInjector][settingsNameInjectorEnabled] = Globals::gShaderInjectorEnabled.load(std::memory_order_acquire);
 		injectorSettingsINI[settingsSectionInjector][settingsNameMenuOpen] = Globals::gShowShaderInjectorGUI;
+
+		//store the selector as an integer: 0 is basic and 1 is advanced.
+		injectorSettingsINI[settingsSectionInjector][settingsNameMenuMode] = static_cast<int>(Globals::gShaderInjectorAdvancedMode);
+
 		injectorSettingsINI[settingsSectionInjector][settingsNameMenuScale] = static_cast<double>(Globals::gShaderInjectorGUIScale);
 		injectorSettingsINI[settingsSectionInjector][settingsNameShaderPatchesEnabled] = Globals::gShaderPatchesEnabled.load(std::memory_order_acquire);
 
@@ -135,6 +162,7 @@ namespace ShaderInjectorIO
 			const int keyToggleShaderInjector = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameToggleInjectorKey, Globals::keyToggleShaderInjector);
 			const bool shaderInjectorEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameInjectorEnabled, Globals::gShaderInjectorEnabled.load(std::memory_order_acquire));
 			const bool showShaderInjectorGUI = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameMenuOpen, Globals::gShowShaderInjectorGUI);
+			const int shaderInjectorMenuMode = ReadInjectorMenuMode(injectorSettingsINI);
 			const double shaderInjectorGUIScale = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameMenuScale, static_cast<double>(Globals::gShaderInjectorGUIScale));
 			const bool shaderPatchesEnabled = ReadIniValueOrDefault(injectorSettingsINI, settingsSectionInjector, settingsNameShaderPatchesEnabled, Globals::gShaderPatchesEnabled.load(std::memory_order_acquire));
 
@@ -174,6 +202,9 @@ namespace ShaderInjectorIO
 			Globals::keyToggleShaderInjector = keyToggleShaderInjector;
 			Globals::gShaderInjectorEnabled.store(shaderInjectorEnabled, std::memory_order_release);
 			Globals::gShowShaderInjectorGUI = showShaderInjectorGUI;
+
+			Globals::gShaderInjectorAdvancedMode = shaderInjectorMenuMode != 0;
+
 			Globals::gShaderInjectorGUIScale = static_cast<float>((std::clamp)(shaderInjectorGUIScale, 0.5, 4.0));
 			Globals::gShaderPatchesEnabled.store(shaderPatchesEnabled, std::memory_order_release);
 
@@ -293,6 +324,41 @@ namespace ShaderInjectorIO
 		catch (...)
 		{
 			WriteToLogFileError("ShaderInjectorIO->WriteInjectorSettings: failed to update injector settings");
+			return false;
+		}
+	}
+
+	bool WriteInjectorMenuMode(bool advancedMode)
+	{
+		const std::string injectorSettingsPath = GetInjectorSettingsPath();
+
+		try
+		{
+			ini::IniFile injectorSettingsINI;
+
+			//save only the mode so switching views preserves other settings already stored on disk.
+			if (FileExists(injectorSettingsPath))
+				injectorSettingsINI.load(injectorSettingsPath);
+
+			const int menuModeValue = static_cast<int>(advancedMode);
+
+			injectorSettingsINI[settingsSectionInjector][settingsNameMenuMode] = menuModeValue;
+
+			std::ostringstream encodedSettings;
+			injectorSettingsINI.encode(encodedSettings);
+
+			if (!WriteTextFile(injectorSettingsPath, encodedSettings.str()))
+			{
+				WriteToLogFileError("ShaderInjectorIO->WriteInjectorMenuMode: failed to write injector settings: " + injectorSettingsPath);
+				return false;
+			}
+
+			WriteToLogFile("ShaderInjectorIO->WriteInjectorMenuMode: saved menuMode=" + std::to_string(menuModeValue));
+			return true;
+		}
+		catch (...)
+		{
+			WriteToLogFileError("ShaderInjectorIO->WriteInjectorMenuMode: failed to update injector settings");
 			return false;
 		}
 	}

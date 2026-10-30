@@ -23,6 +23,9 @@ namespace Globals
 	//Shared runtime state. These must be extern rather than static so every translation unit
 	//observes the settings loaded from ShaderInjector.ini instead of keeping its own copy.
 	extern bool gShowShaderInjectorGUI;
+	//basic mode keeps the menu focused on shader configuration; advanced mode exposes every control.
+	extern bool gShaderInjectorAdvancedMode;
+
 	extern std::atomic<bool> gShaderInjectorEnabled;
 	extern std::atomic<bool> gShaderPatchesEnabled;
 	extern bool gRenderDocIntegrationEnabled;
