@@ -1132,7 +1132,9 @@ float CalculateContactShadows(FGBufferData gbufferData, FResolvedPixel resolvedP
     const float invSamples = rcp((float)CONTACT_SHADOWS_SAMPLES);
 
 	#if defined(RANDOM_INTERLEAVED_GRADIENT_NOISE)
-		float random = InterleavedGradientNoise(input.SvPosition.xy, View_StateFrameIndex);
+		//the animated variant: InterleavedGradientNoise(pixel, frame) changes only about a tenth per frame, so TAA/DLSS averages
+		//nearly the same pattern for many frames, and it loses float precision as the frame count grows during long sessions
+		float random = InterleavedGradientNoiseAnimated(input.SvPosition.xy, View_StateFrameIndex);
 	#elif defined(RANDOM_BLUE_NOISE)
 		float random = LoadSpatiotemporalBlueNoise(input);
 	#else
