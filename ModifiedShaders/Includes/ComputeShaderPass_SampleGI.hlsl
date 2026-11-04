@@ -21,6 +21,12 @@
 //where the coefficents we reconstructed are effectively order 2, but with zonal harmonics we can "hallucinate" a 3rd order leading to less ringing
 #define SPHERICAL_HARMONICS_IRRADIANCE_ZH3
 
+//evaluates the diffuse (irradiance) light straight from the game's baked ambient cube, the form the lighting was baked in
+//the spherical harmonics conversion keeps only 4 of the cube's 6 values, which loses light (about 15% darker on average in a daytime town)
+//the spherical harmonics are still used for the dominant light direction and the specular side
+//NOTE: takes priority over SPHERICAL_HARMONICS_IRRADIANCE_ZH3
+#define GAME_AMBIENT_CUBE_IRRADIANCE
+
 //this uses the dominant direction of baked global illumination to help give extra shading/contrast to characters when in ambient light (half-lambert)
 //this is not physically accurate at all, just purely an artistic effect
 #define CHARACTER_DOMINANT_DIRECTION_SHADING
@@ -30,6 +36,12 @@
 //[CONFIG DEFAULT]: 0.25
 //[CONFIG RANGE]: [0, 1]
 #define CHARACTER_DOMINANT_DIRECTION_SHADING_AMOUNT 0.25
+
+//(CHARACTER_DOMINANT_DIRECTION_SHADING ONLY) brightens the side facing the dominant light as much as it darkens the far side, so characters keep their overall ambient brightness
+#define CHARACTER_DOMINANT_DIRECTION_SHADING_NEUTRAL
+
+//stores how much brighter the baked light is from the sky than from the ground (in the irradiance alpha) for the ReflectionEnvironment's SSGI_DIRECTIONAL_OCCLUSION
+#define AMBIENT_SKY_GROUND_GRADIENT
 
 //this is an experimental feature, that uses the dominant direction and treats it like a light source to get additional shading/contrast in ambient areas.
 //it also uses contact shadows to help give a more grounded look to the shading, and to help mitigate some of the shortcomings of baked global illumination
@@ -210,6 +222,13 @@
 //[CONFIG DEFAULT]: 0.5
 //[CONFIG RANGE]: [0, 1]
 #define SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION_FACTOR 0.5
+
+//(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION ONLY) brightens reflections toward the dominant light as much as it darkens the ones facing away, so reflections keep their overall brightness
+#define SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION_NEUTRAL
+
+//the game stores its baked light the way unreal does (irradiance already divided by PI, so diffuse = color x value),
+//so turning it back into reflected radiance must not divide by PI again: without this the baked reflections come out PI times (3.14x) too dark
+#define SPHERICAL_HARMONICS_RADIANCE_GAME_UNITS
 
 //DONT TOUCH
 //NOTE TO SELF: since this shader does get a little heavier with the extra specular highlights
@@ -1005,6 +1024,10 @@ float3 EvaluateRoughnessFilteredRadiance(SimplifiedSH2 irradianceSH, float3 dire
 	value += bandWeights.x * 0.47746482927568f * Y1 * dot(float3(irradianceSH.Coefficient3, irradianceSH.Coefficient1, irradianceSH.Coefficient2), direction);
 	value += bandWeights.y * 1.273239544735162f * (irradianceSH.Coefficient6 * Y20 * (3.0f * direction.z * direction.z - 1.0f) + irradianceSH.Coefficient8 * Y22 * (direction.x * direction.x - direction.y * direction.y));
 
+	#if defined(SPHERICAL_HARMONICS_RADIANCE_GAME_UNITS)
+		value *= MATH_PI;
+	#endif
+
 	return irradianceSH.Chromaticity * value;
 }
 
@@ -1348,6 +1371,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 radiance = 0.0f;
     float3 irradiance = 0.0f;
     float outputAlpha = 0.0f;
+    float skyGroundGradient = 0.0f;
 
 
         float3 worldNormal = normalize(encodedNormal * 2.0f - 1.0f);
@@ -1400,6 +1424,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                 #else
                     irradiance = EvaluateSphericalHarmonics(sphericalHarmonicsIrradiance, worldNormal);
                 #endif
+
+                #if defined(GAME_AMBIENT_CUBE_IRRADIANCE)
+                    irradiance = EvaluateDirectionalField(field, worldNormal);
+                #endif
+
+                #if defined(AMBIENT_SKY_GROUND_GRADIENT)
+                    //light from straight up vs straight down, as a linear radiance gradient along world up (irradiance ratio (1 + 2a/3) / (1 - 2a/3))
+                    float skyIrradiance = LuminanceRec709(EvaluateDirectionalField(field, float3(0.0f, 0.0f, 1.0f)));
+                    float groundIrradiance = LuminanceRec709(EvaluateDirectionalField(field, float3(0.0f, 0.0f, -1.0f)));
+                    skyGroundGradient = clamp(1.5f * (skyIrradiance - groundIrradiance) / max(skyIrradiance + groundIrradiance, 1.0e-6f), -1.0f, 1.0f);
+                #endif
         
                 //specular lighting
                 //NOTE: now I have some things to say about this... while normally in theory we shouldn't at all be sampling from this irradiance volume for reflections/specular at all
@@ -1417,7 +1452,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                 //we can try to use this to occlude specular reflections that are away from the dominant source of light
                 //this can certainly help us get a little more dimension and shape out of the radiance data and make it appear somewhat less flat and blurry
                 #if defined(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION)
-                    radiance *= lerp(1.0f, saturate(dot(reflectionDirection, dominantLight.Direction) * 0.5f + 0.5f), SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION_FACTOR);
+                    #if defined(SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION_NEUTRAL)
+                        radiance *= lerp(1.0f, 2.0f * saturate(dot(reflectionDirection, dominantLight.Direction) * 0.5f + 0.5f), SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION_FACTOR);
+                    #else
+                        radiance *= lerp(1.0f, saturate(dot(reflectionDirection, dominantLight.Direction) * 0.5f + 0.5f), SPHERICAL_HARMONICS_DOMINANT_DIRECTION_SPECULAR_OCCLUSION_FACTOR);
+                    #endif
                 #endif
                 
                 float domiantHighlightLuminance = 0.0f;
@@ -1490,6 +1529,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 						shadingModelId == SHADINGMODELID_PREINTEGRATED_SKIN)
 					{
 						float skinDominantDiffuseContrast = saturate(dot(worldNormal, dominantLight.Direction) * 0.5f + 0.5f);
+
+						#if defined(CHARACTER_DOMINANT_DIRECTION_SHADING_NEUTRAL)
+							skinDominantDiffuseContrast *= 2.0f; //half-lambert averages 0.5 over all directions
+						#endif
 						irradiance *= lerp(1.0f, skinDominantDiffuseContrast, CHARACTER_DOMINANT_DIRECTION_SHADING_AMOUNT);
 					}
 				#endif
@@ -1512,5 +1555,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	radiance = max(0.004f, radiance);
 
     RWEnvironmentIrradianceATexture[outputPixel] = float4(radiance * View_PreExposure, outputAlpha);
-    RWEnvironmentIrradianceBTexture[outputPixel] = float4(irradiance * View_PreExposure, outputAlpha);
+    #if defined(AMBIENT_SKY_GROUND_GRADIENT)
+        //alpha stays 0 where there is no baked light (the ReflectionEnvironment checks it), otherwise 2 + gradient (1..3)
+        float irradianceAlpha = (outputAlpha != 0.0f) ? 2.0f + skyGroundGradient : 0.0f;
+    #else
+        float irradianceAlpha = outputAlpha;
+    #endif
+
+    RWEnvironmentIrradianceBTexture[outputPixel] = float4(irradiance * View_PreExposure, irradianceAlpha);
 }

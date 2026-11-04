@@ -62,6 +62,10 @@
 //far less of a "frog face" look.
 // #define FLATTEN_CHARACTER_AMBIENT
 
+//rough surfaces send evenly spread (ambient) light back out in full, roughness only changes the direction it goes (energy preserving rough diffuse)
+//without it rough materials lose up to a third of their ambient light (the 1 / (1 + roughness / 2) term below), most of all where they face the camera
+#define AMBIENT_DIFFUSE_ENERGY_PRESERVING
+
 //controls how strong the AO term is in ambient light (use in tandem with SSAO_BRIGHTNESS)
 //NOTE: original game SSAO is much weaker than the SSGI AO, if your flipping back and fourth you'll need to readjust the values
 //Higher Values: more contrast
@@ -146,6 +150,21 @@
 //this DOES impact performance quite a bit, needing to sample the color buffer in order to bounce light around
 //and also in its current state, there is no filtering so this can contribute to quite a bit noise in the final image
 #define SSGI_BOUNCE_LIGHT
+
+//(SSGI_AMBIENT_OCCLUSION / SSGI_BOUNCE_LIGHT) weights the visibility bitmask by how much light each direction actually delivers to the surface (cosine weighted, like GTAO)
+//without it every direction counts the same, so low obstacles near the horizon (cobble bumps, curbs, far walls) block as much ambient light as ones straight overhead and open ground goes too dark
+//this also drops the old x PI boost on the bounce light, which only made up for that extra darkness
+#define SSGI_COSINE_WEIGHTED_VISIBILITY
+
+//(SSGI_AMBIENT_OCCLUSION + SSGI_BOUNCE_LIGHT) a surface that blocks the ambient light also reflects the ambient light that reaches it, not only its direct light
+//(ground in shade still reflects the sky): without this, everything standing on shaded ground (characters, walls, barrels) loses the light the ground sends back up,
+//light the baked lighting already had in it before the AO took it away
+#define SSGI_BOUNCE_OCCLUDER_AMBIENT
+
+//(SSGI_COSINE_WEIGHTED_VISIBILITY ONLY) the baked light is brighter from the sky than from the ground, so a surface that blocks a low direction (the ground below a wall or a character)
+//takes away less of it than one that blocks the sky. without this the AO removes the average baked light for every blocked direction, and walls and characters standing on
+//the ground lose light the baked lighting never gave them (needs AMBIENT_SKY_GROUND_GRADIENT in the SampleGI shader, otherwise it treats the sky and ground as equally bright)
+#define SSGI_DIRECTIONAL_OCCLUSION
 
 //shade half of the expensive SSGI rays each frame and reconstruct the missing half from the two computed neighbors in the same 2x2 pixel quad
 //NOTE: checkerboard rendering is a definite WIN for performance especially at high resolutions, I think it's wise to leave this on even at the expense of quality
@@ -1468,10 +1487,14 @@ void ApproximateFresnelEnergy(float roughness, float NoV, float3 f0, out float3 
 
     float2 gf = View_PreIntegratedGF.SampleLevel(View_SharedBilinearClampedSampler, float2(NoV, roughness), 0.0f).rg;
 
-    //NEW: retro reflection based on roughness to emulate oren-nayar BRDF
-    float diffuseRetroReflection = 0.5f * roughness * (1.0f - NoV);
+    #if defined(AMBIENT_DIFFUSE_ENERGY_PRESERVING)
+        diffuseResponse = 1.0f;
+    #else
+        //NEW: retro reflection based on roughness to emulate oren-nayar BRDF
+        float diffuseRetroReflection = 0.5f * roughness * (1.0f - NoV);
 
-    diffuseResponse = saturate(rcp(1.0f + 0.5f * roughness) + diffuseRetroReflection);
+        diffuseResponse = saturate(rcp(1.0f + 0.5f * roughness) + diffuseRetroReflection);
+    #endif
     specularResponse = saturate(f0 * gf.x + gf.y);
 }
 
@@ -1568,6 +1591,21 @@ void EvaluateMaterialLobes(
 
 static const float SSGI_STEP_SCALE = pow(SSGI_RAYMARCHING_WIDTH, 1.0f / (float)SSGI_RAYMARCHING_STEP_COUNT);
 
+#if defined(SSGI_COSINE_WEIGHTED_VISIBILITY)
+//antiderivative of cos(t - n) * sin(t), the GTAO slice integrand (t = angle from the view direction, n = angle of the projected normal)
+float CosineArc(float t, float n, float sinN)
+{
+    return 0.25f * (2.0f * t * sinN - cos(2.0f * t - n));
+}
+
+//where angle t lands on the cosine weighted [0,1] slice bitmask (0 and 1 are the two ends of the hemisphere around the normal)
+float CosineWeightedSlicePosition(float t, float n, float sinN, float arcStart, float arcZero, float invMeasure)
+{
+    float arc = (t <= 0.0f) ? (arcStart - CosineArc(t, n, sinN)) : (arcStart + CosineArc(t, n, sinN) - 2.0f * arcZero);
+    return saturate(arc * invMeasure);
+}
+#endif
+
 //NOTE TO SELF: the original implementation had an adjustable directions count, this means we could have a really high quality/clean SSGI
 //however because we are already doing alot of raymarching, I have removed it so we are effectively doing 1 direction per pixel
 //using noise we will just temporally accumulate results, this will lead to the best performance
@@ -1575,10 +1613,12 @@ float4 ComputeGTVBGI(
     float2 PixelXY,         // view-local pixel coordinate
     float3 WorldPos,        // world-space surface position
     float3 WorldNormal,     // world-space surface normal
-    out float FallbackMask)
+    out float FallbackMask,
+    out float OccludedUp)    // cosine weighted sum of the blocked directions' world up component (SSGI_DIRECTIONAL_OCCLUSION)
 {
     // Degenerate/early-return cases require full fallback.
     FallbackMask = 1.0f;
+    OccludedUp = 0.0f;
 
     const uint MASK_ALL = 0xFFFFFFFFu;
     const float inv32 = rcp(32.0f);
@@ -1614,6 +1654,7 @@ float4 ComputeGTVBGI(
     float3 AccumulatedGI = 0.0f;
     float AccumulatedOcclusion = 0.0f;
     float AccumulatedScreenGICoverage = 0.0f;
+    float AccumulatedOccludedUp = 0.0f;
 
     //do not unroll this outer loop: its body already contains the full two-sided depth march, and unrolling several slices can greatly increase shader size.
     [loop]
@@ -1659,12 +1700,34 @@ float4 ComputeGTVBGI(
 
         float BaseHor = 0.5f + 0.5f * sinN;
 
+        #if defined(SSGI_COSINE_WEIGHTED_VISIBILITY)
+            //slice basis: the view direction and the in-plane direction toward the positive half of the slice
+            float3 SliceSideDir = normalize(RayStep - ViewDir * dot(RayStep, ViewDir));
+
+            //angle of the projected normal from the view direction (GTAO's n)
+            float NormalAngle = clamp(atan2(dot(ProjViewNormal, SliceSideDir), dot(ProjViewNormal, ViewDir)), -0.5f * MATH_PI, 0.5f * MATH_PI);
+            float SinNormalAngle;
+            float CosNormalAngle;
+            sincos(NormalAngle, SinNormalAngle, CosNormalAngle);
+
+            float HemisphereStart = NormalAngle - 0.5f * MATH_PI;
+            float HemisphereEnd = NormalAngle + 0.5f * MATH_PI;
+            float ArcStart = CosineArc(HemisphereStart, NormalAngle, SinNormalAngle);
+            float ArcZero = -0.25f * CosNormalAngle;
+
+            //cosine weighted size of this slice's hemisphere (cos(n) + n sin(n)), and the slice weight (projected normal length times that), which averages 1 over all slice directions
+            float SliceMeasure = CosNormalAngle + NormalAngle * SinNormalAngle;
+            float InvSliceMeasure = rcp(max(SliceMeasure, 1.0e-4f));
+            float SliceWeight = sqrt(ProjNormalLen2) * SliceMeasure;
+        #endif
+
         // Give every slice a different low-discrepancy jitter while retaining
         // exactly random.z/random.y for SSGISampleIndex == 0.
         float ArcJitter = frac(random.z + (float)SSGISampleIndex * 0.569840296f) * inv32;
         float DirectionStepJitter = frac(random.y + (float)SSGISampleIndex * 0.754877666f);
 
         float3 SliceGI = float3(0.0f, 0.0f, 0.0f);
+        float SliceOccludedUp = 0.0f;
         uint OcclusionBits = 0u;
         uint ResolvedGIBits = 0u;
 
@@ -1701,16 +1764,28 @@ float4 ComputeGTVBGI(
                 float3 FrontDelta = SampleViewRay * SampledDepth - ViewPos;
                 float3 BackDelta = FrontDelta + SampleViewRay * SSGI_THICKNESS;
 
-                // Project onto the view direction to get cos(horizon angle).
-                float2 HorCos = float2(dot(FrontDelta, ViewDir) * rsqrt(max(dot(FrontDelta, FrontDelta), 1.0e-8f)), dot(BackDelta, ViewDir) * rsqrt(max(dot(BackDelta, BackDelta), 1.0e-8f)));
+                #if defined(SSGI_COSINE_WEIGHTED_VISIBILITY)
+                    //angles of the occluder's front and back points from the view direction, inside the slice
+                    float FrontAngle = atan2(dot(FrontDelta, SliceSideDir), dot(FrontDelta, ViewDir));
+                    float BackAngle = atan2(dot(BackDelta, SliceSideDir), dot(BackDelta, ViewDir));
+                    float2 OccluderAngles = clamp(float2(min(FrontAngle, BackAngle), max(FrontAngle, BackAngle)), HemisphereStart, HemisphereEnd);
 
-                // Flip endpoint order for the negative half of the slice.
-                HorCos = (Side >= 0) ? HorCos.xy : HorCos.yx;
+                    float2 Hor01 = float2(
+                        CosineWeightedSlicePosition(OccluderAngles.x, NormalAngle, SinNormalAngle, ArcStart, ArcZero, InvSliceMeasure),
+                        CosineWeightedSlicePosition(OccluderAngles.y, NormalAngle, SinNormalAngle, ArcStart, ArcZero, InvSliceMeasure));
+                    Hor01 = saturate(Hor01 + ArcJitter);
+                #else
+                    // Project onto the view direction to get cos(horizon angle).
+                    float2 HorCos = float2(dot(FrontDelta, ViewDir) * rsqrt(max(dot(FrontDelta, FrontDelta), 1.0e-8f)), dot(BackDelta, ViewDir) * rsqrt(max(dot(BackDelta, BackDelta), 1.0e-8f)));
 
-                // Map the horizon cosines into a [0,1] arc on the bitmask circle.
-                float d05 = SideF * 0.5f;
-                float2 Hor01 = BaseHor + d05 - d05 * HorCos;
-                Hor01 = saturate(Hor01 + ArcJitter);
+                    // Flip endpoint order for the negative half of the slice.
+                    HorCos = (Side >= 0) ? HorCos.xy : HorCos.yx;
+
+                    // Map the horizon cosines into a [0,1] arc on the bitmask circle.
+                    float d05 = SideF * 0.5f;
+                    float2 Hor01 = BaseHor + d05 - d05 * HorCos;
+                    Hor01 = saturate(Hor01 + ArcJitter);
+                #endif
 
                 // Convert the arc to a 32-bit angular occupancy mask.
                 uint2 HorInt = (uint2)floor(Hor01 * 32.0f);
@@ -1729,6 +1804,13 @@ float4 ComputeGTVBGI(
                         float ProjSampledLen2 = max(1.0f - SampleNormalPlaneDot * SampleNormalPlaneDot, 0.0f);
 
                         // ---------- backface rejection ----------
+                        #if defined(SSGI_COSINE_WEIGHTED_VISIBILITY)
+                        //a surface only sends light out of the side its normal faces
+                        float3 WorldSampleToReceiver = mul(-FrontDelta, (float3x3)View_TranslatedWorldToView);
+
+                        if (dot(SampledWorldNormal, WorldSampleToReceiver) <= 0.0f)
+                            NewlyVisibleBits = 0u;
+                        #else
                         if (ProjSampledLen2 > 1.0e-8f)
                         {
                             float InvProjSampledLen = rsqrt(ProjSampledLen2);
@@ -1756,6 +1838,7 @@ float4 ComputeGTVBGI(
 
                             NewlyVisibleBits &= VisBitsN;
                         }
+                        #endif
 
                         if (NewlyVisibleBits != 0u)
                         {
@@ -1764,8 +1847,27 @@ float4 ComputeGTVBGI(
 
                             float Visibility = (float)countbits(NewlyVisibleBits) * inv32;
                             float3 SampledRadiance = OutTextureColor[SampleBufferPixel].rgb;
+
+                            #if defined(SSGI_BOUNCE_OCCLUDER_AMBIENT)
+                                //the blocking surface's own ambient light: its diffuse color times the baked irradiance at it (both pre-exposed like the scene color)
+                                float SampledMetallic = GBufferBTexture.Load(int3(SampleBufferPixel, 0)).r;
+                                float3 SampledDiffuseColor = (1.0f - SampledMetallic) * GBufferCTexture.Load(int3(SampleBufferPixel, 0)).rgb;
+                                SampledRadiance += SampledDiffuseColor * EnvironmentIrradianceBTexture.Load(int3(SampleBufferPixel, 0)).rgb;
+                            #endif
                             SliceGI += SampledRadiance * Visibility;
                         }
+                    }
+                #endif
+
+                #if defined(SSGI_DIRECTIONAL_OCCLUSION) && defined(SSGI_COSINE_WEIGHTED_VISIBILITY)
+                    //which way the newly blocked directions point (world up component of the middle of the blocked arc)
+                    uint NewlyOccludedBits = SampleOccBits & (~OcclusionBits);
+
+                    if (NewlyOccludedBits != 0u)
+                    {
+                        float MidAngle = 0.5f * (OccluderAngles.x + OccluderAngles.y);
+                        float3 ViewOccluderDir = ViewDir * cos(MidAngle) + SliceSideDir * sin(MidAngle);
+                        SliceOccludedUp += (float)countbits(NewlyOccludedBits) * inv32 * mul(ViewOccluderDir, (float3x3)View_TranslatedWorldToView).z;
                     }
                 #endif
 
@@ -1782,6 +1884,16 @@ float4 ComputeGTVBGI(
         float SliceOcclusion = (float)countbits(OcclusionBits) * inv32;
         float SliceScreenGICoverage = (float)countbits(ResolvedGIBits) * inv32;
 
+        #if defined(SSGI_COSINE_WEIGHTED_VISIBILITY)
+            //slices where the normal lies close to the slice plane hold more of the hemisphere, so they count for more
+            SliceGI *= SliceWeight;
+            SliceOcclusion *= SliceWeight;
+            SliceScreenGICoverage *= SliceWeight;
+            SliceOccludedUp *= SliceWeight;
+        #endif
+
+        AccumulatedOccludedUp += SliceOccludedUp;
+
         AccumulatedGI += SliceGI;
         AccumulatedOcclusion += SliceOcclusion;
         AccumulatedScreenGICoverage += SliceScreenGICoverage;
@@ -1794,9 +1906,10 @@ float4 ComputeGTVBGI(
 
     // 0 = screen-space GI fully resolved across all sampled slices.
     // 1 = no valid screen-space GI; use full fallback.
-    FallbackMask = 1.0f - ScreenGICoverage;
+    FallbackMask = saturate(1.0f - ScreenGICoverage);
+    OccludedUp = AccumulatedOccludedUp * InvSSGISampleCount;
 
-    return float4(GI * View_OneOverPreExposure, 1.0f - Occlusion);
+    return float4(GI * View_OneOverPreExposure, saturate(1.0f - Occlusion));
 }
 
 
@@ -1898,6 +2011,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         worldPosition = ReconstructWorldPosition(vector_svPosition, gbufferData.DeviceDepth);
 
 	float ssgiMask = 1.0f;
+	float ssgiOccludedUp = 0.0f;
 
 	#if defined(SSGI_AMBIENT_OCCLUSION) || defined(SSGI_BOUNCE_LIGHT)
         float4 ssgi = float4(0, 0, 0, 1);
@@ -1925,7 +2039,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                 viewPixelPosition,
                 vector_rayOriginSSGI,
                 gbufferData.WorldNormal,
-                ssgiMask);
+                ssgiMask,
+                ssgiOccludedUp);
         }
 
         #if defined(SSGI_CHECKERBOARD) && defined(SSGI_CHECKERBOARD_QUAD_RECONSTRUCTION)
@@ -1934,6 +2049,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             float4 verticalSsgi = QuadReadAcrossY(ssgi);
             float horizontalMask = QuadReadAcrossX(ssgiMask);
             float verticalMask = QuadReadAcrossY(ssgiMask);
+            float horizontalOccludedUp = QuadReadAcrossX(ssgiOccludedUp);
+            float verticalOccludedUp = QuadReadAcrossY(ssgiOccludedUp);
             float horizontalValid = QuadReadAcrossX(computedSample);
             float verticalValid = QuadReadAcrossY(computedSample);
 
@@ -1946,6 +2063,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                     float inverseWeight = rcp(reconstructionWeight);
                     ssgi = (horizontalSsgi * horizontalValid + verticalSsgi * verticalValid) * inverseWeight;
                     ssgiMask = (horizontalMask * horizontalValid + verticalMask * verticalValid) * inverseWeight;
+                    ssgiOccludedUp = (horizontalOccludedUp * horizontalValid + verticalOccludedUp * verticalValid) * inverseWeight;
                 }
             }
         #endif
@@ -2010,6 +2128,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     float4 irradianceVolume = EnvironmentIrradianceBTexture.Load(int3(vector_uvInt, 0));
     radianceVolume.rgb *= View_OneOverPreExposure;
     irradianceVolume.rgb *= View_OneOverPreExposure;
+
+    #if defined(SSGI_AMBIENT_OCCLUSION) && defined(SSGI_DIRECTIONAL_OCCLUSION) && defined(SSGI_COSINE_WEIGHTED_VISIBILITY)
+        //model the baked light as brighter from above than below (linear in the up direction, from the SampleGI's sky/ground ratio),
+        //and take away only the share of it that came from the blocked directions
+        float skyGroundGradient = (irradianceVolume.a >= 1.5f) ? clamp(irradianceVolume.a - 2.0f, -1.0f, 1.0f) : 0.0f;
+        float occludedBakedLight = (1.0f - ssgi.a) + skyGroundGradient * ssgiOccludedUp;
+        float hemisphereBakedLight = max(1.0f + (2.0f / 3.0f) * skyGroundGradient * gbufferData.WorldNormal.z, 1.0e-3f);
+        ssgi.a = saturate(1.0f - occludedBakedLight / hemisphereBakedLight);
+    #endif
 
     float ambientOcclusion = 1.0f;
 
@@ -2129,7 +2256,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         specular += globalIlluminationIrradiance * cameraAmbientLight * CalculateSpecularHighlight(gbufferData.WorldNormal, vector_viewDirection, gbufferData.Roughness) * CAMERA_AMBIENT_LIGHT_SPECULAR_BOOST;
     #endif
 
-    diffuse *= GTAOMultiBounce(ambientOcclusion, gbufferData.BaseColor);
+    #if defined(SSGI_BOUNCE_OCCLUDER_AMBIENT) && defined(SSGI_BOUNCE_LIGHT) && defined(SSGI_AMBIENT_OCCLUSION)
+        //light bouncing between nearby surfaces is traced by the SSGI now, so only the material's own (texture) AO gets the multi-bounce estimate
+        float materialOcclusion = max((gbufferData.ShadingModelID == SHADINGMODELID_EYE) ? 1.0f - gbufferData.GBufferC.a : gbufferData.GBufferC.a, 1.0e-3f);
+        diffuse *= ambientOcclusion * GTAOMultiBounce(materialOcclusion, gbufferData.BaseColor) / materialOcclusion;
+    #else
+        diffuse *= GTAOMultiBounce(ambientOcclusion, gbufferData.BaseColor);
+    #endif
     specular *= GTAOMultiBounce(specularOcclusion, gbufferData.BaseColor);
     //diffuse *= GTAOMultiBounce(ambientOcclusion, gbufferData.EnergyColor);
     //specular *= GTAOMultiBounce(specularOcclusion, gbufferData.EnergyColor);
@@ -2140,7 +2273,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     //if you apply SSGI before then the AO will arbitrarily darken the SSGI contribution incorrectly
     //bounce light is additive! its already factoring in occlusion!
 	#if defined(SSGI_BOUNCE_LIGHT)
-		float ssgiBoost = MATH_PI; //arbitrary boost to the GI
+		#if defined(SSGI_COSINE_WEIGHTED_VISIBILITY)
+			float ssgiBoost = 1.0f; //cosine weighted bounce light is already in the same units as the ambient irradiance
+		#else
+			float ssgiBoost = MATH_PI; //arbitrary boost to the GI
+		#endif
 
 		if (gbufferData.ShadingModelID == SHADINGMODELID_HAIR || 
 			gbufferData.ShadingModelID == SHADINGMODELID_EYE || 
@@ -2148,6 +2285,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			ssgiBoost = 1.0f; //reduce SSGI for these shading models (characters specifically, looks too weird)
 
 		//diffuse = 0; //debug to see SSGI only
+
+		#if defined(SSGI_AMBIENT_OCCLUSION) && defined(SSGI_BOUNCE_OCCLUDER_AMBIENT)
+			//the AO already took away the blocked light and the bounce brings back what the blocking surfaces send,
+			//so the fallback mask (the directions where bounce light was found) would take that light away a second time
+			ssgiMask = 1.0f;
+		#endif
+
 		diffuse *= ssgiMask;
 		diffuse += max(0.0002, ssgi.rgb * ssgiBoost);
 	#endif
