@@ -51,7 +51,9 @@ namespace HookD3D12
 		const std::string& modifiedShaderId,
 		bool generateShaderDisassembly,
 		const ShaderAnalysis::ShaderAnalysisDisk* originalShaderAnalysis,
-		ShaderTarget::ShaderTargetDisk* recapturedTarget = nullptr)
+		ShaderTarget::ShaderTargetDisk* recapturedTarget = nullptr,
+		const ModifiedShader::ModifiedShaderPackageDisk* packageSnapshot = nullptr,
+		ShaderTarget::ShaderTargetDisk* preparedTarget = nullptr)
 	{
 		if (!shaderHash || !shaderBytecode || shaderBytecodeLength == 0)
 		{
@@ -111,12 +113,15 @@ namespace HookD3D12
 			replacement.pipelineTemplates = recapturedTarget->pipelineTemplates;
 		}
 
-		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = packageSnapshot;
+
+		if (!modifiedShader && !preparedTarget)
+			modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
 
 		if (modifiedShader)
 			replacement.modifiedShaderBlobPath = modifiedShader->compiledBlobPath;
 
-		if (originalShaderAnalysis && originalShaderAnalysis->succeeded)
+		if (originalShaderAnalysis)
 		{
 			replacement.originalShaderAnalysis = *originalShaderAnalysis;
 		}
@@ -303,6 +308,12 @@ namespace HookD3D12
 			return true;
 		}
 
+		if (preparedTarget)
+		{
+			*preparedTarget = std::move(replacement);
+			return true;
+		}
+
 		if (gLoadedShaderTargetsOnce)
 		{
 			const auto existingTarget = std::find_if(gLoadedShaderTargets.begin(), gLoadedShaderTargets.end(),
@@ -358,6 +369,77 @@ namespace HookD3D12
 		const ShaderAnalysis::ShaderAnalysisDisk* originalShaderAnalysis)
 	{
 		return CreateShaderTarget(sourceList, pipelineIndex, shaderType, shaderHash, shaderBytecodeLength, shaderBytecode, pipeline.pipelineState, nullptr, &pipeline, modifiedShaderId, generateShaderDisassembly, originalShaderAnalysis);
+	}
+
+	bool PrepareShaderTargetForPipeline(
+		const std::string& sourceList,
+		int pipelineIndex,
+		ShaderTarget::ShaderType shaderType,
+		uint64_t shaderHash,
+		size_t shaderBytecodeLength,
+		const void* shaderBytecode,
+		GraphicsPipelineInfo& pipeline,
+		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
+		ShaderTarget::ShaderTargetDisk& preparedTarget,
+		const ShaderAnalysis::ShaderAnalysisDisk* originalShaderAnalysis)
+	{
+		return CreateShaderTarget(sourceList, pipelineIndex, shaderType, shaderHash, shaderBytecodeLength, shaderBytecode, pipeline.pipelineState, &pipeline, nullptr, modifiedShader.id, false, originalShaderAnalysis, nullptr, &modifiedShader, &preparedTarget);
+	}
+
+	bool PrepareShaderTargetForPipeline(
+		const std::string& sourceList,
+		int pipelineIndex,
+		ShaderTarget::ShaderType shaderType,
+		uint64_t shaderHash,
+		size_t shaderBytecodeLength,
+		const void* shaderBytecode,
+		PipelineStateInfo& pipeline,
+		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
+		ShaderTarget::ShaderTargetDisk& preparedTarget,
+		const ShaderAnalysis::ShaderAnalysisDisk* originalShaderAnalysis)
+	{
+		return CreateShaderTarget(sourceList, pipelineIndex, shaderType, shaderHash, shaderBytecodeLength, shaderBytecode, pipeline.pipelineState, nullptr, &pipeline, modifiedShader.id, false, originalShaderAnalysis, nullptr, &modifiedShader, &preparedTarget);
+	}
+
+	bool PublishPreparedShaderTarget(ShaderTarget::ShaderTargetDisk preparedTarget)
+	{
+		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseModifiedShaders::FindModifiedShaderById(preparedTarget.modifiedShaderId);
+
+		if (!modifiedShader || !modifiedShader->enabled || modifiedShader->shaderType != preparedTarget.shaderType)
+			return false;
+
+		std::vector<uint8_t> compiledReplacementBlob;
+		DatabaseModifiedShaders::TryGetCompiledBlobForShader(*modifiedShader, preparedTarget.originalShaderBytecodeHash, preparedTarget.shaderBytecodeHashAliases, compiledReplacementBlob);
+
+		bool publishedTarget = false;
+		{
+			std::lock_guard<std::mutex> pipelineLock(gPipelineMutex);
+
+			if (gLoadedShaderTargetsOnce)
+			{
+				publishedTarget = true;
+
+				const auto existingTarget = std::find_if(gLoadedShaderTargets.begin(), gLoadedShaderTargets.end(),
+					[&preparedTarget](const ShaderTarget::ShaderTargetDisk& loadedTarget)
+					{
+						return loadedTarget.jsonPath == preparedTarget.jsonPath ||
+							(loadedTarget.shaderType == preparedTarget.shaderType &&
+							 loadedTarget.originalShaderBytecodeHash == preparedTarget.originalShaderBytecodeHash);
+					});
+
+				if (existingTarget == gLoadedShaderTargets.end())
+				{
+					gLoadedShaderTargets.push_back(std::move(preparedTarget));
+					gLoadedShaderTargetBlobs.push_back(std::move(compiledReplacementBlob));
+					RestartShaderTargetApplyScan();
+				}
+			}
+			else
+				publishedTarget = true;
+		}
+
+		QueueShaderTargetApplyWork();
+		return publishedTarget;
 	}
 
 	bool RecaptureShaderTargetForPipeline(ShaderTarget::ShaderTargetDisk& shaderTarget, int pipelineIndex, GraphicsPipelineInfo& pipeline, const ShaderAnalysis::ShaderAnalysisDisk& analysis)

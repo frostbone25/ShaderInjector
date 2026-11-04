@@ -93,7 +93,22 @@ namespace ShaderInjectorIO
 		return JoinPath(GetModifiedShadersDirectory(), "Includes");
 	}
 
+	std::string GetShaderConfigurationDirectory()
+	{
+		return JoinPath(GetShaderInjectorDirectory(), "ShaderConfiguration");
+	}
+
+	std::string GetShaderConfigurationPresetsDirectory()
+	{
+		return JoinPath(GetShaderConfigurationDirectory(), "Presets");
+	}
+
 	std::string GetShaderConfigurationsPath()
+	{
+		return JoinPath(GetShaderConfigurationDirectory(), "Properties" + extensionJSON);
+	}
+
+	std::string GetLegacyShaderConfigurationsPath()
 	{
 		return JoinPath(GetModifiedShadersDirectory(), "ShaderConfigurations" + extensionJSON);
 	}

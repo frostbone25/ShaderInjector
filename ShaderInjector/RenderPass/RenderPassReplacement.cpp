@@ -11,6 +11,7 @@
 #include <wrl/client.h>
 
 #include "Hash/Hash.h"
+#include "HookD3D12/AsyncPipelineCreation.h"
 #include "HookD3D12/HookD3D12.h"
 #include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "StringHelper.h"
@@ -21,6 +22,7 @@ namespace RenderPassReplacement
 	{
 		std::mutex gCacheMutex;
 		std::unordered_map<std::string, ID3D12PipelineState*> gPipelineCache;
+		std::unordered_map<std::string, ID3D12PipelineState*> gLastGoodPipelines;
 		std::atomic<uint64_t> gPipelineAvailabilityGeneration{1};
 
 		std::unordered_map<std::string, PipelineFailure> gPipelineFailures;
@@ -90,7 +92,7 @@ namespace RenderPassReplacement
 
 		std::string CacheKey(const RenderPass::RenderPassDisk& renderPass, ID3D12PipelineState* original, uint64_t fragmentShaderBlobHash)
 		{
-			return StringHelper::PointerToString(original) + ':' + std::to_string(static_cast<int>(renderPass.type)) +
+			return renderPass.id + ':' + StringHelper::PointerToString(original) + ':' + std::to_string(static_cast<int>(renderPass.type)) +
 				   ':' + std::to_string(fragmentShaderBlobHash);
 		}
 
@@ -137,7 +139,8 @@ namespace RenderPassReplacement
 			const StageOverrides& overrides,
 			ID3D12RootSignature* rootSignature,
 			ID3D12PipelineState* original,
-			std::string& outError)
+			std::string& outError,
+			HookD3D12::AsyncPipelineCreation::NativeCreateCallback* outCreateCallback = nullptr)
 		{
 			for (HookD3D12::GraphicsPipelineInfo& pipeline : HookD3D12::gGraphicsPipelines)
 			{
@@ -167,18 +170,29 @@ namespace RenderPassReplacement
 				if (appliedOverrides != CountOverrides(overrides))
 					return nullptr;
 
+				if (outCreateCallback)
+				{
+					auto ownedDescription = std::make_shared<HookD3D12::AsyncPipelineCreation::OwnedGraphicsPipelineDesc>();
+					if (!ownedDescription->Initialize(original, description) || !HookD3D12::Original_CreateGraphicsPipelineState)
+						return nullptr;
+
+					const auto createGraphicsPipelineState = HookD3D12::Original_CreateGraphicsPipelineState;
+					*outCreateCallback = [ownedDescription, createGraphicsPipelineState](ID3D12PipelineState** outputPipelineState)
+					{
+						HookD3D12::ScopedRenderPassInjection injectionScope;
+						return createGraphicsPipelineState(ownedDescription->device.Get(), &ownedDescription->description, IID_PPV_ARGS(outputPipelineState));
+					};
+					return nullptr;
+				}
+
 				ID3D12PipelineState* replacement = nullptr;
 				HookD3D12::ScopedRenderPassInjection injectionScope;
 				HRESULT result = E_NOINTERFACE;
-
 				Microsoft::WRL::ComPtr<ID3D12Device> pipelineDevice;
-
 				if (SUCCEEDED(original->GetDevice(IID_PPV_ARGS(&pipelineDevice))) && HookD3D12::Original_CreateGraphicsPipelineState)
 					result = HookD3D12::Original_CreateGraphicsPipelineState(pipelineDevice.Get(), &description, IID_PPV_ARGS(&replacement));
-
 				if (FAILED(result) || !replacement)
 					outError = "Replacement pixel PSO creation failed with " + StringHelper::FormatHRESULT(result);
-
 				return replacement;
 			}
 
@@ -189,7 +203,8 @@ namespace RenderPassReplacement
 			const StageOverrides& overrides,
 			ID3D12RootSignature* rootSignature,
 			ID3D12PipelineState* original,
-			std::string& outError)
+			std::string& outError,
+			HookD3D12::AsyncPipelineCreation::NativeCreateCallback* outCreateCallback = nullptr)
 		{
 			const HookD3D12::PipelineStateInfo* rebuildTemplate = nullptr;
 
@@ -316,20 +331,61 @@ namespace RenderPassReplacement
 					return nullptr;
 				}
 
-				ID3D12Device2* device = nullptr;
+				if (outCreateCallback)
+				{
+				ID3D12RootSignature* selectedRootSignature = rootSignature;
+				if (!selectedRootSignature)
+					selectedRootSignature = pipeline.rootSignature;
 
+					std::vector<uint8_t> vertexBytecode = pipeline.vertexShaderBytecode;
+					std::vector<uint8_t> pixelBytecode = pipeline.pixelShaderBytecode;
+					std::vector<uint8_t> geometryBytecode = pipeline.geometryShaderBytecode;
+					std::vector<uint8_t> hullBytecode = pipeline.hullShaderBytecode;
+					std::vector<uint8_t> domainBytecode = pipeline.domainShaderBytecode;
+					std::vector<uint8_t> computeBytecode = pipeline.computeShaderBytecode;
+					std::vector<uint8_t> amplificationBytecode = pipeline.amplificationShaderBytecode;
+					std::vector<uint8_t> meshBytecode = pipeline.meshShaderBytecode;
+					const auto copyOverride = [&](ShaderTarget::ShaderType stage, std::vector<uint8_t>& destination)
+					{
+						if (overrides.stages[stage])
+							destination = *overrides.stages[stage];
+					};
+					copyOverride(ShaderTarget::VertexShader, vertexBytecode);
+					copyOverride(ShaderTarget::PixelShader, pixelBytecode);
+					copyOverride(ShaderTarget::GeometryShader, geometryBytecode);
+					copyOverride(ShaderTarget::HullShader, hullBytecode);
+					copyOverride(ShaderTarget::DomainShader, domainBytecode);
+					copyOverride(ShaderTarget::ComputeShader, computeBytecode);
+					copyOverride(ShaderTarget::AmplificationShader, amplificationBytecode);
+					copyOverride(ShaderTarget::MeshShader, meshBytecode);
+					std::shared_ptr<HookD3D12::AsyncPipelineCreation::OwnedStreamPipelineDesc> ownedDescription =
+						std::make_shared<HookD3D12::AsyncPipelineCreation::OwnedStreamPipelineDesc>();
+					if (!ownedDescription->Initialize(
+						original, selectedRootSignature, pipeline.streamBlob, {},
+						D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MAX_VALID, vertexBytecode, pixelBytecode,
+						geometryBytecode, hullBytecode, domainBytecode, computeBytecode, amplificationBytecode, meshBytecode,
+						inputElements, pipeline.inputElementSemanticNames, streamOutputDeclarations,
+						pipeline.streamOutputSemanticNames, pipeline.streamOutputStrides, pipeline.viewInstanceLocations))
+						return nullptr;
+
+					*outCreateCallback = [ownedDescription](ID3D12PipelineState** outputPipelineState)
+					{
+						HookD3D12::ScopedRenderPassInjection injectionScope;
+						return HookD3D12::CreatePipelineStateInternal(ownedDescription->device.Get(), &ownedDescription->description, IID_PPV_ARGS(outputPipelineState));
+					};
+					return nullptr;
+				}
+
+				ID3D12Device2* device = nullptr;
 				if (FAILED(original->GetDevice(IID_PPV_ARGS(&device))) || !device)
 					return nullptr;
-
 				D3D12_PIPELINE_STATE_STREAM_DESC description{stream.size(), stream.data()};
 				ID3D12PipelineState* replacement = nullptr;
 				HookD3D12::ScopedRenderPassInjection injectionScope;
 				const HRESULT result = HookD3D12::CreatePipelineStateInternal(device, &description, IID_PPV_ARGS(&replacement));
 				device->Release();
-
 				if (FAILED(result) || !replacement)
 					outError = "Replacement stream PSO creation failed with " + StringHelper::FormatHRESULT(result);
-
 				return replacement;
 			}
 
@@ -340,7 +396,8 @@ namespace RenderPassReplacement
 			const StageOverrides& overrides,
 			ID3D12RootSignature* rootSignature,
 			ID3D12PipelineState* original,
-			std::string& outError)
+			std::string& outError,
+			HookD3D12::AsyncPipelineCreation::NativeCreateCallback* outCreateCallback = nullptr)
 		{
 			const std::vector<uint8_t>* computeShader = overrides.stages[ShaderTarget::ComputeShader];
 
@@ -357,6 +414,20 @@ namespace RenderPassReplacement
 				description.CachedPSO = {};
 				if (rootSignature)
 					description.pRootSignature = rootSignature;
+				if (outCreateCallback)
+				{
+					auto ownedDescription = std::make_shared<HookD3D12::AsyncPipelineCreation::OwnedComputePipelineDesc>();
+					if (!ownedDescription->Initialize(original, description) || !HookD3D12::Original_CreateComputePipelineState)
+						return nullptr;
+					const auto createComputePipelineState = HookD3D12::Original_CreateComputePipelineState;
+					*outCreateCallback = [ownedDescription, createComputePipelineState](ID3D12PipelineState** outputPipelineState)
+					{
+						HookD3D12::ScopedRenderPassInjection injectionScope;
+						return createComputePipelineState(ownedDescription->device.Get(), &ownedDescription->description, IID_PPV_ARGS(outputPipelineState));
+					};
+					return nullptr;
+				}
+
 				ID3D12PipelineState* replacement = nullptr;
 				HookD3D12::ScopedRenderPassInjection injectionScope;
 				HRESULT result = E_NOINTERFACE;
@@ -379,18 +450,19 @@ namespace RenderPassReplacement
 			ID3D12RootSignature* rootSignature,
 			bool computePipeline,
 			ID3D12PipelineState* original,
-			std::string& outError)
+			std::string& outError,
+			HookD3D12::AsyncPipelineCreation::NativeCreateCallback* outCreateCallback = nullptr)
 		{
 			ID3D12PipelineState* pipeline = nullptr;
 			if (computePipeline)
-				pipeline = BuildComputePipeline(overrides, rootSignature, original, outError);
+				pipeline = BuildComputePipeline(overrides, rootSignature, original, outError, outCreateCallback);
 			else
-				pipeline = BuildGraphicsPipeline(overrides, rootSignature, original, outError);
+				pipeline = BuildGraphicsPipeline(overrides, rootSignature, original, outError, outCreateCallback);
 
-			if (!pipeline)
-				pipeline = BuildStreamPipeline(overrides, rootSignature, original, outError);
+			if (!pipeline && (!outCreateCallback || !*outCreateCallback))
+				pipeline = BuildStreamPipeline(overrides, rootSignature, original, outError, outCreateCallback);
 
-			if (!pipeline && outError.empty())
+			if (!pipeline && (!outCreateCallback || !*outCreateCallback) && outError.empty())
 				outError = "The target PSO has no captured rebuild template for this replacement pass.";
 
 			return pipeline;
@@ -450,45 +522,112 @@ namespace RenderPassReplacement
 		}
 
 		const std::string key = CacheKey(renderPass, originalPipelineState, fragmentShaderBlobHash);
-		std::lock_guard<std::mutex> cacheLock(gCacheMutex);
 		const uint64_t generation = gPipelineAvailabilityGeneration.load(std::memory_order_acquire);
-		const auto cachedIt = gPipelineCache.find(key);
-
-		if (cachedIt != gPipelineCache.end())
 		{
-			CacheThreadPipeline(renderPass, originalPipelineState, cachedIt->second);
-			return cachedIt->second;
-		}
+			std::lock_guard<std::mutex> cacheLock(gCacheMutex);
+			const auto cachedIt = gPipelineCache.find(key);
+			if (cachedIt != gPipelineCache.end())
+			{
+				CacheThreadPipeline(renderPass, originalPipelineState, cachedIt->second);
+				return cachedIt->second;
+			}
 
-		const auto failed = gPipelineFailures.find(key);
-
-		if (failed != gPipelineFailures.end() && failed->second.generation == generation)
-		{
-			outError = failed->second.error;
-			CacheThreadPipeline(renderPass, originalPipelineState, nullptr, outError);
-			return nullptr;
+			const auto failed = gPipelineFailures.find(key);
+			if (failed != gPipelineFailures.end() && failed->second.generation == generation)
+			{
+				outError = failed->second.error;
+				CacheThreadPipeline(renderPass, originalPipelineState, nullptr, outError);
+				return nullptr;
+			}
 		}
 
 		const bool computePipeline = RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute;
 		StageOverrides overrides;
-		overrides.stages[computePipeline ? ShaderTarget::ComputeShader : ShaderTarget::PixelShader] = fragmentShaderBlob;
-		std::lock_guard<std::mutex> pipelineLock(HookD3D12::gPipelineMutex);
-		ID3D12PipelineState* pipeline = BuildPipelineLocked(overrides, nullptr, computePipeline, originalPipelineState, outError);
-
-		if (pipeline)
-		{
-			gPipelineCache.emplace(key, pipeline);
-			CacheThreadPipeline(renderPass, originalPipelineState, pipeline);
-		}
+		if (computePipeline)
+			overrides.stages[ShaderTarget::ComputeShader] = fragmentShaderBlob;
 		else
+			overrides.stages[ShaderTarget::PixelShader] = fragmentShaderBlob;
+		const std::string requestKey = "renderpass:" + key;
+		HookD3D12::AsyncPipelineCreation::TicketResult ticketResult = HookD3D12::AsyncPipelineCreation::Poll(requestKey);
+		HookD3D12::AsyncPipelineCreation::NativeCreateCallback createCallback;
+		if (ticketResult.status == HookD3D12::AsyncPipelineCreation::TicketStatus::Unavailable)
 		{
-			//repeated invalid-argument or missing-template failures are not new work.
-			//a package edit or newly published target invalidates this negative cache.
+			ID3D12PipelineState* preparedPipeline = nullptr;
+			{
+				std::lock_guard<std::mutex> pipelineLock(HookD3D12::gPipelineMutex);
+				preparedPipeline = BuildPipelineLocked(overrides, nullptr, computePipeline, originalPipelineState, outError, &createCallback);
+			}
+
+			if (!createCallback)
+			{
+				std::lock_guard<std::mutex> cacheLock(gCacheMutex);
+				const auto cachedPipeline = gPipelineCache.find(key);
+				if (cachedPipeline != gPipelineCache.end())
+				{
+					CacheThreadPipeline(renderPass, originalPipelineState, cachedPipeline->second);
+					return cachedPipeline->second;
+				}
+				gPipelineFailures[key] = {generation, outError};
+				CacheThreadPipeline(renderPass, originalPipelineState, nullptr, outError);
+				return nullptr;
+			}
+			static_cast<void>(preparedPipeline);
+
+			bool requestQueued = false;
+			const bool requestAccepted = HookD3D12::AsyncPipelineCreation::Request(requestKey, std::move(createCallback), true, &requestQueued);
+			if (!requestAccepted)
+				ticketResult.status = HookD3D12::AsyncPipelineCreation::TicketStatus::Pending;
+			else
+				ticketResult = HookD3D12::AsyncPipelineCreation::Poll(requestKey);
+		}
+
+		if (ticketResult.status == HookD3D12::AsyncPipelineCreation::TicketStatus::Ready && ticketResult.pipelineState)
+		{
+			ID3D12PipelineState* pipeline = ticketResult.pipelineState.Detach();
+			Microsoft::WRL::ComPtr<ID3D12PipelineState> duplicatePipeline;
+			{
+				std::lock_guard<std::mutex> cacheLock(gCacheMutex);
+				const auto insertedPipeline = gPipelineCache.emplace(key, pipeline);
+				if (insertedPipeline.second)
+					gLastGoodPipelines[renderPass.id + ':' + StringHelper::PointerToString(originalPipelineState) + ':' + std::to_string(static_cast<int>(renderPass.type))] = pipeline;
+				else
+				{
+					duplicatePipeline.Attach(pipeline);
+					pipeline = insertedPipeline.first->second;
+				}
+				gPipelineFailures.erase(key);
+				CacheThreadPipeline(renderPass, originalPipelineState, pipeline);
+			}
+			if (duplicatePipeline)
+				HookD3D12::AsyncPipelineCreation::QueueReleaseOnWorker(std::move(duplicatePipeline));
+			return pipeline;
+		}
+
+		if (ticketResult.status == HookD3D12::AsyncPipelineCreation::TicketStatus::Failed)
+		{
+			outError = "Replacement PSO creation failed with " + StringHelper::FormatHRESULT(ticketResult.result);
+			std::lock_guard<std::mutex> cacheLock(gCacheMutex);
+			const auto cachedPipeline = gPipelineCache.find(key);
+			if (cachedPipeline != gPipelineCache.end())
+			{
+				CacheThreadPipeline(renderPass, originalPipelineState, cachedPipeline->second);
+				return cachedPipeline->second;
+			}
 			gPipelineFailures[key] = {generation, outError};
 			CacheThreadPipeline(renderPass, originalPipelineState, nullptr, outError);
+			return nullptr;
 		}
 
-		return pipeline;
+		outError = "Replacement PSO is compiling asynchronously.";
+		if (ticketResult.status == HookD3D12::AsyncPipelineCreation::TicketStatus::Pending)
+			HookD3D12::AsyncPipelineCreation::Promote(requestKey);
+
+		const std::string lastGoodKey = renderPass.id + ':' + StringHelper::PointerToString(originalPipelineState) + ':' + std::to_string(static_cast<int>(renderPass.type));
+		std::lock_guard<std::mutex> cacheLock(gCacheMutex);
+		const auto lastGood = gLastGoodPipelines.find(lastGoodKey);
+		if (lastGood != gLastGoodPipelines.end())
+			return lastGood->second;
+		return nullptr;
 	}
 
 	ID3D12PipelineState* BuildPipeline(
@@ -522,6 +661,7 @@ namespace RenderPassReplacement
 			if (pipeline.second) pipeline.second->Release();
 
 		gPipelineCache.clear();
+		gLastGoodPipelines.clear();
 		gPipelineFailures.clear();
 		InvalidateFailedPipelines();
 		gThreadPipelineLookups.clear();

@@ -433,9 +433,27 @@ PDFs/
 
 # Cross-version discovery test suite (CMake out-of-tree build)
 Tests/CrossVersionDiscovery/build/
-/ShaderInjector/Tests
+/ShaderInjector/Tests/*
+!/ShaderInjector/Tests/ShaderSourceDependenciesTests.cpp
 /ShaderInjector/x64/Tests
 /ShaderInjector/x64/Validation/
 ShaderInjector/DirectionalLightShadows_BounceExperiment.hlsl
 /ShaderInjector/.codex
-/ShaderInjector/Validation
+/ShaderInjector/Validation/*
+#keep the async discovery regression sources alongside the implementation.
+!/ShaderInjector/Validation/DiscoveryTestPipeline.h
+!/ShaderInjector/Validation/ShaderAutomaticDiscoveryTests.cpp
+!/ShaderInjector/Validation/ShaderAutomaticDiscoveryTests.vcxproj
+!/ShaderInjector/Validation/ShaderTargetsUITests.cpp
+!/ShaderInjector/Validation/ShaderTargetsUITests.vcxproj
+#keep selective compilation regressions alongside the implementation.
+!/ShaderInjector/Validation/ModifiedShaderCompileQueueTests.cpp
+!/ShaderInjector/Validation/ModifiedShaderCompileQueueTests.vcxproj
+!/ShaderInjector/Validation/ModifiedShaderCompileLifecycleTests.cpp
+!/ShaderInjector/Validation/ModifiedShaderCompileLifecycleTests.vcxproj
+!/ShaderInjector/Validation/RenderPassCompileQueueTests.cpp
+!/ShaderInjector/Validation/RenderPassCompileQueueTests.vcxproj
+!/ShaderInjector/Validation/RenderPassPublicationTests.cpp
+!/ShaderInjector/Validation/RenderPassPublicationTests.vcxproj
+!/ShaderInjector/Validation/AsyncPipelineCreationTests.cpp
+!/ShaderInjector/Validation/AsyncPipelineCreationTests.vcxproj

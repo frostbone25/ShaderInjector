@@ -2,10 +2,12 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "ModifiedShader.h"
+#include "ShaderConfiguration/CompileConfiguration.h"
 
 namespace DatabaseModifiedShaders
 {
@@ -16,6 +18,9 @@ namespace DatabaseModifiedShaders
 		int failed = 0;
 		int queued = 0;
 		int running = 0;
+		int priorityTotal = 0;
+		int priorityCompleted = 0;
+		int priorityFailed = 0;
 	};
 
 	void RefreshModifiedShaders();
@@ -35,13 +40,21 @@ namespace DatabaseModifiedShaders
 	bool DeleteModifiedShader(const std::string& modifiedShaderId);
 
 	//current blobs stay in use until their replacement is ready.
-	bool CompileModifiedShader(const std::string& modifiedShaderId);
+	bool CompileModifiedShader(const std::string& modifiedShaderId, bool includeLinkedRenderPasses = true);
 
 	CompileProgress GetCompileProgress();
 
 	void ProcessCompletedCompiles();
 
-	bool QueueBackgroundCompile(std::function<void()> compileTask);
+	bool QueueBackgroundCompile(
+		std::function<void()> compileTask,
+		bool urgent = false,
+		std::shared_ptr<ShaderConfiguration::ConfigurationProgress> progress = {});
+
+	void CancelConfigurationCompiles(std::shared_ptr<ShaderConfiguration::ConfigurationProgress> progress);
+	bool HasInterruptedCompiles(const std::string& ownerID);
+	void MarkInterruptedCompile(const std::string& ownerID);
+	void ClearInterruptedCompiles(const std::string& ownerID);
 
 	void Shutdown();
 
@@ -71,13 +84,23 @@ namespace DatabaseModifiedShaders
 		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 		const std::string& sourcePath,
 		const std::string& compiledBlobPath,
-		std::vector<ModifiedShader::ModifiedShaderCompiledVariant>& outVariants);
+		std::vector<ModifiedShader::ModifiedShaderCompiledVariant>& outVariants,
+		bool loadCachedBlobs = true);
 
-	void RequestVariantCompile(const std::string& ownerId, const std::vector<ModifiedShader::ShaderDefine>& defines);
+	void RequestVariantCompile(
+		const std::string& ownerId,
+		const std::vector<ModifiedShader::ShaderDefine>& defines,
+		std::shared_ptr<const ShaderConfiguration::CompileConfiguration> configuration = {});
+
+	//record a target hash when its pipeline is bound so recent runtime variants can compile first.
+	void RecordVariantUse(uint64_t shaderHash);
+
+	uint64_t GetVariantUseStamp(uint64_t shaderHash);
 
 	int QueueSourceCompiles(
 		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 		const std::string& ownerId,
 		const std::string& sourcePath,
-		std::vector<ModifiedShader::ModifiedShaderCompiledVariant>& variants);
+		std::vector<ModifiedShader::ModifiedShaderCompiledVariant>& variants,
+		std::shared_ptr<const ShaderConfiguration::CompileConfiguration> configuration = {});
 } //namespace DatabaseModifiedShaders

@@ -5,6 +5,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+#prefer this shell's modules when the build was launched by another powershell version.
+$env:PSModulePath = (Join-Path $PSHOME 'Modules') + [IO.Path]::PathSeparator + $env:PSModulePath
+
 if (-not (Test-Path -LiteralPath $TargetPath -PathType Leaf)) {
     throw "Release artifact does not exist: $TargetPath"
 }

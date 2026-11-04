@@ -175,6 +175,8 @@ namespace RenderPass
 		{
 			case RenderPassType::MipChain:
 				return "MipChain";
+			case RenderPassType::DownsampleUpsample:
+				return "Downsample / Upsample";
 			case RenderPassType::TemporalHistory:
 				return "Temporal History";
 			case RenderPassType::ReplacementPixelShader:
@@ -215,6 +217,8 @@ namespace RenderPass
 				return "Downsample";
 			case PassOperation::UpsampleChain:
 				return "Upsample Chain";
+			case PassOperation::DownsampleUpsample:
+				return "Downsample / Upsample Chain";
 			case PassOperation::Copy:
 				return "Copy";
 			case PassOperation::TemporalHistory:

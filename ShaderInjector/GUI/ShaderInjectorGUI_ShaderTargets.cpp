@@ -1,6 +1,7 @@
 //ShaderInjectorGUI.cpp
 #include "ShaderInjectorGUI.h"
 #include "GUI/ShaderTargetReloadResult.h"
+#include "Performance/PerformanceMetrics.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -143,8 +144,50 @@ namespace ShaderInjectorGUI
 		return reloaded;
 	}
 
+	static void DrawShaderTargetProgress()
+	{
+		const ShaderAutomaticDiscovery::ShaderTargetProgress progress = ShaderAutomaticDiscovery::GetProgress();
+
+		if (progress.total == 0)
+			return;
+
+		if (progress.completed < progress.total)
+		{
+			std::string progressLabel = "Finding shader targets " + std::to_string(progress.completed) + "/" + std::to_string(progress.total);
+
+			if (progress.failed > 0)
+				progressLabel += " (" + std::to_string(progress.failed) + " failed)";
+
+			const float progressFraction = (std::clamp)(
+				static_cast<float>(progress.completed) / static_cast<float>(progress.total),
+				0.0f,
+				1.0f);
+			ImGui::ProgressBar(progressFraction, ImVec2(-FLT_MIN, 0), progressLabel.c_str());
+
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip(
+					"This tracks captured shaders only. More shader variants may appear later as the game creates PSOs.\n"
+					"created=%llu queued=%llu running=%llu failed=%llu",
+					static_cast<unsigned long long>(progress.created),
+					static_cast<unsigned long long>(progress.queued),
+					static_cast<unsigned long long>(progress.running),
+					static_cast<unsigned long long>(progress.failed));
+			}
+		}
+
+		ImGui::Text(
+			"Captured shaders: created=%llu queued=%llu running=%llu failed=%llu",
+			static_cast<unsigned long long>(progress.created),
+			static_cast<unsigned long long>(progress.queued),
+			static_cast<unsigned long long>(progress.running),
+			static_cast<unsigned long long>(progress.failed));
+	}
+
 	void DrawShaderTargets()
 	{
+		PerformanceMetrics::ScopedTimer shaderTargetsUITimer(PerformanceMetrics::Timing::ShaderTargetsUI);
+
 		if (!HookD3D12::gLoadedShaderTargetsOnce)
 			HookD3D12::RefreshLoadedShaderTargets();
 
@@ -154,6 +197,7 @@ namespace ShaderInjectorGUI
 		{
 			ImGui::Indent(indentSpace);
 			ImGui::Spacing();
+			DrawShaderTargetProgress();
 
 			ImGui::InputTextMultiline("##ShaderTargetsNote",
 									  const_cast<char*>(noteShaderTargetsText),
@@ -191,6 +235,7 @@ namespace ShaderInjectorGUI
 			if (HookD3D12::gLoadedShaderTargets.empty())
 			{
 				ImGui::Text("No replacement JSON files found.");
+				ImGui::Unindent(indentSpace);
 				return;
 			}
 
@@ -311,7 +356,10 @@ namespace ShaderInjectorGUI
 			}
 
 			if (HookD3D12::gSelectedShaderTargetIndex < 0 || HookD3D12::gSelectedShaderTargetIndex >= (int)HookD3D12::gLoadedShaderTargets.size())
+			{
+				ImGui::Unindent(indentSpace);
 				return;
+			}
 
 			HookD3D12::SyncShaderTargetNameBuffer();
 
@@ -333,6 +381,7 @@ namespace ShaderInjectorGUI
 			if (ImGui::Button("Delete##ShaderTarget"))
 			{
 				HookD3D12::DeleteShaderTarget(HookD3D12::gSelectedShaderTargetIndex);
+				ImGui::Unindent(indentSpace);
 				ImGui::Unindent(indentSpace);
 				return;
 			}
@@ -422,8 +471,10 @@ namespace ShaderInjectorGUI
 
 	void DrawShaderTargetPSOList(const ShaderTarget::ShaderTargetDisk& replacement)
 	{
+		PerformanceMetrics::ScopedTimer shaderTargetPSOListUITimer(PerformanceMetrics::Timing::ShaderTargetPSOListUI);
+		const uint64_t shaderHash = Hash::ParseHashText(replacement.originalShaderBytecodeHash);
 		const int replacementCount = CountReplacementPSOs(replacement);
-		std::string title = "Replacing Active PSOs: " + std::to_string(replacementCount);
+		const std::string title = "Replacing Active PSOs: " + std::to_string(replacementCount) + "###ShaderTargetPSOList";
 
 		if (ImGui::TreeNodeEx(title.c_str()))
 		{
@@ -437,11 +488,14 @@ namespace ShaderInjectorGUI
 
 			if (ImGui::BeginChild("ReplacementPSOList##SelectedShaderTarget", ImVec2(0, 130), ImGuiChildFlags_Borders))
 			{
+				//capture can append PSOs while these vector rows are being drawn.
+				std::lock_guard<std::mutex> pipelineLock(HookD3D12::gPipelineMutex);
+
 				for (int i = 0; i < (int)HookD3D12::gGraphicsPipelines.size(); i++)
 				{
 					const auto& pipeline = HookD3D12::gGraphicsPipelines[i];
 
-					if (PipelineUsesReplacement(pipeline, replacement))
+					if (PipelineUsesReplacement(pipeline, replacement.shaderType, shaderHash))
 						DrawReplacementPSORow("Graphics", i, pipeline);
 				}
 
@@ -449,7 +503,7 @@ namespace ShaderInjectorGUI
 				{
 					const auto& pipeline = HookD3D12::gPipelineStates[i];
 
-					if (PipelineUsesReplacement(pipeline, replacement))
+					if (PipelineUsesReplacement(pipeline, replacement.shaderType, shaderHash))
 						DrawReplacementPSORow("Stream", i, pipeline);
 				}
 			}
@@ -482,16 +536,19 @@ namespace ShaderInjectorGUI
 	int CountReplacementPSOs(const ShaderTarget::ShaderTargetDisk& replacement)
 	{
 		int count = 0;
+		const uint64_t shaderHash = Hash::ParseHashText(replacement.originalShaderBytecodeHash);
+		//capture can append PSOs while these vector rows are being counted.
+		std::lock_guard<std::mutex> pipelineLock(HookD3D12::gPipelineMutex);
 
 		for (const auto& pipeline : HookD3D12::gGraphicsPipelines)
 		{
-			if (PipelineUsesReplacement(pipeline, replacement))
+			if (PipelineUsesReplacement(pipeline, replacement.shaderType, shaderHash))
 				count++;
 		}
 
 		for (const auto& pipeline : HookD3D12::gPipelineStates)
 		{
-			if (PipelineUsesReplacement(pipeline, replacement))
+			if (PipelineUsesReplacement(pipeline, replacement.shaderType, shaderHash))
 				count++;
 		}
 
@@ -499,11 +556,11 @@ namespace ShaderInjectorGUI
 	}
 
 	template <typename PipelineT>
-	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderTarget::ShaderTargetDisk& replacement)
+	bool PipelineUsesReplacement(const PipelineT& pipeline, ShaderTarget::ShaderType shaderType, uint64_t shaderHash)
 	{
-		if (!HookD3D12::IsShaderTargetEffectivelyEnabled(replacement) || !pipeline.pipelineStateWithReplacement)
+		if (!pipeline.pipelineStateWithReplacement)
 			return false;
 
-		return pipeline.activeShaderTargetType == replacement.shaderType && pipeline.activeShaderTargetHash == Hash::ParseHashText(replacement.originalShaderBytecodeHash);
+		return pipeline.activeShaderTargetType == shaderType && pipeline.activeShaderTargetHash == shaderHash;
 	}
 } //namespace ShaderInjectorGUI

@@ -13,6 +13,9 @@ namespace PropertyWidgets
 	//custom controls can share the same columns, including a text field with an adjacent action button.
 	void PrepareRow(const char* label, const char* helpText = nullptr);
 
+	//a selectable label keeps the same wrapped row and leaves the value widget in its usual column.
+	bool PrepareSelectableRow(const char* label, const char* helpText, bool selected);
+
 	//read-only inputs still allow selection, horizontal scrolling, and keyboard copying.
 	void ReadOnlyText(const char* label, const char* controlID, const std::string& value);
 

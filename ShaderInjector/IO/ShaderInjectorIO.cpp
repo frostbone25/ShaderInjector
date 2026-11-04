@@ -94,6 +94,21 @@ namespace ShaderInjectorIO
 		return !binaryFile.fail();
 	}
 
+	bool CommitStagedFile(const std::string& stagedPath, const std::string& destinationPath)
+	{
+		const std::filesystem::path stagedFilePath = PathFromUTF8(stagedPath);
+		const std::filesystem::path destinationFilePath = PathFromUTF8(destinationPath);
+
+#if defined(_WIN32)
+		//replacement is one metadata operation; do not pre-delete the working file or request a synchronous flush.
+		return MoveFileExW(stagedFilePath.c_str(), destinationFilePath.c_str(), MOVEFILE_REPLACE_EXISTING) != FALSE;
+#else
+		std::error_code renameError;
+		std::filesystem::rename(stagedFilePath, destinationFilePath, renameError);
+		return !renameError;
+#endif
+	}
+
 	bool ReadTextFile(const std::string& filePath, std::string& fileText)
 	{
 		fileText.clear();

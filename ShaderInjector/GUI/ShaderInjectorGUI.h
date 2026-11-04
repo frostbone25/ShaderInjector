@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <vector>
 
 //3RD Party
@@ -19,6 +20,11 @@
 #include "GUI/MainWindowContext.h"
 #include "GUI/ModifiedShaderBatchRecompileResult.h"
 
+namespace ShaderConfiguration
+{
+	class CompileConfiguration;
+}
+
 namespace ShaderInjectorGUI
 {
 	const float indentSpace = 16.0f;
@@ -27,19 +33,23 @@ namespace ShaderInjectorGUI
 	void DrawShaderInjectorMenu();
 
 	//===================== modified shaders =====================
-	ModifiedShaderBatchRecompileResult RecompileModifiedShaders(bool includeInactivePackages);
+	ModifiedShaderBatchRecompileResult RecompileModifiedShaders(
+		bool includeInactivePackages,
+		std::shared_ptr<const ShaderConfiguration::CompileConfiguration> previousConfiguration = {},
+		bool includeLinkedRenderPasses = true);
 
 	void DrawModifiedShaders();
 
 	//===================== shader configuration =====================
 	void DrawShaderConfiguration();
+	void ProcessShaderConfigurationOperation();
 
 	//===================== shader targets =====================
 	void DrawShaderTargets();
 	void DrawShaderPatches();
 
 	template <typename PipelineT>
-	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderTarget::ShaderTargetDisk& replacement);
+	bool PipelineUsesReplacement(const PipelineT& pipeline, ShaderTarget::ShaderType shaderType, uint64_t shaderHash);
 
 	void DrawShaderTargetSourceSection(ShaderTarget::ShaderTargetDisk& replacement, int replacementIndex);
 
@@ -52,12 +62,10 @@ namespace ShaderInjectorGUI
 	void DrawRenderPasses();
 	void DrawShaderResources();
 
-	template <typename PipelineT>
-	bool PipelineUsesReplacement(const PipelineT& pipeline, const ShaderTarget::ShaderTargetDisk& replacement);
-
 	//===================== developer settings =====================
 	void DrawShaderInspector();
 	void DrawShaderCompilerSettings();
+	void DrawPerformanceMetrics();
 	void DrawRenderDoc();
 	void DrawAdapterInfo();
 	void DrawD3D12PipelineInfo();

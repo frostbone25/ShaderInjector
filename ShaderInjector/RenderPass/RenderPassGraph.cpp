@@ -30,6 +30,10 @@ namespace RenderPassGraph
 			return renderPass.type == RenderPass::RenderPassType::Custom &&
 				   (node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
 					node.executionMode == RenderPass::ExecutionMode::Compute);
+		case RenderPass::PassOperation::DownsampleUpsample:
+			return renderPass.type == RenderPass::RenderPassType::DownsampleUpsample &&
+				   (node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
+					node.executionMode == RenderPass::ExecutionMode::Compute);
 		case RenderPass::PassOperation::MipChain:
 			return renderPass.type == RenderPass::RenderPassType::MipChain &&
 				   (node.executionMode == RenderPass::ExecutionMode::FullscreenPixel ||
@@ -261,7 +265,8 @@ namespace RenderPassGraph
 																			 output.access == RenderPass::ResourceAccess::CopyDestination &&
 																			 !output.resourceId.empty(); });
 			const bool requiresShaderInput = node.operation == RenderPass::PassOperation::Downsample ||
-											 node.operation == RenderPass::PassOperation::UpsampleChain;
+											 node.operation == RenderPass::PassOperation::UpsampleChain ||
+											 node.operation == RenderPass::PassOperation::DownsampleUpsample;
 			const bool requiresCopyInput = node.operation == RenderPass::PassOperation::Copy ||
 										   node.operation == RenderPass::PassOperation::TemporalHistory;
 			bool hasShaderOutput = hasRenderTargetOutput;
@@ -276,6 +281,49 @@ namespace RenderPassGraph
 				node.error = "The operation requires a texture input and runtime texture output.";
 				compilation.diagnostics.push_back(node.error + " Pass=" + renderPass.name + ".");
 				continue;
+			}
+			if (node.operation == RenderPass::PassOperation::DownsampleUpsample)
+			{
+				const size_t shaderInputCount = static_cast<size_t>(std::count_if(
+					renderPass.inputs.begin(), renderPass.inputs.end(), [](const auto& input)
+					{ return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+							input.access == RenderPass::ResourceAccess::ShaderResource && !input.resourceId.empty(); }));
+				RenderPass::ResourceAccess outputAccess = RenderPass::ResourceAccess::RenderTarget;
+				if (node.executionMode == RenderPass::ExecutionMode::Compute)
+					outputAccess = RenderPass::ResourceAccess::UnorderedAccess;
+				const size_t shaderOutputCount = static_cast<size_t>(std::count_if(
+					renderPass.outputs.begin(), renderPass.outputs.end(), [&](const auto& output)
+					{ return output.origin == ShaderResource::ResourceOrigin::Runtime &&
+							output.access == outputAccess && !output.resourceId.empty(); }));
+				const auto sourceBinding = std::find_if(renderPass.inputs.begin(), renderPass.inputs.end(), [](const auto& input)
+					{ return input.origin == ShaderResource::ResourceOrigin::Runtime &&
+							input.access == RenderPass::ResourceAccess::ShaderResource && !input.resourceId.empty(); });
+				const auto outputBinding = std::find_if(renderPass.outputs.begin(), renderPass.outputs.end(), [&](const auto& output)
+					{ return output.origin == ShaderResource::ResourceOrigin::Runtime &&
+							output.access == outputAccess && !output.resourceId.empty(); });
+				const auto outputDefinition = std::find_if(renderPass.runtimeResources.begin(), renderPass.runtimeResources.end(), [&](const auto& definition)
+					{ return outputBinding != renderPass.outputs.end() && definition.id == outputBinding->resourceId; });
+				auto sourceDefinition = runtimeDefinitions.end();
+				if (sourceBinding != renderPass.inputs.end())
+					sourceDefinition = runtimeDefinitions.find(sourceBinding->resourceId);
+				if (!RenderPass::IsValidDownsampleUpsampleFactor(renderPass.chainDownsampleFactor) ||
+					shaderInputCount != 1 || shaderOutputCount != 1 ||
+					sourceBinding == renderPass.inputs.end() || outputBinding == renderPass.outputs.end() ||
+					sourceBinding->resourceId == outputBinding->resourceId ||
+					sourceDefinition == runtimeDefinitions.end() ||
+					sourceDefinition->second->texture.dimension != ShaderResource::TextureDimension::Texture2D ||
+					sourceDefinition->second->texture.depth != 1 || sourceDefinition->second->texture.arraySize != 1 ||
+					sourceDefinition->second->texture.sampleCount != 1 ||
+					outputDefinition == renderPass.runtimeResources.end() ||
+					outputDefinition->texture.dimension != ShaderResource::TextureDimension::Texture2D ||
+					outputDefinition->texture.depth != 1 || outputDefinition->texture.arraySize != 1 ||
+					outputDefinition->texture.sampleCount != 1)
+				{
+					node.valid = false;
+					node.error = "Downsample/upsample chains require a valid factor, one distinct runtime input/output, and a non-array single-sample Texture2D output.";
+					compilation.diagnostics.push_back(node.error + " Pass=" + renderPass.name + ".");
+					continue;
+				}
 			}
 			const size_t runtimeRenderTargetCount = static_cast<size_t>(std::count_if(
 				renderPass.outputs.begin(), renderPass.outputs.end(), [](const auto& output)

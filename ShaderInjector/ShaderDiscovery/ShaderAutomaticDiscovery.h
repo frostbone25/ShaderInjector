@@ -6,6 +6,7 @@
 
 #include "ShaderTarget/ShaderTarget.h"
 #include "ModifiedShader/ModifiedShader.h"
+#include "ShaderDiscovery/ShaderTargetProgress.h"
 
 namespace HookD3D12
 {
@@ -15,9 +16,10 @@ namespace HookD3D12
 
 namespace ShaderAutomaticDiscovery
 {
-	//Capture hooks only enqueue unique shaders. The render path drains a small,
-	//bounded amount of work so shader analysis cannot stall PSO creation threads.
+	//Capture hooks enqueue unique shaders. The render path materializes a small,
+	//bounded amount of work within a short cooperative budget; target preparation runs asynchronously.
 	void ProcessQueuedWork(size_t maximumJobs = 1);
+	ShaderTargetProgress GetProgress();
 	void Shutdown();
 	void RefreshModifiedShaderIndex(const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& modifiedShaders);
 	void ProcessCapturedGraphicsPipeline(const HookD3D12::GraphicsPipelineInfo& pipeline);

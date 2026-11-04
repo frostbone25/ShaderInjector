@@ -36,6 +36,8 @@ namespace PerformanceMetrics
 		ResolveDescriptorMirrorTables,
 		PrepareDescriptorCopyBatch,
 		CopyDescriptorBatchMetadata,
+		ShaderTargetsUI,
+		ShaderTargetPSOListUI,
 		Count,
 	};
 } //namespace PerformanceMetrics

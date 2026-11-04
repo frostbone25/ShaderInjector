@@ -1,13 +1,21 @@
 #pragma once
 
 #include <string>
+#include <memory>
 #include <vector>
 
 #include "ModifiedShader/ModifiedShader.h"
 #include "RenderPass/RenderPass.h"
 
+namespace ShaderConfiguration
+{
+	class ConfigurationProgressTask;
+}
+
 namespace DatabaseRenderPasses
 {
+	extern std::vector<RenderPass::RenderPassDisk> gRenderPasses;
+
 	struct RenderPassShaderBatchCompileResult
 	{
 		size_t compiledRenderPassCount = 0;
@@ -17,7 +25,9 @@ namespace DatabaseRenderPasses
 	};
 
 	void RefreshRenderPasses();
-	void PublishRuntimeConfiguration();
+	void PublishRuntimeConfiguration(bool invalidateHistory = false);
+	void RequestRuntimeShaderPublication(bool urgent, std::shared_ptr<ShaderConfiguration::ConfigurationProgressTask> progressTask = {});
+	void FlushPendingRuntimeShaderPublication();
 	void EnsureRenderPassesLoaded();
 	const std::vector<RenderPass::RenderPassDisk>& GetRenderPasses();
 	RenderPass::RenderPassDisk* FindRenderPassById(const std::string& renderPassId);

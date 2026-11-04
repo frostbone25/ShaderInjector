@@ -24,7 +24,7 @@ namespace PropertyWidgets
 		return std::string("###") + controlID;
 	}
 
-	void PrepareRow(const char* label, const char* helpText)
+	static bool PreparePropertyRow(const char* label, const char* helpText, bool selectable, bool selected)
 	{
 		ImGuiWindow* window = ImGui::GetCurrentWindow();
 		const ImGuiID frameKey = ImHashStr("PropertyWidgets.LastRowFrame");
@@ -53,9 +53,6 @@ namespace PropertyWidgets
 		if (visibleLabelEnd)
 			visibleLabel.assign(label, visibleLabelEnd);
 
-		if (helpText && *helpText)
-			visibleLabel += " (?)";
-
 		//both cells share a height, including enough room for wrapped labels and padding around the control.
 		const float labelTextWidth = (std::max)(1.0f, labelColumnWidth - cellPadding.x * 2.0f);
 		const ImVec2 labelTextSize = ImGui::CalcTextSize(visibleLabel.c_str(), nullptr, false, labelTextWidth);
@@ -79,7 +76,28 @@ namespace PropertyWidgets
 		drawList->AddRect(columnBoundary, rowBottomRight, borderColor);
 
 		//reserve the full row through the label item, so short controls cannot overlap the next wrapped-label row.
-		ImGui::Dummy(ImVec2(labelColumnWidth, rowHeight));
+		bool clicked = false;
+
+		if (selectable)
+		{
+			//use the full label cell as the button, including wrapped names and keyboard navigation.
+			clicked = ImGui::InvisibleButton("##PropertySelection", ImVec2(labelColumnWidth, rowHeight), ImGuiButtonFlags_EnableNav);
+			ImU32 labelColor = backgroundColor;
+
+			if (selected)
+				labelColor = ImGui::GetColorU32(ImGuiCol_Header);
+
+			if (ImGui::IsItemHovered())
+				labelColor = ImGui::GetColorU32(ImGuiCol_ButtonHovered);
+
+			if (ImGui::IsItemActive())
+				labelColor = ImGui::GetColorU32(ImGuiCol_ButtonActive);
+
+			drawList->AddRectFilled(ImVec2(rowPosition.x + 1.0f, rowPosition.y + 1.0f), ImVec2(columnBoundary.x - 1.0f, rowBottomRight.y - 1.0f), labelColor);
+		}
+		else
+			ImGui::Dummy(ImVec2(labelColumnWidth, rowHeight));
+
 		drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(rowPosition.x + cellPadding.x, rowPosition.y + cellPadding.y + style.FramePadding.y), ImGui::GetColorU32(ImGuiCol_Text), visibleLabel.c_str(), nullptr, labelTextWidth);
 
 		if (helpText && *helpText && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled))
@@ -104,6 +122,18 @@ namespace PropertyWidgets
 		storage->SetFloat(bottomKey, rowTop + rowHeight + style.ItemSpacing.y);
 		storage->SetFloat(startKey, rowStart);
 		ImGui::SetNextItemWidth(controlWidth);
+
+		return clicked;
+	}
+
+	void PrepareRow(const char* label, const char* helpText)
+	{
+		PreparePropertyRow(label, helpText, false, false);
+	}
+
+	bool PrepareSelectableRow(const char* label, const char* helpText, bool selected)
+	{
+		return PreparePropertyRow(label, helpText, true, selected);
 	}
 } //namespace PropertyWidgets
 

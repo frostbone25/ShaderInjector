@@ -2,6 +2,7 @@
 
 #if defined(_WIN32)
 
+#include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <limits>
@@ -13,8 +14,13 @@
 
 namespace ShaderInjectorIO
 {
-	LegacyShaderIncludeHandler::LegacyShaderIncludeHandler(std::filesystem::path sourceDirectoryPath, std::filesystem::path sharedIncludesDirectoryPath)
-		: sourceDirectory(std::move(sourceDirectoryPath)), sharedIncludesDirectory(std::move(sharedIncludesDirectoryPath))
+	LegacyShaderIncludeHandler::LegacyShaderIncludeHandler(
+		std::filesystem::path sourceDirectoryPath,
+		std::filesystem::path sharedIncludesDirectoryPath,
+		std::shared_ptr<const ShaderConfiguration::CompileConfiguration> configurationSnapshot)
+		: sourceDirectory(std::move(sourceDirectoryPath)),
+		  sharedIncludesDirectory(std::move(sharedIncludesDirectoryPath)),
+		  configuration(std::move(configurationSnapshot))
 	{
 	}
 
@@ -60,25 +66,44 @@ namespace ShaderInjectorIO
 				continue;
 
 			includeFile.seekg(0, std::ios::beg);
-			size_t includeAllocationSize = 1;
+			std::string includeText;
+			includeText.resize(static_cast<size_t>(includeFileSize));
 
-			if (includeFileSize > 0)
-				includeAllocationSize = static_cast<size_t>(includeFileSize);
+			if (includeFileSize > 0 && !includeFile.read(includeText.data(), includeFileSize))
+			{
+				continue;
+			}
 
-			//the compiler owns this byte buffer until it calls Close after compilation.
+			if (configuration)
+			{
+				const std::string includeFilePath = PathToUTF8(candidateIncludePath);
+				const std::string relativeSourcePath = MakeRelativePath(includeFilePath, GetModifiedShadersDirectory());
+				std::string preparedIncludeText;
+				std::string preparationError;
+
+				if (!configuration->PrepareSource(relativeSourcePath, includeText, preparedIncludeText, preparationError))
+				{
+					sourcePreparationError = preparationError;
+					return E_FAIL;
+				}
+
+				includeText = std::move(preparedIncludeText);
+			}
+
+			if (includeText.size() > (std::numeric_limits<UINT>::max)())
+				return E_FAIL;
+
+			const size_t includeAllocationSize = (std::max)(includeText.size(), size_t(1));
 			char* includeData = new (std::nothrow) char[includeAllocationSize];
 
 			if (!includeData)
 				return E_OUTOFMEMORY;
 
-			if (includeFileSize > 0 && !includeFile.read(includeData, includeFileSize))
-			{
-				delete[] includeData;
-				continue;
-			}
+			if (!includeText.empty())
+				std::copy(includeText.begin(), includeText.end(), includeData);
 
 			*outputIncludeData = includeData;
-			*outputIncludeByteCount = static_cast<UINT>(includeFileSize);
+			*outputIncludeByteCount = static_cast<UINT>(includeText.size());
 			openFileDirectories[includeData] = candidateIncludePath.parent_path();
 			return S_OK;
 		}
@@ -91,6 +116,11 @@ namespace ShaderInjectorIO
 		openFileDirectories.erase(includeData);
 		delete[] static_cast<const char*>(includeData);
 		return S_OK;
+	}
+
+	const std::string& LegacyShaderIncludeHandler::GetSourcePreparationError() const
+	{
+		return sourcePreparationError;
 	}
 } //namespace ShaderInjectorIO
 

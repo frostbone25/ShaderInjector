@@ -8,6 +8,7 @@ namespace HookD3D12
 	{
 		NoMatch,
 		Applied,
+		Pending,
 		RetryableFailure
 	};
 } //namespace HookD3D12

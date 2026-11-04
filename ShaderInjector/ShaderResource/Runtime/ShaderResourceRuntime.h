@@ -7,6 +7,7 @@
 
 #include "RenderPass/RenderPass.h"
 #include "RenderPass/RenderPassMipChain.h"
+#include "ShaderResource/Runtime/ShaderResourcePerformanceStatistics.h"
 
 namespace ShaderResourceRuntime
 {
@@ -44,4 +45,5 @@ namespace ShaderResourceRuntime
 		ID3D12CommandList* const* commandLists);
 	void ReleaseResources();
 	void LogPerformanceStatistics();
+	PerformanceStatistics GetLastPerformanceStatistics();
 } //namespace ShaderResourceRuntime

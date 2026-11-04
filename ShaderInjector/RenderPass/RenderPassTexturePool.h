@@ -13,6 +13,7 @@
 #include "RenderPass/ResolvedTextureDescription.h"
 #include "RenderPass/ScopedInputTextureOverrides.h"
 #include "RenderPass/TextureView.h"
+#include "RenderPass/TexturePoolPerformanceStatistics.h"
 
 namespace RenderPassTexturePool
 {
@@ -34,6 +35,7 @@ namespace RenderPassTexturePool
 		const std::string& resourceId,
 		TextureView& outTexture);
 	void MarkPassOutputsWritten(const RenderPass::RenderPassDisk& renderPass, bool executionSucceeded = true);
+	void InvalidateHistory();
 
 	void PublishConfigurations(const std::vector<RenderPass::RenderPassDisk>& renderPasses);
 	bool EnsurePassResources(
@@ -53,10 +55,19 @@ namespace RenderPassTexturePool
 		bool computePipeline,
 		std::vector<TextureView>& outStageTargets,
 		std::string& outError);
+	bool EnsureDownsampleUpsampleStages(
+		const RenderPass::RenderPassDisk& renderPass,
+		ID3D12GraphicsCommandList* commandList,
+		const TextureView& sourceTexture,
+		const TextureView& destinationTexture,
+		bool computePipeline,
+		std::vector<TextureView>& outStageTargets,
+		std::string& outError);
 	void AdvanceFrame();
 	bool HasRecordedCommandListWork();
 	void ResetCommandListRecording(ID3D12GraphicsCommandList* commandList);
 	void NotifyCommandListsSubmitted(ID3D12CommandQueue* commandQueue, UINT commandListCount, ID3D12CommandList* const* commandLists);
 	void LogPerformanceStatistics();
+	PerformanceStatistics GetLastPerformanceStatistics();
 	void ReleaseResources();
 } //namespace RenderPassTexturePool

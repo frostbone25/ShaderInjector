@@ -15,6 +15,8 @@ namespace HookD3D12
 
 	void STDMETHODCALLTYPE Handle_SetPipelineState(ID3D12GraphicsCommandList* commandList, ID3D12PipelineState* pipelineState)
 	{
+		RenderPassRuntime::RecordShaderTargetUse(pipelineState);
+
 		if (IsInsideRenderPassInjection())
 		{
 			Original_SetPipelineState(commandList, pipelineState);

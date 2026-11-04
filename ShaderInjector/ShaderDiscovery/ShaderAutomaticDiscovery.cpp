@@ -1,6 +1,8 @@
 #include "ShaderDiscovery/ShaderAutomaticDiscovery.h"
 #include "ShaderDiscovery/AnalysisJob.h"
 #include "ShaderDiscovery/AnalysisResult.h"
+#include "ShaderDiscovery/TargetCreationJob.h"
+#include "ShaderDiscovery/TargetCreationResult.h"
 #include "ShaderDiscovery/QueuedShader.h"
 #include "ShaderTarget/ShaderIdentityKey.h"
 #include "ShaderTarget/ShaderIdentityKeyHasher.h"
@@ -42,6 +44,7 @@ namespace ShaderAutomaticDiscovery
 		constexpr size_t defaultQueuedShaderLimit = 8192;
 		constexpr size_t maximumPendingAnalysesLimit = 8192;
 		constexpr size_t maximumQueuedShadersLimit = 65536;
+		constexpr size_t maximumPendingCreations = 64;
 
 		size_t AutomaticAnalysisWorkerThreadCount()
 		{
@@ -84,6 +87,15 @@ namespace ShaderAutomaticDiscovery
 		std::deque<QueuedShader> gQueuedShaders;
 		std::deque<AnalysisJob> gAnalysisJobs;
 		std::deque<AnalysisResult> gAnalysisResults;
+		std::deque<TargetCreationJob> gTargetCreationJobs;
+		std::deque<TargetCreationResult> gTargetCreationResults;
+		std::unordered_set<ShaderIdentityKey, ShaderIdentityKeyHasher> gPendingTargetHashes;
+		std::unordered_set<std::string> gPendingSingleTargetModifiedShaderIDs;
+		std::condition_variable gTargetCreationCondition;
+		std::thread gTargetCreationWorker;
+		bool gTargetCreationWorkerRunning = false;
+		bool gTargetCreationStopRequested = false;
+		size_t gActiveTargetCreations = 0;
 		std::unordered_set<ShaderIdentityKey, ShaderIdentityKeyHasher> gSubmittedShaders;
 		std::unordered_map<ShaderIdentityKey, std::string, ShaderIdentityKeyHasher> gDirectMatchShaders;
 		std::unordered_set<std::string> gModifiedShadersWithGeneratedTargets;
@@ -112,6 +124,7 @@ namespace ShaderAutomaticDiscovery
 		uint64_t gAnalysisFailedTotal = 0;
 		uint64_t gDirectMatchProcessedTotal = 0;
 		uint64_t gShaderTargetsCreatedTotal = 0;
+		uint64_t gTargetCreationFailedTotal = 0;
 		uint64_t gByteLengthRejectedTotal = 0;
 		uint64_t gQueueDroppedTotal = 0;
 		uint64_t gQueueEvictedTotal = 0;
@@ -312,16 +325,20 @@ namespace ShaderAutomaticDiscovery
 
 		bool PopHighestPriorityQueuedShaderLocked(QueuedShader& outQueuedShader)
 		{
-			if (gQueuedShaders.empty())
-				return false;
+			auto highestPriorityIterator = gQueuedShaders.end();
+			const uint64_t currentTick = GetTickCount64();
 
-			auto highestPriorityIterator = gQueuedShaders.begin();
-
-			for (auto queuedIterator = std::next(gQueuedShaders.begin()); queuedIterator != gQueuedShaders.end(); ++queuedIterator)
+			for (auto queuedIterator = gQueuedShaders.begin(); queuedIterator != gQueuedShaders.end(); ++queuedIterator)
 			{
-				if (queuedIterator->priority > highestPriorityIterator->priority)
+				if (queuedIterator->targetCreationRetryAfterTick > currentTick)
+					continue;
+
+				if (highestPriorityIterator == gQueuedShaders.end() || queuedIterator->priority > highestPriorityIterator->priority)
 					highestPriorityIterator = queuedIterator;
 			}
+
+			if (highestPriorityIterator == gQueuedShaders.end())
+				return false;
 
 			outQueuedShader = std::move(*highestPriorityIterator);
 			gQueuedShaders.erase(highestPriorityIterator);
@@ -402,12 +419,6 @@ namespace ShaderAutomaticDiscovery
 			return gModifiedShadersWithGeneratedTargets.find(modifiedShaderId) != gModifiedShadersWithGeneratedTargets.end();
 		}
 
-		bool ModifiedShaderAlreadyHasGeneratedTarget(const std::string& modifiedShaderId)
-		{
-			std::lock_guard<std::mutex> lock(gQueueMutex);
-			return ModifiedShaderHasTargetLocked(modifiedShaderId);
-		}
-
 		bool AllEnabledModifiedShadersHaveTargetsLocked()
 		{
 			if (!gModifiedShaderAnalysisSnapshot)
@@ -435,6 +446,9 @@ namespace ShaderAutomaticDiscovery
 
 		bool PruneSatisfiedDiscoveryWorkLocked(size_t& outQueuedShaders, size_t& outPendingAnalyses, size_t& outPendingResults, bool& outShouldLog)
 		{
+			if (!gTargetCreationJobs.empty() || !gTargetCreationResults.empty() || gActiveTargetCreations > 0)
+				return false;
+
 			if (!AllEnabledModifiedShadersHaveTargetsLocked())
 				return false;
 
@@ -477,7 +491,10 @@ namespace ShaderAutomaticDiscovery
 			return !gQueuedShaders.empty() ||
 				   !gAnalysisJobs.empty() ||
 				   !gAnalysisResults.empty() ||
-				   gActiveAnalysisJobs > 0;
+				   gActiveAnalysisJobs > 0 ||
+				   !gTargetCreationJobs.empty() ||
+				   !gTargetCreationResults.empty() ||
+				   gActiveTargetCreations > 0;
 		}
 
 		std::string BuildDiscoveryProgressMessageLocked(const char* reason)
@@ -516,6 +533,9 @@ namespace ShaderAutomaticDiscovery
 				   " pendingAnalysis=" + std::to_string(gAnalysisJobs.size()) +
 				   " activeAnalysis=" + std::to_string(gActiveAnalysisJobs) +
 				   " pendingResults=" + std::to_string(gAnalysisResults.size()) +
+				   " pendingCreation=" + std::to_string(gTargetCreationJobs.size()) +
+				   " activeCreation=" + std::to_string(gActiveTargetCreations) +
+				   " readyCreation=" + std::to_string(gTargetCreationResults.size()) +
 				   " workerThreads=" + std::to_string(ConfiguredAnalysisWorkerThreadCount()) +
 				   " workerThreadPriority=" + std::to_string(Globals::gShaderDiscoveryWorkerThreadPriority) +
 				   " frameJobBudget=" + std::to_string((std::clamp)(Globals::gShaderDiscoveryFrameJobBudget, 1, 65536)) +
@@ -596,6 +616,41 @@ namespace ShaderAutomaticDiscovery
 			gModifiedShadersWithGeneratedTargets.insert(modifiedShaderId);
 		}
 
+		void RequeueShaderLocked(QueuedShader& queuedShader, bool resetCreationAttempts)
+		{
+			if (!gAcceptingWork)
+				return;
+
+			for (QueuedShader& queuedCandidate : gQueuedShaders)
+			{
+				if (queuedCandidate.shaderKey == queuedShader.shaderKey)
+				{
+					if (resetCreationAttempts)
+					{
+						queuedCandidate.targetCreationAttemptCount = 0;
+						queuedCandidate.targetCreationRetryAfterTick = 0;
+					}
+					return;
+				}
+			}
+			if (resetCreationAttempts)
+			{
+				queuedShader.targetCreationAttemptCount = 0;
+				queuedShader.targetCreationRetryAfterTick = 0;
+			}
+
+			const auto directMatch = gDirectMatchShaders.find(queuedShader.shaderKey);
+			const bool hasDirectMatch = directMatch != gDirectMatchShaders.end() && !directMatch->second.empty();
+			queuedShader.priority = CalculateQueuePriorityLocked(
+				queuedShader.shaderKey.shaderType,
+				queuedShader.shaderBytecode.size(),
+				false,
+				hasDirectMatch);
+			gQueuedShaders.push_front(std::move(queuedShader));
+			//a rematch or retry is another work item, so keep progress totals aligned with its next completion.
+			++gQueuedShaderTotal;
+		}
+
 		void LogMissingModifiedShaderTargets()
 		{
 			std::unordered_set<std::string> modifiedShaderIdsWithTargets;
@@ -660,8 +715,12 @@ namespace ShaderAutomaticDiscovery
 			pipeline.originalDescription.DS = {DataOrNull(pipeline.domainShaderBytecode), pipeline.domainShaderBytecode.size()};
 			pipeline.originalDescription.InputLayout.pInputElementDescs = DataOrNull(pipeline.inputElements);
 			pipeline.originalDescription.InputLayout.NumElements = static_cast<UINT>(pipeline.inputElements.size());
+			for (size_t elementIndex = 0; elementIndex < pipeline.inputElements.size() && elementIndex < pipeline.inputElementSemanticNames.size(); ++elementIndex)
+				pipeline.inputElements[elementIndex].SemanticName = pipeline.inputElementSemanticNames[elementIndex].c_str();
 			pipeline.originalDescription.StreamOutput.pSODeclaration = DataOrNull(pipeline.streamOutputDeclarations);
 			pipeline.originalDescription.StreamOutput.NumEntries = static_cast<UINT>(pipeline.streamOutputDeclarations.size());
+			for (size_t declarationIndex = 0; declarationIndex < pipeline.streamOutputDeclarations.size() && declarationIndex < pipeline.streamOutputSemanticNames.size(); ++declarationIndex)
+				pipeline.streamOutputDeclarations[declarationIndex].SemanticName = pipeline.streamOutputSemanticNames[declarationIndex].c_str();
 			pipeline.originalDescription.StreamOutput.pBufferStrides = DataOrNull(pipeline.streamOutputStrides);
 			pipeline.originalDescription.StreamOutput.NumStrides = static_cast<UINT>(pipeline.streamOutputStrides.size());
 		}
@@ -853,38 +912,9 @@ namespace ShaderAutomaticDiscovery
 			return false;
 		}
 
-		template <typename PipelineType>
-		bool CreateTargetForMatch(
-			const char* sourceList,
-			PipelineType& pipeline,
-			const QueuedShader& queued,
-			const std::string& modifiedShaderId,
-			const ShaderAnalysis::ShaderAnalysisDisk* shaderAnalysis)
-		{
-			if (!HookD3D12::CreateShaderTargetForPipeline(
-					sourceList,
-					queued.pipelineIndex,
-					queued.shaderKey.shaderType,
-					queued.shaderKey.shaderHash,
-					queued.shaderBytecode.size(),
-					queued.shaderBytecode.data(),
-					pipeline,
-					modifiedShaderId,
-					false,
-					shaderAnalysis))
-			{
-				return false;
-			}
+		void EnsureTargetCreationWorkerStartedLocked();
 
-			HookD3D12::QueueShaderTargetApplyWork();
-			MarkShaderTargetCreated(modifiedShaderId);
-			ShaderInjectorGUI::WriteToRuntimeLogSuccess(
-				"ShaderAutomaticDiscovery: created ShaderTarget for " + Hash::FormatHash(queued.shaderKey.shaderHash) +
-				" using " + modifiedShaderId);
-			return true;
-		}
-
-		void ProcessMatchedShader(QueuedShader& queued, const std::string& modifiedShaderId, const ShaderAnalysis::ShaderAnalysisDisk* shaderAnalysis = nullptr)
+		bool QueueTargetCreation(QueuedShader& queued, const std::string& modifiedShaderId, const ShaderAnalysis::ShaderAnalysisDisk* shaderAnalysis = nullptr)
 		{
 			if (!HookD3D12::gLoadedShaderTargetsOnce)
 				HookD3D12::RefreshLoadedShaderTargets();
@@ -903,53 +933,171 @@ namespace ShaderAutomaticDiscovery
 						" already belongs to a target using a different ModifiedShader; treating " +
 						modifiedShaderId + " as covered by " + existingTarget.modifiedShaderId);
 					MarkModifiedShaderCoveredByExistingTarget(modifiedShaderId);
-					return;
+					return true;
 				}
 
 				if (!existingTarget.enabled)
-					return;
+					return true;
 
 				HookD3D12::QueueShaderTargetApplyWork();
-				return;
+				return true;
 			}
 
-			const ModifiedShader::ModifiedShaderPackageDisk* selectedPackage = DatabaseModifiedShaders::FindModifiedShaderById(modifiedShaderId);
-
-			if (!selectedPackage)
-				return;
-
-			if (!selectedPackage->HasPerTargetDefines() && ModifiedShaderAlreadyHasGeneratedTarget(modifiedShaderId))
+			TargetCreationJob job{};
+			job.queuedShader = queued;
+			job.modifiedShaderID = modifiedShaderId;
+			if (shaderAnalysis)
 			{
-				ShaderInjectorGUI::WriteToRuntimeLogWarning("ShaderAutomaticDiscovery: skipped duplicate ShaderTarget candidate " + Hash::FormatHash(queued.shaderKey.shaderHash) + " for " + modifiedShaderId);
-				return;
+				job.shaderAnalysis = *shaderAnalysis;
+				job.hasShaderAnalysis = true;
+			}
+
+			{
+				std::lock_guard<std::mutex> lock(gQueueMutex);
+				if (gTargetCreationJobs.size() + gTargetCreationResults.size() + gActiveTargetCreations >= maximumPendingCreations)
+					return false;
+
+				job.modifiedShaders = gModifiedShaderAnalysisSnapshot;
+				if (!job.modifiedShaders)
+					return true;
+
+				job.modifiedShaderIndex = job.modifiedShaders->size();
+				for (size_t packageIndex = 0; packageIndex < job.modifiedShaders->size(); ++packageIndex)
+				{
+					if ((*job.modifiedShaders)[packageIndex].id == modifiedShaderId)
+					{
+						job.modifiedShaderIndex = packageIndex;
+						break;
+					}
+				}
+				if (job.modifiedShaderIndex >= job.modifiedShaders->size())
+					return true;
+				const auto& package = (*job.modifiedShaders)[job.modifiedShaderIndex];
+				if (!package.HasPerTargetDefines() &&
+					(gPendingSingleTargetModifiedShaderIDs.find(modifiedShaderId) != gPendingSingleTargetModifiedShaderIDs.end() || ModifiedShaderHasTargetLocked(modifiedShaderId)))
+					return true;
+				if (!gPendingTargetHashes.insert(queued.shaderKey).second)
+					return true;
+				if (!package.HasPerTargetDefines())
+					gPendingSingleTargetModifiedShaderIDs.insert(modifiedShaderId);
 			}
 
 			if (queued.source == PipelineSource::Graphics)
 			{
-				HookD3D12::GraphicsPipelineInfo pipeline{};
-
 				if (CopyGraphicsPipeline(
-						queued.pipelineState.Get(), queued.shaderKey.shaderType, queued.shaderKey.shaderHash, pipeline))
+						queued.pipelineState.Get(), queued.shaderKey.shaderType, queued.shaderKey.shaderHash, job.graphicsPipeline))
 				{
-					CreateTargetForMatch("Graphics", pipeline, queued, modifiedShaderId, shaderAnalysis);
-
-					if (pipeline.originalDescription.pRootSignature)
-						pipeline.originalDescription.pRootSignature->Release();
+					job.isGraphicsPipeline = true;
+					job.rootSignatureLifetime.Attach(job.graphicsPipeline.originalDescription.pRootSignature);
+				}
+				else
+				{
+					std::lock_guard<std::mutex> lock(gQueueMutex);
+					gPendingTargetHashes.erase(queued.shaderKey);
+					gPendingSingleTargetModifiedShaderIDs.erase(modifiedShaderId);
+					return true;
 				}
 			}
 			else
 			{
-				HookD3D12::PipelineStateInfo pipeline{};
-
 				if (CopyStreamPipeline(
-						queued.pipelineState.Get(), queued.shaderKey.shaderType, queued.shaderKey.shaderHash, pipeline))
+						queued.pipelineState.Get(), queued.shaderKey.shaderType, queued.shaderKey.shaderHash, job.streamPipeline))
 				{
-					CreateTargetForMatch("Stream", pipeline, queued, modifiedShaderId, shaderAnalysis);
-
-					if (pipeline.rootSignature)
-						pipeline.rootSignature->Release();
+					job.rootSignatureLifetime.Attach(job.streamPipeline.rootSignature);
+				}
+				else
+				{
+					std::lock_guard<std::mutex> lock(gQueueMutex);
+					gPendingTargetHashes.erase(queued.shaderKey);
+					gPendingSingleTargetModifiedShaderIDs.erase(modifiedShaderId);
+					return true;
 				}
 			}
+
+			{
+				std::lock_guard<std::mutex> lock(gQueueMutex);
+				++job.queuedShader.targetCreationAttemptCount;
+				job.queuedShader.targetCreationRetryAfterTick = 0;
+				gTargetCreationJobs.push_back(std::move(job));
+				EnsureTargetCreationWorkerStartedLocked();
+				gTargetCreationCondition.notify_one();
+			}
+			return true;
+		}
+
+		void TargetCreationWorkerMain()
+		{
+			SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+			const HRESULT comInitializationResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+			for (;;)
+			{
+				TargetCreationJob job{};
+				{
+					std::unique_lock<std::mutex> lock(gQueueMutex);
+					gTargetCreationCondition.wait(lock, [] { return gTargetCreationStopRequested || !gTargetCreationJobs.empty(); });
+					if (gTargetCreationStopRequested)
+						break;
+					job = std::move(gTargetCreationJobs.front());
+					gTargetCreationJobs.pop_front();
+					++gActiveTargetCreations;
+				}
+
+				TargetCreationResult result{};
+				result.job = std::move(job);
+				bool jobIsCurrent = false;
+				{
+					std::lock_guard<std::mutex> lock(gQueueMutex);
+					jobIsCurrent = result.job.modifiedShaders == gModifiedShaderAnalysisSnapshot;
+				}
+				try
+				{
+					if (jobIsCurrent)
+					{
+						const auto& package = (*result.job.modifiedShaders)[result.job.modifiedShaderIndex];
+						const ShaderAnalysis::ShaderAnalysisDisk* analysis = nullptr;
+						if (result.job.hasShaderAnalysis)
+							analysis = &result.job.shaderAnalysis;
+						if (result.job.isGraphicsPipeline)
+							result.succeeded = HookD3D12::PrepareShaderTargetForPipeline(
+								"Graphics", result.job.queuedShader.pipelineIndex, result.job.queuedShader.shaderKey.shaderType,
+								result.job.queuedShader.shaderKey.shaderHash, result.job.queuedShader.shaderBytecode.size(),
+								result.job.queuedShader.shaderBytecode.data(), result.job.graphicsPipeline, package,
+								result.preparedTarget, analysis);
+						else
+							result.succeeded = HookD3D12::PrepareShaderTargetForPipeline(
+								"Stream", result.job.queuedShader.pipelineIndex, result.job.queuedShader.shaderKey.shaderType,
+								result.job.queuedShader.shaderKey.shaderHash, result.job.queuedShader.shaderBytecode.size(),
+								result.job.queuedShader.shaderBytecode.data(), result.job.streamPipeline, package,
+								result.preparedTarget, analysis);
+					}
+				}
+				catch (...)
+				{
+					ShaderInjectorGUI::WriteToRuntimeLogError("ShaderAutomaticDiscovery: background target preparation failed unexpectedly");
+				}
+
+				{
+					std::lock_guard<std::mutex> lock(gQueueMutex);
+					--gActiveTargetCreations;
+					gTargetCreationResults.push_back(std::move(result));
+				}
+			}
+			if (SUCCEEDED(comInitializationResult))
+				CoUninitialize();
+		}
+
+		void EnsureTargetCreationWorkerStartedLocked()
+		{
+			if (gTargetCreationWorkerRunning)
+				return;
+			gTargetCreationStopRequested = false;
+			gTargetCreationWorker = std::thread(TargetCreationWorkerMain);
+			gTargetCreationWorkerRunning = true;
+		}
+
+		bool ProcessMatchedShader(QueuedShader& queued, const std::string& modifiedShaderId, const ShaderAnalysis::ShaderAnalysisDisk* shaderAnalysis = nullptr)
+		{
+			return QueueTargetCreation(queued, modifiedShaderId, shaderAnalysis);
 		}
 
 		void AnalysisWorkerMain()
@@ -993,6 +1141,7 @@ namespace ShaderAutomaticDiscovery
 					result.queuedShader = std::move(job.queuedShader);
 					result.modifiedShaderID = (*job.modifiedShaders)[modifiedShaderIndex].id;
 					result.shaderAnalysis = std::move(candidateAnalysis);
+					result.modifiedShaders = job.modifiedShaders;
 					{
 						std::lock_guard<std::mutex> lock(gQueueMutex);
 						gAnalysisResults.push_back(std::move(result));
@@ -1158,6 +1307,8 @@ namespace ShaderAutomaticDiscovery
 
 		std::lock_guard<std::mutex> lock(gQueueMutex);
 		gModifiedShaderAnalysisSnapshot = std::move(analysisSnapshot);
+		gPendingTargetHashes.clear();
+		gPendingSingleTargetModifiedShaderIDs.clear();
 		gDirectMatchShaders.clear();
 		gModifiedShadersWithGeneratedTargets.clear();
 		gDiscoverySatisfiedLogged = false;
@@ -1211,6 +1362,7 @@ namespace ShaderAutomaticDiscovery
 
 	void ProcessQueuedWork(size_t maximumJobs)
 	{
+		const auto processingDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
 		auto pruneSatisfiedDiscoveryWork = []() -> bool
 		{
 			size_t prunedQueuedShaders = 0;
@@ -1258,8 +1410,68 @@ namespace ShaderAutomaticDiscovery
 			return;
 
 		//D3D12-facing completion work remains on the render thread.
-		for (size_t processedJobs = 0; processedJobs < maximumJobs; ++processedJobs)
+		for (size_t processedJobs = 0; processedJobs < maximumJobs && std::chrono::steady_clock::now() < processingDeadline; ++processedJobs)
 		{
+			TargetCreationResult creationResult{};
+			bool hasCreationResult = false;
+			{
+				std::lock_guard<std::mutex> lock(gQueueMutex);
+				if (!gTargetCreationResults.empty())
+				{
+					creationResult = std::move(gTargetCreationResults.front());
+					gTargetCreationResults.pop_front();
+					hasCreationResult = true;
+				}
+			}
+			if (hasCreationResult)
+			{
+				bool currentSnapshot = false;
+				{
+					std::lock_guard<std::mutex> lock(gQueueMutex);
+					currentSnapshot = creationResult.job.modifiedShaders == gModifiedShaderAnalysisSnapshot;
+					if (currentSnapshot)
+					{
+						gPendingTargetHashes.erase(creationResult.job.queuedShader.shaderKey);
+						gPendingSingleTargetModifiedShaderIDs.erase(creationResult.job.modifiedShaderID);
+					}
+					else
+						RequeueShaderLocked(creationResult.job.queuedShader, true);
+				}
+
+				bool targetPublished = false;
+				if (currentSnapshot && creationResult.succeeded)
+					targetPublished = HookD3D12::PublishPreparedShaderTarget(std::move(creationResult.preparedTarget));
+
+				if (targetPublished)
+				{
+					HookD3D12::QueueShaderTargetApplyWork();
+					MarkShaderTargetCreated(creationResult.job.modifiedShaderID);
+					ShaderInjectorGUI::WriteToRuntimeLogSuccess("ShaderAutomaticDiscovery: created ShaderTarget for " + Hash::FormatHash(creationResult.job.queuedShader.shaderKey.shaderHash) + " using " + creationResult.job.modifiedShaderID);
+				}
+				else if (currentSnapshot)
+				{
+					if (creationResult.job.queuedShader.targetCreationAttemptCount < 3)
+					{
+						std::lock_guard<std::mutex> lock(gQueueMutex);
+						creationResult.job.queuedShader.targetCreationRetryAfterTick = GetTickCount64() + 500 * creationResult.job.queuedShader.targetCreationAttemptCount;
+						RequeueShaderLocked(creationResult.job.queuedShader, false);
+					}
+					else
+					{
+						{
+							std::lock_guard<std::mutex> lock(gQueueMutex);
+							++gTargetCreationFailedTotal;
+						}
+
+						ShaderInjectorGUI::WriteToRuntimeLogWarning(
+							"ShaderAutomaticDiscovery: target creation failed after 3 attempts for " +
+							Hash::FormatHash(creationResult.job.queuedShader.shaderKey.shaderHash) +
+							" using " + creationResult.job.modifiedShaderID);
+					}
+				}
+				continue;
+			}
+
 			AnalysisResult result{};
 			{
 				std::lock_guard<std::mutex> lock(gQueueMutex);
@@ -1271,14 +1483,29 @@ namespace ShaderAutomaticDiscovery
 				gAnalysisResults.pop_front();
 			}
 
-			ProcessMatchedShader(result.queuedShader, result.modifiedShaderID, &result.shaderAnalysis);
+			bool resultIsCurrent = false;
+			{
+				std::lock_guard<std::mutex> lock(gQueueMutex);
+				resultIsCurrent = result.modifiedShaders == gModifiedShaderAnalysisSnapshot;
+				if (!resultIsCurrent)
+					RequeueShaderLocked(result.queuedShader, true);
+			}
+			if (!resultIsCurrent)
+				continue;
+
+			if (!ProcessMatchedShader(result.queuedShader, result.modifiedShaderID, &result.shaderAnalysis))
+			{
+				std::lock_guard<std::mutex> lock(gQueueMutex);
+				gAnalysisResults.push_front(std::move(result));
+				break;
+			}
 		}
 
 		if (pruneSatisfiedDiscoveryWork())
 			return;
 
 		//Submit a bounded amount of new work each frame. Background workers process jobs concurrently.
-		for (size_t submittedJobs = 0; submittedJobs < maximumJobs; ++submittedJobs)
+		for (size_t submittedJobs = 0; submittedJobs < maximumJobs && std::chrono::steady_clock::now() < processingDeadline; ++submittedJobs)
 		{
 			QueuedShader queued{};
 			std::string directModifiedShaderId;
@@ -1297,7 +1524,12 @@ namespace ShaderAutomaticDiscovery
 
 			if (!directModifiedShaderId.empty())
 			{
-				ProcessMatchedShader(queued, directModifiedShaderId);
+				if (!ProcessMatchedShader(queued, directModifiedShaderId))
+				{
+					std::lock_guard<std::mutex> lock(gQueueMutex);
+					gQueuedShaders.push_front(std::move(queued));
+					break;
+				}
 				{
 					std::lock_guard<std::mutex> lock(gQueueMutex);
 					++gDirectMatchProcessedTotal;
@@ -1324,26 +1556,39 @@ namespace ShaderAutomaticDiscovery
 		MaybeLogDiscoveryProgress("active");
 	}
 
+	ShaderTargetProgress GetProgress()
+	{
+		std::lock_guard<std::mutex> lock(gQueueMutex);
+
+		ShaderTargetProgress progress{};
+		progress.queued = gQueuedShaders.size() + gAnalysisJobs.size() + gAnalysisResults.size() +
+			gTargetCreationJobs.size() + gTargetCreationResults.size();
+		progress.running = gActiveAnalysisJobs + gActiveTargetCreations;
+		progress.total = (std::max)(gQueuedShaderTotal, progress.queued + progress.running);
+		progress.completed = progress.total - progress.queued - progress.running;
+		progress.created = gShaderTargetsCreatedTotal;
+		progress.failed = gAnalysisFailedTotal + gTargetCreationFailedTotal;
+
+		return progress;
+	}
+
 	void Shutdown()
 	{
 		std::vector<std::thread> workers;
+		std::thread targetCreationWorker;
 		{
 			std::lock_guard<std::mutex> lock(gQueueMutex);
 			gAcceptingWork = false;
-			gQueuedShaders.clear();
-			gAnalysisJobs.clear();
-			gAnalysisResults.clear();
-			gSubmittedShaders.clear();
-			gDirectMatchShaders.clear();
-			gModifiedShadersWithGeneratedTargets.clear();
-			gModifiedShaderAnalysisSnapshot.reset();
-
-			if (gAnalysisWorkers.empty())
-				return;
-
 			gAnalysisStopRequested = true;
+			gAnalysisJobs.clear();
 			workers = std::move(gAnalysisWorkers);
+			if (gTargetCreationWorker.joinable())
+			{
+				gTargetCreationStopRequested = true;
+				targetCreationWorker = std::move(gTargetCreationWorker);
+			}
 			gAnalysisCondition.notify_all();
+			gTargetCreationCondition.notify_all();
 		}
 
 		for (std::thread& worker : workers)
@@ -1351,11 +1596,27 @@ namespace ShaderAutomaticDiscovery
 			if (worker.joinable())
 				worker.join();
 		}
+		if (targetCreationWorker.joinable())
+		{
+			targetCreationWorker.join();
+		}
 
 		{
 			std::lock_guard<std::mutex> lock(gQueueMutex);
 			gAnalysisWorkerRunning = false;
 			gRunningAnalysisWorkerCount = 0;
+			gTargetCreationWorkerRunning = false;
+			gQueuedShaders.clear();
+			gAnalysisJobs.clear();
+			gAnalysisResults.clear();
+			gTargetCreationJobs.clear();
+			gTargetCreationResults.clear();
+			gPendingTargetHashes.clear();
+			gPendingSingleTargetModifiedShaderIDs.clear();
+			gSubmittedShaders.clear();
+			gDirectMatchShaders.clear();
+			gModifiedShadersWithGeneratedTargets.clear();
+			gModifiedShaderAnalysisSnapshot.reset();
 		}
 	}
 

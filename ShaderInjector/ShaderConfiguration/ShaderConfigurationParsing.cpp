@@ -60,6 +60,12 @@ namespace ShaderConfiguration::Internal
 				continue;
 			}
 
+			if (lowercaseComment.find("[config category]") != std::string::npos)
+			{
+				metadata.category = MetadataValue(comment, "[CONFIG CATEGORY]");
+				continue;
+			}
+
 			metadata.descriptionLines.push_back(comment);
 		}
 
@@ -150,11 +156,12 @@ namespace ShaderConfiguration
 				property.name = define.name;
 				property.sourceFile = ShaderInjectorIO::FileNameFromPath(relativeSourcePath);
 				property.sourcePath = relativeSourcePath;
-				property.comment = JoinDescription(metadata.descriptionLines);
-				property.type = type;
+				property.description = JoinDescription(metadata.descriptionLines);
+				property.valueType = type;
 				property.defaultValue = normalizedDefault;
 				property.value = normalizedValue;
-				property.range = StringHelper::TrimWhitespace(metadata.range);
+				property.valueRange = StringHelper::TrimWhitespace(metadata.range);
+				property.category = metadata.category.empty() ? "Uncategorized" : metadata.category;
 				property.booleanUsesDefinitionPresence = usesDefinitionPresence;
 				property.definitionIndex = definitionIndex;
 				property.sourceOrder = sourceOrder++;

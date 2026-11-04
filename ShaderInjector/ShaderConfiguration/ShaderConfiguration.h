@@ -2,6 +2,8 @@
 
 #include "ShaderConfiguration/DocumentDisk.h"
 #include "ShaderConfiguration/PropertyDisk.h"
+#include "ShaderConfiguration/PresetDisk.h"
+#include "ShaderConfiguration/ShaderConfigurationCategories.h"
 
 #include <cstddef>
 #include <string>
@@ -11,6 +13,11 @@ namespace ShaderConfiguration
 {
 	bool WriteJson(const std::string& path, const DocumentDisk& document);
 	bool LoadJson(const std::string& path, DocumentDisk& outDocument);
+	bool WritePresetJson(const std::string& path, const PresetDisk& preset);
+	bool WritePresetAtomically(const std::string& path, const PresetDisk& preset, std::string& outError);
+	bool LoadPresetJson(const std::string& path, PresetDisk& outPreset);
+	bool WriteCatalogAndPreset(const std::string& catalogPath, const std::string& presetPath, const DocumentDisk& document, const PresetDisk& preset, std::string& outError);
+	std::string GetPresetFileName(const std::string& presetID);
 
 	bool ParseShaderSource(
 		const std::string& relativeSourcePath,

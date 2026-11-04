@@ -12,6 +12,7 @@ namespace ShaderConfiguration::Internal
 		std::string type;
 		std::string defaultValue;
 		std::string range;
+		std::string category = "Uncategorized";
 		std::vector<std::string> descriptionLines;
 	};
 } //namespace ShaderConfiguration::Internal

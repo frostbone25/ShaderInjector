@@ -46,6 +46,7 @@ namespace RenderPass
 		std::vector<LogicalResourceBindingDisk> inputs;
 		std::vector<LogicalResourceBindingDisk> outputs;
 		std::vector<RuntimeResourceDefinitionDisk> runtimeResources;
+		uint32_t chainDownsampleFactor = 8;
 		uint32_t sourceTextureShaderRegister = 0;
 		uint32_t sourceTextureRegisterSpace = 0;
 		bool trackResourceBindings = true;
@@ -60,6 +61,10 @@ namespace RenderPass
 		std::string fragmentShaderProfile = "ps_6_6";
 		std::string vertexShaderEntryPoint = "main";
 		std::string fragmentShaderEntryPoint = "main";
+		std::string upsampleShaderSourceFile;
+		std::string upsampleShaderCompiledBlobFile;
+		std::string upsampleShaderProfile = "ps_6_6";
+		std::string upsampleShaderEntryPoint = "main";
 
 		//Runtime-only locations. The JSON file contains portable configuration only.
 		std::string packageDirectory;
@@ -68,11 +73,16 @@ namespace RenderPass
 		std::string fragmentShaderSourcePath;
 		std::string vertexShaderCompiledBlobPath;
 		std::string fragmentShaderCompiledBlobPath;
+		std::string upsampleShaderSourcePath;
+		std::string upsampleShaderCompiledBlobPath;
 		std::vector<uint8_t> vertexShaderBlob;
 		std::vector<uint8_t> fragmentShaderBlob;
+		std::vector<uint8_t> upsampleShaderBlob;
 		uint64_t vertexShaderBlobHash = 0;
 		uint64_t fragmentShaderBlobHash = 0;
+		uint64_t upsampleShaderBlobHash = 0;
 		std::vector<ModifiedShader::ModifiedShaderCompiledVariant> fragmentShaderVariants;
+		std::vector<ModifiedShader::ModifiedShaderCompiledVariant> upsampleShaderVariants;
 
 		NLOHMANN_ORDERED_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
 			RenderPassDisk,
@@ -92,6 +102,7 @@ namespace RenderPass
 			inputs,
 			outputs,
 			runtimeResources,
+			chainDownsampleFactor,
 			sourceTextureShaderRegister,
 			sourceTextureRegisterSpace,
 			trackResourceBindings,
@@ -105,6 +116,10 @@ namespace RenderPass
 			vertexShaderProfile,
 			fragmentShaderProfile,
 			vertexShaderEntryPoint,
-			fragmentShaderEntryPoint)
+			fragmentShaderEntryPoint,
+			upsampleShaderSourceFile,
+			upsampleShaderCompiledBlobFile,
+			upsampleShaderProfile,
+			upsampleShaderEntryPoint)
 	};
 } //namespace RenderPass

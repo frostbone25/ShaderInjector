@@ -7,9 +7,12 @@
 
 #include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "RenderPass/RenderPassRuntime.h"
+#include "RenderPass/RenderPassConfigurationProperties.h"
+#include "RenderPass/RenderPassTexturePool.h"
 #include "RenderPass/RenderPassShaders.h"
 #include "RenderPass/RenderPassShaderCompileQueue.h"
 #include "IO/ShaderInjectorIO.h"
+#include "ShaderConfiguration/DatabaseShaderConfigurations.h"
 #include "StringHelper.h"
 
 namespace DatabaseRenderPasses
@@ -116,11 +119,6 @@ namespace DatabaseRenderPasses
 		renderPass.jsonPath = desiredJsonPath;
 		RenderPass::ResolveShaderPaths(renderPass);
 		return RenderPass::WriteJson(renderPass);
-	}
-
-	void PublishRuntimeConfiguration()
-	{
-		RenderPassRuntime::PublishRenderPassConfigurations(gRenderPasses);
 	}
 
 	void RefreshRenderPasses()

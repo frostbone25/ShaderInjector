@@ -13,6 +13,7 @@
 #include "ShaderResource/DatabaseShaderResources.h"
 #include "ShaderResource/ShaderResourceCatalog.h"
 #include "StringHelper.h"
+#include "ShaderConfiguration/DatabaseShaderConfigurations.h"
 
 namespace RenderPassShaders
 {
@@ -30,6 +31,14 @@ namespace RenderPassShaders
 		constexpr const char* downsampleComputeBlobFile = "DownsampleCS.blob";
 		constexpr const char* upsampleComputeSourceFile = "UpsampleChainCS.hlsl";
 		constexpr const char* upsampleComputeBlobFile = "UpsampleChainCS.blob";
+		constexpr const char* chainDownsampleFragmentSourceFile = "DownsampleUpsampleDown.hlsl";
+		constexpr const char* chainDownsampleFragmentBlobFile = "DownsampleUpsampleDown.blob";
+		constexpr const char* chainUpsampleFragmentSourceFile = "DownsampleUpsampleUp.hlsl";
+		constexpr const char* chainUpsampleFragmentBlobFile = "DownsampleUpsampleUp.blob";
+		constexpr const char* chainDownsampleComputeSourceFile = "DownsampleUpsampleDownCS.hlsl";
+		constexpr const char* chainDownsampleComputeBlobFile = "DownsampleUpsampleDownCS.blob";
+		constexpr const char* chainUpsampleComputeSourceFile = "DownsampleUpsampleUpCS.hlsl";
+		constexpr const char* chainUpsampleComputeBlobFile = "DownsampleUpsampleUpCS.blob";
 		constexpr const char* mipChainVertexSourceFile = "MipChainVS.hlsl";
 		constexpr const char* mipChainFragmentSourceFile = "MipChainDownsample.hlsl";
 		constexpr const char* mipChainVertexBlobFile = "MipChainVS.blob";
@@ -789,8 +798,9 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		}
 
 		const bool mipChain = renderPass.type == RenderPass::RenderPassType::MipChain;
+		const bool downsampleUpsample = renderPass.type == RenderPass::RenderPassType::DownsampleUpsample;
 		const RenderPass::PassOperation operation = RenderPass::ResolvePassOperation(renderPass);
-		const bool downsample = operation == RenderPass::PassOperation::Downsample;
+		const bool downsample = operation == RenderPass::PassOperation::Downsample || downsampleUpsample;
 		const bool upsampleChain = operation == RenderPass::PassOperation::UpsampleChain;
 		if (computePass)
 		{
@@ -823,6 +833,8 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 
 		renderPass.fragmentShaderSourceFile = fragmentSourceFile;
 		renderPass.fragmentShaderCompiledBlobFile = fragmentBlobFile;
+		renderPass.upsampleShaderSourceFile.clear();
+		renderPass.upsampleShaderCompiledBlobFile.clear();
 		if (upsampleChain)
 		{
 			renderPass.fragmentShaderSourceFile = upsampleFragmentSourceFile;
@@ -832,6 +844,23 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		{
 			renderPass.fragmentShaderSourceFile = downsampleFragmentSourceFile;
 			renderPass.fragmentShaderCompiledBlobFile = downsampleFragmentBlobFile;
+		}
+		if (downsampleUpsample)
+		{
+			if (computePass)
+			{
+				renderPass.fragmentShaderSourceFile = chainDownsampleComputeSourceFile;
+				renderPass.fragmentShaderCompiledBlobFile = chainDownsampleComputeBlobFile;
+				renderPass.upsampleShaderSourceFile = chainUpsampleComputeSourceFile;
+				renderPass.upsampleShaderCompiledBlobFile = chainUpsampleComputeBlobFile;
+			}
+			else
+			{
+				renderPass.fragmentShaderSourceFile = chainDownsampleFragmentSourceFile;
+				renderPass.fragmentShaderCompiledBlobFile = chainDownsampleFragmentBlobFile;
+				renderPass.upsampleShaderSourceFile = chainUpsampleFragmentSourceFile;
+				renderPass.upsampleShaderCompiledBlobFile = chainUpsampleFragmentBlobFile;
+			}
 		}
 		if (mipChain)
 		{
@@ -852,7 +881,7 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 				renderPass.fragmentShaderSourceFile = upsampleComputeSourceFile;
 				renderPass.fragmentShaderCompiledBlobFile = upsampleComputeBlobFile;
 			}
-			if (downsample)
+			if (downsample && !downsampleUpsample)
 			{
 				renderPass.fragmentShaderSourceFile = downsampleComputeSourceFile;
 				renderPass.fragmentShaderCompiledBlobFile = downsampleComputeBlobFile;
@@ -861,6 +890,13 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			{
 				renderPass.fragmentShaderSourceFile = mipChainComputeSourceFile;
 				renderPass.fragmentShaderCompiledBlobFile = mipChainComputeBlobFile;
+			}
+			if (downsampleUpsample)
+			{
+				renderPass.fragmentShaderSourceFile = chainDownsampleComputeSourceFile;
+				renderPass.fragmentShaderCompiledBlobFile = chainDownsampleComputeBlobFile;
+				renderPass.upsampleShaderSourceFile = chainUpsampleComputeSourceFile;
+				renderPass.upsampleShaderCompiledBlobFile = chainUpsampleComputeBlobFile;
 			}
 		}
 		if (computeReplacement)
@@ -871,9 +907,11 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::PixelShader);
 		if (computePass)
 			renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::ComputeShader);
+		renderPass.upsampleShaderProfile = renderPass.fragmentShaderProfile;
 		renderPass.vertexShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::VertexShader);
 		renderPass.vertexShaderEntryPoint = "main";
 		renderPass.fragmentShaderEntryPoint = "main";
+		renderPass.upsampleShaderEntryPoint = "main";
 		RenderPass::ResolveShaderPaths(renderPass);
 
 		if (!renderPass.vertexShaderSourcePath.empty() && !ShaderInjectorIO::WriteTextFileIfMissing(
@@ -888,6 +926,13 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		{
 			if (mipChain)
 				fragmentShaderSource = mipChainComputeShader;
+			else if (downsampleUpsample)
+			{
+				RenderPass::RenderPassDisk downsamplePass = renderPass;
+				downsamplePass.type = RenderPass::RenderPassType::Custom;
+				downsamplePass.operation = RenderPass::PassOperation::Downsample;
+				fragmentShaderSource = BuildComputeShaderSource(downsamplePass, modifiedShader);
+			}
 			else
 				fragmentShaderSource = BuildComputeShaderSource(renderPass, modifiedShader);
 		}
@@ -895,6 +940,13 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		{
 			if (mipChain)
 				fragmentShaderSource = mipChainFragmentShader;
+			else if (downsampleUpsample)
+			{
+				RenderPass::RenderPassDisk downsamplePass = renderPass;
+				downsamplePass.type = RenderPass::RenderPassType::Custom;
+				downsamplePass.operation = RenderPass::PassOperation::Downsample;
+				fragmentShaderSource = BuildFragmentShaderSource(downsamplePass, modifiedShader, false);
+			}
 			else
 				fragmentShaderSource = BuildFragmentShaderSource(renderPass, modifiedShader, pixelReplacement);
 		}
@@ -902,6 +954,25 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		{
 			outError = "Could not create the Render Pass shader source.";
 			return false;
+		}
+		if (downsampleUpsample)
+		{
+			RenderPass::RenderPassDisk upsamplePass = renderPass;
+			upsamplePass.type = RenderPass::RenderPassType::Custom;
+			upsamplePass.operation = RenderPass::PassOperation::UpsampleChain;
+			upsamplePass.fragmentShaderSourceFile = renderPass.upsampleShaderSourceFile;
+			upsamplePass.fragmentShaderCompiledBlobFile = renderPass.upsampleShaderCompiledBlobFile;
+			RenderPass::ResolveShaderPaths(upsamplePass);
+			std::string upsampleSource;
+			if (computePass)
+				upsampleSource = BuildComputeShaderSource(upsamplePass, modifiedShader);
+			else
+				upsampleSource = BuildFragmentShaderSource(upsamplePass, modifiedShader, false);
+			if (!ShaderInjectorIO::WriteTextFileIfMissing(renderPass.upsampleShaderSourcePath, upsampleSource))
+			{
+				outError = "Could not create the upsample shader source.";
+				return false;
+			}
 		}
 
 		if (!compileShaders)
@@ -924,9 +995,11 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::PixelShader);
 		if (computePass)
 			renderPass.fragmentShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::ComputeShader);
+		renderPass.upsampleShaderProfile = renderPass.fragmentShaderProfile;
 		renderPass.vertexShaderProfile = StringHelper::ShaderProfileForType(ShaderTarget::VertexShader);
 
 		std::vector<std::string> compilerArguments;
+		const auto configuration = DatabaseShaderConfigurations::GetAppliedConfiguration();
 		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = nullptr;
 		if (RenderPass::IsReplacementPass(renderPass.type))
 			modifiedShader = DatabaseRenderPasses::ResolveModifiedShader(renderPass);
@@ -934,20 +1007,24 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		if (modifiedShader)
 			compilerArguments = modifiedShader->compilerArguments;
 
-		if (!CompilePreparedShaders(renderPass, compilerArguments, outError))
+		if (!CompilePreparedShaders(renderPass, compilerArguments, outError, configuration))
 			return false;
 
-		LoadShaderVariants(renderPass);
+		LoadShaderVariants(renderPass, false);
 		if (!renderPass.fragmentShaderVariants.empty() && modifiedShader)
-			DatabaseModifiedShaders::QueueSourceCompiles(*modifiedShader, renderPass.id, renderPass.fragmentShaderSourcePath, renderPass.fragmentShaderVariants);
+			DatabaseModifiedShaders::QueueSourceCompiles(*modifiedShader, renderPass.id, renderPass.fragmentShaderSourcePath, renderPass.fragmentShaderVariants, configuration);
 		return true;
 	}
 
 	bool CompilePreparedShaders(
 		RenderPass::RenderPassDisk& renderPass,
 		const std::vector<std::string>& compilerArguments,
-		std::string& outError)
+		std::string& outError,
+		std::shared_ptr<const ShaderConfiguration::CompileConfiguration> configuration,
+		std::shared_ptr<const ShaderConfiguration::CompileConfiguration> previousConfiguration)
 	{
+		if (!configuration)
+			configuration = DatabaseShaderConfigurations::GetAppliedConfiguration();
 		outError.clear();
 		if (!RenderPass::HasShaderTemplate(renderPass))
 		{
@@ -955,29 +1032,58 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 			return false;
 		}
 
+		auto PrepareStage = [&](const std::string& sourcePath, const std::string& profile, const std::string& entryPoint, std::string& blobPath, const std::vector<std::string>& arguments, const std::vector<uint8_t>& currentBlob)
+		{
+			if (previousConfiguration && configuration && !currentBlob.empty() &&
+				previousConfiguration->GetSourceFingerprint(sourcePath) == configuration->GetSourceFingerprint(sourcePath))
+			{
+				//copy an unchanged stage into staging so the complete pass still publishes atomically.
+				return ShaderInjectorIO::WriteBinaryFile(blobPath, currentBlob.data(), currentBlob.size());
+			}
+
+			return ShaderInjectorIO::CompileSourceToDXILBlob(sourcePath, profile, entryPoint, blobPath, ShaderInjectorIO::ShaderSignaturePacking::PrefixStable, {}, arguments, configuration);
+		};
+
 		std::string vertexBlobPath = renderPass.vertexShaderCompiledBlobPath;
-		if (!vertexBlobPath.empty() && !ShaderInjectorIO::CompileSourceToDXILBlob(
-										   renderPass.vertexShaderSourcePath,
-										   renderPass.vertexShaderProfile,
-										   renderPass.vertexShaderEntryPoint,
-										   vertexBlobPath))
+		if (!vertexBlobPath.empty() &&
+			!PrepareStage(
+				renderPass.vertexShaderSourcePath,
+				renderPass.vertexShaderProfile,
+				renderPass.vertexShaderEntryPoint,
+				vertexBlobPath,
+				{},
+				renderPass.vertexShaderBlob))
 		{
 			outError = "Fullscreen vertex shader compilation failed.";
 			return false;
 		}
 
 		std::string fragmentBlobPath = renderPass.fragmentShaderCompiledBlobPath;
-		if (!ShaderInjectorIO::CompileSourceToDXILBlob(
+		if (!PrepareStage(
 				renderPass.fragmentShaderSourcePath,
 				renderPass.fragmentShaderProfile,
 				renderPass.fragmentShaderEntryPoint,
 				fragmentBlobPath,
-				ShaderInjectorIO::ShaderSignaturePacking::PrefixStable,
-				{},
-				compilerArguments))
+				compilerArguments,
+				renderPass.fragmentShaderBlob))
 		{
 			outError = "Render Pass shader compilation failed.";
 			return false;
+		}
+		if (renderPass.type == RenderPass::RenderPassType::DownsampleUpsample)
+		{
+			std::string upsampleBlobPath = renderPass.upsampleShaderCompiledBlobPath;
+			if (!PrepareStage(
+					renderPass.upsampleShaderSourcePath,
+					renderPass.upsampleShaderProfile,
+					renderPass.upsampleShaderEntryPoint,
+					upsampleBlobPath,
+					compilerArguments,
+					renderPass.upsampleShaderBlob))
+			{
+				outError = "Render Pass upsample shader compilation failed.";
+				return false;
+			}
 		}
 
 		if (!RenderPass::LoadCompiledShaderBlobs(renderPass))
@@ -989,14 +1095,15 @@ float4 main(FullscreenVertexOutput input) : SV_Target0
 		return true;
 	}
 
-	void LoadShaderVariants(RenderPass::RenderPassDisk& renderPass)
+	void LoadShaderVariants(RenderPass::RenderPassDisk& renderPass, bool loadCachedBlobs)
 	{
 		renderPass.fragmentShaderVariants.clear();
+		renderPass.upsampleShaderVariants.clear();
 		if (!RenderPass::IsReplacementPass(renderPass.type))
 			return;
 
 		const ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = DatabaseRenderPasses::ResolveModifiedShader(renderPass);
 		if (modifiedShader && modifiedShader->HasPerTargetDefines())
-			DatabaseModifiedShaders::LoadSourceVariants(*modifiedShader, renderPass.fragmentShaderSourcePath, renderPass.fragmentShaderCompiledBlobPath, renderPass.fragmentShaderVariants);
+			DatabaseModifiedShaders::LoadSourceVariants(*modifiedShader, renderPass.fragmentShaderSourcePath, renderPass.fragmentShaderCompiledBlobPath, renderPass.fragmentShaderVariants, loadCachedBlobs);
 	}
 } //namespace RenderPassShaders

@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <limits>
+#include <locale>
 #include <sstream>
 #include <vector>
 
@@ -107,6 +108,7 @@ namespace ShaderConfiguration::Internal
 	std::string FormatFloat(float value)
 	{
 		std::ostringstream stream;
+		stream.imbue(std::locale::classic());
 		stream << std::fixed << std::setprecision(6) << value;
 		std::string text = stream.str();
 

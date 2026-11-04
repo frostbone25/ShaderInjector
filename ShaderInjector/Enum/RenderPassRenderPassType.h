@@ -8,6 +8,7 @@ namespace RenderPass
 	{
 		Custom,
 		MipChain,
+		DownsampleUpsample,
 		TemporalHistory,
 		ReplacementPixelShader,
 		ReplacementComputeShader,
@@ -17,6 +18,7 @@ namespace RenderPass
 								 {
 									 {RenderPassType::Custom, "Custom"},
 									 {RenderPassType::MipChain, "MipChain"},
+						 {RenderPassType::DownsampleUpsample, "DownsampleUpsample"},
 									 {RenderPassType::TemporalHistory, "TemporalHistory"},
 									 {RenderPassType::ReplacementPixelShader, "ReplacementPixelShader"},
 									 {RenderPassType::ReplacementComputeShader, "ReplacementComputeShader"},

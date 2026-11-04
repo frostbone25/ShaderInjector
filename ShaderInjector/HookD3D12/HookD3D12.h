@@ -32,6 +32,16 @@ namespace RenderPassRuntime
 	struct PipelineOutputState;
 }
 
+namespace ModifiedShader
+{
+	struct ModifiedShaderPackageDisk;
+}
+
+namespace ShaderAnalysis
+{
+	struct ShaderAnalysisDisk;
+}
+
 namespace HookD3D12
 {
 	static const size_t subobjectSizes[] =
@@ -303,6 +313,29 @@ namespace HookD3D12
 		const std::string& modifiedShaderId,
 		bool generateShaderDisassembly,
 		const ShaderAnalysis::ShaderAnalysisDisk* originalShaderAnalysis = nullptr);
+	bool PrepareShaderTargetForPipeline(
+		const std::string& sourceList,
+		int pipelineIndex,
+		ShaderTarget::ShaderType shaderType,
+		uint64_t shaderHash,
+		size_t shaderBytecodeLength,
+		const void* shaderBytecode,
+		GraphicsPipelineInfo& pipeline,
+		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
+		ShaderTarget::ShaderTargetDisk& preparedTarget,
+		const ShaderAnalysis::ShaderAnalysisDisk* originalShaderAnalysis = nullptr);
+	bool PrepareShaderTargetForPipeline(
+		const std::string& sourceList,
+		int pipelineIndex,
+		ShaderTarget::ShaderType shaderType,
+		uint64_t shaderHash,
+		size_t shaderBytecodeLength,
+		const void* shaderBytecode,
+		PipelineStateInfo& pipeline,
+		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
+		ShaderTarget::ShaderTargetDisk& preparedTarget,
+		const ShaderAnalysis::ShaderAnalysisDisk* originalShaderAnalysis = nullptr);
+	bool PublishPreparedShaderTarget(ShaderTarget::ShaderTargetDisk preparedTarget);
 	bool CreateShaderTargetForPipeline(
 		const std::string& sourceList,
 		int pipelineIndex,

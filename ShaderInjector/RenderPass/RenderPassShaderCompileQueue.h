@@ -1,8 +1,15 @@
 #pragma once
 
 #include <string>
+#include <memory>
 
 #include "RenderPass/DatabaseRenderPasses.h"
+
+namespace ShaderConfiguration
+{
+	class CompileConfiguration;
+	class ConfigurationProgress;
+}
 
 namespace DatabaseRenderPasses
 {
@@ -19,9 +26,11 @@ namespace DatabaseRenderPasses
 	};
 
 	//queue, drain, and invalidate on the frame thread; workers only touch owned shader snapshots.
-	bool QueueRenderPassShaderCompile(const std::string& renderPassId, std::string& outError);
-	RenderPassShaderBatchCompileResult QueueAllRenderPassShaderCompiles();
+	bool QueueRenderPassShaderCompile(const std::string& renderPassId, std::string& outError, std::shared_ptr<const ShaderConfiguration::CompileConfiguration> previousConfiguration = {});
+	//passing the previous snapshot limits property applies to passes whose source dependencies changed.
+	RenderPassShaderBatchCompileResult QueueAllRenderPassShaderCompiles(std::shared_ptr<const ShaderConfiguration::CompileConfiguration> previousConfiguration = {});
 	RenderPassCompileProgress GetRenderPassCompileProgress();
 	void ProcessCompletedRenderPassCompiles();
+	void CancelConfigurationCompiles(std::shared_ptr<ShaderConfiguration::ConfigurationProgress> progress);
 	void InvalidateRenderPassCompiles();
 } //namespace DatabaseRenderPasses

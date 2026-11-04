@@ -11,11 +11,12 @@
 #include "RenderPass/RenderPass.h"
 #include "RenderPass/PipelineOutputState.h"
 #include "RenderPass/Runtime/ShaderPatchBinding.h"
+#include "RenderPass/Runtime/PerformanceSnapshot.h"
 #include "ShaderTarget/ShaderTarget.h"
 
 namespace RenderPassRuntime
 {
-	void PublishRenderPassConfigurations(const std::vector<RenderPass::RenderPassDisk>& renderPasses);
+	void PublishRenderPassConfigurations(std::vector<RenderPass::RenderPassDisk> renderPassConfigurations);
 	bool HasEnabledRenderPasses();
 	bool HasEnabledMipChainPasses();
 	bool IsTrackingRequired();
@@ -64,6 +65,7 @@ namespace RenderPassRuntime
 	void ResetCommandList(ID3D12GraphicsCommandList* commandList, ID3D12PipelineState* initialPipelineState);
 	void CompleteCommandListReset(ID3D12GraphicsCommandList* commandList, bool resetSucceeded);
 	void TrackPipelineState(ID3D12GraphicsCommandList* commandList, ID3D12PipelineState* pipelineState);
+	void RecordShaderTargetUse(ID3D12PipelineState* pipelineState);
 	void TrackBoundPipelineState(ID3D12GraphicsCommandList* commandList, ID3D12PipelineState* pipelineState);
 	void TrackPrimitiveTopology(ID3D12GraphicsCommandList* commandList, D3D12_PRIMITIVE_TOPOLOGY primitiveTopology);
 	void TrackRootSignature(
@@ -133,6 +135,7 @@ namespace RenderPassRuntime
 		ID3D12CommandList* const* commandLists);
 	void AdvanceFrame();
 	void LogPerformanceSnapshot();
+	PerformanceSnapshot GetPerformanceSnapshot();
 
 	RenderPass::RuntimeDiagnostics GetDiagnostics(const std::string& renderPassId);
 	void ClearDiagnostics(const std::string& renderPassId);

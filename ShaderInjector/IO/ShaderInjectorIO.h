@@ -2,12 +2,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "Enum/ShaderSignaturePacking.h"
 #include "Enum/RegistryHive.h"
 #include "IO/ProcessResult.h"
+
+namespace ShaderConfiguration
+{
+	class CompileConfiguration;
+}
 
 #include <d3d12.h>
 
@@ -42,6 +48,8 @@ namespace ShaderInjectorIO
 	void DeleteFileIfExists(const std::string& filePath);
 	bool CopyFileIfMissing(const std::string& sourcePath, const std::string& destinationPath);
 	bool WriteBinaryFile(const std::string& filePath, const void* fileData, size_t dataByteCount);
+	//commit a worker-written file with a same-volume rename; never copy its contents on the frame thread.
+	bool CommitStagedFile(const std::string& stagedPath, const std::string& destinationPath);
 	bool ReadTextFile(const std::string& filePath, std::string& fileText);
 	bool WriteTextFile(const std::string& filePath, const std::string& fileText);
 	bool WriteTextFileIfMissing(const std::string& filePath, const std::string& fileText);
@@ -79,7 +87,10 @@ namespace ShaderInjectorIO
 	std::string GetShaderPatchesDirectory();
 	std::string GetModifiedShadersDirectory();
 	std::string GetModifiedShadersIncludesDirectory();
+	std::string GetShaderConfigurationDirectory();
+	std::string GetShaderConfigurationPresetsDirectory();
 	std::string GetShaderConfigurationsPath();
+	std::string GetLegacyShaderConfigurationsPath();
 	std::string GetInjectorSettingsPath();
 
 	//log writers serialize entries and apply the configured verbosity rules.
@@ -100,7 +111,8 @@ namespace ShaderInjectorIO
 		std::string& compiledBlobFilePath,
 		ShaderSignaturePacking signaturePacking = ShaderSignaturePacking::PrefixStable,
 		const std::vector<std::string>& defines = {},
-		const std::vector<std::string>& extraCompilerArguments = {});
+		const std::vector<std::string>& extraCompilerArguments = {},
+		std::shared_ptr<const ShaderConfiguration::CompileConfiguration> configuration = {});
 	bool LoadDXILBlobFromDisk(const std::string& shaderBlobFilePath, std::vector<uint8_t>& shaderBlobBytes);
 
 	//recreate built-in shader source files from the embedded templates.

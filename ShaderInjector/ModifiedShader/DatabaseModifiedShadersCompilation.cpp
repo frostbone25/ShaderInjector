@@ -14,9 +14,21 @@
 #include "IO/ShaderInjectorIO.h"
 #include "ShaderAnalysis/ShaderAnalyzer.h"
 #include "StringHelper.h"
+#include "ShaderConfiguration/CompileConfiguration.h"
+#include "ShaderConfiguration/DatabaseShaderConfigurations.h"
 
 namespace DatabaseModifiedShaders
 {
+	static std::string CompileConfigurationFingerprint(
+		const std::shared_ptr<const ShaderConfiguration::CompileConfiguration>& configuration,
+		const std::string& sourcePath)
+	{
+		if (!configuration)
+			return {};
+
+		return configuration->GetSourceFingerprint(sourcePath);
+	}
+
 	namespace Detail
 	{
 		static bool SemanticNamesEqual(const std::string& left, const std::string& right)
@@ -200,7 +212,8 @@ namespace DatabaseModifiedShaders
 			const std::vector<ModifiedShader::ShaderDefine>& defines,
 			const std::string& candidateBasePath,
 			std::vector<uint8_t>& outBlob,
-			ShaderAnalysis::ShaderAnalysisDisk& outAnalysis)
+			ShaderAnalysis::ShaderAnalysisDisk& outAnalysis,
+			const std::shared_ptr<const ShaderConfiguration::CompileConfiguration>& configuration)
 		{
 			std::string compiledBlobPath = candidateBasePath + ".candidate";
 
@@ -211,7 +224,8 @@ namespace DatabaseModifiedShaders
 					compiledBlobPath,
 					ShaderInjectorIO::ShaderSignaturePacking::PrefixStable,
 					CompilerDefineStrings(defines),
-					modifiedShader.compilerArguments))
+					modifiedShader.compilerArguments,
+					configuration))
 			{
 				ShaderInjectorIO::DeleteFileIfExists(compiledBlobPath);
 				return false;
@@ -239,7 +253,8 @@ namespace DatabaseModifiedShaders
 			const std::string& candidatePath,
 			ShaderInjectorIO::ShaderSignaturePacking signaturePacking,
 			std::vector<uint8_t>& outBlob,
-			ShaderAnalysis::ShaderAnalysisDisk& outAnalysis)
+			ShaderAnalysis::ShaderAnalysisDisk& outAnalysis,
+			const std::shared_ptr<const ShaderConfiguration::CompileConfiguration>& configuration)
 		{
 			std::string outputPath = candidatePath;
 			return ShaderInjectorIO::CompileSourceToDXILBlob(
@@ -249,7 +264,8 @@ namespace DatabaseModifiedShaders
 					   outputPath,
 					   signaturePacking,
 					   CompilerDefineStrings(defines),
-					   modifiedShader.compilerArguments) &&
+					   modifiedShader.compilerArguments,
+					   configuration) &&
 				   ShaderInjectorIO::LoadDXILBlobFromDisk(outputPath, outBlob) &&
 				   AnalyzeCompiledBlob(outBlob, outAnalysis);
 		}
@@ -259,12 +275,17 @@ namespace DatabaseModifiedShaders
 			const std::vector<ModifiedShader::ShaderDefine>& defines,
 			const std::string& candidateBasePath,
 			std::vector<uint8_t>& outBlob,
-			ShaderAnalysis::ShaderAnalysisDisk& outAnalysis)
+			ShaderAnalysis::ShaderAnalysisDisk& outAnalysis,
+			const std::shared_ptr<const ShaderConfiguration::CompileConfiguration>& configuration)
 		{
+			auto compileConfiguration = configuration;
+			if (!compileConfiguration)
+				compileConfiguration = DatabaseShaderConfigurations::GetAppliedConfiguration();
+
 			//DXBC packages and older fingerprints may lack analyzable interface data.
 			//compile them without rejecting an otherwise valid shader.
 			if (!PackageHasAnalyzedTargetInterface(modifiedShader, &defines))
-				return CompileWithoutAnalyzedInterface(modifiedShader, defines, candidateBasePath, outBlob, outAnalysis);
+				return CompileWithoutAnalyzedInterface(modifiedShader, defines, candidateBasePath, outBlob, outAnalysis, compileConfiguration);
 
 			const std::string prefixStableCandidatePath = candidateBasePath + ".prefix-stable-candidate";
 			const std::string optimizedCandidatePath = candidateBasePath + ".optimized-candidate";
@@ -280,7 +301,8 @@ namespace DatabaseModifiedShaders
 				prefixStableCandidatePath,
 				ShaderInjectorIO::ShaderSignaturePacking::PrefixStable,
 				prefixStableBlob,
-				prefixStableAnalysis);
+				prefixStableAnalysis,
+				compileConfiguration);
 
 			const bool prefixStableMatches = prefixStableCompiled && ShaderInterfaceMatchesAnyPackageTarget(modifiedShader, prefixStableAnalysis, &defines);
 
@@ -292,7 +314,7 @@ namespace DatabaseModifiedShaders
 			if (!prefixStableMatches && PackageHasAnalyzedTargetInterface(modifiedShader, &defines))
 			{
 				//a second packing mode is only needed when the first compiled candidate does not match an interface captured from the original game shader.
-				optimizedCompiled = CompileAndAnalyzeCandidate(modifiedShader, defines, optimizedCandidatePath, ShaderInjectorIO::ShaderSignaturePacking::Optimized, optimizedBlob, optimizedAnalysis);
+				optimizedCompiled = CompileAndAnalyzeCandidate(modifiedShader, defines, optimizedCandidatePath, ShaderInjectorIO::ShaderSignaturePacking::Optimized, optimizedBlob, optimizedAnalysis, compileConfiguration);
 				optimizedMatches = optimizedCompiled && ShaderInterfaceMatchesAnyPackageTarget(modifiedShader, optimizedAnalysis, &defines);
 			}
 
@@ -364,15 +386,13 @@ namespace DatabaseModifiedShaders
 			return true;
 		}
 
-		//the variant without defines keeps the package blob path; others use
-		//<compiled blob path without extension>.<FNV-1a of "NAME=VALUE;NAME=VALUE...">.blob
-		std::string VariantBlobPath(const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader, const std::vector<ModifiedShader::ShaderDefine>& defines)
+		//per-target hashes and applied configuration fingerprints keep cached variants isolated.
+		std::string VariantBlobPath(
+			const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
+			const std::vector<ModifiedShader::ShaderDefine>& defines,
+			const std::shared_ptr<const ShaderConfiguration::CompileConfiguration>& configuration,
+			const std::string* sourceFingerprint)
 		{
-			if (defines.empty())
-				return modifiedShader.compiledBlobPath;
-
-			const std::string description = DescribeDefines(defines);
-			const std::string defineHash = Hash::FormatHash(Hash::HashMemory(description.data(), description.size()));
 			std::string basePath = modifiedShader.compiledBlobPath;
 			const size_t extension = basePath.find_last_of('.');
 			const size_t separator = basePath.find_last_of("/\\");
@@ -380,7 +400,37 @@ namespace DatabaseModifiedShaders
 			if (extension != std::string::npos && (separator == std::string::npos || extension > separator))
 				basePath.erase(extension);
 
-			return basePath + "." + defineHash + ShaderInjectorIO::extensionBLOB;
+			std::string configurationSuffix;
+			if (configuration)
+			{
+				std::string resolvedSourceFingerprint;
+				if (sourceFingerprint)
+					resolvedSourceFingerprint = *sourceFingerprint;
+				else
+					resolvedSourceFingerprint = configuration->GetSourceFingerprint(modifiedShader.sourcePath);
+
+				if (!resolvedSourceFingerprint.empty())
+					configurationSuffix = ".cfg-" + resolvedSourceFingerprint;
+			}
+
+			bool hasConfigurationSuffix = false;
+			if (!configurationSuffix.empty() && basePath.size() >= configurationSuffix.size())
+			{
+				hasConfigurationSuffix = basePath.compare(basePath.size() - configurationSuffix.size(), configurationSuffix.size(), configurationSuffix) == 0;
+				if (hasConfigurationSuffix)
+					basePath.erase(basePath.size() - configurationSuffix.size());
+			}
+
+			if (!defines.empty())
+			{
+				const std::string description = DescribeDefines(defines);
+				basePath += "." + Hash::FormatHash(Hash::HashMemory(description.data(), description.size()));
+			}
+
+			if (!configurationSuffix.empty())
+				basePath += configurationSuffix;
+
+			return basePath + ShaderInjectorIO::extensionBLOB;
 		}
 
 		//keep the package-level blob populated so existing "is this package compiled" checks keep working.
@@ -389,6 +439,19 @@ namespace DatabaseModifiedShaders
 			modifiedShader.compiledBlob.clear();
 			modifiedShader.compiledShaderAnalysis = {};
 			modifiedShader.compiledShaderInterfaceCompatible = true;
+			const std::string configurationFingerprint = CompileConfigurationFingerprint(DatabaseShaderConfigurations::GetAppliedConfiguration(), modifiedShader.sourcePath);
+
+			for (const ModifiedShader::ModifiedShaderCompiledVariant& variant : modifiedShader.compiledVariants)
+			{
+				if (variant.compiledBlob.empty() || !variant.compiledShaderInterfaceCompatible)
+					continue;
+				if (variant.compiledConfigurationFingerprint != configurationFingerprint)
+					continue;
+
+				modifiedShader.compiledBlob = variant.compiledBlob;
+				modifiedShader.compiledShaderAnalysis = variant.compiledShaderAnalysis;
+				return;
+			}
 
 			for (const ModifiedShader::ModifiedShaderCompiledVariant& variant : modifiedShader.compiledVariants)
 			{
@@ -416,8 +479,10 @@ namespace DatabaseModifiedShaders
 
 		//one variant per distinct define set, in target order; packages without defines get one variant.
 		//recapture rebuilds the list after adding targets and keeps the blobs it already loaded in memory.
-		void LoadPackageVariants(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader, bool preserveLoadedBlobs)
+		void LoadPackageVariants(ModifiedShader::ModifiedShaderPackageDisk& modifiedShader, bool preserveLoadedBlobs, bool loadCachedBlobs)
 		{
+			const auto configuration = DatabaseShaderConfigurations::GetAppliedConfiguration();
+			const std::string configurationFingerprint = CompileConfigurationFingerprint(configuration, modifiedShader.sourcePath);
 			std::vector<ModifiedShader::ModifiedShaderCompiledVariant> variants;
 
 			for (ModifiedShader::ModifiedShaderTargetDisk& target : modifiedShader.targets)
@@ -438,8 +503,10 @@ namespace DatabaseModifiedShaders
 				if (preserveLoadedBlobs)
 				{
 					const ModifiedShader::ModifiedShaderCompiledVariant* loadedVariant = modifiedShader.FindVariantForDefines(variant.defines);
+					const bool loadedVariantUsesCurrentPath = loadedVariant &&
+						loadedVariant->compiledBlobPath == VariantBlobPath(modifiedShader, variant.defines, configuration, &configurationFingerprint);
 
-					if (loadedVariant)
+					if (loadedVariantUsesCurrentPath && loadedVariant->compiledConfigurationFingerprint == configurationFingerprint)
 					{
 						//recapture keeps the compiled bytecode exactly as it is; only the compatibility
 						//flag is re-derived because recapture can add targets.
@@ -447,8 +514,21 @@ namespace DatabaseModifiedShaders
 						variant.compiledShaderAnalysis = loadedVariant->compiledShaderAnalysis;
 						variant.compiledShaderInterfaceCompatible = loadedVariant->compiledBlob.empty() ||
 							ShaderInterfaceMatchesAnyPackageTarget(modifiedShader, loadedVariant->compiledShaderAnalysis, &variant.defines);
-						variant.compileFailed = loadedVariant->compileFailed;
+						variant.compiledConfigurationFingerprint = loadedVariant->compiledConfigurationFingerprint;
+					}
+
+					if (loadedVariantUsesCurrentPath && loadedVariant->pendingCompileSerial != 0 &&
+						loadedVariant->pendingConfigurationFingerprint == configurationFingerprint)
+					{
 						variant.pendingCompileSerial = loadedVariant->pendingCompileSerial;
+						variant.pendingConfigurationFingerprint = loadedVariant->pendingConfigurationFingerprint;
+					}
+
+					if (loadedVariantUsesCurrentPath && loadedVariant->compileFailed &&
+						loadedVariant->failedConfigurationFingerprint == configurationFingerprint)
+					{
+						variant.compileFailed = true;
+						variant.failedConfigurationFingerprint = loadedVariant->failedConfigurationFingerprint;
 					}
 				}
 
@@ -460,9 +540,9 @@ namespace DatabaseModifiedShaders
 
 			for (ModifiedShader::ModifiedShaderCompiledVariant& variant : variants)
 			{
-				variant.compiledBlobPath = VariantBlobPath(modifiedShader, variant.defines);
+				variant.compiledBlobPath = VariantBlobPath(modifiedShader, variant.defines, configuration, &configurationFingerprint);
 
-				if (!variant.compiledBlob.empty())
+				if (!loadCachedBlobs || !variant.compiledBlob.empty())
 					continue;
 
 				if (!ShaderInjectorIO::FileExists(variant.compiledBlobPath) ||
@@ -473,6 +553,8 @@ namespace DatabaseModifiedShaders
 					continue;
 				}
 
+				variant.compiledConfigurationFingerprint = configurationFingerprint;
+
 				AnalyzeCompiledBlob(variant.compiledBlob, variant.compiledShaderAnalysis);
 				variant.compiledShaderInterfaceCompatible = ShaderInterfaceMatchesAnyPackageTarget(modifiedShader, variant.compiledShaderAnalysis, &variant.defines);
 
@@ -481,6 +563,7 @@ namespace DatabaseModifiedShaders
 					ShaderInjectorIO::WriteToLogFileWarning("DatabaseModifiedShaders->LoadPackageVariants: incompatible compiled interface, will recompile " + modifiedShader.id + " defines=" + DescribeDefines(variant.defines));
 					variant.compiledBlob.clear();
 					variant.compiledShaderAnalysis = {};
+					variant.compiledConfigurationFingerprint.clear();
 				}
 			}
 
@@ -492,7 +575,7 @@ namespace DatabaseModifiedShaders
 		}
 	} //namespace Detail
 
-	bool CompileModifiedShader(const std::string& modifiedShaderId)
+	bool CompileModifiedShader(const std::string& modifiedShaderId, bool includeLinkedRenderPasses)
 	{
 		ModifiedShader::ModifiedShaderPackageDisk* modifiedShader = Detail::FindMutableModifiedShaderById(modifiedShaderId);
 
@@ -522,7 +605,7 @@ namespace DatabaseModifiedShaders
 			return false;
 		}
 
-		return Detail::QueuePackageCompiles(*modifiedShader) > 0;
+		return Detail::QueuePackageCompiles(*modifiedShader, includeLinkedRenderPasses) > 0;
 	}
 
 	static bool ReadyVariantForShader(
@@ -533,8 +616,11 @@ namespace DatabaseModifiedShaders
 		ShaderAnalysis::ShaderAnalysisDisk* outAnalysis)
 	{
 		bool needsCompile = false;
+		bool pendingNeedsPromotion = false;
 		bool ready = false;
 		std::vector<ModifiedShader::ShaderDefine> defines;
+		const auto configuration = DatabaseShaderConfigurations::GetAppliedConfiguration();
+		const std::string configurationFingerprint = CompileConfigurationFingerprint(configuration, modifiedShader.sourcePath);
 
 		{
 			std::lock_guard<std::mutex> lock(Detail::gCompileMutex);
@@ -544,7 +630,9 @@ namespace DatabaseModifiedShaders
 			if (!variant)
 				return false;
 
-			if (!variant->compiledBlob.empty() && variant->compiledShaderInterfaceCompatible)
+			if (!variant->compiledBlob.empty() &&
+				variant->compiledConfigurationFingerprint == configurationFingerprint &&
+				variant->compiledShaderInterfaceCompatible)
 			{
 				ready = true;
 
@@ -556,13 +644,18 @@ namespace DatabaseModifiedShaders
 			}
 			else
 			{
-				needsCompile = variant->compiledBlob.empty() && !variant->compileFailed && variant->pendingCompileSerial == 0;
 				defines = variant->defines;
+				const bool pendingForCurrentConfiguration = variant->pendingCompileSerial != 0 &&
+					variant->pendingConfigurationFingerprint == configurationFingerprint;
+				pendingNeedsPromotion = pendingForCurrentConfiguration;
+				const bool failedForCurrentConfiguration = variant->compileFailed &&
+					variant->failedConfigurationFingerprint == configurationFingerprint;
+				needsCompile = !pendingForCurrentConfiguration && !failedForCurrentConfiguration;
 			}
 		}
 
-		if (needsCompile)
-			RequestVariantCompile(modifiedShader.id, defines);
+		if (needsCompile || pendingNeedsPromotion)
+			RequestVariantCompile(modifiedShader.id, defines, configuration);
 
 		return ready;
 	}
@@ -613,12 +706,30 @@ namespace DatabaseModifiedShaders
 		const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader,
 		const std::string& sourcePath,
 		const std::string& compiledBlobPath,
-		std::vector<ModifiedShader::ModifiedShaderCompiledVariant>& outVariants)
+		std::vector<ModifiedShader::ModifiedShaderCompiledVariant>& outVariants,
+		bool loadCachedBlobs)
 	{
-		ModifiedShader::ModifiedShaderPackageDisk sourcePackage = modifiedShader;
+		ModifiedShader::ModifiedShaderPackageDisk sourcePackage;
+		sourcePackage.enabled = modifiedShader.enabled;
+		sourcePackage.id = modifiedShader.id;
+		sourcePackage.name = modifiedShader.name;
+		sourcePackage.shaderType = modifiedShader.shaderType;
+		sourcePackage.shaderProfile = modifiedShader.shaderProfile;
+		sourcePackage.shaderEntryPoint = modifiedShader.shaderEntryPoint;
+		sourcePackage.compilerArguments = modifiedShader.compilerArguments;
+		sourcePackage.targets.reserve(modifiedShader.targets.size());
+
+		for (const ModifiedShader::ModifiedShaderTargetDisk& modifiedTarget : modifiedShader.targets)
+		{
+			ModifiedShader::ModifiedShaderTargetDisk targetSnapshot;
+			targetSnapshot.defines = modifiedTarget.defines;
+			targetSnapshot.shaderAnalysis = modifiedTarget.shaderAnalysis;
+			sourcePackage.targets.push_back(std::move(targetSnapshot));
+		}
+
 		sourcePackage.sourcePath = sourcePath;
 		sourcePackage.compiledBlobPath = compiledBlobPath;
-		Detail::LoadPackageVariants(sourcePackage);
+		Detail::LoadPackageVariants(sourcePackage, false, loadCachedBlobs);
 		outVariants = std::move(sourcePackage.compiledVariants);
 	}
 

@@ -36,13 +36,13 @@ namespace ShaderConfiguration::Internal
 
 	std::string DefineValueForProperty(const PropertyDisk& property)
 	{
-		if (property.type == "bool")
+		if (property.valueType == "bool")
 			return property.value;
 
-		if (property.type == "int")
+		if (property.valueType == "int")
 			return property.value;
 
-		const size_t componentCount = ComponentCountForType(property.type);
+		const size_t componentCount = ComponentCountForType(property.valueType);
 
 		if (componentCount <= 1)
 			return property.value;
@@ -52,7 +52,7 @@ namespace ShaderConfiguration::Internal
 		if (!TryGetFloatComponents(property, components) || components.size() != componentCount)
 			components.assign(componentCount, 0.0f);
 
-		std::string value = property.type + "(";
+		std::string value = property.valueType + "(";
 
 		for (size_t index = 0; index < components.size(); ++index)
 		{
@@ -115,7 +115,7 @@ namespace ShaderConfiguration
 					const PropertyDisk& property = *propertyIterator->second;
 					const std::string prefix = LeadingWhitespaceAndBom(content);
 
-					if (property.type == "bool" && property.booleanUsesDefinitionPresence)
+					if (property.valueType == "bool" && property.booleanUsesDefinitionPresence)
 					{
 						bool enabled = true;
 						TryGetBoolean(property, enabled);
@@ -128,7 +128,7 @@ namespace ShaderConfiguration
 					{
 						std::string defineValue = DefineValueForProperty(property);
 
-						if (property.type == "bool")
+						if (property.valueType == "bool")
 						{
 							bool enabled = false;
 							TryGetBoolean(property, enabled);

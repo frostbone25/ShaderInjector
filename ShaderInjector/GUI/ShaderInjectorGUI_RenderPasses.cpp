@@ -402,6 +402,16 @@ namespace ShaderInjectorGUI
 		return &graph.nodes[indexIt->second];
 	}
 
+	void ClearRenderPassUpsampleShader(RenderPass::RenderPassDisk& renderPass)
+	{
+		//changing the pass kind or pipeline mode needs a matching pair of shader templates.
+		renderPass.upsampleShaderSourceFile.clear();
+		renderPass.upsampleShaderCompiledBlobFile.clear();
+		renderPass.upsampleShaderBlob.clear();
+		renderPass.upsampleShaderBlobHash = 0;
+		renderPass.upsampleShaderVariants.clear();
+	}
+
 	void SetRenderPassExecutionMode(
 		RenderPass::RenderPassDisk& renderPass,
 		RenderPass::ExecutionMode executionMode)
@@ -421,6 +431,7 @@ namespace ShaderInjectorGUI
 		renderPass.fragmentShaderBlob.clear();
 		renderPass.vertexShaderBlobHash = 0;
 		renderPass.fragmentShaderBlobHash = 0;
+		ClearRenderPassUpsampleShader(renderPass);
 		RenderPass::NormalizeExecutionResources(renderPass);
 		RenderPass::ResolveShaderPaths(renderPass);
 	}
@@ -439,6 +450,7 @@ namespace ShaderInjectorGUI
 		if (operation != RenderPass::PassOperation::Custom &&
 			operation != RenderPass::PassOperation::Downsample &&
 			operation != RenderPass::PassOperation::UpsampleChain &&
+			operation != RenderPass::PassOperation::DownsampleUpsample &&
 			operation != RenderPass::PassOperation::MipChain)
 		{
 			return;
@@ -452,10 +464,20 @@ namespace ShaderInjectorGUI
 		SetRenderPassExecutionMode(renderPass, executionMode);
 	}
 
-	void DrawResolutionPolicy(const char* id, ShaderResource::ResolutionPolicyDisk& resolution)
+	bool DrawResolutionPolicy(const char* id, ShaderResource::ResolutionPolicyDisk& resolution, const char* actionLabel = nullptr)
 	{
+		bool actionRequested = false;
 		ImGui::PushID(id);
-		if (PropertyWidgets::BeginCombo("Resolution", "##Mode", ResolutionModeName(resolution.mode)))
+		PropertyWidgets::PrepareRow("Resolution");
+
+		//reserve room inside the control cell for the optional runtime-texture action.
+		if (actionLabel)
+		{
+			const float actionWidth = ImGui::CalcTextSize(actionLabel).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+			ImGui::SetNextItemWidth((std::max)(1.0f, ImGui::CalcItemWidth() - actionWidth - ImGui::GetStyle().ItemSpacing.x));
+		}
+
+		if (ImGui::BeginCombo("##Mode", ResolutionModeName(resolution.mode)))
 		{
 			const ShaderResource::ResolutionMode modes[] = {
 				ShaderResource::ResolutionMode::Inherit,
@@ -470,6 +492,12 @@ namespace ShaderInjectorGUI
 			}
 
 			ImGui::EndCombo();
+		}
+
+		if (actionLabel)
+		{
+			ImGui::SameLine();
+			actionRequested = ImGui::Button(actionLabel);
 		}
 
 		if (resolution.mode == ShaderResource::ResolutionMode::DownscalePowerOfTwo)
@@ -500,6 +528,7 @@ namespace ShaderInjectorGUI
 				resolution.height = static_cast<uint32_t>((std::max)(1, height));
 		}
 		ImGui::PopID();
+		return actionRequested;
 	}
 
 	std::string NextRuntimeResourceId(const RenderPass::RenderPassDisk& renderPass)
@@ -637,10 +666,11 @@ namespace ShaderInjectorGUI
 		char name[128]{};
 		strncpy_s(name, resource.name.c_str(), _TRUNCATE);
 		ImGui::PushID("RuntimeTextureProperties");
+		PropertyWidgets::ReadOnlyText("ID", "##RuntimeTextureID", resource.id);
+
 		if (PropertyWidgets::InputText("Name", "##Name", name, sizeof(name)))
 			resource.name = name;
 
-		ImGui::Text("ID: %s", resource.id.c_str());
 		const char* reusePreview = "New allocation";
 
 		if (!resource.reuseFromResourceId.empty())
@@ -1717,6 +1747,7 @@ namespace ShaderInjectorGUI
 			const RenderPass::RenderPassType typeOptions[] = {
 				RenderPass::RenderPassType::Custom,
 				RenderPass::RenderPassType::MipChain,
+				RenderPass::RenderPassType::DownsampleUpsample,
 				RenderPass::RenderPassType::TemporalHistory,
 				RenderPass::RenderPassType::ReplacementPixelShader,
 				RenderPass::RenderPassType::ReplacementComputeShader,
@@ -1740,6 +1771,7 @@ namespace ShaderInjectorGUI
 					renderPass->fragmentShaderBlob.clear();
 					renderPass->vertexShaderBlobHash = 0;
 					renderPass->fragmentShaderBlobHash = 0;
+					ClearRenderPassUpsampleShader(*renderPass);
 					RenderPass::ResolveShaderPaths(*renderPass);
 
 					if (typeOption == RenderPass::RenderPassType::MipChain)
@@ -1751,6 +1783,10 @@ namespace ShaderInjectorGUI
 					else if (typeOption == RenderPass::RenderPassType::TemporalHistory)
 					{
 						RenderPass::ConfigureTemporalHistoryPass(*renderPass);
+					}
+					else if (typeOption == RenderPass::RenderPassType::DownsampleUpsample)
+					{
+						ApplyAutomaticExecutionMode(*renderPass, DatabaseRenderPasses::ResolveModifiedShader(*renderPass));
 					}
 				}
 			}
@@ -1802,6 +1838,7 @@ namespace ShaderInjectorGUI
 
 		const bool configurableExecutionMode =
 			(renderPass->type == RenderPass::RenderPassType::MipChain) ||
+			(renderPass->type == RenderPass::RenderPassType::DownsampleUpsample) ||
 			(customPassType &&
 			 (configuredOperation == RenderPass::PassOperation::Custom ||
 			  configuredOperation == RenderPass::PassOperation::Downsample ||
@@ -1830,6 +1867,28 @@ namespace ShaderInjectorGUI
 
 		ImGui::EndDisabled();
 		RenderPass::NormalizeExecutionResources(*renderPass);
+
+		const bool downsampleUpsamplePass = renderPass->type == RenderPass::RenderPassType::DownsampleUpsample;
+
+		if (downsampleUpsamplePass)
+		{
+			const std::string factorLabel = std::to_string(renderPass->chainDownsampleFactor) + "x";
+
+			if (PropertyWidgets::BeginCombo("Chain Downsample Factor", "##RenderPassChainDownsampleFactor", factorLabel.c_str()))
+			{
+				for (uint32_t factor = 2; factor <= 1024; factor *= 2)
+				{
+					const std::string optionLabel = std::to_string(factor) + "x";
+
+					if (ImGui::Selectable(optionLabel.c_str(), renderPass->chainDownsampleFactor == factor))
+						renderPass->chainDownsampleFactor = factor;
+				}
+
+				ImGui::EndCombo();
+			}
+
+			ImGui::TextWrapped("Each stage halves the source dimensions, then the upsample shader returns through those sizes to the full source resolution. Bind a separate output texture matching the source dimensions.");
+		}
 
 		if (RenderPass::ResolveExecutionMode(*renderPass) == RenderPass::ExecutionMode::Compute)
 		{
@@ -1878,9 +1937,7 @@ namespace ShaderInjectorGUI
 			}
 		}
 
-		DrawResolutionPolicy("PassResolution", renderPass->resolution);
-
-		if (ImGui::Button("Apply to Runtime Textures"))
+		if (DrawResolutionPolicy("PassResolution", renderPass->resolution, "Apply to Runtime Textures"))
 		{
 			for (auto& resource : renderPass->runtimeResources)
 				resource.texture.resolution = renderPass->resolution;
@@ -2193,7 +2250,9 @@ namespace ShaderInjectorGUI
 		{
 			const char* shaderSectionLabel = "Fullscreen Fragment Shader";
 
-			if (replacementComputePass)
+			if (downsampleUpsamplePass)
+				shaderSectionLabel = "Downsample / Upsample Shaders";
+			else if (replacementComputePass)
 				shaderSectionLabel = "Replacement Compute Shader";
 			else if (computeShaderPass && mipChainPass)
 				shaderSectionLabel = "Mip Chain Compute Shader";
@@ -2245,7 +2304,9 @@ namespace ShaderInjectorGUI
 				//the pass type determines which shader the template will create.
 				const char* createTemplateLabel = "Create Render Pass Fragment Shader Template";
 
-				if (replacementComputePass)
+				if (downsampleUpsamplePass)
+					createTemplateLabel = "Create Downsample / Upsample Shader Templates";
+				else if (replacementComputePass)
 					createTemplateLabel = "Create Replacement Compute Shader Template";
 				else if (computeShaderPass && mipChainPass)
 					createTemplateLabel = "Create Mip Chain Compute Shader Template";
@@ -2297,11 +2358,17 @@ namespace ShaderInjectorGUI
 				if (computeShaderPass)
 					openShaderLabel = "Open Render Pass Compute Shader";
 
+				if (downsampleUpsamplePass)
+					openShaderLabel = "Open Downsample Shader";
+
 				if (ImGui::Button(openShaderLabel) &&
 					!ShaderInjectorIO::OpenFile(renderPass->fragmentShaderSourcePath))
 				{
 					WriteToRuntimeLogError("Could not open Render Pass shader: " + renderPass->fragmentShaderSourcePath);
 				}
+
+				if (downsampleUpsamplePass && ImGui::Button("Open Upsample Shader") && !ShaderInjectorIO::OpenFile(renderPass->upsampleShaderSourcePath))
+					WriteToRuntimeLogError("Could not open upsample shader: " + renderPass->upsampleShaderSourcePath);
 			}
 
 			//expose the vertex source independently, including when the other stage has not been created yet.

@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "Hash/Hash.h"
+#include "ShaderConfiguration/DatabaseShaderConfigurations.h"
 #include "IO/ShaderInjectorIO.h"
 
 namespace RenderPass
@@ -28,6 +29,8 @@ namespace RenderPass
 		{
 		case RenderPassType::MipChain:
 			return PassOperation::MipChain;
+		case RenderPassType::DownsampleUpsample:
+			return PassOperation::DownsampleUpsample;
 		case RenderPassType::TemporalHistory:
 			return PassOperation::TemporalHistory;
 		case RenderPassType::ReplacementPixelShader:
@@ -125,7 +128,8 @@ namespace RenderPass
 		ConfigureTemporalHistoryPass(renderPass);
 
 		if (renderPass.type != RenderPassType::Custom &&
-			renderPass.type != RenderPassType::TemporalHistory)
+			renderPass.type != RenderPassType::TemporalHistory &&
+			renderPass.type != RenderPassType::DownsampleUpsample)
 			return;
 
 		const PassOperation operation = ResolvePassOperation(renderPass);
@@ -168,7 +172,8 @@ namespace RenderPass
 
 		if (operation != PassOperation::Custom &&
 			operation != PassOperation::Downsample &&
-			operation != PassOperation::UpsampleChain)
+			operation != PassOperation::UpsampleChain &&
+			operation != PassOperation::DownsampleUpsample)
 			return;
 
 		const ExecutionMode executionMode = ResolveExecutionMode(renderPass);
@@ -207,10 +212,33 @@ namespace RenderPass
 		}
 
 		if (executionMode == ExecutionMode::Compute &&
-			(operation == PassOperation::Downsample || operation == PassOperation::UpsampleChain))
+			(operation == PassOperation::Downsample || operation == PassOperation::UpsampleChain || operation == PassOperation::DownsampleUpsample))
 		{
 			renderPass.dispatch.mode = DispatchMode::ScaleByResolution;
 		}
+	}
+
+	bool IsValidDownsampleUpsampleFactor(uint32_t factor)
+	{
+		return factor >= 2 && factor <= 1024 && (factor & (factor - 1)) == 0;
+	}
+
+	RenderPassDisk CreateUpsampleStagePass(const RenderPassDisk& renderPass)
+	{
+		RenderPassDisk stagePass = renderPass;
+		stagePass.id += ":UpsampleStage";
+		stagePass.type = RenderPassType::Custom;
+		stagePass.operation = PassOperation::UpsampleChain;
+		stagePass.fragmentShaderSourceFile = renderPass.upsampleShaderSourceFile;
+		stagePass.fragmentShaderCompiledBlobFile = renderPass.upsampleShaderCompiledBlobFile;
+		stagePass.fragmentShaderProfile = renderPass.upsampleShaderProfile;
+		stagePass.fragmentShaderEntryPoint = renderPass.upsampleShaderEntryPoint;
+		stagePass.fragmentShaderSourcePath = renderPass.upsampleShaderSourcePath;
+		stagePass.fragmentShaderCompiledBlobPath = renderPass.upsampleShaderCompiledBlobPath;
+		stagePass.fragmentShaderBlob = renderPass.upsampleShaderBlob;
+		stagePass.fragmentShaderBlobHash = renderPass.upsampleShaderBlobHash;
+		stagePass.fragmentShaderVariants = renderPass.upsampleShaderVariants;
+		return stagePass;
 	}
 
 	bool IsTimingValid(const std::string& timing)
@@ -220,7 +248,8 @@ namespace RenderPass
 
 	bool WriteJson(const RenderPassDisk& renderPass)
 	{
-		if (renderPass.jsonPath.empty() || renderPass.id.empty())
+		if (renderPass.jsonPath.empty() || renderPass.id.empty() ||
+			(renderPass.type == RenderPassType::DownsampleUpsample && !IsValidDownsampleUpsampleFactor(renderPass.chainDownsampleFactor)))
 			return false;
 
 		RenderPassDisk portableRenderPass = renderPass;
@@ -231,10 +260,14 @@ namespace RenderPass
 		portableRenderPass.fragmentShaderSourcePath.clear();
 		portableRenderPass.vertexShaderCompiledBlobPath.clear();
 		portableRenderPass.fragmentShaderCompiledBlobPath.clear();
+		portableRenderPass.upsampleShaderSourcePath.clear();
+		portableRenderPass.upsampleShaderCompiledBlobPath.clear();
 		portableRenderPass.vertexShaderBlob.clear();
 		portableRenderPass.fragmentShaderBlob.clear();
+		portableRenderPass.upsampleShaderBlob.clear();
 		portableRenderPass.vertexShaderBlobHash = 0;
 		portableRenderPass.fragmentShaderBlobHash = 0;
+		portableRenderPass.upsampleShaderBlobHash = 0;
 		nlohmann::ordered_json json = portableRenderPass;
 		return ShaderInjectorIO::WriteTextFile(renderPass.jsonPath, json.dump(4));
 	}
@@ -289,6 +322,9 @@ namespace RenderPass
 
 			if (renderPass.format != formatName || renderPass.id.empty())
 				return false;
+			if (renderPass.type == RenderPassType::DownsampleUpsample &&
+				!IsValidDownsampleUpsampleFactor(renderPass.chainDownsampleFactor))
+				return false;
 
 			if (renderPass.name.empty())
 				renderPass.name = renderPass.id;
@@ -341,6 +377,8 @@ namespace RenderPass
 		renderPass.fragmentShaderSourcePath.clear();
 		renderPass.vertexShaderCompiledBlobPath.clear();
 		renderPass.fragmentShaderCompiledBlobPath.clear();
+		renderPass.upsampleShaderSourcePath.clear();
+		renderPass.upsampleShaderCompiledBlobPath.clear();
 		if (!renderPass.vertexShaderSourceFile.empty())
 			renderPass.vertexShaderSourcePath = ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.vertexShaderSourceFile);
 		if (!renderPass.fragmentShaderSourceFile.empty())
@@ -349,14 +387,43 @@ namespace RenderPass
 			renderPass.vertexShaderCompiledBlobPath = ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.vertexShaderCompiledBlobFile);
 		if (!renderPass.fragmentShaderCompiledBlobFile.empty())
 			renderPass.fragmentShaderCompiledBlobPath = ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.fragmentShaderCompiledBlobFile);
+		if (!renderPass.upsampleShaderSourceFile.empty())
+			renderPass.upsampleShaderSourcePath = ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.upsampleShaderSourceFile);
+		if (!renderPass.upsampleShaderCompiledBlobFile.empty())
+			renderPass.upsampleShaderCompiledBlobPath = ShaderInjectorIO::JoinPath(renderPass.packageDirectory, renderPass.upsampleShaderCompiledBlobFile);
+		const auto configuration = DatabaseShaderConfigurations::GetAppliedConfiguration();
+		auto appendConfigurationFingerprint = [&](const std::string& sourcePath, std::string& blobPath)
+		{
+			if (blobPath.empty() || sourcePath.empty() || !configuration)
+				return;
+
+			const std::string sourceFingerprint = configuration->GetSourceFingerprint(sourcePath);
+
+			if (sourceFingerprint.empty())
+				return;
+
+			const std::string configurationSuffix = ".cfg-" + sourceFingerprint;
+			const size_t extension = blobPath.find_last_of('.');
+			const size_t separator = blobPath.find_last_of("/\\");
+			if (extension != std::string::npos && (separator == std::string::npos || extension > separator))
+				blobPath.insert(extension, configurationSuffix);
+			else
+				blobPath += configurationSuffix;
+		};
+
+		appendConfigurationFingerprint(renderPass.vertexShaderSourcePath, renderPass.vertexShaderCompiledBlobPath);
+		appendConfigurationFingerprint(renderPass.fragmentShaderSourcePath, renderPass.fragmentShaderCompiledBlobPath);
+		appendConfigurationFingerprint(renderPass.upsampleShaderSourcePath, renderPass.upsampleShaderCompiledBlobPath);
 	}
 
 	bool LoadCompiledShaderBlobs(RenderPassDisk& renderPass)
 	{
 		renderPass.vertexShaderBlob.clear();
 		renderPass.fragmentShaderBlob.clear();
+		renderPass.upsampleShaderBlob.clear();
 		renderPass.vertexShaderBlobHash = 0;
 		renderPass.fragmentShaderBlobHash = 0;
+		renderPass.upsampleShaderBlobHash = 0;
 		const bool computePass = ResolveExecutionMode(renderPass) == ExecutionMode::Compute;
 		const bool fragmentOnlyPass = IsReplacementPass(renderPass.type) || computePass;
 
@@ -368,20 +435,29 @@ namespace RenderPass
 
 		const bool vertexLoaded = fragmentOnlyPass || ShaderInjectorIO::LoadDXILBlobFromDisk(renderPass.vertexShaderCompiledBlobPath, renderPass.vertexShaderBlob);
 		const bool fragmentLoaded = ShaderInjectorIO::LoadDXILBlobFromDisk(renderPass.fragmentShaderCompiledBlobPath, renderPass.fragmentShaderBlob);
+		const bool upsampleLoaded = renderPass.type != RenderPassType::DownsampleUpsample ||
+			ShaderInjectorIO::LoadDXILBlobFromDisk(renderPass.upsampleShaderCompiledBlobPath, renderPass.upsampleShaderBlob);
 
-		if (!vertexLoaded || !fragmentLoaded || !HasCompiledShaders(renderPass))
+		if (!vertexLoaded || !fragmentLoaded || !upsampleLoaded || !HasCompiledShaders(renderPass))
 			return false;
 
 		renderPass.vertexShaderBlobHash = 0;
 		if (!renderPass.vertexShaderBlob.empty())
 			renderPass.vertexShaderBlobHash = Hash::HashMemory(renderPass.vertexShaderBlob.data(), renderPass.vertexShaderBlob.size());
 		renderPass.fragmentShaderBlobHash = Hash::HashMemory(renderPass.fragmentShaderBlob.data(), renderPass.fragmentShaderBlob.size());
+		if (!renderPass.upsampleShaderBlob.empty())
+			renderPass.upsampleShaderBlobHash = Hash::HashMemory(renderPass.upsampleShaderBlob.data(), renderPass.upsampleShaderBlob.size());
 
 		return true;
 	}
 
 	bool HasShaderTemplate(const RenderPassDisk& renderPass)
 	{
+		if (renderPass.type == RenderPassType::DownsampleUpsample)
+			return !renderPass.fragmentShaderSourcePath.empty() && !renderPass.upsampleShaderSourcePath.empty() &&
+				ShaderInjectorIO::FileExists(renderPass.fragmentShaderSourcePath) && ShaderInjectorIO::FileExists(renderPass.upsampleShaderSourcePath) &&
+				(ResolveExecutionMode(renderPass) == ExecutionMode::Compute ||
+				 (!renderPass.vertexShaderSourcePath.empty() && ShaderInjectorIO::FileExists(renderPass.vertexShaderSourcePath)));
 		if (IsReplacementPass(renderPass.type) ||
 			ResolveExecutionMode(renderPass) == ExecutionMode::Compute)
 		{
@@ -396,6 +472,9 @@ namespace RenderPass
 
 	bool HasCompiledShaders(const RenderPassDisk& renderPass)
 	{
+		if (renderPass.type == RenderPassType::DownsampleUpsample)
+			return !renderPass.fragmentShaderBlob.empty() && !renderPass.upsampleShaderBlob.empty() &&
+				(ResolveExecutionMode(renderPass) == ExecutionMode::Compute || !renderPass.vertexShaderBlob.empty());
 		if (IsReplacementPass(renderPass.type) ||
 			ResolveExecutionMode(renderPass) == ExecutionMode::Compute)
 			return !renderPass.fragmentShaderBlob.empty();

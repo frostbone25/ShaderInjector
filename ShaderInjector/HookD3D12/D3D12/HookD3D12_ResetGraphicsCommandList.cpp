@@ -25,6 +25,10 @@ namespace HookD3D12
 		{
 			const HRESULT result = Original_ResetGraphicsCommandList(commandList, allocator, pipelineState);
 
+			//the initial pipeline can be used for a draw without another SetPipelineState call.
+			if (SUCCEEDED(result) && injectorEnabledForRecording)
+				RenderPassRuntime::RecordShaderTargetUse(initialState);
+
 			if (SUCCEEDED(result) && commandListState.deviceRuntimeState &&
 				FAILED(commandListState.deviceRuntimeState->removalReason.load(std::memory_order_acquire)))
 			{

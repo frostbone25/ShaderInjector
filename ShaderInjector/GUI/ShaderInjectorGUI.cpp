@@ -133,6 +133,18 @@ namespace ShaderInjectorGUI
 				if (ImGui::IsItemDeactivatedAfterEdit() && !ShaderInjectorIO::WriteInjectorMenuScale(Globals::gShaderInjectorGUIScale))
 					WriteToRuntimeLogError("Could not save MenuScale to ShaderInjector.ini.");
 
+				//advanced settings share the same values persisted by save settings.
+				if (Globals::gShaderInjectorAdvancedMode)
+				{
+					ImGui::SeparatorText("RenderDoc");
+					PropertyWidgets::Checkbox("Enabled", "##RenderDocIntegrationEnabled", &Globals::gRenderDocIntegrationEnabled);
+					PropertyWidgets::Checkbox("Auto Attach", "##RenderDocAutoAttachEnabled", &Globals::gRenderDocAutoAttachEnabled);
+
+					ImGui::SeparatorText("Performance Telemetry");
+					PropertyWidgets::Checkbox("Enabled", "##PerformanceTelemetryEnabled", &Globals::gPerformanceTelemetryEnabled);
+					ImGui::Spacing();
+				}
+
 				const float settingsButtonWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
 
 				if (ImGui::Button("Save Settings", ImVec2(settingsButtonWidth, 0)))
@@ -208,6 +220,7 @@ namespace ShaderInjectorGUI
 		DrawRenderPasses();
 		DrawShaderCompilerSettings();
 		DrawShaderInspector();
+		DrawPerformanceMetrics();
 		DrawRenderDoc();
 	}
 } //namespace ShaderInjectorGUI

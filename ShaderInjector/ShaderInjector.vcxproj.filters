@@ -174,6 +174,15 @@
     <ClInclude Include="ShaderDiscovery\AnalysisResult.h">
       <Filter>ShaderDiscovery</Filter>
     </ClInclude>
+    <ClInclude Include="ShaderDiscovery\TargetCreationJob.h">
+      <Filter>ShaderDiscovery</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderDiscovery\TargetCreationResult.h">
+      <Filter>ShaderDiscovery</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderDiscovery\ShaderTargetProgress.h">
+      <Filter>ShaderDiscovery</Filter>
+    </ClInclude>
     <ClInclude Include="FPSCounter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -190,6 +199,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="HookD3D12\HookD3D12.h">
+      <Filter>HookD3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="HookD3D12\AsyncPipelineCreation.h">
       <Filter>HookD3D12</Filter>
     </ClInclude>
     <ClInclude Include="HookD3D12\DeviceRuntimeState.h"><Filter>HookD3D12</Filter></ClInclude>
@@ -493,6 +505,7 @@
     <ClInclude Include="RenderPass\LogicalResourceBindingDisk.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderPass\RenderPassDisk.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderPass\RenderPassSchema.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="RenderPass\DownsampleUpsampleStagePlan.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderPass\ResourceBindingDiagnostic.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderPass\RuntimeDiagnostics.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderPass\RuntimeResourceDefinitionDisk.h"><Filter>Header Files</Filter></ClInclude>
@@ -603,6 +616,13 @@
     <ClInclude Include="Performance\PerformanceMetrics.h">
       <Filter>Performance</Filter>
     </ClInclude>
+    <ClInclude Include="Performance\PerformanceSnapshot.h"><Filter>Performance</Filter></ClInclude>
+    <ClInclude Include="Performance\PassTimingSnapshot.h"><Filter>Performance</Filter></ClInclude>
+    <ClInclude Include="Performance\GPUPerformanceSnapshot.h"><Filter>Performance</Filter></ClInclude>
+    <ClInclude Include="RenderPass\TexturePoolPerformanceStatistics.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="RenderPass\Runtime\PassPerformanceStatistics.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="RenderPass\Runtime\PerformanceSnapshot.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ShaderResource\Runtime\ShaderResourcePerformanceStatistics.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Performance\GPUTimingCommandList.h">
       <Filter>Performance</Filter>
     </ClInclude>
@@ -645,11 +665,59 @@
     <ClInclude Include="ShaderConfiguration\ShaderConfiguration.h">
       <Filter>ShaderConfiguration</Filter>
     </ClInclude>
+    <ClInclude Include="ShaderConfiguration\CompileConfiguration.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ShaderSourceDependencies.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ConfigurationProgress.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ConfigurationProgressSnapshot.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ConfigurationProgressTask.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ConfigurationProgressTaskOutcome.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ConfigurationOperationResult.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\PreparedConfigurationOperation.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\PropertyMacro.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
     <ClInclude Include="ShaderConfiguration\ShaderConfigurationConstants.h">
       <Filter>ShaderConfiguration</Filter>
     </ClInclude>
     <ClInclude Include="ShaderConfiguration\PropertyDisk.h">
       <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ShaderConfigurationProperty.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ShaderConfigurationCategory.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\PropertyType.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\RenderPassPropertyType.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\PresetDisk.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderConfiguration\ShaderConfigurationCategories.h">
+      <Filter>ShaderConfiguration</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderPass\RenderPassConfigurationProperties.h">
+      <Filter>RenderPass</Filter>
     </ClInclude>
     <ClInclude Include="ShaderConfiguration\DocumentDisk.h">
       <Filter>ShaderConfiguration</Filter>
@@ -688,6 +756,9 @@
       <Filter>ModifiedShader</Filter>
     </ClInclude>
     <ClInclude Include="ModifiedShader\DatabaseModifiedShadersInternal.h">
+      <Filter>ModifiedShader</Filter>
+    </ClInclude>
+    <ClInclude Include="ModifiedShader\ModifiedShaderCompilePriority.h">
       <Filter>ModifiedShader</Filter>
     </ClInclude>
     <ClInclude Include="ModifiedShader\ModifiedShader.h">
@@ -939,6 +1010,9 @@
       <Filter>Database</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\HookD3D12.cpp">
+      <Filter>HookD3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="HookD3D12\AsyncPipelineCreation.cpp">
       <Filter>HookD3D12</Filter>
     </ClCompile>
     <ClCompile Include="HookD3D12\HookD3D12RetiredPSOTracker.cpp">
@@ -1201,6 +1275,7 @@
     <ClCompile Include="Performance\PerformanceMetrics.cpp">
       <Filter>Performance</Filter>
     </ClCompile>
+    <ClCompile Include="GUI\ShaderInjectorGUI_PerformanceMetrics.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="Performance\RenderPassGPUProfiler.cpp">
       <Filter>Performance</Filter>
     </ClCompile>
@@ -1276,6 +1351,12 @@
     <ClCompile Include="ShaderConfiguration\ShaderConfigurationParsing.cpp">
       <Filter>ShaderConfiguration</Filter>
     </ClCompile>
+    <ClCompile Include="ShaderConfiguration\ShaderConfigurationCategories.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderPass\RenderPassConfigurationProperties.cpp">
+      <Filter>RenderPass</Filter>
+    </ClCompile>
     <ClCompile Include="ShaderConfiguration\ShaderConfigurationRewriting.cpp">
       <Filter>ShaderConfiguration</Filter>
     </ClCompile>
@@ -1285,7 +1366,22 @@
     <ClCompile Include="ShaderConfiguration\DatabaseShaderConfigurations.cpp">
       <Filter>ShaderConfiguration</Filter>
     </ClCompile>
+    <ClCompile Include="ShaderConfiguration\CompileConfiguration.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\ShaderSourceDependencies.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\ConfigurationProgress.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderConfiguration\DatabaseShaderConfigurationsOperations.cpp">
+      <Filter>ShaderConfiguration</Filter>
+    </ClCompile>
     <ClCompile Include="RenderPass\DatabaseRenderPasses.cpp">
+      <Filter>RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderPass\RenderPassRuntimePublication.cpp">
       <Filter>RenderPass</Filter>
     </ClCompile>
     <ClCompile Include="RenderPass\RenderPassShaderCompileQueue.cpp">

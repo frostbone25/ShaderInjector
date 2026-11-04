@@ -1,5 +1,6 @@
 #include "RenderPass/RenderPassTexturePool.h"
 #include "RenderPass/ThreadTextureCacheEntry.h"
+#include "RenderPass/DownsampleUpsampleStagePlan.h"
 #include "RenderPass/ThreadTextureLookup.h"
 #include "RenderPass/TexturePool/DefinitionRecord.h"
 #include "RenderPass/TexturePool/HistoryBootstrapTexture.h"
@@ -31,6 +32,8 @@ namespace RenderPassTexturePool
 		using Microsoft::WRL::ComPtr;
 
 		std::mutex gPoolMutex;
+		std::mutex gPerformanceStatisticsMutex;
+		PerformanceStatistics gLastPerformanceStatistics;
 		std::unordered_map<std::string, DefinitionRecord> gDefinitions;
 		std::unordered_map<std::string, TextureEntry> gTextures;
 		struct GeneratedMipEntry
@@ -805,6 +808,26 @@ namespace RenderPassTexturePool
 		gConfigurationGeneration.fetch_add(1, std::memory_order_release);
 	}
 
+	void InvalidateHistory()
+	{
+		std::lock_guard<std::mutex> lock(gPoolMutex);
+
+		//clear only write validity so existing allocations and GPU retirement tracking stay intact.
+		for (auto& textureEntry : gTextures)
+		{
+			TextureEntry& texture = textureEntry.second;
+			if (texture.versionCount < 2)
+				continue;
+
+			for (uint32_t versionIndex = 0; versionIndex < texture.versionCount; ++versionIndex)
+				texture.versions[versionIndex].written = false;
+		}
+
+		gPublishedOutputFrames.clear();
+		//force successful previous-frame lookups to recheck the invalidated version flags.
+		gTextureGeneration.fetch_add(1, std::memory_order_release);
+	}
+
 	bool GetHistoryBootstrapTexture(
 		ID3D12Device* device,
 		const std::string& resourceId,
@@ -1143,6 +1166,110 @@ namespace RenderPassTexturePool
 		return false;
 	}
 
+	bool EnsureDownsampleUpsampleStages(
+		const RenderPass::RenderPassDisk& renderPass,
+		ID3D12GraphicsCommandList* commandList,
+		const TextureView& sourceTexture,
+		const TextureView& destinationTexture,
+		bool computePipeline,
+		std::vector<TextureView>& outStageTargets,
+		std::string& outError)
+	{
+		outStageTargets.clear();
+		outError.clear();
+		if (!commandList || !sourceTexture.resource || !destinationTexture.resource ||
+			sourceTexture.resource.Get() == destinationTexture.resource.Get())
+		{
+			outError = "Downsample/upsample chain requires distinct valid source and destination textures.";
+			return false;
+		}
+
+		const ResolvedTextureDescription& source = sourceTexture.description;
+		const ResolvedTextureDescription& destination = destinationTexture.description;
+		if (source.dimension != ShaderResource::TextureDimension::Texture2D ||
+			destination.dimension != ShaderResource::TextureDimension::Texture2D ||
+			source.depth != 1 || destination.depth != 1 ||
+			source.arraySize != 1 || destination.arraySize != 1 ||
+			source.sampleCount != 1 || destination.sampleCount != 1 ||
+			source.width != destination.width || source.height != destination.height)
+		{
+			outError = "Downsample/upsample chains require matching, non-array, non-MSAA Texture2D source and destination extents.";
+			return false;
+		}
+
+		std::vector<RenderPassRuntime::DownsampleUpsampleStage> stagePlan;
+		if (!RenderPassRuntime::BuildDownsampleUpsampleStagePlan(
+				source.width, source.height, renderPass.chainDownsampleFactor, stagePlan))
+		{
+			outError = "Downsample/upsample chain dimensions or factor are invalid.";
+			return false;
+		}
+
+		ComPtr<ID3D12Device> device;
+		if (FAILED(commandList->GetDevice(IID_PPV_ARGS(&device))) || !device)
+		{
+			outError = "Could not query the D3D12 device for the downsample/upsample chain.";
+			return false;
+		}
+
+		std::lock_guard<std::mutex> lock(gPoolMutex);
+		for (size_t stageIndex = 0; stageIndex < stagePlan.size(); ++stageIndex)
+		{
+			const RenderPassRuntime::DownsampleUpsampleStage& stage = stagePlan[stageIndex];
+			if (stage.width == destination.width && stage.height == destination.height && stage.upsample)
+			{
+				bool writable = (destination.flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) && destinationTexture.renderTargetView.ptr;
+				if (computePipeline)
+					writable = (destination.flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) && destinationTexture.unorderedAccessView.ptr;
+				if (!writable)
+				{
+					outError = "Downsample/upsample output does not support the selected write mode.";
+					return false;
+				}
+				outStageTargets.push_back(destinationTexture);
+				continue;
+			}
+
+			RenderPass::RuntimeResourceDefinitionDisk intermediate{};
+			intermediate.id = renderPass.id + ":DownsampleUpsampleStage:" + std::to_string(stageIndex) + ":" +
+							  std::to_string(stage.width) + "x" + std::to_string(stage.height);
+			intermediate.name = renderPass.name + " Chain Stage " + std::to_string(stageIndex);
+			intermediate.texture.dimension = ShaderResource::TextureDimension::Texture2D;
+			intermediate.texture.format = static_cast<uint32_t>(destination.format);
+			intermediate.texture.resolution.mode = ShaderResource::ResolutionMode::Explicit;
+			intermediate.texture.resolution.width = stage.width;
+			intermediate.texture.resolution.height = stage.height;
+			intermediate.texture.mipLevels = 1;
+			intermediate.texture.sampleCount = 1;
+			intermediate.texture.lifetime = ShaderResource::ResourceLifetime::Transient;
+			intermediate.texture.allowRenderTarget = !computePipeline;
+			intermediate.texture.allowUnorderedAccess = computePipeline;
+
+			DefinitionRecord definition{renderPass.id, intermediate};
+			gDefinitions[intermediate.id] = definition;
+			ReferenceExtent explicitExtent{};
+			explicitExtent.dimension = ShaderResource::TextureDimension::Texture2D;
+			explicitExtent.width = stage.width;
+			explicitExtent.height = stage.height;
+			explicitExtent.fallbackFormat = destination.format;
+			explicitExtent.fallbackShaderViewFormat = destination.shaderViewFormat;
+			if (!EnsureTextureLocked(device.Get(), definition, explicitExtent, outError))
+				return false;
+
+			const auto textureIt = gTextures.find(intermediate.id);
+			TextureView target;
+			if (textureIt == gTextures.end() ||
+				!FillTextureViewLocked(textureIt->second, ShaderResource::TemporalView::Current, target))
+			{
+				outError = "Could not resolve an allocated downsample/upsample stage.";
+				return false;
+			}
+			RecordTextureLocked(commandList, textureIt->second);
+			outStageTargets.push_back(std::move(target));
+		}
+		return true;
+	}
+
 	void AdvanceFrame()
 	{
 		if (gHasPendingQueueTextures.load(std::memory_order_acquire) ||
@@ -1257,16 +1384,15 @@ namespace RenderPassTexturePool
 
 	void LogPerformanceStatistics()
 	{
-		size_t liveTextures = 0, retiredTextures = 0;
-		uint64_t liveBytes = 0, retiredBytes = 0;
+		PerformanceStatistics statistics;
 		{
 			std::lock_guard<std::mutex> lock(gPoolMutex);
 			PruneSubmittedTexturesLocked();
-			liveTextures = gTextures.size();
+			statistics.liveTextures = gTextures.size();
 			std::unordered_set<ID3D12Resource*> activeResources;
 			for (const auto& texture : gTextures)
 			{
-				liveBytes += texture.second.allocationBytes;
+				statistics.liveBytes += texture.second.allocationBytes;
 				for (uint32_t versionIndex = 0; versionIndex < texture.second.versionCount; ++versionIndex)
 					activeResources.insert(texture.second.versions[versionIndex].resource.Get());
 			}
@@ -1275,7 +1401,7 @@ namespace RenderPassTexturePool
 			{
 				if (version.resource && activeResources.find(version.resource.Get()) == activeResources.end() &&
 					retiredResources.insert(version.resource.Get()).second)
-					retiredBytes += version.allocationBytes;
+					statistics.retiredBytes += version.allocationBytes;
 			};
 			for (const auto& recording : gRecordedTextures)
 				for (const auto& version : recording.second)
@@ -1288,11 +1414,21 @@ namespace RenderPassTexturePool
 					countRetired(version);
 			for (const auto& version : gUnretirableTextures)
 				countRetired(version);
-			retiredTextures = retiredResources.size();
+			statistics.retiredTextures = retiredResources.size();
+		}
+		{
+			std::lock_guard<std::mutex> lock(gPerformanceStatisticsMutex);
+			gLastPerformanceStatistics = statistics;
 		}
 		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
 			"RenderPassTexturePool->Performance: liveTextures=%zu liveBytes=%llu retiredTextures=%zu retiredBytes=%llu",
-			liveTextures, static_cast<unsigned long long>(liveBytes),
-			retiredTextures, static_cast<unsigned long long>(retiredBytes)));
+			statistics.liveTextures, static_cast<unsigned long long>(statistics.liveBytes),
+			statistics.retiredTextures, static_cast<unsigned long long>(statistics.retiredBytes)));
+	}
+
+	PerformanceStatistics GetLastPerformanceStatistics()
+	{
+		std::lock_guard<std::mutex> lock(gPerformanceStatisticsMutex);
+		return gLastPerformanceStatistics;
 	}
 } //namespace RenderPassTexturePool

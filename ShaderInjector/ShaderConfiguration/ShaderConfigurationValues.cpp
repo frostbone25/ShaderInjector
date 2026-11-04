@@ -45,7 +45,7 @@ namespace ShaderConfiguration
 
 	bool TryGetRange(const PropertyDisk& property, float& outMinimum, float& outMaximum)
 	{
-		const std::vector<float> range = ParseNumericComponents(property.range);
+		const std::vector<float> range = ParseNumericComponents(property.valueRange);
 
 		if (range.size() < 2 || range[0] >= range[1])
 			return false;
@@ -80,6 +80,6 @@ namespace ShaderConfiguration
 
 	size_t ComponentCount(const PropertyDisk& property)
 	{
-		return ComponentCountForType(property.type);
+		return ComponentCountForType(property.valueType);
 	}
 } //namespace ShaderConfiguration

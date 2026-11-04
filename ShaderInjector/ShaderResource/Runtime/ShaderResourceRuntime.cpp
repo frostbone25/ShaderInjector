@@ -53,6 +53,8 @@ namespace ShaderResourceRuntime
 		std::vector<std::unique_ptr<TextureGPU>> gRetiredTextures;
 		std::atomic<uint64_t> gTextureGeneration = 0;
 		std::mutex gCommandListSlotMutex;
+		std::mutex gPerformanceStatisticsMutex;
+		PerformanceStatistics gLastPerformanceStatistics;
 		std::unordered_map<ID3D12GraphicsCommandList*, std::unique_ptr<CommandListSlot>> gCommandListSlots;
 		std::unordered_map<ID3D12CommandQueue*, QueueFence> gQueueFences;
 		std::atomic<uint32_t> gRecordedCommandListCount = 0;
@@ -2015,33 +2017,42 @@ namespace ShaderResourceRuntime
 
 	void LogPerformanceStatistics()
 	{
-		size_t commandLists = 0, executionSlots = 0, blockedSlots = 0, heapPages = 0;
-		uint64_t descriptorCapacity = 0;
+		PerformanceStatistics statistics;
 		{
 			std::lock_guard<std::mutex> lock(gCommandListSlotMutex);
-			commandLists = gCommandListSlots.size();
+			statistics.commandLists = gCommandListSlots.size();
 
 			for (const auto& commandList : gCommandListSlots)
 			{
-				executionSlots += commandList.second->executionSlots.size();
+				statistics.executionSlots += commandList.second->executionSlots.size();
 
 				for (const auto& slot : commandList.second->executionSlots)
 				{
 					if (slot->retirementBlocked)
-						++blockedSlots;
-					heapPages += slot->pages.size() + slot->samplerPages.size();
+						++statistics.blockedSlots;
+					statistics.heapPages += slot->pages.size() + slot->samplerPages.size();
 
 					for (const auto& page : slot->pages)
-						descriptorCapacity += page.capacity;
+						statistics.descriptorCapacity += page.capacity;
 
 					for (const auto& page : slot->samplerPages)
-						descriptorCapacity += page.capacity;
+						statistics.descriptorCapacity += page.capacity;
 				}
 			}
+		}
+		{
+			std::lock_guard<std::mutex> lock(gPerformanceStatisticsMutex);
+			gLastPerformanceStatistics = statistics;
 		}
 
 		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
 			"ShaderResourceRuntime->Performance: commandLists=%zu executionSlots=%zu blockedSlots=%zu heapPages=%zu descriptorCapacity=%llu",
-			commandLists, executionSlots, blockedSlots, heapPages, static_cast<unsigned long long>(descriptorCapacity)));
+			statistics.commandLists, statistics.executionSlots, statistics.blockedSlots, statistics.heapPages, static_cast<unsigned long long>(statistics.descriptorCapacity)));
+	}
+
+	PerformanceStatistics GetLastPerformanceStatistics()
+	{
+		std::lock_guard<std::mutex> lock(gPerformanceStatisticsMutex);
+		return gLastPerformanceStatistics;
 	}
 } //namespace ShaderResourceRuntime

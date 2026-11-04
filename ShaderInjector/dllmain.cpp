@@ -15,6 +15,7 @@
 #include "ShaderInjectorVersion.h"
 #include "ShaderInjectorInternalResources.h"
 #include "ShaderPatch/ShaderPatchCache.h"
+#include "ShaderConfiguration/DatabaseShaderConfigurations.h"
 
 //dllmain starts this worker so hook setup can wait for the game without holding the loader lock.
 static DWORD WINAPI OnAttachDLL(LPVOID)
@@ -65,6 +66,9 @@ static DWORD WINAPI OnAttachDLL(LPVOID)
 
 	//record machine, executable, and display details for diagnosing startup issues.
 	ShaderInjectorIO::LogProcessAndSystemInfo();
+
+	//dependency tracing runs on this startup worker before cached variants are read or rendering is enabled.
+	DatabaseShaderConfigurations::PrepareStartupConfiguration();
 
 	//load shader packages before matching targets against game pipelines.
 	DatabaseModifiedShaders::RefreshModifiedShaders();

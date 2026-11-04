@@ -72,6 +72,7 @@
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup>
     <ClCompile>
+      <AdditionalOptions>/FS %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Database;$(ProjectDir)GUI;$(ProjectDir)HookD3D12;$(ProjectDir)RenderDoc;$(ProjectDir)RenderPass;$(ProjectDir)ShaderResource;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -231,6 +232,7 @@
     <ClInclude Include="ExternalDependencies\imgui-1.92.8\imstb_truetype.h" />
     <ClInclude Include="Globals.h" />
     <ClInclude Include="HookD3D12\HookD3D12.h" />
+    <ClInclude Include="HookD3D12\AsyncPipelineCreation.h" />
     <ClInclude Include="HookD3D12\DeviceRuntimeState.h" />
     <ClInclude Include="HookD3D12\HookD3D12DeviceLifecycle.h" />
     <ClInclude Include="HookD3D12\OverlayInitializationScope.h" />
@@ -258,6 +260,7 @@
     <ClInclude Include="Input\Keycodes.h" />
     <ClInclude Include="ModifiedShader\DatabaseModifiedShaders.h" />
     <ClInclude Include="ModifiedShader\DatabaseModifiedShadersInternal.h" />
+    <ClInclude Include="ModifiedShader\ModifiedShaderCompilePriority.h" />
     <ClInclude Include="ModifiedShader\ModifiedShader.h" />
     <ClInclude Include="ModifiedShader\ModifiedShaderPackageDisk.h" />
     <ClInclude Include="ModifiedShader\ModifiedShaderTargetDisk.h" />
@@ -265,6 +268,13 @@
     <ClInclude Include="ModifiedShader\ModifiedShaderCreation.h" />
     <ClInclude Include="ModifiedShader\ModifiedShaderRecapture.h" />
     <ClInclude Include="Performance\PerformanceMetrics.h" />
+    <ClInclude Include="Performance\PerformanceSnapshot.h" />
+    <ClInclude Include="Performance\PassTimingSnapshot.h" />
+    <ClInclude Include="Performance\GPUPerformanceSnapshot.h" />
+    <ClInclude Include="RenderPass\TexturePoolPerformanceStatistics.h" />
+    <ClInclude Include="RenderPass\Runtime\PassPerformanceStatistics.h" />
+    <ClInclude Include="RenderPass\Runtime\PerformanceSnapshot.h" />
+    <ClInclude Include="ShaderResource\Runtime\ShaderResourcePerformanceStatistics.h" />
     <ClInclude Include="Performance\GPUTimingCommandList.h" />
     <ClInclude Include="Performance\GPUTimingPage.h" />
     <ClInclude Include="Performance\GPUTimingQueue.h" />
@@ -358,6 +368,7 @@
     <ClInclude Include="RenderPass\LogicalResourceBindingDisk.h" />
     <ClInclude Include="RenderPass\RenderPassDisk.h" />
     <ClInclude Include="RenderPass\RenderPassSchema.h" />
+    <ClInclude Include="RenderPass\DownsampleUpsampleStagePlan.h" />
     <ClInclude Include="RenderPass\ResourceBindingDiagnostic.h" />
     <ClInclude Include="RenderPass\RuntimeDiagnostics.h" />
     <ClInclude Include="RenderPass\RuntimeResourceDefinitionDisk.h" />
@@ -420,9 +431,25 @@
     <ClInclude Include="ShaderResource\Runtime\ScopedResourceBindingBatch.h" />
     <ClInclude Include="ShaderResource\Runtime\QueueFence.h" />
     <ClInclude Include="ShaderConfiguration\DatabaseShaderConfigurations.h" />
+    <ClInclude Include="ShaderConfiguration\CompileConfiguration.h" />
+    <ClInclude Include="ShaderConfiguration\ShaderSourceDependencies.h" />
+    <ClInclude Include="ShaderConfiguration\ConfigurationProgress.h" />
+    <ClInclude Include="ShaderConfiguration\ConfigurationProgressSnapshot.h" />
+    <ClInclude Include="ShaderConfiguration\ConfigurationProgressTask.h" />
+    <ClInclude Include="ShaderConfiguration\ConfigurationProgressTaskOutcome.h" />
+    <ClInclude Include="ShaderConfiguration\ConfigurationOperationResult.h" />
+    <ClInclude Include="ShaderConfiguration\PreparedConfigurationOperation.h" />
+    <ClInclude Include="ShaderConfiguration\PropertyMacro.h" />
     <ClInclude Include="ShaderConfiguration\ShaderConfiguration.h" />
     <ClInclude Include="ShaderConfiguration\ShaderConfigurationConstants.h" />
     <ClInclude Include="ShaderConfiguration\PropertyDisk.h" />
+    <ClInclude Include="ShaderConfiguration\ShaderConfigurationProperty.h" />
+    <ClInclude Include="ShaderConfiguration\ShaderConfigurationCategory.h" />
+    <ClInclude Include="ShaderConfiguration\PropertyType.h" />
+    <ClInclude Include="ShaderConfiguration\RenderPassPropertyType.h" />
+    <ClInclude Include="ShaderConfiguration\PresetDisk.h" />
+    <ClInclude Include="ShaderConfiguration\ShaderConfigurationCategories.h" />
+    <ClInclude Include="RenderPass\RenderPassConfigurationProperties.h" />
     <ClInclude Include="ShaderConfiguration\DocumentDisk.h" />
     <ClInclude Include="ShaderConfiguration\SourceLine.h" />
     <ClInclude Include="ShaderConfiguration\ParsedDefine.h" />
@@ -440,6 +467,9 @@
     <ClInclude Include="ShaderDiscovery\QueuedShader.h" />
     <ClInclude Include="ShaderDiscovery\AnalysisJob.h" />
     <ClInclude Include="ShaderDiscovery\AnalysisResult.h" />
+    <ClInclude Include="ShaderDiscovery\TargetCreationJob.h" />
+    <ClInclude Include="ShaderDiscovery\TargetCreationResult.h" />
+    <ClInclude Include="ShaderDiscovery\ShaderTargetProgress.h" />
     <ClInclude Include="ShaderTarget\DatabaseShaderTargets.h" />
     <ClInclude Include="ShaderTarget\ShaderTarget.h" />
     <ClInclude Include="ShaderTarget\ShaderTargetInternal.h" />
@@ -485,6 +515,7 @@
     <ClCompile Include="ExternalDependencies\imgui-1.92.8\imgui_widgets.cpp" />
     <ClCompile Include="Globals.cpp" />
     <ClCompile Include="HookD3D12\HookD3D12.cpp" />
+    <ClCompile Include="HookD3D12\AsyncPipelineCreation.cpp" />
     <ClCompile Include="HookD3D12\HookD3D12RetiredPSOTracker.cpp" />
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_CopyDescriptors.cpp" />
     <ClCompile Include="HookD3D12\D3D12\HookD3D12_CopyDescriptorsSimple.cpp" />
@@ -579,9 +610,11 @@
     <ClCompile Include="ModifiedShader\ModifiedShaderCreation.cpp" />
     <ClCompile Include="ModifiedShader\ModifiedShaderRecapture.cpp" />
     <ClCompile Include="Performance\PerformanceMetrics.cpp" />
+    <ClCompile Include="GUI\ShaderInjectorGUI_PerformanceMetrics.cpp" />
     <ClCompile Include="Performance\RenderPassGPUProfiler.cpp" />
     <ClCompile Include="RenderDoc\RenderDocIntegration.cpp" />
     <ClCompile Include="RenderPass\DatabaseRenderPasses.cpp" />
+    <ClCompile Include="RenderPass\RenderPassRuntimePublication.cpp" />
     <ClCompile Include="GUI\PropertyWidgets.cpp" />
     <ClCompile Include="RenderPass\RenderPassShaderCompileQueue.cpp" />
     <ClCompile Include="RenderPass\RenderPass.cpp" />
@@ -601,12 +634,18 @@
     <ClCompile Include="ShaderAnalysis\ShaderAnalyzer.cpp" />
     <ClCompile Include="ShaderAnalysis\ShaderAnalysis.cpp" />
     <ClCompile Include="ShaderConfiguration\DatabaseShaderConfigurations.cpp" />
+    <ClCompile Include="ShaderConfiguration\CompileConfiguration.cpp" />
+    <ClCompile Include="ShaderConfiguration\ShaderSourceDependencies.cpp" />
+    <ClCompile Include="ShaderConfiguration\ConfigurationProgress.cpp" />
+    <ClCompile Include="ShaderConfiguration\DatabaseShaderConfigurationsOperations.cpp" />
     <ClCompile Include="ShaderConfiguration\ShaderConfiguration.cpp" />
     <ClCompile Include="ShaderConfiguration\ShaderConfigurationSourceParsing.cpp" />
     <ClCompile Include="ShaderConfiguration\ShaderConfigurationValues.cpp" />
     <ClCompile Include="ShaderConfiguration\ShaderConfigurationNumeric.cpp" />
     <ClCompile Include="ShaderConfiguration\ShaderConfigurationNormalization.cpp" />
     <ClCompile Include="ShaderConfiguration\ShaderConfigurationParsing.cpp" />
+    <ClCompile Include="ShaderConfiguration\ShaderConfigurationCategories.cpp" />
+    <ClCompile Include="RenderPass\RenderPassConfigurationProperties.cpp" />
     <ClCompile Include="ShaderConfiguration\ShaderConfigurationRewriting.cpp" />
     <ClCompile Include="ShaderConfiguration\DatabaseShaderConfigurationsApply.cpp" />
     <ClCompile Include="ShaderDiscovery\ShaderDiscovery.cpp" />

@@ -21,6 +21,8 @@ namespace PerformanceMetrics
 	constexpr size_t counterCount = static_cast<size_t>(Counter::Count);
 	constexpr size_t timingCount = static_cast<size_t>(Timing::Count);
 	constexpr double reportIntervalSeconds = 5.0;
+	std::mutex gSnapshotMutex;
+	PerformanceSnapshot gSnapshot;
 
 	//the registry outlives worker threads so their telemetry stays available for the final report.
 	std::mutex& ThreadRegistryMutex()
@@ -155,6 +157,8 @@ namespace PerformanceMetrics
 			"resolveDescriptorMirrorTables",
 			"prepareDescriptorCopyBatch",
 			"copyDescriptorBatchMetadata",
+			"shaderTargetsUI",
+			"shaderTargetPSOListUI",
 		};
 
 		static_assert(sizeof(names) / sizeof(names[0]) == timingCount);
@@ -208,6 +212,20 @@ namespace PerformanceMetrics
 
 		if (elapsedSeconds > 0.0)
 			framesPerSecond = static_cast<double>(presents) / elapsedSeconds;
+
+		PerformanceSnapshot snapshot;
+		snapshot.available = true;
+		snapshot.intervalMilliseconds = elapsedSeconds * 1000.0;
+		snapshot.framesPerSecond = framesPerSecond;
+		snapshot.presents = presents;
+		snapshot.metricThreadCount = metricThreadCount;
+		snapshot.counters = counters;
+		snapshot.timings = timings;
+		snapshot.ticksPerSecond = QueryFrequency();
+		{
+			std::lock_guard<std::mutex> lock(gSnapshotMutex);
+			gSnapshot = snapshot;
+		}
 
 		std::ostringstream summary;
 		summary << std::fixed << std::setprecision(2)
@@ -271,6 +289,12 @@ namespace PerformanceMetrics
 			return;
 
 		CurrentThreadMetrics().counters[static_cast<size_t>(counter)].fetch_add(amount, std::memory_order_relaxed);
+	}
+
+	PerformanceSnapshot GetSnapshot()
+	{
+		std::lock_guard<std::mutex> lock(gSnapshotMutex);
+		return gSnapshot;
 	}
 
 	ScopedTimer::ScopedTimer(Timing timing, uint32_t sampleEvery)

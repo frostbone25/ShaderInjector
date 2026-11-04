@@ -2,12 +2,16 @@
 #include "Enum/PerformanceMetricsCounter.h"
 #include "Enum/PerformanceMetricsTiming.h"
 #include "Performance/TimingAccumulator.h"
+#include "Performance/PerformanceSnapshot.h"
 
 #include <cstdint>
 
 namespace PerformanceMetrics
 {
 	void Increment(Counter counter, uint64_t amount = 1);
+	PerformanceSnapshot GetSnapshot();
+	const char* CounterName(Counter counter);
+	const char* TimingName(Timing timing);
 
 	//hot paths count every call, but only sampled calls read the clock twice.
 	class ScopedTimer

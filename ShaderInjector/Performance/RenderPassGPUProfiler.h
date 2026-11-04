@@ -5,6 +5,7 @@
 #include <d3d12.h>
 
 #include "Performance/GPUTimingToken.h"
+#include "Performance/GPUPerformanceSnapshot.h"
 
 namespace RenderPassGPUProfiler
 {
@@ -44,5 +45,6 @@ namespace RenderPassGPUProfiler
 
 	//read only completed submissions; an unfinished sample is left alone, never waited on.
 	void LogPerformanceStatistics();
+	PerformanceSnapshot GetSnapshot();
 	void ReleaseResources();
 }

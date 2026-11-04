@@ -86,5 +86,14 @@ People who have aided in the development of this project with testing or other v
 - [Zaccachino](https://www.nexusmods.com/profile/Zaccachino)
 - [Ninjagrime](https://www.nexusmods.com/profile/Ninjagrime)
 - [Phroster](https://www.nexusmods.com/profile/Phroster)
-- [willywill](https://github.com/willywill)
+- [William Germany](https://github.com/willywill)
 - [faisalkindi](https://github.com/faisalkindi)
+- [ShortFuse](https://github.com/clshortfuse/) *([ko-fi](https://ko-fi.com/shortfuse))* *([patreon](https://www.patreon.com/CLShortFuse))*
+- [Musa](https://github.com/mqhaji)
+- Joshua Senouf
+- [Filippo Tarpini](https://github.com/Filoppi) *[(Twitter / X)](https://x.com/FilippoTarpini)*
+- [TheGreatHmmmmm](https://github.com/TheGreatHMMMM) *([ko-fi](https://ko-fi.com/thegreathmmmmm))*
+- [JoHien](https://ko-fi.com/johien)
+
+- [RenoDX](https://github.com/clshortfuse/renodx)
+- [Luma](https://github.com/Filoppi/Luma-Framework)

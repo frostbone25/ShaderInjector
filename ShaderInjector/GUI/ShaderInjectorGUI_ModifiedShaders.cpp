@@ -54,10 +54,10 @@ namespace ShaderInjectorGUI
 		return false;
 	}
 
-	ModifiedShaderRecompileResult RecompileModifiedShaderAndReloadLinkedTargets(const std::string& modifiedShaderId)
+	ModifiedShaderRecompileResult RecompileModifiedShaderAndReloadLinkedTargets(const std::string& modifiedShaderId, bool includeLinkedRenderPasses = true)
 	{
 		ModifiedShaderRecompileResult result{};
-		result.compileQueued = DatabaseModifiedShaders::CompileModifiedShader(modifiedShaderId);
+		result.compileQueued = DatabaseModifiedShaders::CompileModifiedShader(modifiedShaderId, includeLinkedRenderPasses);
 
 		if (!result.compileQueued)
 			return result;
@@ -98,12 +98,29 @@ namespace ShaderInjectorGUI
 		if (progress.total == 0 || progress.completed >= progress.total)
 			return;
 
-		std::string overlay = "Compiling shaders " + std::to_string(progress.completed) + "/" + std::to_string(progress.total);
+		const bool priorityComplete = progress.priorityTotal > 0 &&
+			progress.priorityCompleted >= progress.priorityTotal &&
+			progress.priorityFailed == 0;
+		const int displayedPriorityCompleted = (std::min)(progress.priorityCompleted, progress.priorityTotal);
+		std::string overlay;
+
+		if (priorityComplete)
+			overlay = "Active shaders ready; compiling remaining shaders " + std::to_string(progress.completed) + "/" + std::to_string(progress.total);
+		else if (progress.priorityTotal > 0)
+			overlay = "Compiling active shaders " + std::to_string(displayedPriorityCompleted) + "/" + std::to_string(progress.priorityTotal) + " (" + std::to_string(progress.completed) + "/" + std::to_string(progress.total) + " total)";
+		else
+			overlay = "Compiling shaders " + std::to_string(progress.completed) + "/" + std::to_string(progress.total);
 
 		if (progress.failed > 0)
 			overlay += " (" + std::to_string(progress.failed) + " failed)";
 
+		if (priorityComplete)
+			ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.2f, 0.7f, 0.3f, 1.0f));
+
 		ImGui::ProgressBar(static_cast<float>(progress.completed) / static_cast<float>(progress.total), ImVec2(-FLT_MIN, 0), overlay.c_str());
+
+		if (priorityComplete)
+			ImGui::PopStyleColor();
 
 		if (ImGui::IsItemHovered())
 		{
@@ -115,7 +132,10 @@ namespace ShaderInjectorGUI
 		}
 	}
 
-	ModifiedShaderBatchRecompileResult RecompileModifiedShaders(bool includeInactivePackages)
+	ModifiedShaderBatchRecompileResult RecompileModifiedShaders(
+		bool includeInactivePackages,
+		std::shared_ptr<const ShaderConfiguration::CompileConfiguration> previousConfiguration,
+		bool includeLinkedRenderPasses)
 	{
 		ModifiedShaderBatchRecompileResult batchResult{};
 		const std::vector<ModifiedShader::ModifiedShaderPackageDisk>& modifiedShaders = DatabaseModifiedShaders::GetModifiedShaders();
@@ -124,9 +144,26 @@ namespace ShaderInjectorGUI
 
 		for (const ModifiedShader::ModifiedShaderPackageDisk& modifiedShader : modifiedShaders)
 		{
+			const bool interrupted = DatabaseModifiedShaders::HasInterruptedCompiles(modifiedShader.id);
+
+			if (previousConfiguration && !interrupted)
+			{
+				const auto currentConfiguration = DatabaseShaderConfigurations::GetAppliedConfiguration();
+				std::string previousFingerprint = previousConfiguration->GetSourceFingerprint(modifiedShader.sourcePath);
+				std::string currentFingerprint;
+
+				if (currentConfiguration)
+					currentFingerprint = currentConfiguration->GetSourceFingerprint(modifiedShader.sourcePath);
+
+				if (previousFingerprint == currentFingerprint)
+				{
+					continue;
+				}
+			}
+
 			const bool active = modifiedShader.enabled && ModifiedShaderIsUsedByEnabledShaderTarget(modifiedShader.id);
 
-			if (!includeInactivePackages && !active)
+			if (!includeInactivePackages && !active && !interrupted)
 			{
 				++batchResult.skippedInactivePackageCount;
 				continue;
@@ -139,7 +176,7 @@ namespace ShaderInjectorGUI
 
 		for (const std::string& modifiedShaderId : selectedModifiedShaderIds)
 		{
-			const ModifiedShaderRecompileResult result = RecompileModifiedShaderAndReloadLinkedTargets(modifiedShaderId);
+			const ModifiedShaderRecompileResult result = RecompileModifiedShaderAndReloadLinkedTargets(modifiedShaderId, includeLinkedRenderPasses);
 
 			if (!result.compileQueued)
 			{
@@ -155,6 +192,9 @@ namespace ShaderInjectorGUI
 		}
 
 		std::string actionName = "Recompile All Active Modified Shaders";
+
+		if (previousConfiguration)
+			actionName = "Recompile Modified Shaders Affected by Property Changes";
 
 		if (includeInactivePackages)
 			actionName = "Force Recompile All Modified Shaders";

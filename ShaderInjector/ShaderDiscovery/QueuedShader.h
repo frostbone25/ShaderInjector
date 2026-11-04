@@ -18,6 +18,8 @@ namespace ShaderAutomaticDiscovery
 		PipelineSource source = PipelineSource::Stream;
 		int pipelineIndex = -1;
 		double priority = 0.0;
+		uint8_t targetCreationAttemptCount = 0;
+		uint64_t targetCreationRetryAfterTick = 0;
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState;
 		std::vector<uint8_t> shaderBytecode;
 	};

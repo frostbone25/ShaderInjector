@@ -49,4 +49,6 @@ namespace RenderPass
 	bool HasShaderTemplate(const RenderPassDisk& renderPass);
 	bool HasCompiledShaders(const RenderPassDisk& renderPass);
 	bool IsReplacementPass(RenderPassType type);
+	bool IsValidDownsampleUpsampleFactor(uint32_t factor);
+	RenderPassDisk CreateUpsampleStagePass(const RenderPassDisk& renderPass);
 } //namespace RenderPass

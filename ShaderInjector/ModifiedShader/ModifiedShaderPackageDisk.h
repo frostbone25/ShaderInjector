@@ -19,6 +19,9 @@ namespace ModifiedShader
 		std::vector<uint8_t> compiledBlob;
 		ShaderAnalysis::ShaderAnalysisDisk compiledShaderAnalysis;
 		bool compiledShaderInterfaceCompatible = false;
+		std::string compiledConfigurationFingerprint;
+		std::string pendingConfigurationFingerprint;
+		std::string failedConfigurationFingerprint;
 		uint64_t pendingCompileSerial = 0;
 		bool compileFailed = false;
 	};

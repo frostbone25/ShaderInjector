@@ -21,6 +21,7 @@
 #include <wrl/client.h>
 
 #include "HookD3D12.h"
+#include "ModifiedShader/DatabaseModifiedShaders.h"
 #include "HookD3D12/HookD3D12RetiredPSOTracker.h"
 #include "GUI/ShaderInjectorGUI.h"
 #include "Globals.h"
@@ -29,6 +30,7 @@
 #include "RenderPass/RenderPassResourceRegistry.h"
 #include "RenderPass/RenderPassExecutor.h"
 #include "RenderPass/RenderPassGraph.h"
+#include "RenderPass/DownsampleUpsampleStagePlan.h"
 #include "RenderPass/RenderPassMipChain.h"
 #include "RenderPass/RenderPassReplacement.h"
 #include "RenderPass/RenderPassTexturePool.h"
@@ -51,6 +53,8 @@
 
 namespace RenderPassRuntime
 {
+	std::mutex gPerformanceSnapshotMutex;
+	PerformanceSnapshot gPerformanceSnapshot;
 	using ShaderTargetBindingMap = std::unordered_map<ID3D12PipelineState*, ShaderTargetBinding>;
 	const RenderPassConfigurationSnapshot gEmptyConfigurationSnapshot;
 	const ShaderTargetBindingMap gEmptyShaderTargetBindingMap;
@@ -1207,12 +1211,15 @@ namespace RenderPassRuntime
 	}
 
 	//build a fresh immutable configuration, then publish its pointer after every lookup is ready.
-	void PublishRenderPassConfigurations(const std::vector<RenderPass::RenderPassDisk>& renderPasses)
+	void PublishRenderPassConfigurations(std::vector<RenderPass::RenderPassDisk> renderPassConfigurations)
 	{
 		RenderPassReplacement::InvalidateFailedPipelines();
-		RenderPassTexturePool::PublishConfigurations(renderPasses);
 		auto snapshot = std::make_unique<RenderPassConfigurationSnapshot>();
-		snapshot->renderPasses = renderPasses;
+		//the caller hands over its prepared copy, so publishing does not duplicate every compiled variant again.
+		snapshot->renderPasses = std::move(renderPassConfigurations);
+		const std::vector<RenderPass::RenderPassDisk>& renderPasses = snapshot->renderPasses;
+
+		RenderPassTexturePool::PublishConfigurations(renderPasses);
 		snapshot->runtimeCounters.reserve(renderPasses.size());
 		for (size_t renderPassIndex = 0; renderPassIndex < renderPasses.size(); ++renderPassIndex)
 			snapshot->runtimeCounters.push_back(std::make_unique<RuntimeCounters>());
@@ -1280,7 +1287,8 @@ namespace RenderPassRuntime
 										  renderPass.inheritedGameBindings.constantBuffers;
 				hasGameTextureInput = hasGameTextureInput || hasGameInput;
 				hasCustomFullscreenPass = hasCustomFullscreenPass ||
-										  (renderPass.type == RenderPass::RenderPassType::Custom &&
+										  ((renderPass.type == RenderPass::RenderPassType::Custom ||
+											renderPass.type == RenderPass::RenderPassType::DownsampleUpsample) &&
 										   RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::FullscreenPixel);
 			}
 		}
@@ -1794,6 +1802,19 @@ namespace RenderPassRuntime
 		state.pipelineState = pipelineState;
 		state.boundPipelineState = pipelineState;
 		RefreshCommandListExecutionBoundaries(state);
+	}
+
+	void RecordShaderTargetUse(ID3D12PipelineState* pipelineState)
+	{
+		if (!pipelineState)
+			return;
+
+		const ShaderTargetBindingMap* shaderTargetBindings =
+			gPublishedShaderTargetBindings.load(std::memory_order_acquire);
+		const auto binding = shaderTargetBindings->find(pipelineState);
+
+		if (binding != shaderTargetBindings->end())
+			DatabaseModifiedShaders::RecordVariantUse(binding->second.hash);
 	}
 
 	void TrackBoundPipelineState(ID3D12GraphicsCommandList* commandList, ID3D12PipelineState* pipelineState)
@@ -2751,11 +2772,13 @@ namespace RenderPassRuntime
 					}
 				}
 			}
-			else if (renderPass.type == RenderPass::RenderPassType::Custom &&
+			else if ((renderPass.type == RenderPass::RenderPassType::Custom ||
+					  renderPass.type == RenderPass::RenderPassType::DownsampleUpsample) &&
 					 RenderPass::ResolveExecutionMode(renderPass) == RenderPass::ExecutionMode::Compute &&
 					 (passOperation == RenderPass::PassOperation::Custom ||
 					  passOperation == RenderPass::PassOperation::Downsample ||
-					  passOperation == RenderPass::PassOperation::UpsampleChain) &&
+					  passOperation == RenderPass::PassOperation::UpsampleChain ||
+					  passOperation == RenderPass::PassOperation::DownsampleUpsample) &&
 					 RenderPass::HasCompiledShaders(renderPass))
 			{
 				PerformanceMetrics::Increment(PerformanceMetrics::Counter::CustomPassAttempted);
@@ -2786,7 +2809,8 @@ namespace RenderPassRuntime
 				{
 					executionSucceeded = false;
 				}
-				else if (passOperation == RenderPass::PassOperation::UpsampleChain)
+				else if (passOperation == RenderPass::PassOperation::UpsampleChain ||
+						 passOperation == RenderPass::PassOperation::DownsampleUpsample)
 				{
 					const RenderPass::LogicalResourceBindingDisk* sourceBinding =
 						FindRuntimeInput(renderPass, RenderPass::ResourceAccess::ShaderResource);
@@ -2796,25 +2820,60 @@ namespace RenderPassRuntime
 					RenderPassTexturePool::TextureView destinationTexture;
 					thread_local std::vector<RenderPassTexturePool::TextureView> stageTargets;
 					stageTargets.clear();
-					if (ResolveRuntimeTexture(sourceBinding, sourceTexture, executionError, "upsample source", true) &&
-						ResolveRuntimeTexture(destinationBinding, destinationTexture, executionError, "upsample destination") &&
-						RenderPassTexturePool::EnsureUpsampleChainStages(
-							renderPass,
-							commandList,
-							sourceTexture,
-							destinationTexture,
-							true,
-							stageTargets,
-							executionError))
+					bool stagesReady = false;
+					if (ResolveRuntimeTexture(sourceBinding, sourceTexture, executionError, "chain source", true) &&
+						ResolveRuntimeTexture(destinationBinding, destinationTexture, executionError, "chain destination"))
 					{
-						ID3D12PipelineState* computePipelineState = graphicsComputePipelineState;
-
-						if (computePipeline)
-							computePipelineState = RenderPassReplacement::GetOrCreatePipeline(renderPass, state.pipelineState, targetIt->second, executionError);
-						executionSucceeded = computePipelineState != nullptr;
-						RenderPassTexturePool::TextureView stageSource = sourceTexture;
-						for (const RenderPassTexturePool::TextureView& stageTarget : stageTargets)
+						if (passOperation == RenderPass::PassOperation::DownsampleUpsample)
+							stagesReady = RenderPassTexturePool::EnsureDownsampleUpsampleStages(
+								renderPass, commandList, sourceTexture, destinationTexture, true, stageTargets, executionError);
+						else
+							stagesReady = RenderPassTexturePool::EnsureUpsampleChainStages(
+								renderPass, commandList, sourceTexture, destinationTexture, true, stageTargets, executionError);
+					}
+					if (stagesReady)
+					{
+						std::vector<RenderPassRuntime::DownsampleUpsampleStage> stagePlan;
+						RenderPass::RenderPassDisk upsamplePass;
+						if (passOperation == RenderPass::PassOperation::DownsampleUpsample)
 						{
+							RenderPassRuntime::BuildDownsampleUpsampleStagePlan(sourceTexture.description.width, sourceTexture.description.height, renderPass.chainDownsampleFactor, stagePlan);
+							upsamplePass = RenderPass::CreateUpsampleStagePass(renderPass);
+						}
+						executionSucceeded = true;
+						RenderPassTexturePool::TextureView stageSource = sourceTexture;
+						thread_local RenderPassMipChain::GraphicsStateSnapshot upsampleComputeState;
+						ID3D12PipelineState* upsampleGraphicsComputePipelineState = nullptr;
+						bool upsampleComputeStateReady = false;
+						for (size_t stageIndex = 0; stageIndex < stageTargets.size(); ++stageIndex)
+						{
+							const RenderPassTexturePool::TextureView& stageTarget = stageTargets[stageIndex];
+							const bool upsampleStage = passOperation == RenderPass::PassOperation::UpsampleChain ||
+								(passOperation == RenderPass::PassOperation::DownsampleUpsample && stagePlan[stageIndex].upsample);
+							const RenderPass::RenderPassDisk* stagePass = &renderPass;
+							if (upsampleStage && passOperation == RenderPass::PassOperation::DownsampleUpsample)
+								stagePass = &upsamplePass;
+							const RenderPassMipChain::GraphicsStateSnapshot* stageComputeResourceState = computeResourceState;
+							const RenderPassMipChain::GraphicsStateSnapshot* stageOppositeComputeResourceState = oppositeComputeResourceState;
+							ID3D12PipelineState* computePipelineState = graphicsComputePipelineState;
+							if (computePipeline)
+								computePipelineState = RenderPassReplacement::GetOrCreatePipeline(*stagePass, state.pipelineState, targetIt->second, executionError);
+							else if (upsampleStage && passOperation == RenderPass::PassOperation::DownsampleUpsample)
+							{
+								if (!upsampleComputeStateReady)
+								{
+									HookD3D12::ScopedRenderPassInjection injectionScope;
+									ShaderResourceRuntime::RestoreResourcesImmediately(commandList);
+									upsampleComputeStateReady = RenderPassExecutor::PrepareGraphicsComputeState(
+										*stagePass, commandList, gShaderResourceState, upsampleComputeState,
+										upsampleGraphicsComputePipelineState, executionError);
+									if (upsampleComputeStateReady)
+										commandList->SetComputeRootSignature(upsampleComputeState.rootSignature);
+								}
+								stageComputeResourceState = &upsampleComputeState;
+								stageOppositeComputeResourceState = &gShaderResourceState;
+								computePipelineState = upsampleGraphicsComputePipelineState;
+							}
 							const ShaderResourceRuntime::RuntimeTextureBindingOverride textureOverride{
 								sourceBinding->resourceId,
 								stageSource.shaderResourceView,
@@ -2823,21 +2882,17 @@ namespace RenderPassRuntime
 							bool resourcesBound = false;
 							{
 								HookD3D12::ScopedRenderPassInjection injectionScope;
-								resourcesBound = ShaderResourceRuntime::BindResources(
-									renderPass,
-									commandList,
-									*computeResourceState,
-									*oppositeComputeResourceState,
-									true,
-									executionError,
-									&textureOverride);
+								if (computePipelineState)
+									resourcesBound = ShaderResourceRuntime::BindResources(
+										*stagePass, commandList, *stageComputeResourceState,
+										*stageOppositeComputeResourceState, true, executionError, &textureOverride);
 							}
 							unorderedAccessOutputs.assign(1, stageTarget);
 							UINT threadGroupCountX = 0;
 							UINT threadGroupCountY = 0;
 							UINT threadGroupCountZ = 0;
 							if (resourcesBound && ResolveComputeDispatch(
-													  renderPass,
+													  *stagePass,
 													  originalThreadGroupCountX,
 													  originalThreadGroupCountY,
 													  originalThreadGroupCountZ,
@@ -2848,7 +2903,7 @@ namespace RenderPassRuntime
 													  executionError))
 							{
 								executionSucceeded = RenderPassExecutor::ExecuteCompute(
-									renderPass,
+									*stagePass,
 									commandList,
 									computePipelineState,
 									state.boundPipelineState,
@@ -2957,7 +3012,8 @@ namespace RenderPassRuntime
 			else if (!computePipeline && RenderPass::HasCompiledShaders(renderPass) &&
 					 (passOperation == RenderPass::PassOperation::Custom ||
 					  passOperation == RenderPass::PassOperation::Downsample ||
-					  passOperation == RenderPass::PassOperation::UpsampleChain))
+					  passOperation == RenderPass::PassOperation::UpsampleChain ||
+					  passOperation == RenderPass::PassOperation::DownsampleUpsample))
 			{
 				PerformanceMetrics::Increment(PerformanceMetrics::Counter::CustomPassAttempted);
 				thread_local std::vector<RenderPass::ResourceBindingDiagnostic> effectiveOutputBindings;
@@ -2996,7 +3052,8 @@ namespace RenderPassRuntime
 				executionAttempted = true;
 				captureShaderResourceState();
 				captureFullscreenGraphicsState();
-				if (passOperation == RenderPass::PassOperation::UpsampleChain)
+				if (passOperation == RenderPass::PassOperation::UpsampleChain ||
+					passOperation == RenderPass::PassOperation::DownsampleUpsample)
 				{
 					const RenderPass::LogicalResourceBindingDisk* sourceBinding =
 						FindRuntimeInput(renderPass, RenderPass::ResourceAccess::ShaderResource);
@@ -3004,25 +3061,38 @@ namespace RenderPassRuntime
 					RenderPassTexturePool::TextureView destinationTexture;
 					thread_local std::vector<RenderPassTexturePool::TextureView> stageTargets;
 					stageTargets.clear();
-					if (ResolveRuntimeTexture(sourceBinding, sourceTexture, executionError, "upsample source", true) &&
+					bool stagesReady = false;
+					if (ResolveRuntimeTexture(sourceBinding, sourceTexture, executionError, "chain source", true) &&
 						ResolveRuntimeTexture(
 							FindRuntimeOutput(renderPass, RenderPass::ResourceAccess::RenderTarget),
 							destinationTexture,
 							executionError,
-							"upsample destination") &&
-						RenderPassTexturePool::EnsureUpsampleChainStages(
-							renderPass,
-							commandList,
-							sourceTexture,
-							destinationTexture,
-							false,
-							stageTargets,
-							executionError))
+							"chain destination"))
+					{
+						if (passOperation == RenderPass::PassOperation::DownsampleUpsample)
+							stagesReady = RenderPassTexturePool::EnsureDownsampleUpsampleStages(
+								renderPass, commandList, sourceTexture, destinationTexture, false, stageTargets, executionError);
+						else
+							stagesReady = RenderPassTexturePool::EnsureUpsampleChainStages(
+								renderPass, commandList, sourceTexture, destinationTexture, false, stageTargets, executionError);
+					}
+					if (stagesReady)
 					{
 						executionSucceeded = true;
 						RenderPassTexturePool::TextureView stageSource = sourceTexture;
-						for (const RenderPassTexturePool::TextureView& stageTarget : stageTargets)
+						std::vector<RenderPassRuntime::DownsampleUpsampleStage> stagePlan;
+						RenderPass::RenderPassDisk upsamplePass;
+						if (passOperation == RenderPass::PassOperation::DownsampleUpsample)
 						{
+							RenderPassRuntime::BuildDownsampleUpsampleStagePlan(sourceTexture.description.width, sourceTexture.description.height, renderPass.chainDownsampleFactor, stagePlan);
+							upsamplePass = RenderPass::CreateUpsampleStagePass(renderPass);
+						}
+						for (size_t stageIndex = 0; stageIndex < stageTargets.size(); ++stageIndex)
+						{
+							const RenderPassTexturePool::TextureView& stageTarget = stageTargets[stageIndex];
+							const RenderPass::RenderPassDisk* stagePass = &renderPass;
+							if (passOperation == RenderPass::PassOperation::DownsampleUpsample && stagePlan[stageIndex].upsample)
+								stagePass = &upsamplePass;
 							const ShaderResourceRuntime::RuntimeTextureBindingOverride sourceOverride{
 								sourceBinding->resourceId,
 								stageSource.shaderResourceView};
@@ -3030,18 +3100,13 @@ namespace RenderPassRuntime
 							{
 								HookD3D12::ScopedRenderPassInjection injectionScope;
 								resourcesBound = ShaderResourceRuntime::BindResources(
-									renderPass,
-									commandList,
-									gShaderResourceState,
-									gOppositeShaderResourceState,
-									false,
-									executionError,
-									&sourceOverride);
+									*stagePass, commandList, gShaderResourceState,
+									gOppositeShaderResourceState, false, executionError, &sourceOverride);
 							}
 							if (resourcesBound)
 							{
 								executionSucceeded = RenderPassExecutor::ExecuteFullscreenTriangle(
-									renderPass,
+									*stagePass,
 									commandList,
 									state.graphicsRootSignature,
 									state.boundPipelineState,
@@ -3407,29 +3472,37 @@ namespace RenderPassRuntime
 	{
 		if (!Globals::gPerformanceTelemetryEnabled)
 			return;
+		PerformanceSnapshot snapshot;
+		snapshot.available = true;
 		RenderPassTexturePool::LogPerformanceStatistics();
 		ShaderResourceRuntime::LogPerformanceStatistics();
 		RenderPassGPUProfiler::LogPerformanceStatistics();
+		snapshot.textures = RenderPassTexturePool::GetLastPerformanceStatistics();
+		snapshot.shaderResources = ShaderResourceRuntime::GetLastPerformanceStatistics();
 
-		const RenderPassResourceRegistry::RegistryStatistics registryStatistics =
+		snapshot.registry =
 			RenderPassResourceRegistry::GetStatistics();
 		ShaderInjectorIO::WriteToLogFile(StringHelper::Format(
 			"RenderPassResourceRegistry->Performance: descriptors=%llu descriptorHeaps=%llu retiredDescriptorHeaps=%llu heapDescriptors=%llu fallbackDescriptors=%llu metadataRecords=%llu bufferResources=%llu rootSignatures=%llu descriptorMirrorHeaps=%llu descriptorMirrorCapacity=%llu",
-			static_cast<unsigned long long>(registryStatistics.descriptorCount),
-			static_cast<unsigned long long>(registryStatistics.descriptorHeapCount),
-			static_cast<unsigned long long>(registryStatistics.retiredDescriptorHeapCount),
-			static_cast<unsigned long long>(registryStatistics.heapDescriptorCount),
-			static_cast<unsigned long long>(registryStatistics.fallbackDescriptorCount),
-			static_cast<unsigned long long>(registryStatistics.descriptorMetadataCount),
-			static_cast<unsigned long long>(registryStatistics.bufferResourceCount),
-			static_cast<unsigned long long>(registryStatistics.rootSignatureCount),
-			static_cast<unsigned long long>(registryStatistics.descriptorMirrorHeapCount),
-			static_cast<unsigned long long>(registryStatistics.descriptorMirrorCapacity)));
+			static_cast<unsigned long long>(snapshot.registry.descriptorCount),
+			static_cast<unsigned long long>(snapshot.registry.descriptorHeapCount),
+			static_cast<unsigned long long>(snapshot.registry.retiredDescriptorHeapCount),
+			static_cast<unsigned long long>(snapshot.registry.heapDescriptorCount),
+			static_cast<unsigned long long>(snapshot.registry.fallbackDescriptorCount),
+			static_cast<unsigned long long>(snapshot.registry.descriptorMetadataCount),
+			static_cast<unsigned long long>(snapshot.registry.bufferResourceCount),
+			static_cast<unsigned long long>(snapshot.registry.rootSignatureCount),
+			static_cast<unsigned long long>(snapshot.registry.descriptorMirrorHeapCount),
+			static_cast<unsigned long long>(snapshot.registry.descriptorMirrorCapacity)));
 
 		const RenderPassConfigurationSnapshot* configuration =
 			gPublishedConfiguration.load(std::memory_order_acquire);
 		if (!configuration)
+		{
+			std::lock_guard<std::mutex> lock(gPerformanceSnapshotMutex);
+			gPerformanceSnapshot = std::move(snapshot);
 			return;
+		}
 
 		for (size_t renderPassIndex = 0;
 			 renderPassIndex < configuration->renderPasses.size() &&
@@ -3456,6 +3529,17 @@ namespace RenderPassRuntime
 			const uint64_t failureDelta = failureCount - previousFailures;
 			const uint64_t previousBlockedInputs = counters.reportedBlockedInputCount.exchange(blockedInputCount, std::memory_order_relaxed);
 			const uint64_t blockedInputDelta = blockedInputCount - previousBlockedInputs;
+			PassPerformanceStatistics passStatistics;
+			passStatistics.name = renderPass.name;
+			passStatistics.type = RenderPass::TypeName(renderPass.type);
+			passStatistics.enabled = renderPass.enabled;
+			passStatistics.triggers = triggerDelta;
+			passStatistics.successes = executionDelta;
+			passStatistics.failures = failureDelta;
+			passStatistics.blockedInputs = blockedInputDelta;
+
+			//retain zero-activity passes in the UI while keeping the log focused on active work.
+			snapshot.passes.push_back(std::move(passStatistics));
 
 			if (!triggerDelta && !executionDelta && !failureDelta && !blockedInputDelta)
 				continue;
@@ -3470,6 +3554,14 @@ namespace RenderPassRuntime
 				static_cast<unsigned long long>(failureDelta),
 				static_cast<unsigned long long>(blockedInputDelta)));
 		}
+		std::lock_guard<std::mutex> lock(gPerformanceSnapshotMutex);
+		gPerformanceSnapshot = std::move(snapshot);
+	}
+
+	PerformanceSnapshot GetPerformanceSnapshot()
+	{
+		std::lock_guard<std::mutex> lock(gPerformanceSnapshotMutex);
+		return gPerformanceSnapshot;
 	}
 
 	RenderPass::RuntimeDiagnostics GetDiagnostics(const std::string& renderPassId)

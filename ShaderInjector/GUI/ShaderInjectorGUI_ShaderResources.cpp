@@ -154,13 +154,13 @@ namespace ShaderInjectorGUI
 			if (resource.dimension == ShaderResource::TextureDimension::Texture3D)
 				extent += "x" + std::to_string(resource.depth);
 
-			PropertyWidgets::ReadOnlyText("Extent", "##ResourceExtent", extent);
+			PropertyWidgets::ReadOnlyText("Resolution", "##ResourceExtent", extent);
 
 			if (resource.dimension != ShaderResource::TextureDimension::Texture3D)
 				PropertyWidgets::ReadOnlyText("Array Slices", "##ResourceArraySlices", std::to_string(resource.arraySize));
 
 			PropertyWidgets::ReadOnlyText("Mip Levels", "##ResourceMipLevels", std::to_string(resource.mipLevels));
-			PropertyWidgets::ReadOnlyText("DXGI Format", "##ResourceFormat", std::to_string(resource.format));
+			PropertyWidgets::ReadOnlyText("DXGI Format", "##ResourceFormat", ShaderResource::TextureFormatDisplayName(resource.format));
 
 			if (!resource.status.empty())
 				PropertyWidgets::ReadOnlyText("Status", "##ResourceStatus", resource.status);

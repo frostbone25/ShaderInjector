@@ -28,6 +28,7 @@ namespace RenderPassGPUProfiler
 	std::unordered_map<ID3D12CommandQueue*, GPUTimingQueue> gQueues;
 	std::unordered_map<std::string, std::array<uint64_t, 2>> gExecutionCounts;
 	std::unordered_map<std::string, GPUTimingStatistics> gStatistics;
+	PerformanceSnapshot gPerformanceSnapshot;
 	std::atomic<uint32_t> gRecordedCommandListCount = 0;
 	thread_local ID3D12GraphicsCommandList* gSampledCommandList = nullptr;
 
@@ -420,12 +421,28 @@ namespace RenderPassGPUProfiler
 		}
 
 		std::sort(report.begin(), report.end(), [](const auto& left, const auto& right) { return left.second.totalMilliseconds > right.second.totalMilliseconds; });
+		{
+			std::lock_guard<std::mutex> lock(gProfilerMutex);
+			gPerformanceSnapshot.available = true;
+			gPerformanceSnapshot.executionSampleInterval = executionSampleInterval;
+			gPerformanceSnapshot.passes.clear();
+			gPerformanceSnapshot.passes.reserve(report.size());
+
+			for (const auto& entry : report)
+				gPerformanceSnapshot.passes.push_back({entry.first, entry.second});
+		}
 
 		for (const auto& entry : report)
 		{
 			const GPUTimingStatistics& statistics = entry.second;
 			ShaderInjectorIO::WriteToLogFile(StringHelper::Format("RenderPassGPUProfiler->Performance: pass=%s gpuSamples=%llu sampledTotalMs=%.3f averageMs=%.3f maximumMs=%.3f averageCPURecordMs=%.3f maximumCPURecordMs=%.3f sampleInterval=%llu", entry.first.c_str(), static_cast<unsigned long long>(statistics.samples), statistics.totalMilliseconds, statistics.totalMilliseconds / static_cast<double>(statistics.samples), statistics.maximumMilliseconds, statistics.totalCPUMilliseconds / static_cast<double>(statistics.samples), statistics.maximumCPUMilliseconds, static_cast<unsigned long long>(executionSampleInterval)));
 		}
+	}
+
+	PerformanceSnapshot GetSnapshot()
+	{
+		std::lock_guard<std::mutex> lock(gProfilerMutex);
+		return gPerformanceSnapshot;
 	}
 
 	void ReleaseResources()
@@ -435,6 +452,7 @@ namespace RenderPassGPUProfiler
 		gQueues.clear();
 		gExecutionCounts.clear();
 		gStatistics.clear();
+		gPerformanceSnapshot = {};
 		gRecordedCommandListCount.store(0, std::memory_order_release);
 		gSampledCommandList = nullptr;
 	}
